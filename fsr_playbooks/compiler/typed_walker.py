@@ -503,25 +503,48 @@ def _synth_set_variable_shape(
     return _shape_object(keys)
 
 
+def _child_terminal_steps(pb: Playbook) -> list[Step]:
+    """Steps with no outgoing edges (no ``next`` / ``branches`` / ``unlabeled_next``).
+
+    These are the last steps on each branch path. FSR returns only the vars
+    from the *executed* terminal step to the parent (live-verified on 7.6.5
+    and 8.0.0: earlier set_variable vars are NOT visible to the parent).
+    """
+    terminals: list[Step] = []
+    for s in pb.steps:
+        has_next = bool(getattr(s, "next", None))
+        has_branches = bool(getattr(s, "branches", None))
+        has_unlabeled = bool(getattr(s, "unlabeled_next", None))
+        if not (has_next or has_branches or has_unlabeled):
+            terminals.append(s)
+    return terminals
+
+
 def _workflow_reference_output_shape(child: Playbook) -> Shape:
     """Output shape of a SYNC `workflow_reference` to `child`.
 
-    Live ground truth (run 686622): a synchronous child's `set_variable` vars
-    merge into the *reference step's* result namespace -- i.e. `vars.steps.<ref
-    step>.<childvar>` resolves to the child's var (NOT top-level `vars.<var>`).
-    So the reference step's shape is the union of every `set_variable` key the
-    child defines. Keys are typed `any` (the child's values are dynamic).
+    Live ground truth (verified 2026-08-23 on FSR 7.6.5 and 8.0.0): a
+    synchronous child returns ONLY the vars from the **last executed step**
+    on the taken branch path -- NOT the union of all set_variable vars.
+    Earlier set_variable steps' vars are NOT visible to the parent.
+
+    Since the static analyzer can't know which branch fires at runtime,
+    the shape is the union of vars from ALL terminal (no-outgoing-edge)
+    steps that are set_variable steps. If a terminal step is a decision
+    (shouldn't happen -- decisions always have branches), it contributes
+    no vars. If the child has no set_variable terminal steps, the output
+    is unknown (the child may end with a connector or other step type).
+
+    Keys are typed `any` (the child's values are dynamic Jinja).
     """
     keys: dict[str, Shape] = {}
-    for s in child.steps:
+    for s in _child_terminal_steps(child):
         if s.type == "set_variable":
-            # _set_variable_value_map handles BOTH the friendly/arg_list form
-            # and the resolver-flattened form (the resolved IR is what
-            # verify_playbook walks); _synth_set_variable_shape misses the flat
-            # form. Values are Jinja → typed `any`.
             for name in _set_variable_value_map(s):
                 keys[name] = _shape_scalar("any")
-    return _shape_object(keys)
+    return _shape_object(keys) if keys else _shape_unknown(
+        "child's terminal steps have no set_variable output"
+    )
 
 
 def _child_wf_ref_shapes(coll: Collection) -> dict[str, Shape]:

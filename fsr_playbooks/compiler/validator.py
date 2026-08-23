@@ -917,4 +917,176 @@ def validate(collection: Collection) -> list[CompileError]:
                 message=f"playbook {pb.name!r} has {len(starts)} 'start' steps; exactly one is required",
                 path=path,
             ))
+
+    _check_child_playbook_returns(collection, errors)
     return errors
+
+
+def _child_terminal_steps(pb: Playbook) -> list[Step]:
+    """Steps with no outgoing edges (no next / branches / unlabeled_next)."""
+    terminals: list[Step] = []
+    for s in pb.steps:
+        has_next = bool(getattr(s, "next", None))
+        has_branches = bool(getattr(s, "branches", None))
+        has_unlabeled = bool(getattr(s, "unlabeled_next", None))
+        if not (has_next or has_branches or has_unlabeled):
+            terminals.append(s)
+    return terminals
+
+
+def _set_var_keys(s: Step) -> set[str]:
+    """Top-level var names a set_variable step defines.
+
+    Handles both the parser's ``arg_list`` form (pre-resolve) and the
+    resolver's flattened form (post-resolve, where each var becomes a
+    direct key in ``arguments``).
+    """
+    keys: set[str] = set()
+    args = s.arguments if isinstance(s.arguments, dict) else {}
+    arg_list = args.get("arg_list")
+    if isinstance(arg_list, list):
+        for item in arg_list:
+            if isinstance(item, dict) and item.get("name"):
+                keys.add(str(item["name"]))
+    else:
+        # Post-resolve: the resolver flattens arg_list into direct keys.
+        # Every non-IR key in arguments is a var name.
+        _ir_keys = {"step_variables", "mock_result", "condition",
+                    "do_until", "ignore_errors", "when", "message"}
+        for k in args:
+            if k not in _ir_keys:
+                keys.add(k)
+    return keys
+
+
+def _check_child_playbook_returns(
+    collection: Collection, errors: list[CompileError],
+) -> None:
+    """Validate child-playbook return values against what the parent reads.
+
+    Live evidence (2026-08-23, FSR 7.6.5 and 8.0.0): a synchronous child
+    returns ONLY the vars from the last executed step on the taken branch
+    path -- NOT the union of all set_variable vars in the child. Earlier
+    set_variable vars are NOT visible to the parent at ``vars.steps.<ref>.<var>``.
+
+    This check catches:
+    1. Parent reads ``vars.steps.<ref>.<var>`` but no terminal step of the
+       child produces that var (it was set in an earlier step, not the last).
+    2. Child's terminal steps produce different var sets on different branches
+       (ambiguous return -- the parent gets different vars depending on which
+       branch fires). Warning, not error.
+    3. Parent passes child_args the child doesn't declare as parameters.
+    4. Child declares parameters but a sync parent caller doesn't pass them.
+    """
+    pb_by_name = {pb.name: pb for pb in collection.playbooks}
+    for pi, pb in enumerate(collection.playbooks):
+        for si, s in enumerate(pb.steps):
+            if s.type != "workflow_reference":
+                continue
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            if args.get("apply_async") is True:
+                continue  # async -- no return value
+            target = args.get("target") or args.get("workflowReference")
+            if not isinstance(target, str):
+                continue
+            # Resolve target name -- the resolved IR carries workflowReference
+            # (an IRI like /api/3/workflows/<uuid>), the parsed IR carries target
+            # (the friendly name). Map IRI back to name via the emitter's uuid5.
+            child_name = target
+            if target.startswith("/api/3/workflows/"):
+                from .emitter import _u
+                for name in pb_by_name:
+                    iri = f"/api/3/workflows/{_u('workflow', collection.name, name)}"
+                    if iri == target:
+                        child_name = name
+                        break
+            if child_name not in pb_by_name:
+                continue  # external/cross-collection -- can't validate
+            child = pb_by_name[child_name]
+
+            # 1. Terminal steps produce different var sets → ambiguous return
+            terminals = _child_terminal_steps(child)
+            sv_terminals = [t for t in terminals if t.type == "set_variable"]
+            if len(sv_terminals) > 1:
+                var_sets = [_set_var_keys(t) for t in sv_terminals]
+                all_keys: set[str] = set()
+                for ks in var_sets:
+                    all_keys |= ks
+                # Check if any terminal produces a var the others don't
+                for i, t in enumerate(sv_terminals):
+                    unique = var_sets[i] - set().union(
+                        *(var_sets[:i] + var_sets[i+1:])
+                    )
+                    if unique:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"child playbook {child_name!r} has branch "
+                                f"terminal {(t.name or t.id)!r} that produces "
+                                f"var(s) {sorted(unique)} not produced by "
+                                f"other terminals -- the parent will only see "
+                                f"these if this branch fires (ambiguous return)"
+                            ),
+                            path=f"playbooks[{pb_by_name[child_name] and collection.playbooks.index(child)}.steps",
+                            severity="warning",
+                        ))
+                        break  # one warning per child is enough
+
+            # 2. Parent reads a var the child's terminal steps don't produce
+            terminal_vars: set[str] = set()
+            for t in sv_terminals:
+                terminal_vars |= _set_var_keys(t)
+
+            # The jinja-level check (parent reads vars.steps.<ref>.<var> the
+            # child doesn't produce) is already caught by the typed_walker's
+            # shape lookup + reference_lint. We don't duplicate it here --
+            # the checks below are structural, not jinja-level.
+
+            # 3. Parent passes child_args the child doesn't declare as parameters
+            child_params = set(child.parameters or [])
+            child_args = args.get("child_args") or {}
+            if isinstance(child_args, dict):
+                # Envelope keys that are NOT child params
+                envelope_keys = {
+                    "target", "workflowReference", "apply_async",
+                    "pass_parent_env", "pass_input_record", "step_variables",
+                    "for_each", "when", "mock_result", "do_until", "child_args",
+                }
+                for k in child_args:
+                    if k in envelope_keys:
+                        continue
+                    if k not in child_params:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"parent passes child_arg {k!r} to child "
+                                f"{child_name!r} but the child doesn't declare "
+                                f"it as a parameter -- it will be ignored at "
+                                f"runtime"
+                            ),
+                            path=f"playbooks[{pi}].steps[{si}].arguments.child_args.{k}",
+                            severity="warning",
+                        ))
+
+            # 4. Child declares parameters but sync parent doesn't pass them
+            if child_params:
+                passed = set(child_args.keys()) if isinstance(child_args, dict) else set()
+                # Also check hoisted step-level keys (the legacy surface)
+                passed |= {k for k in args if k not in {
+                    "target", "workflowReference", "apply_async",
+                    "pass_parent_env", "pass_input_record", "step_variables",
+                    "for_each", "when", "mock_result", "do_until", "child_args",
+                    "connector", "operation", "config", "params",
+                }}
+                missing = child_params - passed
+                if missing:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"child {child_name!r} declares parameter(s) "
+                            f"{sorted(missing)} but parent doesn't pass them "
+                            f"-- they will be null/undefined at runtime"
+                        ),
+                        path=f"playbooks[{pi}].steps[{si}].arguments.child_args",
+                        severity="warning",
+                    ))

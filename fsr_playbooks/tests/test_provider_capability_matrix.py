@@ -94,12 +94,37 @@ def _probe_anthropic_task_budget(p: AnthropicProvider) -> None:
     assert "task_budget" in kwargs["output_config"], kwargs
 
 
+def _probe_anthropic_deferred_tools(p: AnthropicProvider) -> None:
+    """The long tail is deferred and the search tool is prepended."""
+    from fsr_playbooks.llm.anthropic_provider import apply_deferred_loading
+
+    surface = [{"name": "find_connector"}, {"name": "validate_yaml"},
+               {"name": "mcp_soc__get_alert"}, {"name": "mcp_soc__block_indicator"}]
+    out, n = apply_deferred_loading(surface, p.model)
+    assert n == 2, out
+    assert out[0]["type"].startswith("tool_search_tool_bm25"), out[0]
+    deferred = {t["name"] for t in out if t.get("defer_loading")}
+    assert deferred == {"mcp_soc__get_alert", "mcp_soc__block_indicator"}
+    # API constraint: the search tool is never itself deferred, and at least
+    # one other tool stays loaded.
+    assert "defer_loading" not in out[0]
+    assert any(not t.get("defer_loading") for t in out[1:])
+    # An all-deferrable slice would trip `400 All tools have defer_loading
+    # set`, so it is left alone rather than sent.
+    all_mcp = [{"name": "mcp_soc__get_alert"}]
+    assert apply_deferred_loading(all_mcp, p.model) == (all_mcp, 0)
+    # And a model without tool search gets the slice untouched.
+    old = AnthropicProvider(api_key="k", model="claude-sonnet-4-5-20250929")
+    assert apply_deferred_loading(surface, old.model) == (surface, 0)
+
+
 #: (provider name, capability) -> probe. A declared-true capability with no
 #: entry here is a failure, not an omission.
 PROBES = {
     ("fortiai-proxy", "reasoning_depth"): _probe_fortiai_reasoning,
     ("anthropic", "reasoning_depth"): _probe_anthropic_reasoning,
     ("anthropic", "task_budget"): _probe_anthropic_task_budget,
+    ("anthropic", "deferred_tools"): _probe_anthropic_deferred_tools,
 }
 
 
@@ -210,3 +235,17 @@ def test_task_budget_is_not_sent_unless_the_loop_hands_one_over() -> None:
     assert p.capabilities.task_budget is True
     assert p._native_request_kwargs(tool_turns=16) == ({}, [])
     assert p.emulation.task_budget is True
+
+
+def test_deferred_loading_is_not_applied_unless_asked() -> None:
+    """Same blast-radius rule as the task budget: declaring the capability
+    must not change the array for a caller that never asked."""
+    from fsr_playbooks.llm.anthropic_provider import apply_deferred_loading
+
+    p = AnthropicProvider(api_key="test-key")
+    assert p.capabilities.deferred_tools is True
+    assert p._turn_request.defer_tools is False
+    # The provider only calls `apply_deferred_loading` behind that flag; the
+    # function itself stays pure and callable either way.
+    surface = [{"name": "find_connector"}, {"name": "mcp_soc__get_alert"}]
+    assert apply_deferred_loading(surface, p.model)[1] == 1

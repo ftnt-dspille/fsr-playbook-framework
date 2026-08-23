@@ -207,6 +207,66 @@ TASK_BUDGET_MIN_TOKENS = 20_000
 #: the model wrap up early, which is the failure we are trying to STOP.
 TASK_BUDGET_TOKENS_PER_TOOL_TURN = 8_000
 
+#: ───────────────── deferred tool loading / tool search (A1.4) ─────────────
+#:
+#: Models taking tool search + `defer_loading`. Same family as adaptive
+#: thinking; the search tool is a server tool, no beta header.
+_TOOL_SEARCH_MODELS = _ADAPTIVE_THINKING_MODELS
+
+#: The BM25 search tool. Ranked lexical match over the deferred schemas --
+#: the right one for a surface whose names ARE the vocabulary
+#: (`mcp_fortisiem__get_incident_by_id` says what it does).
+TOOL_SEARCH_TOOL = {
+    "type": "tool_search_tool_bm25_20251119",
+    "name": "tool_search_tool_bm25",
+}
+
+
+def _is_deferrable(tool: dict[str, Any]) -> bool:
+    """True for the LONG TAIL: materialized MCP tools.
+
+    The split has to be config-stable, not page-stable -- deferring by page
+    would put us right back to a tool array that changes mid-session, which is
+    the cache defect A1.3 just fixed. MCP materialization is a property of the
+    configured servers, so `mcp_*` is exactly such a line: dozens of schemas,
+    stable for the session, and individually rare in any one turn.
+    """
+    return str(tool.get("name", "")).startswith("mcp_")
+
+
+def apply_deferred_loading(
+    tools: list[dict[str, Any]], model: str
+) -> tuple[list[dict[str, Any]], int]:
+    """Mark the long tail `defer_loading: true` and prepend the search tool.
+
+    Returns `(tools, deferred_count)`; `(tools, 0)` unchanged when the model
+    cannot search or when there is nothing worth deferring.
+
+    Two API constraints, both enforced here rather than discovered at the
+    wire: the search tool itself must not be deferred, and at least one other
+    tool must stay loaded (`400 All tools have defer_loading set`). The
+    curated surface always satisfies the second -- but a slice that happened
+    to be all-MCP would not, so it is checked, not assumed.
+
+    Schemas are APPENDED when found, never swapped, so the cached prefix
+    survives a search. That is the whole reason this is the mechanism for a
+    dynamic surface rather than per-turn filtering.
+    """
+    if not _model_supports_tool_search(model):
+        return list(tools), 0
+    deferrable = [t for t in tools if _is_deferrable(t)]
+    if not deferrable or len(deferrable) == len(tools):
+        return list(tools), 0
+    out: list[dict[str, Any]] = [dict(TOOL_SEARCH_TOOL)]
+    for t in tools:
+        out.append({**t, "defer_loading": True} if _is_deferrable(t) else t)
+    return out, len(deferrable)
+
+
+def _model_supports_tool_search(model: str) -> bool:
+    return (model or "").strip() in _TOOL_SEARCH_MODELS
+
+
 #: Kill switch. `FSR_ANTHROPIC_NATIVE=0` makes this provider declare BOTH
 #: primitives unsupported, which routes the turn back through the host-side
 #: emulation via the ordinary seam -- one env var, no second code path. It
@@ -305,6 +365,7 @@ class AnthropicProvider(CapabilityMixin):
         return ProviderCapabilities(
             reasoning_depth=_model_supports_reasoning_depth(self.model),
             task_budget=_model_supports_task_budget(self.model),
+            deferred_tools=_model_supports_tool_search(self.model),
         )
 
     # Class-level default so the loop reads a sane cap even on an instance
@@ -672,6 +733,12 @@ class AnthropicProvider(CapabilityMixin):
         cached_system = [
             {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
         ]
+        # A1.4: defer the long tail when the loop asked for it. Applied
+        # BEFORE the cache_control stamp so the search tool and the
+        # `defer_loading` flags are inside the cached prefix -- they are
+        # config-stable, so they cache like the rest of it.
+        if self._turn_request.defer_tools and not self.emulation.deferred_tools:
+            tools, _deferred_n = apply_deferred_loading(tools, self.model)
         cached_tools: list[dict[str, Any]] = []
         for i, t in enumerate(tools):
             if i == len(tools) - 1:

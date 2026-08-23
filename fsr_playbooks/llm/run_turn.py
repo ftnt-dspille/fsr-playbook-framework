@@ -227,6 +227,7 @@ async def run_agent_turn(
     case_state: Any = None,              # CaseState | None, kept as Any to keep this file's imports cheap
     max_tool_turns: int | None = None,   # budget-ask resume (None → provider default)
     reasoning: str | None = None,        # requested depth; None → provider default
+    defer_tools: bool = False,           # A1.4: let the model search the long tail
 ) -> TurnResult:
     """Drive one user turn through the provider and return the transcript.
 
@@ -312,6 +313,7 @@ async def run_agent_turn(
     _ask = TurnRequest(
         reasoning=reasoning,
         max_tool_turns=max_tool_turns or MAX_TOOL_TURNS,
+        defer_tools=defer_tools,
     )
     try:
         provider.request(_ask)
