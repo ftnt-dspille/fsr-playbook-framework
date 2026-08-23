@@ -22,6 +22,7 @@ from typing import Any
 from agent import load_system_prompt
 
 from evals.providers import ProviderFn, get_provider, set_tool_slice
+from evals.scoring import SCORER_VERSION as _SCORER_VERSION
 from evals.scoring import canonicalize_trace, delivered_yaml, score
 from evals.tasks import Task, load_tasks
 
@@ -435,6 +436,15 @@ def run_matrix(
         # box holding nothing -- the investigation rows are unservable and
         # their zeros are the harness's, not the agent's.
         "record_substrate": record_substrate,
+        # ...and which SCORING RULE turned traces into numbers. A scorer change
+        # moves every cell without the agent doing anything differently; see
+        # scoring.SCORER_VERSION for the case that made this necessary.
+        "scorer_version": _SCORER_VERSION,
+        # ...and which LANE asked for it. The lane names the whole measurement
+        # environment in one word (provider, model, substrate) -- see
+        # evals/lanes.py. `adhoc` means someone ran the harness directly, which
+        # is fine but is not comparable to a lane run by construction.
+        "lane": os.environ.get("EVAL_LANE", "").strip() or "adhoc",
         "tasks": [t.name for t in tasks],
         "models": list(model_names),
         "rows": rows,
@@ -691,6 +701,21 @@ _SUBSTRATE_FIELDS = (
     ("tool_substrate", "which tools the agent could call"),
     ("record_substrate", "what its record reads returned"),
     ("offline", "whether an appliance was behind the tools"),
+    # Not a substrate in the "where did the bytes come from" sense, but it
+    # belongs to the same question -- is a moved cell about the AGENT? A
+    # scorer change moves every cell on its own, and the pinned pre-#127
+    # baseline is the standing proof (every row 1.0 under the old rule).
+    ("scorer_version", "which rule turned traces into numbers"),
+    # The lane is the one-word name for provider+model+substrate (evals/
+    # lanes.py). The fields above already catch a screen-vs-confirm diff by
+    # substrate alone; this one makes the refusal SAY which two lanes, instead
+    # of leaving the reader to infer it from `offline: True -> False`.
+    #
+    # Task set is deliberately NOT a field here: the differ renders per cell,
+    # so a task-set difference shows up as missing cells rather than as a
+    # misleading number, and diffing a subset against a full run is a
+    # legitimate thing to want.
+    ("lane", "which named lane asked for the run"),
 )
 
 
@@ -733,20 +758,31 @@ def render_delta(d: dict[str, Any]) -> str:
     ]
     sub = d.get("substrate") or {}
     if sub and not sub.get("comparable", True):
-        # Above the table, not below it: by the time someone has read the
-        # cells they have already formed an opinion about the agent.
+        # WITHHOLD the table, don't just caption it. A banner above a printed
+        # grid loses: the eye goes to the numbers, and "these are not
+        # comparable" has never once stopped anyone from reading a red cell as
+        # a regression. Refusing is the only version of this warning that
+        # works -- the cells are still in the JSON for anyone who genuinely
+        # wants them (`--json`), which makes reading them a deliberate act.
         lines += [
-            "!! SUBSTRATE MISMATCH -- these two runs are NOT comparable.",
-            "   A cell that moved may have moved because the world did.",
+            "!! NOT COMPARABLE -- refusing to diff these two runs.",
+            "   A cell that moved may have moved because the world did,",
+            "   so the table is withheld rather than captioned.",
+            "",
         ]
         for f in sub.get("fields", []):
             if f.get("match"):
                 continue
             lines.append(f"   {f['field']}: {f['before']} → {f['after']}"
                          f"   ({f['meaning']})")
-        lines.append("   Re-baseline against a run taken the same way, or "
-                     "read the cells as unlabeled.")
-        lines.append("")
+        lines += [
+            "",
+            "   Fix: re-baseline against a run taken the same way --",
+            "     make tool-gate BASELINE=            # run with no diff",
+            "     then pin the new run id in the Makefile.",
+            "   The cells are still in --json if you want them unlabeled.",
+        ]
+        return "\n".join(lines)
     lines += [
         f"{'model':<14} {'task':<28} {'before':>7} {'after':>7}  status",
         "-" * 70,

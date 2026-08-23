@@ -137,6 +137,10 @@ def _persist_usage(ev: UsageEvent) -> None:
         "output_tokens": ev.output_tokens,
         "cache_read": ev.cache_read,
         "cache_write": ev.cache_write,
+        # Why a cache went cold, not just that it did -- a session whose
+        # fingerprint changes between turns rebuilt the (tools, system)
+        # prefix. See fsr_playbooks.llm.cache_prefix.
+        "prefix_fingerprint": ev.prefix_fingerprint,
         "stop_reason": ev.stop_reason,
         "self_repair_turn": ev.self_repair_turn,
         "history_chars": ev.history_chars,

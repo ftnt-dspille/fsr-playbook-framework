@@ -124,6 +124,36 @@ class TurnPlan:
     budget: TurnBudget = field(default_factory=TurnBudget)
     context: TurnContext = field(default_factory=TurnContext)
 
+    #: Set when this plan is a STAND-IN for a derivation that failed, naming
+    #: what failed. A failsafe plan states no page facts -- it only keeps the
+    #: dispatch gate armed. See ``TurnPlan.failsafe``.
+    failsafe_reason: str | None = None
+
+    @classmethod
+    def failsafe(cls, reason: str) -> "TurnPlan":
+        """The plan to install when deriving the real one FAILED.
+
+        A host that uses TurnPlan derives one per turn, and every derivation
+        site is wrapped so a turn is never broken by the gate. That is right,
+        but it made the FAILURE mode fail *open*: `_ACTIVE_PLAN` stayed None,
+        `gate_refusal` was never consulted, and the affordance gate silently
+        disappeared for that turn. The gate's whole job is to be the thing
+        standing between a from-scratch create and a model calling
+        `emit_enhancement_offer` with nothing open -- so "we could not work out
+        the page state" must mean the gate stays ON, not that it evaporates.
+
+        The distinction this preserves: *no plan installed* means no host is
+        using TurnPlan (the framework's own MCP callers), and stays fail-open.
+        *A failsafe plan installed* means a host tried and could not, and the
+        gated frontier is closed until it can.
+
+        The refusal it produces does not claim there is no open playbook --
+        we do not know that. It says the state could not be resolved, and
+        points at the same path forward.
+        """
+        return cls(intent="", prompt="", base_prompt="",
+                   failsafe_reason=reason)
+
     def gate_refusal(self, name: str, args: dict[str, Any] | None) -> dict[str, Any] | None:
         """The dispatch-level affordance gate.
 
@@ -135,6 +165,26 @@ class TurnPlan:
         gated = name in _OPEN_PLAYBOOK_TOOLS
         if name == "emit_card":
             gated = (args or {}).get("card_type") in _OPEN_PLAYBOOK_CARD_TYPES
+        if gated and self.failsafe_reason is not None:
+            # Distinct code AND distinct wording: this is not "there is no
+            # open playbook", it is "we could not find out". Reporting the
+            # first would be asserting a fact we do not have -- and a host
+            # reading these codes to decide whether to retry needs the two
+            # kept apart (the same reason `would_drop_fields` and
+            # `live_unreadable` are separate guard codes).
+            return {
+                "ok": False,
+                "code": "state_unresolved",
+                "error": (
+                    "This session's playbook state could not be resolved "
+                    f"({self.failsafe_reason}), so patch/enhance calls are "
+                    "held rather than run against an unknown target. Say "
+                    "which playbook to open, or emit_card("
+                    "card_type='capability_gap', ...) naming the gap and the "
+                    "closest available path -- do not end in prose asking "
+                    "them to advise."
+                ),
+            }
         if gated and not self.context.has_open_playbook:
             return {
                 "ok": False,

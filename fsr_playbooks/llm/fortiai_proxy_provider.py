@@ -1,11 +1,23 @@
-"""FortiAI Proxy provider -- on-appliance LLM adapter.
+"""FortiAI Proxy provider -- on-box LLM adapter.
 
-Drives the agent loop through the on-appliance `fortinet-fortiai-proxy`
-connector (`agent_chat_completions` operation). Non-streaming, one HTTP
-call per round-trip, single sequential tool calls with flattened-text
-round-trip. No external key, no egress.
+Drives the agent loop through the `fortinet-fortiai-proxy` connector
+(`agent_chat_completions` operation). Non-streaming: one HTTP call per
+round-trip, tool calls round-tripped as flattened text.
 
-Phase B of docs/plans/FORTIAI_PROXY_PROVIDER_PLAN.md.
+**Reasoning depth is selectable.** `feature` picks the backend profile
+(`AI_MODEL_MEDIUM` / `AI_MODEL_LARGE`) and `reasoning_effort` sets the depth,
+both sent per call via `params.config`; see `_resolve_llm_config` for the one
+compatibility rule (effort implies LARGE). The stock appliance ships the same
+choice as two connector configurations, "Low Reasoning" and "High Reasoning".
+
+**Tool calls can arrive in batches** -- see `_normalize_tool_calls`.
+
+No customer-supplied API key: the connector holds its own credential. It is
+NOT, however, egress-free -- the stock configuration points at FortiAI on
+FortiCloud, so an air-gapped deployment requires FortiAI itself to be on-prem.
+
+Phase B of docs/plans/FORTIAI_PROXY_PROVIDER_PLAN.md; corrected by
+docs/plans/FORTIAI_PROXY_CAPABILITY_CORRECTION.md.
 """
 from __future__ import annotations
 
@@ -47,6 +59,51 @@ from .provider import (
 from .tools import _resolve_tier as _tier_for
 from .tools import anthropic_tools as _anthropic_tools
 from .tools import dispatch
+
+#: FortiAI ``feature`` values, i.e. which backend profile serves the call.
+#: These are what the appliance's connector *configurations* set as
+#: ``config.model`` -- the stock box ships "Low Reasoning" (MEDIUM, default)
+#: and "High Reasoning" (LARGE). Live-verified on 8.0.0.
+FEATURE_MEDIUM = "AI_MODEL_MEDIUM"
+FEATURE_LARGE = "AI_MODEL_LARGE"
+FEATURE_SMALL = "AI_MODEL_SMALL"
+#: The FSOC default. On an FSR box it answers 404 -30008 "Assistant not found",
+#: so it is deliberately not offered.
+FEATURE_LOCAL = "AI_MODEL_LOCAL"
+
+
+def _resolve_llm_config(feature: str | None,
+                        reasoning_effort: str | None) -> dict[str, Any]:
+    """Build the per-call ``params.config`` overlay -- THE one place the
+    effort/model compatibility rule lives.
+
+    The proxy merges ``params["config"]`` over the connector configuration
+    (``operations.py``: ``merged_config = {**config, **params.get("config")}``),
+    so a caller can pick the backend profile and the reasoning depth per call
+    without switching the connector's config UUID. Auth and server address are
+    NOT overridable this way -- the client is still constructed from the
+    stored config -- which is exactly the seam we want.
+
+    **effort implies LARGE.** ``reasoning_effort`` on ``AI_MODEL_MEDIUM`` is a
+    hard ``400 -30000 "The request payload is invalid."`` every time
+    (live-verified, 2 reps per cell). Asking for reasoning depth and getting a
+    silent empty turn is the worst available outcome, so requesting an effort
+    without naming a feature -- or naming a non-LARGE one -- upgrades to LARGE
+    here rather than failing at the wire.
+
+    Returns ``{}`` when nothing is set, so the default path sends no ``config``
+    key at all and the connector configuration decides, exactly as before.
+    """
+    overlay: dict[str, Any] = {}
+    effort = (reasoning_effort or "").strip() or None
+    feat = (feature or "").strip() or None
+    if effort:
+        if feat != FEATURE_LARGE:
+            feat = FEATURE_LARGE
+        overlay["reasoning_effort"] = effort
+    if feat:
+        overlay["model"] = feat
+    return overlay
 
 
 def _collapse_union_types(node: Any) -> Any:
@@ -110,6 +167,52 @@ def _normalize_tools_fortiai(tools: list[dict[str, Any]]) -> list[dict[str, Any]
     return out
 
 
+def _normalize_tool_calls(tool_name: Any, tool_args: Any,
+                          tools_field: Any) -> list[tuple[str, Any]]:
+    """Every tool call the proxy elected, as ``[(name, raw_args), ...]``.
+
+    The response carries the FULL batch in ``tools``
+    (``[{"name": ..., "args": {...}}, ...]``); ``tool_name``/``tool_args`` are
+    only the FIRST of them, kept for back-compat. Reading the singular pair
+    alone -- which this provider did until now -- silently discarded every call
+    after the first: the model asked for two things, one ran, and nothing
+    reported the drop. Live-verified on 8.0.0 that a two-tool prompt returns
+    both entries.
+
+    Falls back to the singular pair when ``tools`` is absent or unusable, so an
+    older proxy build behaves exactly as before. ``raw_args`` is passed through
+    untouched -- the caller parses it and reports its own failures (the proxy
+    sometimes hands args back as a JSON *string*).
+    """
+    calls: list[tuple[str, Any]] = []
+    if isinstance(tools_field, list):
+        for entry in tools_field:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if isinstance(name, str) and name:
+                calls.append((name, entry.get("args")))
+    if calls:
+        return calls
+    if isinstance(tool_name, str) and tool_name:
+        return [(tool_name, tool_args)]
+    return []
+
+
+def _describe_proxy_error(err: Any) -> str:
+    """Render the proxy's error envelope as one readable line.
+
+    The dict form carries `error_desc` + `error_code`; anything else (a bare
+    string, or a shape we have not seen) is stringified rather than dropped."""
+    if isinstance(err, dict):
+        desc = err.get("error_desc") or err.get("message") or ""
+        code = err.get("error_code") or err.get("status_code") or ""
+        if desc and code:
+            return f"{desc} (code {code})"
+        return str(desc or code or err)
+    return str(err)
+
+
 def _stringify(result: Any) -> str:
     """Convert a tool result to a compact text representation for the
     flattened-text round-trip."""
@@ -132,12 +235,16 @@ def _is_error_result(result: Any) -> bool:
 
 
 class FortiAIProxyProvider:
-    """Non-streaming LLM provider for the on-appliance FortiAI proxy.
+    """Non-streaming LLM provider for the FortiAI proxy.
 
     Calls ``agent_chat_completions`` on the ``fortinet-fortiai-proxy``
-    connector via ``POST /api/integration/execute/``.  No external API key
-    or egress.  One HTTP round-trip per LLM turn.  Tool calls are singular
-    (one per response) and return as flattened-text messages.
+    connector via ``POST /api/integration/execute/``. No customer-supplied API
+    key (the connector holds its own credential); egress depends on where
+    FortiAI itself is deployed. One HTTP round-trip per LLM turn. A turn may
+    carry a BATCH of tool calls, which round-trip as flattened-text messages.
+
+    ``feature`` + ``reasoning_effort`` select the backend profile and reasoning
+    depth per call -- see :func:`_resolve_llm_config`.
     """
 
     name = "fortiai-proxy"
@@ -149,13 +256,20 @@ class FortiAIProxyProvider:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        feature: str | None = None,
+        reasoning_effort: str | None = None,
         approval_gateway: Any = None,
         max_output_tokens: int | None = None,
         client: Any = None,  # httpx.AsyncClient or compatible, for testing
     ):
         self.base_url = (base_url or "").rstrip("/")
         self._auth = api_key
+        # `model` is the COSMETIC params.model -- the proxy echoes it back in
+        # data.model and does not route on it. `feature`/`reasoning_effort` are
+        # the ones that select a backend profile; see _resolve_llm_config.
         self.model = model or "fortiai-proxy"
+        self.feature = feature
+        self.reasoning_effort = reasoning_effort
         self.max_output_tokens = max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
         self._approval_gateway = approval_gateway
         self._client = client or httpx.AsyncClient(timeout=120.0)
@@ -361,12 +475,13 @@ class FortiAIProxyProvider:
         # Internal helper for a single proxy round-trip.
         async def _call_proxy(
             *, history: list[dict[str, Any]], tool_defs: list[dict[str, Any]]
-        ) -> tuple[str, str | None, dict[str, Any] | None, dict[str, int]]:
+        ) -> tuple[str, list[tuple[str, Any]], dict[str, int]]:
             """Call agent_chat_completions.
 
-            Returns (content, tool_name, tool_args, usage) as raw values.
-            content is None for tool-call turns. tool_name/tool_args are
-            populated for tool-call turns. usage is a dict of token counts.
+            Returns (content, calls, usage). ``content`` is None for tool-call
+            turns; ``calls`` is EVERY tool call the proxy elected, normalized to
+            ``[(name, raw_args), ...]`` (see _normalize_tool_calls) and empty on
+            a text turn. usage is a dict of token counts.
             On error, raises RuntimeError.
             """
             body = {
@@ -379,6 +494,9 @@ class FortiAIProxyProvider:
             }
             if self.model:
                 body["params"]["model"] = self.model
+            overlay = _resolve_llm_config(self.feature, self.reasoning_effort)
+            if overlay:
+                body["params"]["config"] = overlay
 
             headers = {}
             if self._auth:
@@ -404,13 +522,25 @@ class FortiAIProxyProvider:
                 raise RuntimeError(f"FortiAI proxy execution failed: {msg}")
 
             payload = data.get("data", data)
-            if isinstance(payload.get("error"), str):
-                raise RuntimeError(f"FortiAI proxy LLM error: {payload['error']}")
+            # ANY truthy `error` is an error, whatever its type. This used to
+            # test `isinstance(..., str)`, but the live envelope is a DICT --
+            # `{"status": "Failure", "status_code": "400", "error_code":
+            # "-30000", "error_desc": "The request payload is invalid."}` --
+            # so the check never fired and the turn continued with empty
+            # content, no usage and no exception. The model then narrated an
+            # empty response as a normal answer. A `reasoning_effort` sent
+            # against a non-LARGE feature is a live generator of exactly this
+            # envelope, so the two fixes belong together.
+            err = payload.get("error")
+            if err:
+                raise RuntimeError(
+                    f"FortiAI proxy LLM error: {_describe_proxy_error(err)}")
 
             content = payload.get("content")
-            tool_name = payload.get("tool_name")
-            tool_args = payload.get("tool_args") or {}
             usage = payload.get("usage") or {}
+            calls = _normalize_tool_calls(payload.get("tool_name"),
+                                          payload.get("tool_args"),
+                                          payload.get("tools"))
 
             # Pass `tool_args` through UNCHANGED. Coercing a non-dict to `{}`
             # here is what produced the `run_op({})` dispatches seen on
@@ -418,7 +548,7 @@ class FortiAIProxyProvider:
             # JSON *string*, which this turned into an empty call before the
             # caller's parser (which handles strings, and now reports a parse
             # failure instead of emptying) ever saw it.
-            return content, tool_name, tool_args, usage
+            return content, calls, usage
 
         for _turn in range(MAX_TOOL_TURNS):
             turn_idx += 1
@@ -429,7 +559,7 @@ class FortiAIProxyProvider:
 
             # Single proxy call
             try:
-                content, tool_name, tool_args, usage = await _call_proxy(
+                content, calls, usage = await _call_proxy(
                     history=history, tool_defs=tool_defs
                 )
             except Exception as exc:
@@ -444,154 +574,170 @@ class FortiAIProxyProvider:
 
             tool_call_usage = []
 
-            if tool_name:
-                # --- Tool call turn ------------------------------------------
-                raw_args = tool_args
-                args_error: str | None = None
-                try:
-                    if isinstance(raw_args, str):
-                        parsed_args = json.loads(raw_args)
-                        if not isinstance(parsed_args, dict):
+            if calls:
+                # EVERY call in the batch, in order. The proxy can elect
+                # more than one (see _normalize_tool_calls); running only
+                # the first was a silent drop.
+                for _ci, (tool_name, tool_args) in enumerate(calls):
+                    # --- Tool call turn ------------------------------------------
+                    raw_args = tool_args
+                    args_error: str | None = None
+                    try:
+                        if isinstance(raw_args, str):
+                            parsed_args = json.loads(raw_args)
+                            if not isinstance(parsed_args, dict):
+                                args_error = ("arguments must be a JSON object, got "
+                                              f"{type(parsed_args).__name__}")
+                                parsed_args = {}
+                        elif isinstance(raw_args, dict):
+                            parsed_args = raw_args
+                        else:
                             args_error = ("arguments must be a JSON object, got "
-                                          f"{type(parsed_args).__name__}")
+                                          f"{type(raw_args).__name__}")
                             parsed_args = {}
-                    elif isinstance(raw_args, dict):
-                        parsed_args = raw_args
-                    else:
-                        args_error = ("arguments must be a JSON object, got "
-                                      f"{type(raw_args).__name__}")
+                    except Exception as exc:  # noqa: BLE001
+                        args_error = f"arguments were not valid JSON ({exc})"
                         parsed_args = {}
-                except Exception as exc:  # noqa: BLE001
-                    args_error = f"arguments were not valid JSON ({exc})"
-                    parsed_args = {}
 
-                call_id = f"call_{session_id}_{turn_idx}"
-                if args_error is not None:
-                    # Do NOT dispatch a call whose arguments we could not read.
-                    # Emptying them and running anyway is silent arg-dropping:
-                    # observed on contain_block_ip_direct (run 20260815T153152Z)
-                    # as three consecutive `run_op({})` calls that burned a
-                    # third of the turn's budget and staged nothing. It also
-                    # weakens the gate -- `_resolve_tier` reads the op out of
-                    # the args, so a tier-4 containment with unreadable args
-                    # resolves as a plain tier-3 (it escalates from unknown, so
-                    # nothing runs ungated, but a step-up requirement is lost).
-                    # Hand the parse failure back so the model can re-emit.
-                    err = {"ok": False, "code": "bad_tool_arguments",
-                           "message": (f"{tool_name}: {args_error}. Re-issue "
-                                       f"the call with a single valid JSON "
-                                       f"object as the arguments."),
-                           "suggestions": []}
-                    yield ToolUseEvent(name=tool_name, arguments={},
-                                       call_id=call_id,
-                                       tier=_tier_for(tool_name, {}))
-                    yield ToolResultEvent(call_id=call_id, result=err,
-                                          duration_ms=0)
+                    # `_ci` keeps ids unique WITHIN a batch -- two calls in
+                    # one turn previously collided on the same id, which the
+                    # widget matches results by.
+                    call_id = f"call_{session_id}_{turn_idx}_{_ci}"
+                    if args_error is not None:
+                        # Do NOT dispatch a call whose arguments we could not read.
+                        # Emptying them and running anyway is silent arg-dropping:
+                        # observed on contain_block_ip_direct (run 20260815T153152Z)
+                        # as three consecutive `run_op({})` calls that burned a
+                        # third of the turn's budget and staged nothing. It also
+                        # weakens the gate -- `_resolve_tier` reads the op out of
+                        # the args, so a tier-4 containment with unreadable args
+                        # resolves as a plain tier-3 (it escalates from unknown, so
+                        # nothing runs ungated, but a step-up requirement is lost).
+                        # Hand the parse failure back so the model can re-emit.
+                        err = {"ok": False, "code": "bad_tool_arguments",
+                               "message": (f"{tool_name}: {args_error}. Re-issue "
+                                           f"the call with a single valid JSON "
+                                           f"object as the arguments."),
+                               "suggestions": []}
+                        yield ToolUseEvent(name=tool_name, arguments={},
+                                           call_id=call_id,
+                                           tier=_tier_for(tool_name, {}))
+                        yield ToolResultEvent(call_id=call_id, result=err,
+                                              duration_ms=0)
+                        history.append({
+                            "role": "assistant",
+                            "content": f"[called {tool_name} with unreadable arguments]",
+                        })
+                        history.append({
+                            "role": "user",
+                            "content": f"Tool result: {tool_name} = {json.dumps(err)}",
+                        })
+                        # Next call in the batch -- one unreadable call does
+                        # not void the others the model elected.
+                        continue
+                    tier = _tier_for(tool_name, parsed_args)
+                    yield ToolUseEvent(
+                        name=tool_name, arguments=parsed_args,
+                        call_id=call_id, tier=tier,
+                    )
+
+                    _t0 = time.perf_counter()
+                    result = _guarded_dispatch(tool_name, parsed_args)
+                    dur_ms = int((time.perf_counter() - _t0) * 1000)
+                    yield ToolResultEvent(
+                        call_id=call_id, result=result, duration_ms=dur_ms
+                    )
+
+                    # Record tool-call usage
+                    content_str = _stringify(result)
+                    try:
+                        args_chars = len(json.dumps(parsed_args, default=str))
+                    except Exception:
+                        args_chars = 0
+                    tool_call_usage.append(ToolCallUsage(
+                        name=tool_name, args_chars=args_chars,
+                        result_chars=len(content_str), duration_ms=dur_ms,
+                    ))
+
+                    # Check for pending_approval → suspend
+                    if isinstance(result, dict) and result.get("pending_approval"):
+                        approval_id = result["approval_id"]
+                        # The rest of THIS batch has not run yet. `remaining_tool_
+                        # calls` exists precisely to carry them across the
+                        # suspension; leaving it empty (as it was when only one
+                        # call per turn was believed possible) would drop every
+                        # sibling call the moment one of them needed approval.
+                        remaining = [
+                            _approvals.SkippedToolCall(
+                                call_id=f"{call_id}_skipped_{_si}",
+                                name=_sname, args=_sargs
+                                if isinstance(_sargs, dict) else {},
+                            )
+                            for _si, (_sname, _sargs) in enumerate(calls[_ci + 1:])
+                        ]
+                        suspended_session = _approvals.SuspendedSession(
+                            approval_id=approval_id,
+                            # The CHAT session id, not `session_id` -- that local
+                            # is a per-stream trace id (uuid4().hex[:8]) used for
+                            # telemetry correlation. Stashing it here wrote a value
+                            # into suspended_sessions.session_id that could never
+                            # join to chat_sessions, so the monitor's Pending panel
+                            # showed an unresolvable session with a null intent and
+                            # user, and list_active_sessions could never derive
+                            # `waiting_approval` for any row.
+                            session_id=(tags or {}).get("session_id") or session_id,
+                            tool=tool_name,
+                            tool_use_id=call_id,
+                            args=parsed_args,
+                            tier=int(result.get("tier", 3)),
+                            history_snapshot=list(history),
+                            prior_tool_result_blocks=[],
+                            remaining_tool_calls=list(remaining),
+                            system=system,
+                            tags=dict(tags),
+                            summary=result.get("summary"),
+                            # the advertised slice -- resume re-enters with it
+                            tools=list(tools or []),
+                        )
+                        _approvals.bind(suspended_session)
+                        if self._approval_gateway is not None:
+                            self._approval_gateway.stash(suspended_session)
+                        else:
+                            _approvals.stash(suspended_session)
+                        pending = ApprovalRequestEvent(
+                            approval_id=approval_id,
+                            tool_use_id=call_id,
+                            tool=tool_name,
+                            tier=int(result.get("tier", 3)),
+                            preview=result.get("preview") or {},
+                            args_hash=result.get("args_hash", ""),
+                            summary=result.get("summary"),
+                            requires_step_up=bool(result.get("requires_step_up")),
+                        )
+                        yield pending
+                        yield _emit_usage("pending_approval")
+                        yield DoneEvent(stop_reason="pending_approval")
+                        return
+
+                    # Flatten tool call + result into text messages for the proxy
+                    args_summary = json.dumps(parsed_args, default=str)
                     history.append({
                         "role": "assistant",
-                        "content": f"[called {tool_name} with unreadable arguments]",
+                        "content": f"[called {tool_name}({args_summary})]",
                     })
                     history.append({
                         "role": "user",
-                        "content": f"Tool result: {tool_name} = {json.dumps(err)}",
+                        "content": f"Tool result: {tool_name} = {content_str}",
                     })
-                    yield _emit_usage("tool_calls")
-                    continue
-                tier = _tier_for(tool_name, parsed_args)
-                yield ToolUseEvent(
-                    name=tool_name, arguments=parsed_args,
-                    call_id=call_id, tier=tier,
-                )
+                    # TurnPlan item 3: state the shrinking budget in the soft
+                    # window before the cap (mirrors the other providers).
+                    from ._loop_helpers import budget_note
+                    _bnote = budget_note(_turn + 1, MAX_TOOL_TURNS)
+                    if _bnote:
+                        history.append({"role": "user",
+                                        "content": f"[turn budget] {_bnote}"})
+                    any_tools_run = True
 
-                _t0 = time.perf_counter()
-                result = _guarded_dispatch(tool_name, parsed_args)
-                dur_ms = int((time.perf_counter() - _t0) * 1000)
-                yield ToolResultEvent(
-                    call_id=call_id, result=result, duration_ms=dur_ms
-                )
-
-                # Record tool-call usage
-                content_str = _stringify(result)
-                try:
-                    args_chars = len(json.dumps(parsed_args, default=str))
-                except Exception:
-                    args_chars = 0
-                tool_call_usage.append(ToolCallUsage(
-                    name=tool_name, args_chars=args_chars,
-                    result_chars=len(content_str), duration_ms=dur_ms,
-                ))
-
-                # Check for pending_approval → suspend
-                if isinstance(result, dict) and result.get("pending_approval"):
-                    approval_id = result["approval_id"]
-                    remaining = []
-                    suspended_session = _approvals.SuspendedSession(
-                        approval_id=approval_id,
-                        # The CHAT session id, not `session_id` -- that local
-                        # is a per-stream trace id (uuid4().hex[:8]) used for
-                        # telemetry correlation. Stashing it here wrote a value
-                        # into suspended_sessions.session_id that could never
-                        # join to chat_sessions, so the monitor's Pending panel
-                        # showed an unresolvable session with a null intent and
-                        # user, and list_active_sessions could never derive
-                        # `waiting_approval` for any row.
-                        session_id=(tags or {}).get("session_id") or session_id,
-                        tool=tool_name,
-                        tool_use_id=call_id,
-                        args=parsed_args,
-                        tier=int(result.get("tier", 3)),
-                        history_snapshot=list(history),
-                        prior_tool_result_blocks=[],
-                        remaining_tool_calls=[
-                            _approvals.SkippedToolCall(
-                                call_id=s.call_id, name=s.name, args=s.args,
-                            )
-                            for s in remaining
-                        ],
-                        system=system,
-                        tags=dict(tags),
-                        summary=result.get("summary"),
-                        # the advertised slice -- resume re-enters with it
-                        tools=list(tools or []),
-                    )
-                    _approvals.bind(suspended_session)
-                    if self._approval_gateway is not None:
-                        self._approval_gateway.stash(suspended_session)
-                    else:
-                        _approvals.stash(suspended_session)
-                    pending = ApprovalRequestEvent(
-                        approval_id=approval_id,
-                        tool_use_id=call_id,
-                        tool=tool_name,
-                        tier=int(result.get("tier", 3)),
-                        preview=result.get("preview") or {},
-                        args_hash=result.get("args_hash", ""),
-                        summary=result.get("summary"),
-                        requires_step_up=bool(result.get("requires_step_up")),
-                    )
-                    yield pending
-                    yield _emit_usage("pending_approval")
-                    yield DoneEvent(stop_reason="pending_approval")
-                    return
-
-                # Flatten tool call + result into text messages for the proxy
-                args_summary = json.dumps(parsed_args, default=str)
-                history.append({
-                    "role": "assistant",
-                    "content": f"[called {tool_name}({args_summary})]",
-                })
-                history.append({
-                    "role": "user",
-                    "content": f"Tool result: {tool_name} = {content_str}",
-                })
-                # TurnPlan item 3: state the shrinking budget in the soft
-                # window before the cap (mirrors the other providers).
-                from ._loop_helpers import budget_note
-                _bnote = budget_note(_turn + 1, MAX_TOOL_TURNS)
-                if _bnote:
-                    history.append({"role": "user",
-                                    "content": f"[turn budget] {_bnote}"})
-                any_tools_run = True
 
                 yield _emit_usage("tool_calls")
                 continue

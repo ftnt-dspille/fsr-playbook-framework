@@ -16,6 +16,7 @@ Schema of one line:
       "output_tokens": 256,           # billed
       "cache_read": 6800,             # cached prefix hit
       "cache_write": 0,               # ephemeral cache write
+      "prefix_fingerprint": "8c1924fbd501",  # digest of (tools, system)
       "stop_reason": "tool_use",
       "self_repair_turn": 0,
       "history_chars": 14_280,        # serialised messages[] before this turn

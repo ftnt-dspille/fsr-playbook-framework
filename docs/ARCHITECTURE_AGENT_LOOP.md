@@ -68,19 +68,41 @@ stream) and the same HITL machinery (tier resolution, approval suspension,
 self-repair, forced assessment). Adding a backend is a *provider* addition,
 not a loop change -- the contract is the loop boundary.
 
-#### On-appliance mode (`fortiai-proxy`)
+#### On-box mode (`fortiai-proxy`)
 
-`fortiai-proxy` drives the agent loop against the on-appliance FortiAI
-gateway (`fortinet-fortiai-proxy` connector's `agent_chat_completions`
-operation). No external API key, no egress -- suitable for air-gapped or
-egress-restricted boxes. The connector runs on-box; the provider reaches
-`/api/integration/execute/` via the crudhub loopback with no explicit auth.
-Non-streaming: the proxy has no SSE support, so the provider makes one HTTP
+`fortiai-proxy` drives the agent loop against the `fortinet-fortiai-proxy`
+connector's `agent_chat_completions` operation. The connector runs on-box and
+holds its own credential, so there is **no customer-supplied API key**; the
+provider reaches `/api/integration/execute/` via the crudhub loopback with no
+explicit auth.
+
+**This is not automatically egress-free.** The stock connector configuration
+points at FortiAI on FortiCloud (`fortiai.forticloud.com`), so inference leaves
+the appliance. It suits an air-gapped or egress-restricted box only when
+FortiAI itself is deployed on-prem and the configuration's `server_address`
+says so. (An earlier revision of this document claimed "no egress -- suitable
+for air-gapped boxes" unconditionally. That was wrong.)
+
+**Reasoning depth is selectable.** The `feature` (`AI_MODEL_MEDIUM` /
+`AI_MODEL_LARGE`) and `reasoning_effort` knobs ride per call in
+`params.config`; the appliance ships the same choice as two connector
+configurations, "Low Reasoning" (default) and "High Reasoning". One
+compatibility rule, enforced in `_resolve_llm_config`: **effort implies
+`AI_MODEL_LARGE`** -- an effort against a non-LARGE feature is a hard 400.
+
+**Non-streaming:** the proxy has no SSE support, so the provider makes one HTTP
 call per LLM round-trip and the user sees no text until the full response
 arrives (sub-second for short answers; longer dead air for narratives is the
-trade-off). Tool calls are singular (one per response) and round-trip via
-flattened-text messages -- the proxy rejects structured `tool`-role blocks.
-See `docs/plans/FORTIAI_PROXY_PROVIDER_PLAN.md` for the full wire contract.
+trade-off). This limit is real and remains.
+
+**Tool calls may arrive in batches** -- the response's `tools` array carries
+every elected call, while `tool_name`/`tool_args` hold only the first for
+back-compat. They round-trip via flattened-text messages; the proxy rejects
+structured `tool`-role blocks.
+
+See `docs/plans/FORTIAI_PROXY_PROVIDER_PLAN.md` for the original wire contract
+and `docs/plans/FORTIAI_PROXY_CAPABILITY_CORRECTION.md` for the corrections
+above.
 
 ## How each front-end wires them
 

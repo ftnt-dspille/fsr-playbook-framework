@@ -115,6 +115,12 @@ class UsageEvent:
     self_repair_turn: int = 0
     tool_calls: list[ToolCallUsage] = field(default_factory=list)
     tags: dict[str, Any] = field(default_factory=dict)
+    #: Digest of the CACHEABLE (tools, system) prefix -- see
+    #: `fsr_playbooks.llm.cache_prefix`. Two turns of one session with
+    #: different fingerprints could not have shared a prompt cache, which is
+    #: what `cache_read` alone can never tell you. Empty when a provider does
+    #: not cache (the FortiAI proxy) or has not been taught to report it.
+    prefix_fingerprint: str = ""
     kind: Literal["usage"] = "usage"
 
 
