@@ -1,0 +1,6 @@
+Mislabelled scope: this commit also carries fsr_playbooks/llm/model_catalog.py and
+tests/test_model_catalog.py, which belong to a concurrent session's work -- the
+tested-model list + the health-check refusal of measured-failing models
+(gpt-4.1-mini 3/5 vs gpt-5.4-mini 5/5 on the gate slice; tracker #155/#156).
+They were swept in by a 'git add' from the other session. Nothing was rewritten;
+see 'git log --notes'.
