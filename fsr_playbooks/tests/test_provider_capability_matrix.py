@@ -20,7 +20,11 @@ from __future__ import annotations
 
 import pytest
 
-from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
+from fsr_playbooks.llm.anthropic_provider import (
+    TASK_BUDGET_BETA,
+    TASK_BUDGET_MIN_TOKENS,
+    AnthropicProvider,
+)
 from fsr_playbooks.llm.fake_provider import FakeProvider
 from fsr_playbooks.llm.fortiai_proxy_provider import (
     FEATURE_LARGE,
@@ -57,10 +61,45 @@ def _probe_fortiai_reasoning(p: FortiAIProxyProvider) -> None:
     assert overlay.get("model") == FEATURE_LARGE, overlay
 
 
+def _probe_anthropic_reasoning(p: AnthropicProvider) -> None:
+    """Anthropic serves depth with adaptive thinking + `output_config.effort`."""
+    p.request(TurnRequest(reasoning="high"))
+    kwargs, betas = p._native_request_kwargs(tool_turns=8)
+    assert kwargs.get("thinking") == {"type": "adaptive"}, kwargs
+    assert kwargs["output_config"]["effort"] == "high", kwargs
+    # Effort is GA -- asking for depth alone must not drag in a beta flag.
+    assert betas == [], betas
+    # A model that predates the family must NOT be sent these.
+    old = AnthropicProvider(api_key="test-key", model="claude-sonnet-4-5-20250929")
+    assert old.capabilities.reasoning_depth is False
+    old.request(TurnRequest(reasoning="high"))
+    assert old._native_request_kwargs(tool_turns=8) == ({}, [])
+
+
+def _probe_anthropic_task_budget(p: AnthropicProvider) -> None:
+    """A handed-over turn bound becomes a server-tracked token budget."""
+    p.request(TurnRequest(max_tool_turns=16))
+    kwargs, betas = p._native_request_kwargs(tool_turns=16)
+    budget = kwargs["output_config"]["task_budget"]
+    assert budget["type"] == "tokens"
+    assert budget["total"] >= TASK_BUDGET_MIN_TOKENS, budget
+    # `remaining` is the server's to track; sending ours under-reports spend.
+    assert "remaining" not in budget, budget
+    assert betas == [TASK_BUDGET_BETA], betas
+    # Both primitives at once must SURVIVE each other -- they are siblings in
+    # one `output_config`, so a naive merge silently drops the effort.
+    p.request(TurnRequest(reasoning="max", max_tool_turns=16))
+    kwargs, _ = p._native_request_kwargs(tool_turns=16)
+    assert kwargs["output_config"]["effort"] == "max", kwargs
+    assert "task_budget" in kwargs["output_config"], kwargs
+
+
 #: (provider name, capability) -> probe. A declared-true capability with no
 #: entry here is a failure, not an omission.
 PROBES = {
     ("fortiai-proxy", "reasoning_depth"): _probe_fortiai_reasoning,
+    ("anthropic", "reasoning_depth"): _probe_anthropic_reasoning,
+    ("anthropic", "task_budget"): _probe_anthropic_task_budget,
 }
 
 
@@ -88,8 +127,9 @@ def test_declared_capability_reaches_the_wire(name: str) -> None:
 @pytest.mark.parametrize("name", sorted(PROVIDERS))
 def test_undeclared_capability_falls_back_to_host_emulation(name: str) -> None:
     provider = PROVIDERS[name]()
-    residue = provider.request(TurnRequest(reasoning="high", prune_history=True,
-                                           defer_tools=True))
+    # Ask for EVERY capability -- a residue is only meaningful against an ask.
+    residue = provider.request(TurnRequest(reasoning="high", max_tool_turns=8,
+                                           prune_history=True, defer_tools=True))
     for cap in CAPABILITY_NAMES:
         if getattr(provider.capabilities, cap):
             assert not getattr(residue, cap), (
@@ -127,7 +167,7 @@ def test_probe_registry_has_no_stale_entries() -> None:
 
 def test_resolve_is_pure_and_symmetric() -> None:
     caps = ProviderCapabilities(reasoning_depth=True, task_budget=True)
-    r = HostEmulation.resolve(caps, TurnRequest(reasoning="low"))
+    r = HostEmulation.resolve(caps, TurnRequest(reasoning="low", max_tool_turns=8))
     assert r == HostEmulation(reasoning_depth=False, task_budget=False,
                               deferred_tools=False, history_pruning=True)
     # Not asking for a capability is not the same as the provider serving it,
@@ -160,3 +200,13 @@ def test_every_provider_is_in_the_matrix() -> None:
         f"providers absent from the capability matrix: {sorted(missing)}. Add "
         f"a constructor to PROVIDERS so its declaration is checked."
     )
+
+
+def test_task_budget_is_not_sent_unless_the_loop_hands_one_over() -> None:
+    """The blast-radius guard. Declaring the capability must not change the
+    wire for callers that never asked: no `output_config`, no beta endpoint,
+    and the host-side budget note still running."""
+    p = AnthropicProvider(api_key="test-key")
+    assert p.capabilities.task_budget is True
+    assert p._native_request_kwargs(tool_turns=16) == ({}, [])
+    assert p.emulation.task_budget is True

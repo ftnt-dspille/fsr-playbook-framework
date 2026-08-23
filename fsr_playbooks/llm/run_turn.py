@@ -34,6 +34,7 @@ from ._loop_helpers import (
     clear_guard_fires as _clear_guard_fires,
 )
 from ._loop_helpers import (
+    MAX_TOOL_TURNS,
     extract_yaml_block,
     latest_user_text,
 )
@@ -50,6 +51,7 @@ from .provider import (
     TextEvent,
     ToolResultEvent,
     ToolUseEvent,
+    TurnRequest,
     UsageEvent,
 )
 
@@ -224,6 +226,7 @@ async def run_agent_turn(
     timeout_secs: float = 600,
     case_state: Any = None,              # CaseState | None, kept as Any to keep this file's imports cheap
     max_tool_turns: int | None = None,   # budget-ask resume (None → provider default)
+    reasoning: str | None = None,        # requested depth; None → provider default
 ) -> TurnResult:
     """Drive one user turn through the provider and return the transcript.
 
@@ -299,6 +302,28 @@ async def run_agent_turn(
         reset_turn_user_message,
         set_turn_user_message,
     )
+
+    # A2: ASK the provider for this turn's capabilities before streaming. One
+    # ask for all providers -- whoever serves a primitive natively uses it,
+    # whoever does not gets the same host-side emulation as before, and the
+    # decision is not restated per provider. Handing the turn bound over is
+    # what makes a native task budget possible at all; a provider that cannot
+    # take one keeps `budget_note` switched on through the returned residue.
+    _ask = TurnRequest(
+        reasoning=reasoning,
+        max_tool_turns=max_tool_turns or MAX_TOOL_TURNS,
+    )
+    try:
+        provider.request(_ask)
+    except AttributeError:
+        # A provider predating the seam (or a hand-rolled test double) has no
+        # `request`. That is the fail-open case by design: it emulates. Caught
+        # NARROWLY on purpose -- a blanket `except` here would swallow a broken
+        # seam and leave the gate silently absent, which is exactly how the
+        # TurnPlan dispatch gate once vanished.
+        import logging
+        logging.debug("provider %s has no capability seam; emulating",
+                      getattr(provider, "name", provider))
 
     _user_msg_token = set_turn_user_message(latest_user_text(messages))
     try:

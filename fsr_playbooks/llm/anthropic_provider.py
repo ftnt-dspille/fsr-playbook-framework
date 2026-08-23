@@ -168,15 +168,144 @@ def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]
     out[-1] = last
     return out
 
+# ─────────────── native reasoning depth + task budgets (A2 row 7) ───────────────
+#
+# Two provider primitives replace two things this loop hand-built. Both are
+# MODEL-GATED, and the gate is the whole risk: `budget_tokens` is gone on the
+# 4.6+ family (400), and `thinking: {"type": "adaptive"}` is not a thing the
+# pre-4.6 models accept either. So a model this provider was pointed at that
+# predates the family must declare the capability FALSE and let the host
+# emulate, rather than send a parameter that fails the turn.
+
+#: Models taking `thinking: {"type": "adaptive"}` and `output_config.effort`.
+#: Effort is GA -- no beta header.
+_ADAPTIVE_THINKING_MODELS = (
+    "claude-fable-5", "claude-mythos-5",
+    "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+    "claude-sonnet-5", "claude-sonnet-4-6",
+)
+
+#: Models taking `output_config.task_budget`. A strict subset of the above --
+#: Sonnet 4.6 and Opus 4.6 take effort but not a task budget.
+_TASK_BUDGET_MODELS = (
+    "claude-fable-5", "claude-mythos-5",
+    "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7",
+    "claude-sonnet-5",
+)
+
+#: Beta flag task budgets ride on.
+TASK_BUDGET_BETA = "task-budgets-2026-03-13"
+
+#: API floor. A `total` below this is rejected, so a short tool budget still
+#: buys at least this much -- the budget paces the model, it does not cap it
+#: (`max_tokens` is the enforced ceiling and the model cannot see it).
+TASK_BUDGET_MIN_TOKENS = 20_000
+
+#: What one tool turn is worth in budget tokens. Deliberately generous: the
+#: budget counts what the model generates plus the tool results it reads, and
+#: a tool result in this loop can be a full playbook. Under-budgeting makes
+#: the model wrap up early, which is the failure we are trying to STOP.
+TASK_BUDGET_TOKENS_PER_TOOL_TURN = 8_000
+
+#: Kill switch. `FSR_ANTHROPIC_NATIVE=0` makes this provider declare BOTH
+#: primitives unsupported, which routes the turn back through the host-side
+#: emulation via the ordinary seam -- one env var, no second code path. It
+#: exists because the native path changes the wire (task budgets ride the beta
+#: endpoint) and a box can be reverted faster than it can be re-shipped.
+NATIVE_ENV_FLAG = "FSR_ANTHROPIC_NATIVE"
+
+
+def _native_enabled() -> bool:
+    return os.environ.get(NATIVE_ENV_FLAG, "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
+#: Efforts the API accepts. An unrecognised one is dropped rather than sent --
+#: a 400 in the middle of a turn is worse than the default depth.
+_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def _model_supports_reasoning_depth(model: str) -> bool:
+    return (model or "").strip() in _ADAPTIVE_THINKING_MODELS
+
+
+def _model_supports_task_budget(model: str) -> bool:
+    return (model or "").strip() in _TASK_BUDGET_MODELS
+
+
+def reasoning_kwargs(model: str, effort: str | None) -> dict[str, Any]:
+    """The request kwargs that carry a REQUESTED reasoning depth, or `{}`.
+
+    Empty when nothing was asked or the model cannot take it -- so the default
+    path sends no `thinking` / `output_config` at all and behaves exactly as it
+    did before this landed. That matters: on the 4.6+ family, omitting
+    `thinking` already runs adaptive, so sending it unasked would change the
+    wire for every turn to buy nothing.
+    """
+    depth = (effort or "").strip().lower() or None
+    if not depth or depth not in _EFFORT_LEVELS:
+        return {}
+    if not _model_supports_reasoning_depth(model):
+        return {}
+    return {
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": depth},
+    }
+
+
+def task_budget_kwargs(model: str, tool_turns: int | None) -> dict[str, Any]:
+    """The request kwargs that hand the model a server-tracked token budget.
+
+    `{}` when the model cannot take one, which is what keeps the host-side
+    `budget_note` emulation switched on for it. `remaining` is deliberately NOT
+    sent: the server tracks the countdown, and a client-computed `remaining`
+    alongside a resent history under-reports the spend.
+    """
+    if not tool_turns or not _model_supports_task_budget(model):
+        return {}
+    total = max(TASK_BUDGET_MIN_TOKENS,
+                int(tool_turns) * TASK_BUDGET_TOKENS_PER_TOOL_TURN)
+    return {"output_config": {"task_budget": {"type": "tokens", "total": total}}}
+
+
+def merge_output_config(*kwarg_sets: dict[str, Any]) -> dict[str, Any]:
+    """Merge request kwarg sets, UNIONING their `output_config` instead of
+    letting the last one win. `effort` and `task_budget` are siblings in one
+    object, so a naive `{**a, **b}` silently drops the effort -- exactly the
+    kind of quiet no-op the capability matrix exists to catch.
+    """
+    merged: dict[str, Any] = {}
+    out_cfg: dict[str, Any] = {}
+    for kw in kwarg_sets:
+        for k, v in kw.items():
+            if k == "output_config":
+                out_cfg.update(v)
+            else:
+                merged[k] = v
+    if out_cfg:
+        merged["output_config"] = out_cfg
+    return merged
+
 
 class AnthropicProvider(CapabilityMixin):
     name = "anthropic"
-    #: Nothing native YET. The Messages API does expose adaptive thinking,
-    #: `output_config.effort`/`task_budget`, tool search and context editing --
-    #: wiring them is row 7 of AGENT_DESIGN_AND_TEST_UNIFICATION.md. Declaring
-    #: them before they reach the wire is the shipped-but-inert defect this
-    #: seam exists to prevent, so they stay False and the host emulates.
-    capabilities = ProviderCapabilities()
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:  # type: ignore[override]
+        """Declared PER MODEL, not per class: the same provider pointed at
+        Sonnet 4.5 serves neither primitive and must fall back to the host
+        emulation, while on the 4.6+ family both reach the wire.
+
+        Still False: `deferred_tools` (tool search) and `history_pruning`
+        (context editing) -- rows 8-10. They stay False until they are sent.
+        """
+        if not _native_enabled():
+            return ProviderCapabilities()
+        return ProviderCapabilities(
+            reasoning_depth=_model_supports_reasoning_depth(self.model),
+            task_budget=_model_supports_task_budget(self.model),
+        )
 
     # Class-level default so the loop reads a sane cap even on an instance
     # built without __init__ (tests use `__new__` to drive `_pump` directly).
@@ -328,6 +457,29 @@ class AnthropicProvider(CapabilityMixin):
             tags=suspended.tags,
         ):
             yield ev
+
+    def _native_request_kwargs(
+        self, tool_turns: int | None
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Request kwargs for the primitives THIS model serves, plus any beta
+        flags they need. `({}, [])` when nothing was asked or the model cannot
+        take it -- the pre-seam wire, byte for byte.
+
+        Only what `request()` asked for is sent. A turn nobody asked anything
+        of gets no `thinking`, no `output_config` and the non-beta endpoint,
+        which is what keeps this landing free of a blast radius.
+        """
+        req = self._turn_request
+        reasoning = reasoning_kwargs(self.model, req.reasoning)
+        # Native budget only when the loop handed one over; `tool_turns` is
+        # this stream's own bound, used as the value once asked. Without an
+        # ask, `emulation.task_budget` stays True and `budget_note` runs.
+        budget: dict[str, Any] = {}
+        if req.max_tool_turns is not None and not self.emulation.task_budget:
+            budget = task_budget_kwargs(self.model, req.max_tool_turns or tool_turns)
+        merged = merge_output_config(reasoning, budget)
+        betas = [TASK_BUDGET_BETA] if budget else []
+        return merged, betas
 
     async def _wrapup_call(
         self,
@@ -565,13 +717,23 @@ class AnthropicProvider(CapabilityMixin):
             # the SDK's streaming context; `drain_with_idle_timeout` supplies the
             # per-delta inactivity timeout + cancellation (shared across
             # providers -- see _loop_helpers).
+            # Native primitives for this model, if any were asked for. A
+            # task budget must ride the BETA messages endpoint, so the choice
+            # of endpoint follows the kwargs rather than being decided up front.
+            _native_kw, _native_betas = self._native_request_kwargs(_turn_budget)
+
             async def _pump():
-                async with self._client.messages.stream(
+                _msgs = (self._client.beta.messages if _native_betas
+                         else self._client.messages)
+                _extra = {"betas": _native_betas} if _native_betas else {}
+                async with _msgs.stream(
                     model=self.model,
                     max_tokens=self.max_output_tokens,
                     system=cached_system,
                     messages=_with_history_breakpoint(_to_anthropic_messages(history)),
                     tools=cached_tools,
+                    **_native_kw,
+                    **_extra,
                 ) as _stream:
                     async for _ev in _stream:
                         if _ev.type == "content_block_delta" and getattr(

@@ -213,9 +213,12 @@ class HostEmulation:
     def resolve(cls, caps: ProviderCapabilities, req: TurnRequest) -> HostEmulation:
         return cls(
             reasoning_depth=bool(req.reasoning) and not caps.reasoning_depth,
-            # The loop ALWAYS bounds tool turns -- there is no "unbounded"
-            # request -- so this one is requested unconditionally.
-            task_budget=not caps.task_budget,
+            # A native task budget is served only when the loop actually
+            # HANDS one over (`max_tool_turns`). Treating it as always-asked
+            # would change the wire for every existing caller the moment a
+            # provider declared the capability -- and the host-side
+            # `budget_note` must stay on for a turn nobody bounded.
+            task_budget=not (caps.task_budget and req.max_tool_turns is not None),
             deferred_tools=req.defer_tools and not caps.deferred_tools,
             history_pruning=req.prune_history and not caps.history_pruning,
         )
