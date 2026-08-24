@@ -118,10 +118,16 @@ CATALOG: tuple[ModelEntry, ...] = (
         "Pre-4.6: uses `budget_tokens`, not adaptive thinking.",
     ),
     ModelEntry(
-        "claude-haiku-4-5-20251001", "anthropic", "supported", True,
-        "documented supported set (row 5); not measured on the gate slice",
-        "The cheapest offered option. Unmeasured on the tool loop -- screen "
-        "it before putting volume traffic behind it.",
+        "claude-haiku-4-5-20251001", "anthropic", "discouraged", True,
+        "gate slice on the attribute substrate, 20260824T013356Z -- 4/5, "
+        "3 repeats, verdict failing",
+        "Screened, as the row above asked for. Fast -- 3-12s a fixture, "
+        "several times quicker than any OpenAI model here -- and green on "
+        "four of five. It fails select_build_offer 0/3, dropping three of "
+        "four gates every single time: a consistent defect on the build "
+        "hand-off, not variance, which is the same fixture #155 names for "
+        "gpt-4.1-mini. Cheap and fast does not survive handing a finished "
+        "build to the wrong card. Re-measure if that hand-off changes.",
     ),
     # -- Fortilab gateway: laptop-only -------------------------------------
     ModelEntry(
