@@ -485,6 +485,12 @@ def screen_models(
         cells[m] = {}
         for t in tasks:
             passes, errors = 0, 0
+            # WHICH gate failed, not just how many cells did. #160: haiku and
+            # o4-mini both print 0-or-1/3 on select_build_offer, but haiku
+            # fails `appropriate_approval_requests` (it calls push_playbook --
+            # an ungated state-changing write) while o4-mini fails delivery
+            # alone. Those are different defects and one is far worse; the
+            # rollup was hiding that behind an identical-looking number.
             for r in runs:
                 row = next((x for x in r["rows"]
                             if x["model"] == m and x["task"] == t), None)
@@ -495,7 +501,8 @@ def screen_models(
                 # tool_selection fixture that is exactly the terminal call.
                 if row.get("max") and row["score"] == row["max"]:
                     passes += 1
-            cells[m][t] = {"passes": passes, "of": repeats, "errors": errors}
+            cells[m][t] = {"passes": passes, "of": repeats, "errors": errors,
+                           "failed_gates": _failed_gates(runs, m, t)}
     verdicts: dict[str, str] = {}
     for m in model_names:
         rates = [c["passes"] for c in cells[m].values()]
@@ -507,6 +514,25 @@ def screen_models(
             verdicts[m] = "flaky"
     return {"repeats": repeats, "tasks": tasks, "models": list(model_names),
             "cells": cells, "verdicts": verdicts, "runs": runs}
+
+
+def _failed_gates(runs: list[dict[str, Any]], model: str,
+                  task: str) -> dict[str, int]:
+    """How many repeats each counted gate failed in, for one cell."""
+    failed: dict[str, int] = {}
+    for r in runs:
+        row = next((x for x in r.get("rows", [])
+                    if x.get("model") == model and x.get("task") == task),
+                   None)
+        if row is None or "error" in row:
+            continue
+        if row.get("max") and row.get("score") == row["max"]:
+            continue
+        for k, lv in (row.get("levels") or {}).items():
+            if (not lv.get("skipped") and not lv.get("informational")
+                    and not lv.get("passed")):
+                failed[k] = failed.get(k, 0) + 1
+    return failed
 
 
 def render_screen(screen: dict[str, Any]) -> str:
@@ -523,6 +549,24 @@ def render_screen(screen: dict[str, Any]) -> str:
             f"{(str(screen['cells'][m][t]['passes']) + '/' + str(reps)):>18}"
             for m in screen["models"])
         lines.append(row)
+    # A cell's number says how often it failed; this says what it failed at.
+    # Without it, reading a demotion means opening the archived run.
+    detail = []
+    for m in screen["models"]:
+        for t in screen["tasks"]:
+            gates = screen["cells"][m][t].get("failed_gates")
+            if gates is None:
+                # Screens archived before #160 carry no `failed_gates`, but
+                # they DO carry every row. Recompute rather than print a blank
+                # section, so an old artifact still answers "failed at what?".
+                gates = _failed_gates(screen.get("runs") or [], m, t)
+            if gates:
+                worst = ", ".join(
+                    f"{k} x{v}" for k, v in
+                    sorted(gates.items(), key=lambda kv: -kv[1]))
+                detail.append(f"  {t} [{m[:18]}]: {worst}")
+    if detail:
+        lines += ["", "Failed gates:"] + detail
     lines += ["", "Verdict:"]
     for m in screen["models"]:
         lines.append(f"  {m:<24} {screen['verdicts'][m]}")
