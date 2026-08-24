@@ -456,6 +456,23 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     if "delay" in rt:
                         du["delay"] = rt["delay"]
                     args["do_until"] = du
+                    # Warn if retry has no until/condition: FSR's editor
+                    # (line 34487) drops do_until when condition is empty,
+                    # and the import process does the same — so the retry
+                    # config is silently lost. Live-verified on 8.0.0.
+                    if "condition" not in du:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                "step.retry without `until` will be "
+                                "silently dropped by FSR at import time "
+                                "(do_until.condition must be non-empty). "
+                                "Add an `until:` condition for the retry "
+                                "to take effect."
+                            ),
+                            path=f"{sp}.retry",
+                            severity="warning",
+                        ))
 
             #   on_remote: <agent>            → agent: <agent>, pickFromTenant: false
             #   on_remote: pick_from_record   → agent: "Pick From Record
