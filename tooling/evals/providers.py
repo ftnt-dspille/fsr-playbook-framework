@@ -16,6 +16,8 @@ import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from fsr_playbooks.llm._loop_helpers import MAX_TOOL_TURNS
+
 ProviderFn = Callable[[str, str], str]
 
 _YAML_FENCE = re.compile(r"```(?:yaml)?\s*\n(.*?)```", re.DOTALL)
@@ -128,10 +130,14 @@ def _lmstudio_provider() -> ProviderFn:
 # the dict return and routes it through the agentic gates.
 # ---------------------------------------------------------------------------
 
-# Cap on tool-use turns per agentic eval task. Mirrors MAX_TOOL_TURNS in
-# web/backend/llm/_loop_helpers.py -- the eval provider should hit the same
-# wall the chat path hits, so a runaway scoring config matches production.
-_AGENTIC_MAX_TURNS = 12
+# Cap on tool-use turns per agentic eval task. IMPORTED, not restated: this was
+# hard-coded to 12 while production ran 16, and the comment claimed to mirror a
+# file (`web/backend/llm/_loop_helpers.py`) that does not exist -- so a build
+# task that needed 13 rounds was truncated by the harness and scored as the
+# model failing. Same class as the EVAL_HTTP_TIMEOUT and `temperature` traps:
+# a client-side limit read as agent regression. Bind it to the real ceiling so
+# it cannot drift again.
+_AGENTIC_MAX_TURNS = MAX_TOOL_TURNS
 
 
 # Per-task tool-slice override, set by the harness around each cell (see
