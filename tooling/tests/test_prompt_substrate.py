@@ -17,7 +17,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from evals.prompt_source import (
     MIN_CREDIBLE_PROMPT_CHARS,
     PromptUnresolvable,

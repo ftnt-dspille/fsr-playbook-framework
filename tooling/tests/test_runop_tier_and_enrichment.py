@@ -26,7 +26,6 @@ from fsr_playbooks.mcp_server.tools_connector_discovery import (
     _is_enrichment_op,
 )
 
-
 # --- Fix #1: tier resolution for guessed vs. real ops -----------------------
 
 requires_db = pytest.mark.skipif(

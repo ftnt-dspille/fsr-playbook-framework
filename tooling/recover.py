@@ -31,7 +31,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-
 CACHE_DIR = Path(os.environ.get(
     "XDG_CACHE_HOME", Path.home() / ".cache")) / "fsrpb" / "recover"
 CACHE_TTL_S = 48 * 3600  # 48 hours; --refresh forces re-fetch

@@ -14,8 +14,8 @@ from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.errors import ErrorCode
 from fsr_playbooks.compiler.typed_args.schema import emit_step_arg_schema
 from fsr_playbooks.compiler.typed_args.steps import (
-    ConnectorArgs,
     STEP_ARG_MODELS,
+    ConnectorArgs,
     is_modeled,
 )
 

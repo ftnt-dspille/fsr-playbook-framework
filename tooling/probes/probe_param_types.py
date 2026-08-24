@@ -34,11 +34,12 @@ import json
 import re
 import sqlite3
 from collections import Counter
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from . import _env  # noqa: F401  (loads .env)
-from .common import probe_session, SCHEMA_PATH
+from .common import SCHEMA_PATH, probe_session
 
 PROBE_NAME = "probe_param_types"
 CLASSIFIER_VERSION = 1
@@ -794,7 +795,7 @@ def main(argv: list[str] | None = None) -> int:
         # verifications and deadlocks against the probe_session's
         # outer write transaction. For type probing we only need the
         # raw response -- verification ledger pollution is unwanted.
-        from probes._env import get_config, get_client
+        from probes._env import get_client, get_config
         cfg = get_config()
         if not cfg.is_live():
             print("FSR_BASE_URL / FSR_API_KEY not set -- refusing live probe.")

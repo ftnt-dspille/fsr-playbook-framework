@@ -24,7 +24,7 @@ FORMERLY_REJECTED = [
 @pytest.mark.parametrize("tok", FORMERLY_REJECTED)
 def test_jinja_accepts_the_token_as_an_attribute(tok):
     """Ground truth: Jinja2 parses it, so we must not reject it."""
-    Environment().parse("{{ vars.steps.%s.data }}" % tok)
+    Environment().parse(f"{{{{ vars.steps.{tok}.data }}}}")
 
 
 def test_jinja_rejects_only_assignment_to_a_constant():

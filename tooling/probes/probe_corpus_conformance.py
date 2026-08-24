@@ -40,8 +40,9 @@ import argparse
 import json
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .common import DB_PATH, REPO_ROOT
 

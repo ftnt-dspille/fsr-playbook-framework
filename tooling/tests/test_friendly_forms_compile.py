@@ -13,9 +13,7 @@ import re
 import yaml
 
 from fsr_playbooks.compiler import compile_yaml
-
 from fsr_playbooks.mcp_server import _FRIENDLY_FORMS
-
 
 # Friendly forms that document a non-trigger step type. We synthesize a
 # Start → <step> → End scaffold; trigger / terminator types are exercised

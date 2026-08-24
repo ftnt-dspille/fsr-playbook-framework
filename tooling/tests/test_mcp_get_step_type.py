@@ -24,7 +24,6 @@ pytest.importorskip(
 
 import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 
-
 # Every short type listed in resolver.SHORT_TYPE_TO_FSR -- this is the
 # contract the `friendly_form` coverage promises.
 SHORT_TYPES = [
@@ -150,6 +149,7 @@ def test_manual_input_kinds_match_validator():
     tool taught.
     """
     import re
+
     from fsr_playbooks.compiler.resolver.picklists import PicklistMixin
 
     # Get the taught list from the discovery tool

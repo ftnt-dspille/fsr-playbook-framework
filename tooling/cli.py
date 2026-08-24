@@ -484,8 +484,9 @@ def cmd_push(args: argparse.Namespace) -> int:
                           orphan child rows). Gated on
                           FSR_ALLOW_HARD_DELETE.
     """
-    from fsr_playbooks.compiler import compile_yaml
     from probes import _env  # type: ignore
+
+    from fsr_playbooks.compiler import compile_yaml
 
     # CLI flags override whatever .env has (must happen before get_config()).
     if getattr(args, "url", None):
@@ -1578,9 +1579,10 @@ def cmd_canvas_check(args: argparse.Namespace) -> int:
 
 def cmd_diff(args: argparse.Namespace) -> int:
     """Compare local YAML against the live state of a collection."""
-    from fsr_playbooks.compiler import compile_yaml
-    from fsr_playbooks.compiler.roundtrip import normalize_collection, diff
     from probes import _env  # type: ignore
+
+    from fsr_playbooks.compiler import compile_yaml
+    from fsr_playbooks.compiler.roundtrip import diff, normalize_collection
 
     text = Path(args.input).read_text()
     result = compile_yaml(text, Path(args.db))
@@ -1926,6 +1928,7 @@ def cmd_run_op(args: argparse.Namespace) -> int:
     `--params` accepts a JSON string OR a path to a JSON file.
     """
     import sqlite3
+
     from probes import _env  # type: ignore
 
     cfg = _env.get_config()
@@ -2974,7 +2977,11 @@ def cmd_agreement(args: argparse.Namespace) -> int:
     is ever needed for again.
     """
     from evals.agreement import (
-        AgreementError, agree, list_screens, load_screen, render_agreement,
+        AgreementError,
+        agree,
+        list_screens,
+        load_screen,
+        render_agreement,
     )
     if args.list_screens:
         runs = list_screens()
@@ -3011,9 +3018,15 @@ def cmd_evals(args: argparse.Namespace) -> int:
     Use `--json` to capture the full matrix for archiving.
     """
     from evals.harness import (
-        delta_vs, list_runs, load_run, render_delta, render_text,
-        run_matrix, save_run,
+        delta_vs,
+        list_runs,
+        load_run,
+        render_delta,
+        render_text,
+        run_matrix,
+        save_run,
     )
+
     # Providers read their config straight off os.environ. A shell that exports
     # only *some* of a provider's vars (e.g. FRANK_BASE_URL + FRANK_API_KEY but
     # not FRANK_MODEL) otherwise ERRs every cell at provider init, which reads
@@ -3323,6 +3336,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     directly -- no FSR calls. Phase 2.4 of STATIC_TYPE_VALIDATION_PLAN.
     """
     import sqlite3
+
     from fsr_playbooks.mcp_server._shared import DB_PATH
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -3422,8 +3436,9 @@ def _doctor_coverage(rows: list[dict]) -> dict[str, Any]:
 
 
 def cmd_generate_recipe(args: argparse.Namespace) -> int:
-    from recipes import generate_threat_feed_recipe, generate_data_ingest_recipe
+    from recipes import generate_data_ingest_recipe, generate_threat_feed_recipe
     from recipes.prechecks import run_recipe_prechecks
+
     from fsr_playbooks.compiler import rulesets as rs
 
     info = json.loads(Path(args.info_json).read_text())
@@ -3514,6 +3529,7 @@ def cmd_generate_recipe(args: argparse.Namespace) -> int:
 
 def cmd_validate_ingestion(args: argparse.Namespace) -> int:
     import os as _os
+
     from fsr_playbooks.compiler import rulesets as rs
 
     in_path = Path(args.input)
@@ -3557,6 +3573,7 @@ def cmd_validate_ingestion(args: argparse.Namespace) -> int:
 def cmd_decompile(args: argparse.Namespace) -> int:
     """FSR JSON -> simplified YAML (one playbook, optionally filtered by name)."""
     import yaml
+
     from fsr_playbooks.compiler.decompiler import decompile
 
     src = json.loads(Path(args.input).read_text())
@@ -3943,8 +3960,8 @@ def cmd_e2e(args: argparse.Namespace) -> int:
                          Default patterns: 'FSRPB Demo*', 'Compiler Demo*',
                          '*__fsrpb_probe__*'. Override with one or more args.
     """
+    from e2e.runner import cleanup_all, run_test
     from probes import _env  # type: ignore
-    from e2e.runner import run_test, cleanup_all
 
     sub = getattr(args, "e2e_cmd", None)
     if sub == "run":
@@ -4065,6 +4082,7 @@ def cmd_inventory(args: argparse.Namespace) -> int:
       search <q>     -- cross-table search: connectors, ops, jinja, api examples.
     """
     import json as _json
+
     import inventory as inv
 
     sub = args.inv_cmd
@@ -4246,6 +4264,7 @@ def cmd_chat_review(args: argparse.Namespace) -> int:
     """Mine one chat session for known failure patterns. Prints a
     structured report (or JSON with --json)."""
     import json as _json
+
     import chat_review
     try:
         report = chat_review.review_session(args.session_id, db_path=args.history_db)
@@ -4276,6 +4295,7 @@ def cmd_chat_transcript(args: argparse.Namespace) -> int:
     tab is also dumpable here without touching the running server.
     """
     import json as _json
+
     import chat_review
     try:
         s = chat_review.load_session(args.session_id, db_path=args.history_db)
@@ -4467,7 +4487,9 @@ def cmd_probe(args: argparse.Namespace) -> int:
                 failed.append(name)
         except Exception as exc:  # noqa: BLE001
             print(f"[{name}] ERROR: {exc}", file=sys.stderr)
-            import traceback; traceback.print_exc()
+            import traceback
+
+            traceback.print_exc()
             failed.append(name)
 
     if failed:

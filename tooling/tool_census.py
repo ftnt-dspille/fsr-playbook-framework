@@ -46,7 +46,6 @@ import collections
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -219,7 +218,7 @@ def harvest_probe(path: Path) -> tuple[dict, set]:
     return dict(stats), {s for s in seen if s}
 
 
-def _registry(runtime: Optional[Path]) -> tuple[list, set]:
+def _registry(runtime: Path | None) -> tuple[list, set]:
     """(all tool names, names the connector registered at runtime).
 
     The 22 connector-registered tools are read from the committed manifest
@@ -242,7 +241,7 @@ def _registry(runtime: Optional[Path]) -> tuple[list, set]:
     return all_names, late
 
 
-def census(*, runtime: Optional[Path], probe: Optional[Path]) -> dict:
+def census(*, runtime: Path | None, probe: Path | None) -> dict:
     names, late = _registry(runtime)
     eval_stats, tasks, rows = harvest_eval_runs(_REPO / "data" / "eval_runs")
     probe_stats, probe_tasks = harvest_probe(probe) if probe else ({}, set())
@@ -327,7 +326,7 @@ def _print(rep: dict) -> None:
     print(f"\n{dict(counts)}")
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runtime", type=Path, default=None,

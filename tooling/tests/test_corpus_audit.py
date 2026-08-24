@@ -11,7 +11,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from probes import probe_corpus_audit as audit
 
 

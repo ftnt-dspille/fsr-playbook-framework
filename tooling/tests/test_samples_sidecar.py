@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import textwrap
 
-
 from fsr_playbooks.compiler.samples import (
     append_samples,
     extract_samples_block,
     overlay_into_vars,
 )
-from fsr_playbooks.compiler.visual_model import to_visual, from_visual
-
+from fsr_playbooks.compiler.visual_model import from_visual, to_visual
 
 YAML_PLAIN = textwrap.dedent(
     """\

@@ -35,8 +35,9 @@ class SeedError(RuntimeError):
 
 def push_yaml(yaml_text: str) -> None:
     """Compile + push a playbook through the same path `fsrpb push` uses."""
-    from fsr_playbooks.compiler import compile_yaml as _compile
     from e2e.runner import _push, _PushError
+
+    from fsr_playbooks.compiler import compile_yaml as _compile
 
     result = _compile(yaml_text, DB)
     if not result.ok:

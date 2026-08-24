@@ -12,7 +12,6 @@ The metric was measuring obedience to an instruction the product reversed.
 from __future__ import annotations
 
 import pytest
-
 from evals.scoring import delivered_yaml, score
 from evals.tasks import load_tasks
 

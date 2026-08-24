@@ -18,8 +18,8 @@ for p in (REPO_ROOT / "tooling", REPO_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from evals.scoring import _score_investigation_quality  # noqa: E402
 from evals.levers import lever_for  # noqa: E402
+from evals.scoring import _score_investigation_quality  # noqa: E402
 
 # A 4-stage hunt: pull the incident, correlate on the host, pivot to the
 # internal IP, then chase the external C2 endpoint with threat intel.

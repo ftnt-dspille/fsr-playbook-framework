@@ -15,12 +15,8 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-
-from probes import _env
+from probes import _env, probe_api_endpoints, probe_connector_configs, probe_modules
 from probes import common as probes_common
-from probes import probe_api_endpoints
-from probes import probe_connector_configs
-from probes import probe_modules
 
 SCHEMA_PATH = probes_common.SCHEMA_PATH
 

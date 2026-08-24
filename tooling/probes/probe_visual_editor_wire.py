@@ -57,9 +57,10 @@ def _push_yaml(yaml_text: str) -> tuple[bool, str]:
     (ok, message). Side effects on the live FSR are reverted by the
     caller via ``_purge_collection``."""
     try:
+        from e2e.runner import _push, _PushError
+
         from fsr_playbooks.compiler import compile_yaml as _compile
         from probes._env import get_client as _get
-        from e2e.runner import _push, _PushError
     except Exception as exc:
         return False, f"import failed: {exc!r}"
     db = ROOT / "data" / "fsr_reference.db"

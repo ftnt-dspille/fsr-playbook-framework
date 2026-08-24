@@ -42,11 +42,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tooling"))
 
-from probes._env import get_client  # noqa: E402
-from fsr_playbooks.compiler import compile_yaml  # noqa: E402
 from e2e.runner import (  # noqa: E402
-    _push, _PushError, _resolve_wf, _hard_purge,
+    _hard_purge,
+    _push,
+    _PushError,
+    _resolve_wf,
 )
+
+from fsr_playbooks.compiler import compile_yaml  # noqa: E402
+from probes._env import get_client  # noqa: E402
 
 DB = ROOT / "data" / "fsr_reference.db"
 MODULE = "alerts"

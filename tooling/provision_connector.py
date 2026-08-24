@@ -37,7 +37,7 @@ import json
 import pathlib
 import sqlite3
 import sys
-from typing import Any, Optional
+from typing import Any
 
 # Source tags written to `connectors.source`, matching the existing probe
 # vocabulary ('live_api_get' | 'rpm_info_json' | ...).
@@ -69,7 +69,7 @@ def _as_int(val: Any, default: int = 0) -> int:
     return default
 
 
-def _connector_row(info: dict, source: str, source_path: Optional[str]) -> dict:
+def _connector_row(info: dict, source: str, source_path: str | None) -> dict:
     category = info.get("category")
     if isinstance(category, list):
         category = ",".join(str(c) for c in category)
@@ -97,8 +97,8 @@ def _connector_row(info: dict, source: str, source_path: Optional[str]) -> dict:
 
 
 def _param_rows(connector: str, op_name: str, params: Any,
-                parent: Optional[str] = None,
-                condition: Optional[str] = None) -> list[dict]:
+                parent: str | None = None,
+                condition: str | None = None) -> list[dict]:
     """Flatten an operation's parameter list, including `onchange` sub-params.
 
     FortiSOAR nests conditional parameters under
@@ -185,7 +185,7 @@ def _insert(conn: sqlite3.Connection, table: str, rows: list[dict]) -> None:
 
 
 def write_connector(conn: sqlite3.Connection, info: dict, source: str,
-                    source_path: Optional[str]) -> dict:
+                    source_path: str | None) -> dict:
     """Upsert one connector plus its operations and parameters. Idempotent."""
     name = info["name"]
     crow = _connector_row(info, source, source_path)
@@ -262,7 +262,7 @@ def load_from_instance(name: str) -> dict:
     return match
 
 
-def _instance_mismatch_warning(conn: sqlite3.Connection) -> Optional[str]:
+def _instance_mismatch_warning(conn: sqlite3.Connection) -> str | None:
     """The catalog is warmed from one instance; warn when we're on another.
 
     Mixing two appliances' definitions into one store silently produces wrong
@@ -270,8 +270,9 @@ def _instance_mismatch_warning(conn: sqlite3.Connection) -> Optional[str]:
     this uses the same normalization as the rest of the catalog.
     """
     try:
-        from fsr_playbooks import _catalog_meta
         from probes import _env  # type: ignore
+
+        from fsr_playbooks import _catalog_meta
 
         base_url = _env.get_config().base_url or ""
         if not base_url:

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from fsr_playbooks.compiler import compile_yaml
 
-
 # ---- Trigger defaults (Issue 1) ----------------------------------
 
 def test_record_action_trigger_defaults_module_and_button_label(db_path):

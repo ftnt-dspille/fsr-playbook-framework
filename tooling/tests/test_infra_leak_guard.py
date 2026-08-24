@@ -27,6 +27,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 import check_infra_leaks as guard  # noqa: E402
 
+
 # Fixtures live in the gitignored overlay, NOT here. Even a fragment-assembled
 # literal like "example." + "<lab-domain>" still shows a reader of the public
 # mirror which domain to look for -- which is the leak this guard exists to

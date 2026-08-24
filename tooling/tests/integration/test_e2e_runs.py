@@ -207,6 +207,7 @@ def _wait_finished(client, task_id: str, *, tries: int = 20):
 def test_stage5_manual_input_multi_field(env_configured):
     """Friendly multi-field prompt: form renders correctly + values flow through."""
     import time
+
     from probes import _env  # type: ignore  # noqa: PLC0415
 
     client = _env.get_client()

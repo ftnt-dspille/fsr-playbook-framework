@@ -15,7 +15,10 @@ pytest.importorskip("mcp.server.fastmcp",
 
 import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 import fsr_playbooks.mcp_server._shared  # noqa: E402, F401
-from fsr_playbooks.compiler.render_analyzer import analyze, diagnostics_dict  # noqa: E402
+from fsr_playbooks.compiler.render_analyzer import (  # noqa: E402
+    analyze,
+    diagnostics_dict,
+)
 
 
 @pytest.fixture(autouse=True)

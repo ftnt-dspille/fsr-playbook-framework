@@ -261,8 +261,12 @@ def test_tier23_ipv4_validator_unit():
     """Pure-function tests for the new observed_type validators. These
     don't need the DB -- they catch validator regressions cheaply."""
     from fsr_playbooks.compiler.resolver.connector_args import (
-        _is_ipv4, _is_url, _is_email, _is_iso8601,
-        _is_json_object, _is_json_array,
+        _is_email,
+        _is_ipv4,
+        _is_iso8601,
+        _is_json_array,
+        _is_json_object,
+        _is_url,
     )
     assert _is_ipv4("10.0.0.1")
     assert _is_ipv4("0.0.0.0")

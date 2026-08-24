@@ -1,3 +1,3 @@
 """End-to-end test harness: compile → push → trigger → poll → assert → cleanup."""
 
-from .runner import run_test, RunResult  # noqa: F401
+from .runner import RunResult, run_test  # noqa: F401

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TASKS_DIR = Path(__file__).resolve().parent / "tasks"
@@ -28,29 +28,29 @@ TASKS_DIR = Path(__file__).resolve().parent / "tasks"
 class Task:
     name: str
     prompt: str
-    gold_yaml_path: Optional[str] = None  # repo-relative
+    gold_yaml_path: str | None = None  # repo-relative
     notes: str = ""
     # Phase 3 HITL: per-task eval policy. None = use $EVAL_APPROVAL_POLICY
     # (or "suspend" if unset, but suspend in an eval is treated as a
     # tier-3+ call returning `pending_approval`).
-    approval_policy: Optional[str] = None
+    approval_policy: str | None = None
     # Shape for the `appropriate_approval_requests` gate. None = default
     # ("exactly_zero" tier-3+ calls).
-    expected_approvals: Optional[dict[str, Any]] = None
+    expected_approvals: dict[str, Any] | None = None
     # Behavioral assertions on the built playbook's IR (#127). Each entry is
     # one thing the PROMPT actually requires -- the loop iterates the named
     # field, the approval gate precedes the block -- graded by
     # `ir_assertions.check_ir_assertions`. None/[] = the fixture asserts
     # nothing about behavior and the `behavior` level skips, which is the
     # honest state for a fixture nobody has written assertions for yet.
-    ir_assertions: Optional[list[dict[str, Any]]] = None
+    ir_assertions: list[dict[str, Any]] | None = None
     # Scoring mode. `None` = standard authoring task. `"refuse"` = the
     # agent is expected to decline (e.g. `unknown_connector`); authoring
     # gates become informational and adherence inverts. `"investigation"`
     # = triage/hunt task scored on pivot recall (see `required_facts`).
     # `"tool_selection"` = scored on ONE thing: did the turn reach the
     # terminal tool this ask requires (see `terminal_tool`).
-    mode: Optional[str] = None
+    mode: str | None = None
     # Investigation-mode scoring inputs. Each entry is a tool-call matcher
     # (see scoring._fact_matches). `required_facts` = pivots the agent
     # SHOULD perform (recall numerator); `forbidden_facts` = pivots it must
@@ -74,23 +74,23 @@ class Task:
     # None = the harness default. This is what makes the Phase 1.4
     # build-vs-neutral experiment a pair of fixtures instead of a one-off
     # script: same prompt text, same tools, only the persona differs.
-    prompt_variant: Optional[str] = None
+    prompt_variant: str | None = None
     # --- repair mode (Phase 2: the troubleshoot verb) ----------------------
     # Repo-relative path to the BROKEN playbook the fixture asks the agent to
     # fix. The harness appends it to the prompt, and scoring diffs the
     # delivered YAML against it so a "fix" that deletes the failing step is
     # caught by `no_collateral_damage` rather than praised by `verified`.
-    broken_yaml_path: Optional[str] = None
+    broken_yaml_path: str | None = None
     # Enhance mode (Phase 3): the name of a fixture in
     # `tooling/evals/enhance_scenarios/`, whose `before_yaml` is the playbook
     # the analyst already has OPEN. Named rather than copied so the matrix
     # fixture and the deterministic delivery gate grade the same document.
-    before_scenario: Optional[str] = None
+    before_scenario: str | None = None
     # Tool slice to advertise: "build" / "triage" (intents.tools_for_intent)
     # or None for the full registry the agentic provider defaults to.
-    tool_slice: Optional[str] = None
+    tool_slice: str | None = None
 
-    def broken_yaml_text(self) -> Optional[str]:
+    def broken_yaml_text(self) -> str | None:
         """The playbook the turn starts FROM -- a broken one to repair, or an
         open one to edit. Both modes diff the delivered YAML against it."""
         if self.broken_yaml_path:
@@ -104,7 +104,7 @@ class Task:
             return json.loads(p.read_text(encoding="utf-8")).get("before_yaml")
         return None
 
-    def gold_yaml_text(self) -> Optional[str]:
+    def gold_yaml_text(self) -> str | None:
         if not self.gold_yaml_path:
             return None
         p = REPO_ROOT / self.gold_yaml_path

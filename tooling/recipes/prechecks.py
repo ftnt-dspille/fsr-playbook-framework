@@ -134,7 +134,7 @@ def check_picklist_value(
     live picklist's items.
     """
     try:
-        from picklists import resolve_iri, picklist_values  # type: ignore
+        from picklists import picklist_values, resolve_iri  # type: ignore
     except Exception as exc:  # noqa: BLE001
         return PrecheckResult(
             ok=False,

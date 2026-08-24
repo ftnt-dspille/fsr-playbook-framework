@@ -24,7 +24,7 @@ import time
 
 from ._env import get_config  # noqa: F401  (kept for parity / future use)
 from .common import REPO_ROOT
-from .probe_set_variable_coercion import _Live, _ENGINE_KEYS, _TERMINAL
+from .probe_set_variable_coercion import _ENGINE_KEYS, _TERMINAL, _Live
 
 DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
 OUT_PATH = REPO_ROOT / "data" / "probe_results" / "var_scoping.json"

@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import _env  # noqa: F401  (loads .env)
-from .common import probe_session, wipe_probe_tables, SCHEMA_PATH
+from .common import SCHEMA_PATH, probe_session, wipe_probe_tables
 
 PROBE_NAME = "probe_op_safety"
 # v2: added pure-compute transform verbs (convert/parse/format/extract/…) to

@@ -1122,7 +1122,9 @@ def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str,
     render_fn = None
     if live:
         try:
-            from fsr_playbooks.mcp_server import render_jinja as render_fn  # noqa: PLC0415
+            from fsr_playbooks.mcp_server import (
+                render_jinja as render_fn,  # noqa: PLC0415
+            )
         except Exception:  # noqa: BLE001
             render_fn = None
 

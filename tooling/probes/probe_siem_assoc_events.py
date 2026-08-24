@@ -12,8 +12,8 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tooling"))
 
-from probes._env import get_config  # noqa: E402
 from fsr_playbooks.mcp_server.tools_execution import run_op  # noqa: E402
+from probes._env import get_config  # noqa: E402
 
 
 def show(label, res):
@@ -54,6 +54,7 @@ trials = [
 
 # add a windowed variant using the incident's firstSeen/lastSeen epoch range
 import datetime as _dt
+
 # firstSeen 1776353025, lastSeen 1777043985 from the alert records
 fs = _dt.datetime.fromtimestamp(1776353025, _dt.timezone.utc)
 ls = _dt.datetime.fromtimestamp(1777043985, _dt.timezone.utc)

@@ -9,7 +9,6 @@ overlaps.
 from __future__ import annotations
 
 import pytest
-
 from evals.agreement import (
     AgreementError,
     agree,

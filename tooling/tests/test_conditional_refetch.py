@@ -10,9 +10,9 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from probes.common import conditional_refetch
 
 from fsr_playbooks import _catalog_meta as cm
-from probes.common import conditional_refetch
 
 
 class _Resp:

@@ -25,7 +25,6 @@ from pathlib import Path
 
 from probes.common import DB_PATH
 
-
 SYMFONY_ROUTE_RE = re.compile(
     r'^\s*(?P<name>\S+)\s+(?P<methods>[A-Z|]+)\s+\S+\s+\S+\s+(?P<path>/\S+)\s*$'
 )

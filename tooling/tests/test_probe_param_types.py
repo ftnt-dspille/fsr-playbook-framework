@@ -12,9 +12,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-
 from probes import probe_param_types as ppt
-
 
 # ---------------------------------------------------------------------------
 # widget_to_observed_type

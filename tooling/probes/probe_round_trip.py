@@ -23,8 +23,9 @@ from __future__ import annotations
 import argparse
 import sys
 import textwrap
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tooling"))
@@ -46,9 +47,10 @@ DB = ROOT / "data" / "fsr_reference.db"
 def _push_yaml(yaml_text: str) -> tuple[bool, str]:
     """Compile + push via the same path `fsrpb push` uses."""
     try:
+        from e2e.runner import _push, _PushError
+
         from fsr_playbooks.compiler import compile_yaml as _compile
         from probes._env import get_client as _get
-        from e2e.runner import _push, _PushError
     except Exception as exc:
         return False, f"import failed: {exc!r}"
     result = _compile(yaml_text, DB)

@@ -16,9 +16,8 @@ pytest.importorskip(
 )
 
 import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
-import fsr_playbooks.mcp_server.tools_execution  # noqa: E402, F401
 import fsr_playbooks.mcp_server._shared  # noqa: E402, F401
-
+import fsr_playbooks.mcp_server.tools_execution  # noqa: E402, F401
 
 YAML = textwrap.dedent(
     """\

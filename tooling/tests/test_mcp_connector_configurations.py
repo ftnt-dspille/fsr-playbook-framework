@@ -55,7 +55,8 @@ def test_sqlite_source_when_info_json_has_configurations(monkeypatch):
     """info_json from probe ingest already contains the full
     `configuration` array. Prefer that over a live round-trip -- saves
     ~2 s per first-touch lookup."""
-    import sqlite3, json
+    import json
+    import sqlite3
     name = "sqlite_first_test"
     blob = json.dumps({
         "configuration": [

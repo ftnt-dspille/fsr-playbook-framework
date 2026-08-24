@@ -21,8 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from recipes import (generate_data_ingest_recipe,
-                     generate_threat_feed_recipe)
+from recipes import generate_data_ingest_recipe, generate_threat_feed_recipe
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "recipes"
 

@@ -19,8 +19,19 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
       # Pinned to match .pre-commit-config.yaml so local + CI agree.
-      # Config (target-version py39, select F) lives in pyproject.toml.
-      - run: uvx ruff@0.15.20 check fsr_playbooks
+      # Config (target-version py310, select F/UP/I) lives in pyproject.toml.
+      #
+      # `tooling/` is linted here too, and deliberately: `make lint` has always
+      # covered it, so CI checking only fsr_playbooks meant the local gate and
+      # the CI gate disagreed -- and the local one was the stricter of the two,
+      # which is the wrong way round for a check meant to stop bad code landing.
+      # It had drifted to 115 violations by the time this was noticed.
+      #
+      # The path set matches .pre-commit-config.yaml exactly, conftest.py
+      # included -- three gates that lint different things are three chances
+      # for one of them to be the only thing standing between a violation and
+      # main.
+      - run: uvx ruff@0.15.20 check fsr_playbooks tooling conftest.py
 
   test:
     name: pytest (py${{ matrix.python }})

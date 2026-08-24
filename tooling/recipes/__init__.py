@@ -9,5 +9,7 @@ Kinds:
 """
 from __future__ import annotations
 
-from .generator import generate_threat_feed_recipe  # noqa: F401
-from .generator import generate_data_ingest_recipe  # noqa: F401
+from .generator import (
+    generate_data_ingest_recipe,  # noqa: F401
+    generate_threat_feed_recipe,  # noqa: F401
+)

@@ -14,10 +14,9 @@ from __future__ import annotations
 import re
 
 import pytest
-
-from fsr_playbooks.compiler import compile_yaml
 from recipes import step_lookup
 
+from fsr_playbooks.compiler import compile_yaml
 
 # Generic placeholder fills; recipe-specific ones added per-recipe below.
 _PLACEHOLDERS = {

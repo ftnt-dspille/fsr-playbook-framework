@@ -25,11 +25,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import tooling.step_type_coverage as cov
 from fsr_playbooks.compiler.resolver import SHORT_TYPE_TO_FSR
 from fsr_playbooks.compiler.typed_args.schema import emit_step_arg_schema
 from fsr_playbooks.compiler.typed_args.steps import STEP_ARG_MODELS
-
-import tooling.step_type_coverage as cov
 
 _REPO = Path(__file__).resolve().parents[2]
 _DECOMPILER = (_REPO / "fsr_playbooks" / "compiler" / "decompiler.py").read_text()

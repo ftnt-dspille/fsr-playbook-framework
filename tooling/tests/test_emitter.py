@@ -142,6 +142,7 @@ def test_debug_flag_defaults_to_false(db_path):
 
 def _priority_iri(db_path, value):
     import sqlite3
+
     from fsr_playbooks.compiler.ir import PRIORITY_LIST_NAME
     c = sqlite3.connect(db_path)
     row = c.execute(

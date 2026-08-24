@@ -25,13 +25,12 @@ from __future__ import annotations
 
 from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.errors import ErrorCode
+from fsr_playbooks.compiler.resolver.picklists import PicklistMixin
 from fsr_playbooks.compiler.typed_args.schema import emit_step_arg_schema
 from fsr_playbooks.compiler.typed_args.steps import (
-    ManualInputArgs,
     STEP_ARG_MODELS,
+    ManualInputArgs,
 )
-from fsr_playbooks.compiler.resolver.picklists import PicklistMixin
-
 
 _KNOWN_KINDS = sorted(PicklistMixin._INPUT_FIELD_KINDS)
 

@@ -15,17 +15,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tooling"))
 
 from probes.common import CATALOG_DB_PATH  # noqa: E402
+
 from fsr_playbooks.mcp_server.tools_catalog import (  # noqa: E402
-    find_api_example,
-    find_api_fixture,
-    find_api_product,
-    propose_http_fallback,
     _METHOD_TO_HTTP_OP,
     _looks_like_api_call_op,
     _render_fallback_step,
     _split_url_template,
+    find_api_example,
+    find_api_fixture,
+    find_api_product,
+    propose_http_fallback,
 )
-
 
 CATALOG_PRESENT = CATALOG_DB_PATH.exists()
 catalog_required = pytest.mark.skipif(
@@ -256,7 +256,8 @@ def test_is_auth_prelude_catches_known_endpoints():
 
 def test_expected_method_for_intent():
     from fsr_playbooks.mcp_server.tools_catalog import (
-        _intent_tokens, _expected_method_for_intent,
+        _expected_method_for_intent,
+        _intent_tokens,
     )
     assert _expected_method_for_intent(_intent_tokens("create incident")) == "POST"
     assert _expected_method_for_intent(_intent_tokens("delete user")) == "DELETE"

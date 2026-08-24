@@ -7,14 +7,15 @@ import sqlite3
 import pytest
 
 from fsr_playbooks.compiler import jinja_typing as jt
-
 from fsr_playbooks.compiler.jinja_typing import (
-    extract_pure_jinja, terminal_filter, infer_terminal_observed_type,
+    extract_pure_jinja,
+    infer_terminal_observed_type,
+    terminal_filter,
 )
 from fsr_playbooks.compiler.resolver.connector_args import (
-    _param_target_observed_type, _types_compatible,
+    _param_target_observed_type,
+    _types_compatible,
 )
-
 
 # --------------------------------------------------------------------- helpers
 

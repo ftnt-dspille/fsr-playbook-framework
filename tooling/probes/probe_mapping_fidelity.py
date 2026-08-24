@@ -34,12 +34,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tooling"))
 
-from probes._env import get_client  # noqa: E402
-
 from fsr_playbooks.compiler.decompiler import decompile  # noqa: E402
 from fsr_playbooks.compiler.emitter import emit  # noqa: E402
 from fsr_playbooks.compiler.roundtrip import diff, normalize_collection  # noqa: E402
 from fsr_playbooks.compiler.wire import normalize_live_collection  # noqa: E402
+from probes._env import get_client  # noqa: E402
 
 DB = ROOT / "data" / "fsr_reference.db"
 

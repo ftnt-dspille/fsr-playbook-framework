@@ -14,7 +14,6 @@ import pytest
 from fsr_playbooks.llm import tools as _tools
 from fsr_playbooks.llm.tools import ToolSpec
 
-
 # --- helpers: flag + floor resolution -------------------------------------
 
 @pytest.fixture(autouse=True)

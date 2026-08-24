@@ -20,9 +20,9 @@ import json
 import os
 import sqlite3
 import sys
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
 
 from . import _env
 from .common import REPO_ROOT, probe_session, record_verification

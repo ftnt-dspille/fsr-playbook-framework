@@ -28,7 +28,6 @@ import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
 import fsr_playbooks.mcp_server._shared  # noqa: E402, F401
 from fsr_playbooks.mcp_server import debug_session as _ds  # noqa: E402
 
-
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
 

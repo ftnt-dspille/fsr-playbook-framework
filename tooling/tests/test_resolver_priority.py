@@ -8,7 +8,6 @@ from __future__ import annotations
 import sqlite3
 from types import SimpleNamespace
 
-
 from fsr_playbooks.compiler.ir import PRIORITY_LIST_NAME
 from fsr_playbooks.compiler.resolver import Resolver
 

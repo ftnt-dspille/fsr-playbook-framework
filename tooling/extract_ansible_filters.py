@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import sys
 
-
 # Collections plausibly present on an FSR box's Ansible engine. Random
 # vendor collections (ovirt, netapp, …) come with the full `ansible` bundle
 # in the dump env but are NOT on the appliance -- including them would trade

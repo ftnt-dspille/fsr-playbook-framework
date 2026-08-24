@@ -6,15 +6,14 @@ pattern and asserts the right Finding fires.
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import chat_review  # noqa: E402
-
 
 # Schema mirrors web/backend/history.py -- we only need the tables the
 # detectors read. Using a minimal subset keeps the fixture small.

@@ -245,6 +245,7 @@ def _build_provider(kind: str, model: str):
     """
     if kind == "frank":
         import os as _os
+
         from fsr_playbooks.llm.openai_provider import OpenAIProvider
         base_url = _os.environ.get("FRANK_BASE_URL")
         key = _os.environ.get("FRANK_API_KEY")
@@ -255,6 +256,7 @@ def _build_provider(kind: str, model: str):
                               model=model or _os.environ.get("FRANK_MODEL"))
 
     from anthropic import AsyncAnthropic
+
     from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
     # Tier-1 org cap is 50k input tokens/min; a multi-turn investigation
     # resends growing history, so single turns can hit the per-minute
@@ -329,10 +331,10 @@ async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
     from probes._env import get_config
     get_config()  # load .env (FSR creds + ANTHROPIC_API_KEY)
 
-    from fsr_playbooks.llm.run_turn import resume_agent_turn, run_agent_turn
-    from fsr_playbooks.llm.provider import Message
-    from fsr_playbooks.llm.intents import tools_for_intent
     from evals.prompt_source import resolve_triage_prompt
+    from fsr_playbooks.llm.intents import tools_for_intent
+    from fsr_playbooks.llm.provider import Message
+    from fsr_playbooks.llm.run_turn import resume_agent_turn, run_agent_turn
 
     provider = _build_provider(provider_kind, model)
     # NOT load_intent_prompt(): that resolves to a 583-char fallback stub in
@@ -558,10 +560,12 @@ def main() -> int:
         _offline.install()
         substrate = f"{_offline.active_client_name()} / {_offline.active_box_name()}"
 
+    from evals.scoring import (
+        _score_investigation,
+        _score_investigation_quality,
+        unservable_required_tools,
+    )
     from evals.tasks import load_tasks
-    from evals.scoring import (_score_investigation,
-                               _score_investigation_quality,
-                               unservable_required_tools)
 
     tasks = [t for t in load_tasks() if t.mode == "investigation"]
     if args.only:

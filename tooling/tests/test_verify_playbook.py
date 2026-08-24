@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import textwrap
 
-
 from fsr_playbooks.mcp_server import verify_playbook
 
 
