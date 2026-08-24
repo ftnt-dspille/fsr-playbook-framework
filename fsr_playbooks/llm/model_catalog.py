@@ -68,10 +68,16 @@ CATALOG: tuple[ModelEntry, ...] = (
         "OpenAI model measured green on every gate fixture.",
     ),
     ModelEntry(
-        "o4-mini", "openai", "supported", True,
-        "same reasoning class as the tested default; not measured on the gate "
-        "slice",
-        "The cheaper reasoning option. Measure it before recommending it.",
+        "o4-mini", "openai", "discouraged", True,
+        "attribute lane 20260824T013015Z -- 4/5, 3 repeats, verdict flaky",
+        "Measured, as the row above asked for, and it is genuinely better "
+        "than gpt-4.1-mini: it fixes #156 outright (3/3 on the neutral run "
+        "request, where 4.1-mini never reaches the approval gate). But "
+        "select_build_offer is 1/3 -- it passed once and dropped two gates "
+        "the other two times. That is the flaky case, not the failing one, "
+        "and it is demoted for exactly the reason the screen prints: a flaky "
+        "model is not a cheaper consistent one, because the analyst gets one "
+        "attempt. Worth re-measuring if that fixture's gates move.",
     ),
     ModelEntry(
         "gpt-4.1-mini", "openai", "discouraged", False,

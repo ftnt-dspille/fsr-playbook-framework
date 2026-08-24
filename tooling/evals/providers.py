@@ -339,6 +339,12 @@ def _agentic_anthropic_provider() -> Callable:
     return _call
 
 
+#: Models that reject an explicit `temperature`. Populated at run time from
+#: the API's own 400 rather than hard-coded, so a new reasoning model screens
+#: correctly without a code change here.
+_NO_TEMPERATURE: set[str] = set()
+
+
 def _agentic_openai_compatible(*, base_url: str, model: str,
                                headers: dict[str, str] | None = None,
                                ) -> Callable:
@@ -372,10 +378,24 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
         turns = 0
         for _ in range(_AGENTIC_MAX_TURNS):
             turns += 1
+            payload = {"model": model, "messages": history, "tools": tools}
+            # Reasoning models (o1/o3/o4, and the gpt-5 reasoning tier) accept
+            # ONLY the default temperature and 400 on any explicit value. We
+            # want temperature=0 everywhere it is allowed -- a screen that
+            # varies sampling is measuring noise -- so it is sent by default
+            # and dropped for the models that refuse it, learned once per
+            # model rather than retried every turn.
+            #
+            # This was worth finding: an `o4-mini` screen came back 0/5 with
+            # `ERR (provider call raised)` in 0.2s per task, which reads as a
+            # model that cannot do the work. It was this parameter. Same shape
+            # as the EVAL_HTTP_TIMEOUT note above -- a client-side detail
+            # scoring as an agent regression.
+            if model not in _NO_TEMPERATURE:
+                payload["temperature"] = 0.0
             r = requests.post(
                 f"{base_url}/chat/completions",
-                json={"model": model, "messages": history, "tools": tools,
-                      "temperature": 0.0},
+                json=payload,
                 headers=headers or {},
                 # The long authoring tasks legitimately exceed 180s (14+ tool
                 # calls, each a round trip). Every `ERR (provider call raised)`
@@ -385,6 +405,16 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                 # that could not do the task.
                 timeout=float(os.environ.get("EVAL_HTTP_TIMEOUT", "180")),
             )
+            if (r.status_code == 400 and model not in _NO_TEMPERATURE
+                    and "temperature" in r.text):
+                _NO_TEMPERATURE.add(model)
+                payload.pop("temperature", None)
+                r = requests.post(
+                    f"{base_url}/chat/completions",
+                    json=payload,
+                    headers=headers or {},
+                    timeout=float(os.environ.get("EVAL_HTTP_TIMEOUT", "180")),
+                )
             r.raise_for_status()
             msg = r.json()["choices"][0]["message"]
             history.append(msg)
