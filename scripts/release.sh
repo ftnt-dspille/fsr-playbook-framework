@@ -34,6 +34,33 @@ REMOTE="${REMOTE:-origin}"
 [[ "$(git branch --show-current)" == "main" ]] || { echo "release: must be on main" >&2; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo "release: working tree not clean" >&2; exit 1; }
 
+# --- HEAD must not already carry a version tag ------------------------------
+#
+# #158. setuptools-scm derives the version from the tags on the commit being
+# built, and when a commit carries more than one it does NOT take the one you
+# just pushed -- it took the LOWER. That is silent: `release.sh 0.6.41` passed
+# every guard above (v0.6.41 was genuinely new, and 0.6.41 genuinely beat
+# PyPI's latest), the workflow went green, a GitHub Release for v0.6.41 exists
+# -- and the wheel on PyPI is 0.6.40, because v0.6.40 was already sitting on
+# HEAD. We only got away with it because the content was identical.
+#
+# The fix is upstream of all of that: a release needs a commit of its own. If
+# HEAD is already tagged, there is nothing new to release from here.
+EXISTING_ON_HEAD="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+if [[ -n "$EXISTING_ON_HEAD" ]]; then
+    echo "release: HEAD already carries a version tag:" >&2
+    printf '  %s\n' $EXISTING_ON_HEAD >&2
+    echo "  Tagging $TAG on this same commit would put two version tags on one" >&2
+    echo "  commit, and setuptools-scm then publishes the LOWER one -- silently," >&2
+    echo "  with a green workflow and a GitHub Release for the version you asked" >&2
+    echo "  for. That is #158; it shipped 0.6.40 when 0.6.41 was requested." >&2
+    echo "" >&2
+    echo "  A release needs its own commit. Either land the change you meant to" >&2
+    echo "  release, or -- if HEAD really is the content you want -- that content" >&2
+    echo "  is already tagged, so check whether it needs releasing at all." >&2
+    exit 1
+fi
+
 # --- tag must be new -------------------------------------------------------
 #
 # A tag can exist WITHOUT the version ever having been published: the publish
