@@ -316,6 +316,41 @@ def _check_raise_exception_mock(s: Step, pi: int, si: int) -> CompileError | Non
     )
 
 
+def _check_find_record_mock_shape(s: Step, pi: int, si: int) -> CompileError | None:
+    """Warn when a find_record mock_result uses the envelope shape.
+
+    Live-verified on FSR 8.0.0-6034: find_record's REAL output (no mock)
+    is a raw list of records, NOT the ``{data, status, message, operation}``
+    envelope. But authors commonly write ``mock_result: {data: [...],
+    status: "Success"}`` — which makes mock runs work with ``.data`` refs
+    that break in production (the real list has no ``.data`` key).
+
+    The correct mock_result for find_record is a bare list:
+    ``mock_result: [{name: test}]`` — matching the real output shape.
+    """
+    if s.type != "find_record":
+        return None
+    args = s.arguments or {}
+    mock = args.get("mock_result") or args.get("mockResult")
+    if not isinstance(mock, dict):
+        return None  # already a list or absent
+    if "data" in mock or "status" in mock:
+        return CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(
+                f"find_record step {(s.name or s.id)!r} has a mock_result "
+                f"with envelope keys (data/status) but find_record's real "
+                f"output is a raw list (live-verified 8.0.0). Mock runs "
+                f"using `.data` refs will work but break in production. "
+                f"Use a bare list: `mock_result: [{{name: test}}]`"
+            ),
+            path=f"playbooks[{pi}].steps[{si}].arguments.mock_result",
+            suggestion="use a bare list mock_result to match real output",
+            severity="warning",
+        )
+    return None
+
+
 def lint(text: str, coll: Collection | None) -> list[CompileError]:
     """Run every linter rule. Pure - no DB, no live FSR."""
     errs: list[CompileError] = []
@@ -333,6 +368,9 @@ def lint(text: str, coll: Collection | None) -> list[CompileError]:
                 if e:
                     errs.append(e)
                 e = _check_raise_exception_mock(s, pi, si)
+                if e:
+                    errs.append(e)
+                e = _check_find_record_mock_shape(s, pi, si)
                 if e:
                     errs.append(e)
                 errs.extend(_check_code_snippet(s, pi, si))
