@@ -24,13 +24,15 @@ class FieldValueValidator:
     filters (field existence, value type/picklist membership).
 
     Operators where the ``value`` is semantically meaningless
-    (``isnull`` / ``isnotnull`` / ``changed``) skip value validation -- FSR's
+    (``isnull`` / ``exists`` / ``changed``) skip value validation -- FSR's
     own designer emits a placeholder (e.g. ``"true"``) there, and flagging it
-    as a type mismatch is a false positive.
+    as a type mismatch is a false positive. ``isnotnull`` is kept for
+    decompiler robustness (old exported playbooks may carry it) even though
+    the compiler no longer emits it.
     """
 
     _VALUE_IRRELEVANT_OPS: frozenset[str] = frozenset({
-        "isnull", "isnotnull", "changed",
+        "isnull", "isnotnull", "exists", "changed",
     })
 
     def __init__(self, conn: sqlite3.Connection):

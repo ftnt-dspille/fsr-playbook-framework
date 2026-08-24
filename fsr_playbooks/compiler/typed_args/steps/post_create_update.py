@@ -16,7 +16,7 @@ instead of silently riding through to the runtime. ``modules`` (a list),
 rejected anything genuinely unknown, and ``_validate_trigger_fields``
 re-checks the filter against the catalog after this walk.
 
-`expand_post_create_update` owns the friendly→canonical transform,
+`expand_post_create_update` owns the friendly->canonical transform,
 byte-for-byte with the imperative normalizer it replaces:
 
 * ``module:``/``modules:`` -> resolved ``resource`` (single) + ``resources`` (list),
@@ -120,13 +120,19 @@ def expand_post_create_update(
     a.setdefault("__triggerLimit", True)
 
     when = a.pop("when", None)
+    trigger_filter = a.pop("trigger_filter", None)
     if when is not None:
         fbt = expand_when(when, step_type, path, errors)
         if fbt is not None:
             a["fieldbasedtrigger"] = fbt
-    elif "trigger_filter" in a:
-        # Friendly alias for the canonical ``fieldbasedtrigger`` wire key.
-        a["fieldbasedtrigger"] = a.pop("trigger_filter")
+    elif trigger_filter is not None:
+        # Friendly alias -- normalize via expand_when so op->operator,
+        # type->primitive, and wildcard wrapping are applied (matching
+        # the `when:` path). Live-verified: FSR expects `operator` not
+        # `op` in fieldbasedtrigger filters.
+        fbt = expand_when(trigger_filter, step_type, path, errors)
+        if fbt is not None:
+            a["fieldbasedtrigger"] = fbt
     elif "fieldbasedtrigger" not in a:
         a["fieldbasedtrigger"] = {
             "sort": [], "limit": 30, "logic": "AND", "filters": [],

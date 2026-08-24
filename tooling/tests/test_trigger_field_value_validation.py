@@ -637,7 +637,7 @@ class TestPicklistIRIValues:
 
 
 class TestValueIrrelevantOperators:
-    """isnull/isnotnull/changed carry placeholder values that must not be type-checked."""
+    """isnull/isnotnull/exists/changed carry placeholder values that must not be type-checked."""
 
     def test_isnull_on_integer_with_placeholder_skips(self):
         """`isnull` with a placeholder string on an integer field must not warn."""
@@ -661,6 +661,9 @@ class TestValueIrrelevantOperators:
             conn.close()
 
     def test_isnotnull_on_integer_with_placeholder_skips(self):
+        # isnotnull is deprecated (400s on appliance) but the field validator
+        # must still skip value type-checking for old exported playbooks that
+        # carry it.
         conn = _get_db()
         try:
             validator = FieldValueValidator(conn)
@@ -670,6 +673,25 @@ class TestValueIrrelevantOperators:
                 "field": "ackDate",
                 "value": "not-a-number",
                 "operator": "isnotnull",
+            }]
+            validator.validate_trigger_filters(
+                filters, "alerts", "p.when", errors
+            )
+            value_errors = [e for e in errors if ".value" in e.path]
+            assert not value_errors
+        finally:
+            conn.close()
+
+    def test_exists_on_integer_with_placeholder_skips(self):
+        conn = _get_db()
+        try:
+            validator = FieldValueValidator(conn)
+            errors: list[CompileError] = []
+            filters = [{
+                "type": "primitive",
+                "field": "ackDate",
+                "value": "not-a-number",
+                "operator": "exists",
             }]
             validator.validate_trigger_filters(
                 filters, "alerts", "p.when", errors

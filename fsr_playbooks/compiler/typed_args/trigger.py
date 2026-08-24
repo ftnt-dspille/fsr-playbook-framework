@@ -21,7 +21,7 @@ groups live in the corpus).
 
 `WhenGroup`/`WhenLeaf` enforce the *structure* (known keys via
 `extra="forbid"`, value types, recursive nesting). The operator semantics --
-alias rewriting, the `contains → like %…%` rewrite, the bare-`like` wildcard
+alias rewriting, the `contains -> like %…%` rewrite, the bare-`like` wildcard
 wrap, the `changed`-only-on-update rule -- live in `expand_when`, which walks
 the validated tree with precise `filters[i].op` paths so warning/error
 messages stay byte-identical to the imperative normalizer they replace.
@@ -41,19 +41,39 @@ from .base import StrictArgs
 # Valid operators FSR's field-based-trigger evaluator honors. A wrong operator
 # does not error at deploy -- the trigger silently never matches -- so unknowns
 # are rejected at compile time. `changed` is update-only (enforced below).
+#
+# This set is kept in exact agreement with pyfsr's ``OPERATORS`` (the
+# authoritative operator knowledge base in ``pyfsr.query_models``). An
+# agreement test in ``test_wire_pyfsr_agreement.py`` fails if either side
+# drifts. pyfsr distinguishes "leaf" (query-layer) and "trigger" (playbook
+# start/update only) categories; trigger filters accept both, so we use the
+# full set.
 _TRIGGER_OPS: frozenset[str] = frozenset({
     "eq", "neq", "gt", "gte", "lt", "lte",
-    "isnull", "isnotnull",
+    "isnull", "exists",
     "in", "nin", "in_all",
-    # `like`/`notlike` = case-insensitive SQL-LIKE on a scalar. `contains`/
-    # `notcontains` are accepted authoring sugar but rewrite to `like`/`notlike`
-    # with a `%…%`-wrapped value (a raw scalar `contains` never fires -- the
-    # query layer 400s it). Live-verified via probe_trigger_matrix.
+    # `like`/`notlike` = case-insensitive SQL-LIKE on a scalar. `contains`
+    # is a valid relationship/collection operator (per pyfsr) kept in this
+    # set for agreement, but ``_TRIGGER_OP_REWRITE`` rewrites it to ``like``
+    # with a ``%…%``-wrapped value for the common scalar substring use case
+    # (a raw scalar ``contains`` never fires -- the query layer 400s it;
+    # live-verified via probe_trigger_matrix).
     "like", "notlike",
-    "contains", "notcontains",
+    "contains",
     "changed",
+    "between",
 })
-# Token-only aliases (friendly / near-miss spellings → canonical token).
+# Operators that are NOT valid but users commonly try. Unlike aliases (which
+# silently map to a canonical token), these need a value change or are
+# outright broken on the appliance, so they are rejected with a helpful
+# message instead of being silently rewritten. Mirrors pyfsr's
+# ``DEPRECATED_OPERATORS`` guidance.
+_DEPRECATED_OPS: dict[str, str] = {
+    "isnotnull": "use 'isnull' with value: false (isnotnull returns HTTP 400)",
+    "is_not_null": "use 'isnull' with value: false",
+    "not_null": "use 'isnull' with value: false",
+}
+# Token-only aliases (friendly / near-miss spellings -> canonical token).
 # Auto-applied with a warning; no value change.
 _TRIGGER_OP_ALIASES: dict[str, str] = {
     "equals": "eq", "==": "eq", "=": "eq", "is": "eq",
@@ -67,17 +87,31 @@ _TRIGGER_OP_ALIASES: dict[str, str] = {
     "in_list": "in", "is_in_list": "in", "is_one_of": "in",
     "is_not_in_list": "nin", "is_not_one_of": "nin",
     "is_null": "isnull", "null": "isnull", "is_empty": "isnull",
-    "is_not_null": "isnotnull", "not_null": "isnotnull", "exists": "isnotnull",
     "matches_pattern": "like", "matches": "like", "ilike": "like",
     "does_not_match": "notlike", "does_not_match_pattern": "notlike",
     "not_like": "notlike",
     "is_changed": "changed", "has_changed": "changed",
 }
-# Pattern-producing rewrites: op → (canonical operator, wildcard wrap mode).
+# Operator arity (mirrors pyfsr's ``OPERATOR_SPECS`` Arity enum). Used by
+# ``_check_arity`` to catch value/operator mismatches at compile time (e.g.
+# ``op: changed`` with a value, ``op: in`` without a list).
+_TRIGGER_OP_ARITY: dict[str, str] = {
+    "eq": "scalar", "neq": "scalar", "gt": "scalar", "gte": "scalar",
+    "lt": "scalar", "lte": "scalar", "like": "scalar", "notlike": "scalar",
+    "contains": "scalar",
+    "in": "list", "nin": "list", "in_all": "list", "between": "list",
+    "exists": "bool", "isnull": "bool",
+    "changed": "none",
+}
+# Pattern-producing rewrites: op -> (canonical operator, wildcard wrap mode).
 # `like` with explicit `%` is the canonical cross-version substring match.
 # While `contains`/`startswith`/`endswith` also work on FSR 8.0.0-6034
 # (live-verified), `like` with `%` is the safe form across FSR versions.
 # Auto-applied + warned.
+#
+# Shared with ``_rewrite_query_filter_ops`` in normalizers.py (the query
+# layer has the same scalar-``contains`` gap), so changes here affect both
+# the trigger and record-step query paths.
 _TRIGGER_OP_REWRITE: dict[str, tuple[str, str]] = {
     "contains": ("like", "both"), "icontains": ("like", "both"),
     "notcontains": ("notlike", "both"), "not_contains": ("notlike", "both"),
@@ -184,6 +218,13 @@ def _normalize_op(
     op = orig_op.lower()
     wrap: str | None = None
     opath = f"{leaf_path}.op"
+    if op in _DEPRECATED_OPS:
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=f"unsupported operator {orig_op!r}: {_DEPRECATED_OPS[op]}",
+            path=opath,
+        ))
+        return None
     if op in _TRIGGER_OP_REWRITE:
         op, wrap = _TRIGGER_OP_REWRITE[op]
         errors.append(CompileError(
@@ -198,7 +239,7 @@ def _normalize_op(
         if canon != op:
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE, severity="warning",
-                message=f"operator {orig_op!r} → {canon!r}",
+                message=f"operator {orig_op!r} -> {canon!r}",
                 path=opath,
             ))
         op = canon
@@ -217,6 +258,57 @@ def _normalize_op(
         ))
         return None
     return op, wrap
+
+
+def _check_arity(
+    op: str, value: Any, opath: str, errors: list[CompileError],
+) -> bool:
+    """Validate ``value`` against ``op``'s arity.
+
+    Mirrors ``pyfsr.query_models.validate_leaf_value``. Returns True if the
+    arity check passes (or is inconclusive), False if it is a blocking error.
+    """
+    arity = _TRIGGER_OP_ARITY.get(op)
+    if arity is None:
+        return True
+    if arity == "none":
+        if value is not None:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE, severity="warning",
+                message=f"operator {op!r} is value-less; drop the value",
+                path=opath,
+            ))
+    elif arity == "list":
+        if not isinstance(value, (list, tuple)):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"operator {op!r} needs a list value, got "
+                          f"{type(value).__name__ if value is not None else 'null'}"),
+                path=opath,
+            ))
+            return False
+    elif arity == "bool":
+        if isinstance(value, bool):
+            pass
+        elif isinstance(value, str) and value.lower() in ("true", "false"):
+            pass  # FSR wire uses string "true"/"false" for bool fields
+        else:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"operator {op!r} needs a bool value, got "
+                          f"{type(value).__name__ if value is not None else 'null'}"),
+                path=opath,
+            ))
+            return False
+    elif arity == "scalar":
+        if value is None:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=f"operator {op!r} requires a value",
+                path=opath,
+            ))
+            return False
+    return True
 
 
 def _leaf_to_filter(
@@ -245,7 +337,7 @@ def _leaf_to_filter(
             ))
             return None
         # Neutral default for the FRIENDLY hand-authored `op: changed` path only.
-        # The decompile→emit path never reaches here -- it passes `_value` through
+        # The decompile->emit path never reaches here -- it passes `_value` through
         # verbatim (traced 2026-07-25: a corpus `changed` filter round-trips
         # byte-identical, `@id` and all), so the corpus is unaffected by this
         # constant.
@@ -270,6 +362,9 @@ def _leaf_to_filter(
             "_value": {"display": "", "itemValue": ""},
             "operator": "changed",
         }
+
+    if not _check_arity(op, leaf.value, opath, errors):
+        return None
 
     # Advanced (live-grounded) wire shapes: when the author/decompiler sets an
     # explicit non-primitive `type`, emit that shape with the supplied

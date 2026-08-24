@@ -71,6 +71,7 @@ ACCEPTED_PHANTOM: set[str] = {
     "__recommend",  # wire-internal default read by decompiler (stripped on pull)
     "_showJson",  # wire-internal default read by decompiler (stripped on pull)
     "apply_async",
+    "child_args",  # wire-internal nested args read by validator (decompiler passthrough)
     "collectionType",  # wire key written by record_crud.py (not in STAGES);
     # decompiler reads it on pull to reverse → friendly `module:`.
     "connector_name",

@@ -229,7 +229,10 @@ def test_operator_shadow_mirrors_operator_not_like_pattern():
 
 def test_contains_notcontains_recognized_inputs():
     from fsr_playbooks.compiler.resolver.normalizers import _TRIGGER_OPS
-    assert "contains" in _TRIGGER_OPS and "notcontains" in _TRIGGER_OPS
+    assert "contains" in _TRIGGER_OPS
+    # notcontains is NOT a canonical operator (not in pyfsr's OPERATORS);
+    # it's authoring sugar that rewrites to notlike via _TRIGGER_OP_REWRITE.
+    assert "notcontains" not in _TRIGGER_OPS
 
 
 def test_startswith_anchors_prefix_pattern():
