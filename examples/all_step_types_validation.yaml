@@ -230,11 +230,21 @@ playbooks:
         ignore_errors: true
         comment: |
           Creates an alert tagged with `marker` so the later find/delete steps
-          can locate it. `ignore_errors` because module required-fields are
-          box-specific; the step TYPE still executes.
+          can locate it.
+
+          `name:` is REQUIRED on alerts -- omitting it fails the create with
+          "name: This value should not be blank", and because this step is
+          `ignore_errors: true` the run still reached `finished` while every
+          later step in the create -> find -> update -> delete chain quietly
+          operated on nothing. `ignore_errors` covers box-SPECIFIC required
+          fields; `name` is not one of those.
+
+          The find/update/delete steps and the on-create trigger all match on
+          `description`, so `name` is free to carry the marker too.
         module: alerts
         operation: Replace
         fields:
+          name: "{{ vars.marker }}"
           description: "{{ vars.marker }}"
           source: "{{ vars.feed_source_name }}"
       - name: Find audit alert

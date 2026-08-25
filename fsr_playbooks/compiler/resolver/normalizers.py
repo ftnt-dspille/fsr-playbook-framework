@@ -146,6 +146,7 @@ class NormalizerMixin:
         def resolve_module_name(
             self, raw: str, path: str, errors: list[CompileError],
         ) -> str: ...
+        def module_unique_columns(self, module: str) -> list[str] | None: ...
         def resolve_config_id(
             self, connector: str, config_name: str | None = None,
         ) -> str | None: ...
@@ -710,7 +711,11 @@ class NormalizerMixin:
         a = step.arguments if isinstance(step.arguments, dict) else {}
         _FRIENDLY = {"module", "mock_result", "condition", "record", "fields",
                      "field_operations", "tags_operation", "operation", "link",
-                     "unlink"}
+                     "unlink",
+                     # Uniqueness-conflict settings on create_record; the
+                     # typed layer turns these into resource.__replace /
+                     # resource.__fieldsToUpdate.
+                     "on_conflict", "update_fields"}
         _CANONICAL = {
             "collection", "collectionType", "resource", "operation",
             "fieldOperation", "__recommend", "_showJson", "step_variables",
@@ -749,6 +754,30 @@ class NormalizerMixin:
             fo = a.pop("field_operations")
             if isinstance(fo, dict):
                 a["fieldOperation"] = fo
+                # Re-measured on 8.0 and still inert: every combination of
+                # operation / fieldOperation / tagsOperation REPLACED the tag
+                # list, including on the upsert endpoint with __replace "true"
+                # and with recordTags named in __fieldsToUpdate. The only
+                # append is `link:`.
+                #
+                # Warned rather than dropped, because silence is the whole
+                # problem: the step compiles green, runs green, and quietly
+                # loses every tag that was already on the record.
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message=(
+                        "`field_operations:` has no effect on 8.0 -- a "
+                        "`fields:` write REPLACES a multi-value field whatever "
+                        "this is set to, so existing tags are lost silently."
+                    ),
+                    path=f"{path}.field_operations",
+                    suggestion=(
+                        "to append, move the value to `link:` "
+                        "(e.g. `link: {recordTags: [...]}`), which is the only "
+                        "mechanism measured to add without replacing"
+                    ),
+                ))
             else:
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
@@ -762,6 +791,16 @@ class NormalizerMixin:
         # `tags_operation: OverwriteTags` → wire `tagsOperation`.
         if "tags_operation" in a and "tagsOperation" not in a:
             a["tagsOperation"] = a.pop("tags_operation")
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                severity="warning",
+                message=(
+                    "`tags_operation:` has no effect on 8.0 -- the tag list is "
+                    "replaced by a `fields:` write regardless of this key."
+                ),
+                path=f"{path}.tags_operation",
+                suggestion="to append tags, use `link: {recordTags: [...]}`",
+            ))
         else:
             a.pop("tags_operation", None)
 
@@ -815,6 +854,48 @@ class NormalizerMixin:
         if new is not None:
             a = new
         step.arguments = a
+
+        # An upsert with nothing to match on is not an upsert.
+        #
+        # `/api/3/upsert/<m>` reconciles duplicates by the module's UNIQUE
+        # CONSTRAINT -- `sourceId` on alerts, `cVEID` on CVEs. A payload that
+        # omits those columns gives it no natural key, so it INSERTS every
+        # single run: three runs leave three records, each carrying whatever
+        # that run wrote. Nothing errors, the run is green, and the symptom
+        # (each record holding one tag, or one value) reads exactly like an
+        # append or an update that is silently failing -- which is a much
+        # harder thing to go looking for than a missing field.
+        #
+        # Warned, never blocked: the constraint can be satisfied by a Jinja
+        # value the compiler cannot see through, and a module may legitimately
+        # have no constraint at all. Silent when the catalog cannot answer.
+        coll = a.get("collection")
+        if (step.type == "create_record"
+                and isinstance(coll, str)
+                and coll.startswith("/api/3/upsert/")):
+            module = coll[len("/api/3/upsert/"):]
+            unique = self.module_unique_columns(module)
+            resource = a.get("resource")
+            if unique and isinstance(resource, dict):
+                missing = [c for c in unique if c not in resource]
+                if missing:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        severity="warning",
+                        message=(
+                            f"upsert on `{module}` does not set "
+                            f"{', '.join(repr(c) for c in missing)} -- the "
+                            f"column(s) it matches duplicates on. With no "
+                            f"natural key in the payload it inserts a NEW "
+                            f"record on every run instead of updating."
+                        ),
+                        path=f"{path}.arguments.fields",
+                        suggestion=(
+                            f"set {', '.join(repr(c) for c in missing)} in "
+                            f"`fields:`, or drop the upsert if a new record "
+                            f"per run is what you want"
+                        ),
+                    ))
 
         # Friendly picklist tokens → IRIs. If the resource payload sets a
         # picklist-backed field to a bare string label (e.g. status:

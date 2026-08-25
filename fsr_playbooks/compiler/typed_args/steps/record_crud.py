@@ -67,6 +67,8 @@ class RecordCrudArgs(StrictArgs):
 
     module: str | None = None
     is_upsert: bool | None = None
+    on_conflict: str | None = None
+    update_fields: list | str | None = None
     record: str | None = None
     field_operations: dict | None = None
     link: dict | None = None
@@ -178,6 +180,102 @@ def expand_record_crud(
     # collection) is left untouched. `update_record` is already a partial patch
     # by IRI/query, so `is_upsert` has no effect there beyond being dropped.
     is_upsert = a.pop("is_upsert", None)
+
+    # `on_conflict:` / `update_fields:` -- the step editor's "Uniqueness
+    # conflict settings", which decide what happens when the record being
+    # created already exists. Friendly levers; neither reaches the wire under
+    # these names.
+    #
+    # MEASURED on 8.0, each case run twice (no record present, then against a
+    # seeded one). The first position is a DIFFERENT ENDPOINT, not a value:
+    #
+    #   endpoint /api/3/<m>          collision -> 409, step FAILS, run HALTS
+    #   upsert + __replace "false"   existing record untouched
+    #   upsert + __replace "true"    existing record fully overwritten
+    #   upsert + __fieldsToUpdate    only the listed fields are written
+    #
+    # `__replace` is ignored outright on the plain endpoint, and OMITTING it on
+    # the upsert endpoint does NOT fall through to "fail" -- it overwrites
+    # everything. That default is why an upsert silently erases whatever a run
+    # could not fetch, so `on_conflict:` exists to make the choice explicit.
+    #
+    # Both keys live INSIDE `resource` on the wire (the PUT body), and
+    # `__replace` is the STRING "true"/"false", not a boolean.
+    on_conflict = a.pop("on_conflict", None)
+    update_fields = a.pop("update_fields", None)
+
+    if update_fields is not None and on_conflict is None:
+        # Naming the fields IS the intent; requiring both is ceremony.
+        on_conflict = "update_listed"
+
+    if (on_conflict is not None or update_fields is not None) \
+            and step_type != "create_record":
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(
+                f"{step_type}: `on_conflict:` / `update_fields:` apply to "
+                "create_record only -- update_record already targets one "
+                "record by IRI, so there is no uniqueness conflict to settle."
+            ),
+            path=f"{path}.arguments.on_conflict",
+        ))
+        on_conflict = update_fields = None
+
+    _CONFLICT = {"fail", "keep_existing", "update_all", "update_listed"}
+    if on_conflict is not None and on_conflict not in _CONFLICT:
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(
+                f"`on_conflict: {on_conflict!r}` is not a valid setting. "
+                f"Use one of: {', '.join(sorted(_CONFLICT))}."
+            ),
+            path=f"{path}.arguments.on_conflict",
+            suggestion=(
+                "fail = let the collision fail the step; keep_existing = leave "
+                "the existing record alone; update_all = overwrite every field; "
+                "update_listed = write only `update_fields:`"
+            ),
+        ))
+        on_conflict = None
+
+    if on_conflict == "update_listed" and update_fields is None:
+        errors.append(CompileError(
+            code=ErrorCode.MISSING_FIELD,
+            message=(
+                "`on_conflict: update_listed` needs `update_fields:` naming "
+                "which fields may be written on an existing record."
+            ),
+            path=f"{path}.arguments.update_fields",
+            suggestion=(
+                "list the fields this step is entitled to overwrite, or use "
+                "`on_conflict: update_all`"
+            ),
+        ))
+        on_conflict = None
+
+    if on_conflict == "fail" and is_upsert:
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(
+                "`on_conflict: fail` and `is_upsert: true` contradict: "
+                "failing on a collision means NOT using the upsert endpoint, "
+                "which is the only place the other settings apply."
+            ),
+            path=f"{path}.arguments.on_conflict",
+            suggestion="drop `is_upsert: true`, or choose another on_conflict",
+        ))
+        on_conflict = None
+
+    if on_conflict in ("keep_existing", "update_all", "update_listed"):
+        # These are upsert-endpoint settings; asking for one IS asking to
+        # reconcile duplicates, so the routing follows without a second key.
+        is_upsert = True
+        res = a.setdefault("resource", {})
+        if isinstance(res, dict):
+            res["__replace"] = "false" if on_conflict == "keep_existing" else "true"
+            if on_conflict == "update_listed":
+                res["__fieldsToUpdate"] = update_fields
+
     if is_upsert and step_type == "create_record":
         coll = a.get("collection")
         if (isinstance(coll, str) and coll.startswith("/api/3/")

@@ -84,6 +84,32 @@ class CatalogLookupMixin:
         if not isinstance(script, str):
             return None
         return script.rsplit("/", 1)[-1]
+    def module_unique_columns(self, module: str) -> list[str] | None:
+        """The column(s) an upsert on `module` matches on, or None if unknown.
+
+        None means "the catalog cannot say" -- an older DB predating the
+        column, or an unwarmed one -- and callers must stay SILENT on it. A
+        check that fires on missing catalog data teaches authors to ignore it.
+        """
+        try:
+            cols = {r[1] for r in self.conn.execute(
+                "PRAGMA table_info(modules)").fetchall()}
+            if "unique_constraint" not in cols:
+                return None
+            row = self.conn.execute(
+                "SELECT unique_constraint FROM modules WHERE name = ?",
+                (module,),
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        if row is None or row[0] is None:
+            return None
+        try:
+            parsed = json.loads(row[0])
+        except (TypeError, ValueError):
+            return None
+        return [c for c in parsed if isinstance(c, str)] if isinstance(parsed, list) else None
+
     def resolve_module_name(
         self,
         raw: str,
