@@ -686,6 +686,42 @@ For cross-collection references, use the IRI directly:
   arguments: {hostname: "fsr-1"}
 ```
 
+#### Looping a child playbook (when `do_until` isn't enough)
+
+`retry:` works on a `workflow_reference`, which is how you poll something that
+takes more than one step to observe. `do_until` loops a SINGLE step, so a wait
+that needs a *pair* -- ask for fresh data, then read it -- has to put the pair
+in a child and loop the child:
+
+```yaml
+- name: Await Patch
+  type: workflow_reference
+  target: Refresh And Read Host
+  apply_async: false          # required: an async child returns nothing to test
+  host_id: "{{ vars.host_id }}"
+  retry:
+    times: 12
+    delay: 15
+    until: "{{ vars.steps.Await_Patch.patched == 'yes' }}"
+```
+
+**The child must SET the variable, not return it.** The parent reads
+`vars.steps.<step>.<var the child set>` -- a `code_output` the child never
+promoted to a variable is invisible from the caller, and the `until:` then
+never resolves. It does not fail loudly: the loop burns its whole budget on
+every run, including the successful ones, and the step still reports success.
+So the child ends in a `set_variable`:
+
+```yaml
+- name: Answer                # last step of the child
+  type: set_variable
+  vars:
+    patched: "{{ vars.steps.Check_Version.data.code_output.patched }}"
+```
+
+Live-verified on 8.0.0: with the child setting `patched: "no"` the parent ran
+the full budget; with `"yes"` it stopped after one call.
+
 ### `api_endpoint`
 
 ```yaml
