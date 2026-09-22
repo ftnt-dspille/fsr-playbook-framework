@@ -3290,7 +3290,19 @@ def cmd_validate(args: argparse.Namespace) -> int:
         if args.json:
             print(json.dumps([e.to_dict() for e in result.errors], indent=2))
         return 1
-    print("ok", file=sys.stderr)
+    # A clean compile is NOT a clean playbook. Warning-severity diagnostics --
+    # notably the reference lint's `bad_var_reference`, which is how a parent
+    # reading a key its child never returns gets caught offline -- used to be
+    # computed and then thrown away here, so `validate` printed a bare "ok"
+    # over a playbook that would fail silently at runtime. Warnings are
+    # reported; they still do not change the exit code.
+    warnings = [e for e in result.errors if e.severity == "warning"]
+    if warnings:
+        _print_errors(warnings)
+    if args.json:
+        print(json.dumps([e.to_dict() for e in result.errors], indent=2))
+    print(f"ok ({len(warnings)} warning(s))" if warnings else "ok",
+          file=sys.stderr)
     return 0
 
 

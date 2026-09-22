@@ -54,6 +54,58 @@ def test_validate_errors_json(repo_root, db_path, tmp_path):
     assert any(e["code"] == "unknown_step_type" for e in payload)
 
 
+def test_validate_reports_warnings_on_a_clean_compile(repo_root, db_path, tmp_path):
+    """`validate` must PRINT warning-severity diagnostics, not swallow them.
+
+    A parent reading a key its child never returns is a warning, not a compile
+    error -- the playbook emits fine and fails silently at runtime. `validate`
+    used to print a bare "ok" over exactly that, because it only reported
+    diagnostics when the compile was blocked.
+    """
+    bad = tmp_path / "child_contract.yaml"
+    bad.write_text(
+        "collection: T\n"
+        "playbooks:\n"
+        "  - name: Child\n"
+        "    parameters: [base]\n"
+        "    steps:\n"
+        "      - name: start\n"
+        "        type: start\n"
+        "        next: Early\n"
+        "      - name: Early\n"
+        "        type: set_variable\n"
+        "        next: Last\n"
+        "        vars:\n"
+        "          dropped: 'set in a NON-final step'\n"
+        "      - name: Last\n"
+        "        type: set_variable\n"
+        "        vars:\n"
+        "          kept: 'set in the final step'\n"
+        "  - name: Parent\n"
+        "    parameters: [base]\n"
+        "    steps:\n"
+        "      - name: start\n"
+        "        type: start\n"
+        "        next: Call child\n"
+        "      - name: Call child\n"
+        "        type: workflow_reference\n"
+        "        next: Read it\n"
+        "        target: Child\n"
+        "        apply_async: false\n"
+        "        pass_parent_env: false\n"
+        "        pass_input_record: false\n"
+        "      - name: Read it\n"
+        "        type: set_variable\n"
+        "        vars:\n"
+        "          got: \"{{ vars.steps.Call_child.dropped }}\"\n"
+    )
+    r = _run(repo_root, "validate", str(bad))
+    assert r.returncode == 0, r.stderr          # a warning does not block
+    combined = r.stdout + r.stderr
+    assert "bad_var_reference" in combined, combined
+    assert "dropped" in combined, combined
+
+
 def test_explain_handler(repo_root, db_path):
     r = _run(repo_root, "explain", "handler", "cond")
     assert r.returncode == 0
