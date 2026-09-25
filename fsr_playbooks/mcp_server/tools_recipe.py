@@ -261,36 +261,119 @@ def generate_recipe(
 
 @mcp.tool()
 def find_recipe(query: str = "", kind: str | None = None,
-                limit: int = 10) -> dict[str, Any]:
-    """Look up persisted recipes by name / connector / kind.
+                limit: int = 3) -> dict[str, Any]:
+    """Look up example playbooks and step patterns by intent.
+
+    Searches the example corpus (built by harvest_examples.py) by token
+    overlap over name, description, step types, and connectors. Ranked by
+    how many distinct tokens of `query` match, so "block ip fortigate" will
+    surface FortiGate blocking examples above unrelated ones.
 
     Returns recipes previously stored via `generate_recipe(persist=True)`
-    or the CLI's `--persist`. `query` is a substring match against
-    `name`, `source_playbook`, or `when_to_use`. `kind` filters to
-    `threat_feed` / `data_ingest` etc. Returns the YAML template so
-    the agent can paste it into the editor verbatim.
+    or the CLI's `--persist`, plus harvested examples (kind='example').
+    `query` is natural language like "block an IP" or "send email".
+    `kind` filters to `threat_feed` / `data_ingest` / `example` / `step` etc.
+    Returns the YAML template (capped at ~6KB) so the agent can paste it
+    into the editor verbatim.
     """
+    # Import token ranking function
+    from .tools_corpus import _token_fallback as _rank_by_tokens
+
     sql_parts = ["1=1"]
     args: list[Any] = []
-    if query:
-        sql_parts.append(
-            "(name LIKE ? OR source_playbook LIKE ? OR when_to_use LIKE ?)"
-        )
-        like = f"%{query}%"
-        args.extend([like, like, like])
     if kind:
         sql_parts.append("kind = ?")
         args.append(kind.replace("-", "_"))
-    args.append(int(limit))
+
     with _db() as conn:
-        rows = _rows(
-            conn,
-            "SELECT name, kind, when_to_use, yaml_template, source_playbook "
-            f"FROM recipes WHERE {' AND '.join(sql_parts)} "
-            "ORDER BY name LIMIT ?",
-            tuple(args),
-        )
-    return {"ok": True, "count": len(rows), "recipes": rows}
+        # First, try exact LIKE on name/source_playbook (for generated recipes
+        # which have fixed names like "threat_feed:connectorname").
+        # Also handle kind filter for generated recipes (threat_feed / data_ingest).
+        is_generated_kind = kind and kind.replace("-", "_") in ("threat_feed", "data_ingest")
+        if (query and not kind) or is_generated_kind:
+            like_parts = [
+                "name LIKE ? OR source_playbook LIKE ? OR when_to_use LIKE ?"
+            ]
+            like_args = []
+            if query:
+                like = f"%{query}%"
+                like_args.extend([like, like, like])
+
+            kind_sql = "kind IN ('threat_feed', 'data_ingest')"
+            if is_generated_kind:
+                kind_str = kind.replace("-", "_")
+                kind_sql = f"kind = '{kind_str}'"
+
+            like_sql = (
+                "SELECT name, kind, when_to_use, yaml_template, source_playbook "
+                f"FROM recipes WHERE {kind_sql} "
+            )
+            if query:
+                like_sql += f"AND ({' OR '.join(like_parts)}) "
+            like_sql += "LIMIT ?"
+            like_args.append(int(limit))
+            exact_rows = _rows(conn, like_sql, tuple(like_args))
+        else:
+            exact_rows = []
+
+        # Then, token-rank the examples corpus for natural-language queries.
+        # Reuse the token_fallback ranking from tools_corpus.
+        import re
+
+        def _tokens(q: str) -> list[str]:
+            from .tools_corpus import _STOPWORDS, _tokens as _corpus_tokens
+            return _corpus_tokens(q)
+
+        if query or not kind:
+            toks = _tokens(query)
+            if toks and (kind == "example" or not kind):
+                # Build ranking query for example corpus
+                # Reuse the pattern from _token_fallback: CASE WHEN on name+when_to_use
+                hit = ("(CASE WHEN name LIKE '%'||?||'%' ESCAPE '\\' "
+                       "OR when_to_use LIKE '%'||?||'%' ESCAPE '\\' "
+                       "THEN 1 ELSE 0 END)")
+                score = " + ".join([hit] * len(toks))
+                params: list[Any] = []
+                for t in toks:
+                    params.extend([t] * 2)  # name + when_to_use per token
+
+                min_matches = 1 if len(toks) < 3 else 2
+
+                sql = (f"""SELECT name, kind, when_to_use, yaml_template,
+                                  source_playbook,
+                                  ({score}) AS matched_tokens
+                           FROM recipes
+                           WHERE kind IN ('example', 'step')
+                             AND ({score}) >= {min_matches}
+                           ORDER BY matched_tokens DESC, name
+                           LIMIT ?""")
+                # The score appears twice in the SQL, so params also needs to appear twice
+                ranked_rows = _rows(conn, sql, tuple(params + params + [int(limit)]))
+
+                # Mark which rows came from which ranking
+                for r in ranked_rows:
+                    r.pop("matched_tokens", None)
+                    r["match"] = "tokens"
+            else:
+                ranked_rows = []
+        else:
+            ranked_rows = []
+
+        # Merge results: exact first, then ranked
+        all_rows = exact_rows + ranked_rows
+        # Deduplicate by name
+        seen: dict[str, dict] = {}
+        for row in all_rows:
+            if row["name"] not in seen:
+                seen[row["name"]] = row
+
+        final_rows = list(seen.values())[: int(limit)]
+
+    return {
+        "ok": True,
+        "count": len(final_rows),
+        "recipes": final_rows,
+    }
 
 
 _JINJA_BLOCK_RE = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
