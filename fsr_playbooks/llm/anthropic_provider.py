@@ -665,6 +665,9 @@ class AnthropicProvider(CapabilityMixin):
 
         history = list(messages)
         self_repair_turns = 0
+        # Clear per-turn citation validator state for structured verdicts
+        from ..mcp_server._citation_validator import clear_tool_registry
+        clear_tool_registry()
         # P1 -- forced-assessment guarantee. `any_tools_run` flips once any
         # tool result has been folded into history; `assessment_forced`
         # caps the guarantee at one extra round so it can't loop.
@@ -1192,13 +1195,19 @@ class AnthropicProvider(CapabilityMixin):
             pending_remaining: list[tuple[str, str, dict[str, Any]]] = []
 
             def _record_result(name: str, args: dict[str, Any], result: Any,
-                               duration_ms: int | None = None) -> dict[str, Any]:
+                               duration_ms: int | None = None, call_id: str | None = None) -> dict[str, Any]:
                 # Build the tool_result block + fold usage. Returns the block
                 # so callers can both append it and (for parallel calls) keep
                 # tool_use order intact.
                 _delivery.note_result(name, args, result)
                 _create_delivery.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)
+                # Register the tool result for citation validation
+                if call_id:
+                    from .tools import _is_error_result as _check_error
+                    success = not _check_error(result)
+                    from ..mcp_server._citation_validator import register_tool_result
+                    register_tool_result(call_id, name, success)
                 content_str = _stringify(result)
                 block = {
                     "type": "tool_result",
@@ -1249,7 +1258,7 @@ class AnthropicProvider(CapabilityMixin):
                 # Emit results + build tool_result blocks in tool_use order.
                 for (call_id, name, args), (result, dur_ms) in zip(parallel_batch, batch_results):
                     yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
-                    block = _record_result(name, args, result, dur_ms)
+                    block = _record_result(name, args, result, dur_ms, call_id=call_id)
                     block["tool_use_id"] = call_id
                     tool_result_blocks.append(block)
 
@@ -1323,7 +1332,7 @@ class AnthropicProvider(CapabilityMixin):
                 # so the model's self-repair loop branches on a real error
                 # signal instead of guessing from prose.
                 yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
-                block = _record_result(name, args, result, dur_ms)
+                block = _record_result(name, args, result, dur_ms, call_id=call_id)
                 block["tool_use_id"] = call_id
                 tool_result_blocks.append(block)
 

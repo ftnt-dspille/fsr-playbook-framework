@@ -1067,8 +1067,9 @@ _DELIVERY_CARRIERS: dict[str, tuple[str, ...]] = {
     "emit_playbook_offer": ("yaml",),
     "emit_patch_proposal": ("after_yaml",),
     "push_playbook": ("yaml_text",),
-    # The consolidated emit_card also carries deliverables when a playbook_offer
-    # or patch_proposal card_type is used. The payload field holds the YAML.
+    # The consolidated emit_card also carries deliverables when a playbook_offer,
+    # patch_proposal, or verdict card_type is used. The payload field holds the YAML
+    # or verdict data.
     "emit_card": ("payload",),
 }
 
@@ -1138,20 +1139,23 @@ def _carries_delivery(name: Any, args: Any) -> bool:
                 return False
         if not isinstance(args, dict):
             return False
-        # emit_card carries delivery only for playbook_offer or patch_proposal types
         card_type = args.get("card_type")
-        if card_type not in ("playbook_offer", "patch_proposal"):
-            return False
         payload = args.get("payload", {})
         if not isinstance(payload, dict):
             return False
-        # Check if payload has substantive YAML
-        yaml_val = payload.get("yaml")
-        if isinstance(yaml_val, str) and len(yaml_val.strip()) > 40:
-            return True
-        after_yaml = payload.get("after_yaml")
-        if isinstance(after_yaml, str) and len(after_yaml.strip()) > 40:
-            return True
+        # emit_card carries delivery for playbook_offer, patch_proposal, or verdict
+        if card_type in ("playbook_offer", "patch_proposal"):
+            # Check if payload has substantive YAML
+            yaml_val = payload.get("yaml")
+            if isinstance(yaml_val, str) and len(yaml_val.strip()) > 40:
+                return True
+            after_yaml = payload.get("after_yaml")
+            if isinstance(after_yaml, str) and len(after_yaml.strip()) > 40:
+                return True
+        elif card_type == "verdict":
+            # Verdict is delivery if it has a disposition (all verdicts do)
+            if payload.get("disposition"):
+                return True
         return False
 
     keys = _DELIVERY_CARRIERS.get(name_str)
@@ -1570,14 +1574,16 @@ class CreateDeliveryGuard:
 # backstopping the delivery end. Fires at most once per turn.
 
 # Tools that prove a turn actually entered the authoring half of the loop.
-# Note: emit_card with playbook_offer, enhancement_offer, or patch_proposal
-# card_type also proves authoring intent (handled in BuildProgressGuard.note_result).
+# Note: emit_card with playbook_offer, enhancement_offer, patch_proposal, or
+# verdict card_type also proves authoring intent (handled in BuildProgressGuard.note_result).
 _AUTHORING_PROGRESS_TOOLS = frozenset({
     "validate_yaml", "compile_yaml", "verify_playbook",
     "emit_playbook_offer", "build_playbook_from_trace",
     # Enhance authors too -- its own pair means the turn is not stalled.
     "verify_enhancement", "emit_enhancement_offer", "emit_patch_proposal",
-    # The consolidated emit_card when used for offer types also proves authoring.
+    # Triage verdicts
+    "emit_verdict",
+    # The consolidated emit_card when used for offer or verdict types also proves authoring.
     "emit_card",
 })
 
@@ -1651,6 +1657,94 @@ class BuildProgressGuard:
         # A run/diagnose turn is not a stalled build -- see _RUN_INTENT_TOOLS.
         if self._run_intent:
             return False
+        return True
+
+    def mark_forced(self) -> None:
+        self._forced = True
+        record_guard_fire(type(self).__name__)
+
+
+# ─────────────────────── verdict-delivery guard ────────────────────────
+#
+# TRIAGE turns that run evidence/enrichment tools (get_record, search_*,
+# siem_*, faz_*, run_op, mcp_* read tools, find with enrichment kind) should
+# END with a structured verdict card. The turn ran investigation work; the
+# analyst needs a summary to decide on action. Without a forced verdict, a
+# triage turn can devolve into prose ("Here's what I found...") and leave the
+# analyst without a clear disposition.
+#
+# Same contract as the other guards: detector only, fires at most once via
+# `mark_forced()`. The provider injects a directive and CONTINUES the loop
+# rather than terminating, so the model authors a verdict -> emits the card.
+# Only fires for triage turns (authoring turns have their own P1 guard).
+
+_TRIAGE_EVIDENCE_TOOLS = frozenset({
+    # Direct record/search lookups
+    "get_record", "search_records", "search_records_by_module",
+    # SIEM enrichment
+    "siem_search_incidents", "siem_search_observables",
+    "siem_get_correlation_details", "siem_get_incident_events",
+    # FAZ enrichment
+    "faz_get_logs", "faz_search_events",
+    # Connector operations (mcp_* read tools)
+    "run_op",
+    # Generic find with enrichment
+    "find_record",
+})
+
+
+class VerdictDeliveryGuard:
+    """Tracks triage turns that ran evidence tools but never emitted a verdict.
+
+    Fires only on triage turns (no build-only authoring tools in allowed_names)
+    AND when the turn ran ≥1 evidence/enrichment tool. A triage turn with pure
+    research (no evidence tools called, just planning or asking questions) stays
+    inert -- there is nothing to verdict on yet.
+    """
+
+    def __init__(self) -> None:
+        self._ran_evidence_tool = False
+        self._emitted_verdict = False
+        self._forced = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result into the verdict state."""
+        if name in _TRIAGE_EVIDENCE_TOOLS:
+            # Special case: find_record only counts if kind=enrichment
+            if name == "find_record":
+                if isinstance(args, dict) and args.get("kind") == "enrichment":
+                    self._ran_evidence_tool = True
+            else:
+                self._ran_evidence_tool = True
+        # Check if a verdict was emitted
+        is_verdict = (
+            name == "emit_verdict" or
+            (name == "emit_card" and
+             isinstance(args, dict) and
+             args.get("card_type") == "verdict")
+        )
+        if is_verdict and isinstance(result, dict) and result.get("ok") is True:
+            self._emitted_verdict = True
+
+    def outstanding(self, allowed_names: set[str], authoring: bool) -> bool:
+        """True when triage ran evidence tools but never emitted a verdict.
+
+        Returns False if:
+          - This is an authoring/build turn (has build-only tools)
+          - No evidence tools were called
+          - A verdict was already emitted
+          - Guard has already forced once this turn
+        """
+        # Only fires on triage, not build
+        if authoring:
+            return False
+        # Only fires if evidence tools were called
+        if not self._ran_evidence_tool:
+            return False
+        # Already emitted or forced
+        if self._forced or self._emitted_verdict:
+            return False
+        # Guard fires
         return True
 
     def mark_forced(self) -> None:
