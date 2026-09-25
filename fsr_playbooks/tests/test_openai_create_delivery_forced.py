@@ -58,10 +58,9 @@ _BUILD_TOOLS = [
         "parameters": {"type": "object", "properties": {
             "yaml_text": {"type": "string"}}}}},
     {"type": "function", "function": {
-        "name": "emit_playbook_offer", "description": "offer to save",
+        "name": "emit_card", "description": "emit a card",
         "parameters": {"type": "object", "properties": {
-            "id": {"type": "string"}, "summary": {"type": "string"},
-            "yaml": {"type": "string"}}}}},
+            "card_type": {"type": "string"}, "payload": {"type": "object"}}}}},
 ]
 
 
@@ -75,7 +74,7 @@ async def _drain(gen):
 def _fake_dispatch(name, args):
     if name == "verify_playbook":
         return {"ready_to_push": True, "summary": "enriches the sender domain"}
-    if name == "emit_playbook_offer":
+    if name == "emit_card":
         return {"ok": True, "card": {"type": "playbook_offer"}}
     return {"ok": True}
 
@@ -131,14 +130,17 @@ def test_narrated_build_is_forced_into_a_real_offer_call():
 
     # The offer tool was actually CALLED, not narrated.
     offer_uses = [e for e in events
-                  if isinstance(e, ToolUseEvent) and e.name == "emit_playbook_offer"]
+                  if isinstance(e, ToolUseEvent) and e.name == "emit_card"]
     assert len(offer_uses) == 1, "guard did not force the offer call"
 
-    # And it carries the VERIFIED bytes, not the model's hallucinated YAML.
+    # The forced round now uses emit_card with card_type='playbook_offer'
+    assert offer_uses[0].arguments.get("card_type") == "playbook_offer"
+
+    # And it carries the VERIFIED bytes, not the model's hallucinated YAML (in payload now).
     offer_dispatch = [c for c in disp.call_args_list
-                      if c[0][0] == "emit_playbook_offer"]
+                      if c[0][0] == "emit_card"]
     assert len(offer_dispatch) == 1
-    assert offer_dispatch[0][0][1]["yaml"] == VERIFIED_YAML
+    assert offer_dispatch[0][0][1]["payload"]["yaml"] == VERIFIED_YAML
 
     # A card reached the stream and the turn closed cleanly.
     assert any(isinstance(e, ToolResultEvent)
@@ -168,6 +170,7 @@ def test_forced_create_delivery_fires_at_most_once():
 def test_offer_already_delivered_is_not_forced():
     # The happy path (also seen live): the model calls the offer itself. The
     # guard must stay out of the way -- no second, duplicate card.
+    # Now the model calls emit_card (the consolidated offer tool).
     turn1 = [
         _delta_chunk(tool_calls=[_tool_call_delta(
             index=0, id="c1", name="verify_playbook",
@@ -176,8 +179,10 @@ def test_offer_already_delivered_is_not_forced():
     ]
     turn2 = [
         _delta_chunk(tool_calls=[_tool_call_delta(
-            index=0, id="c2", name="emit_playbook_offer",
-            args=json.dumps({"id": "o1", "summary": "s", "yaml": VERIFIED_YAML}))]),
+            index=0, id="c2", name="emit_card",
+            args=json.dumps({"card_type": "playbook_offer",
+                             "payload": {"id": "o1", "summary": "s",
+                                        "yaml": VERIFIED_YAML}}))]),
         _delta_chunk(finish="tool_calls"), _usage_chunk(),
     ]
     turn3 = [_delta_chunk(content="Saved as a draft playbook."),
@@ -192,7 +197,7 @@ def test_offer_already_delivered_is_not_forced():
             system="s", messages=[Message(role="user", content="build one")],
             tools=_BUILD_TOOLS, tags={})))
     offer_uses = [e for e in events
-                  if isinstance(e, ToolUseEvent) and e.name == "emit_playbook_offer"]
+                  if isinstance(e, ToolUseEvent) and e.name == "emit_card"]
     assert len(offer_uses) == 1, "guard forced a duplicate offer"
     # No forced round: exactly the three modelled turns.
     assert create.await_count == 3
