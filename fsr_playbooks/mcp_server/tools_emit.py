@@ -1055,7 +1055,7 @@ def emit_verdict(
         import uuid  # noqa: PLC0415
         id = uuid.uuid4().hex[:16]
     card: dict[str, Any] = {
-        "type": "verdict",
+        "type": "verdict_card",
         "id": id,
         "disposition": disposition,
         "severity": severity,

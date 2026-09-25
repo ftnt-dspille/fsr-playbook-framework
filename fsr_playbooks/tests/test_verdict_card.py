@@ -29,7 +29,7 @@ class TestVerdictPayloadValidation:
             ],
         )
         assert r["ok"] is True
-        assert r["card"]["type"] == "verdict"
+        assert r["card"]["type"] == "verdict_card"
         assert r["card"]["disposition"] == "true_positive"
         assert len(r["card"]["findings"]) == 1
 
@@ -257,7 +257,7 @@ class TestVerdictViaEmitCard:
             "findings": [{"claim": "x", "evidence": ["id1"]}],
         })
         assert r["ok"] is True
-        assert r["card"]["type"] == "verdict"
+        assert r["card"]["type"] == "verdict_card"
         assert r["card_type"] == "verdict"
 
     def test_emit_card_unknown_verdict_type(self):
@@ -345,7 +345,7 @@ class TestWireEventShape:
         )
         assert r["ok"] is True
         card = r["card"]
-        assert card["type"] == "verdict"
+        assert card["type"] == "verdict_card"
         assert card["disposition"] == "false_positive"
         assert card["severity"] == "low"
         assert card["confidence"] == 0.75
@@ -377,3 +377,98 @@ class TestToolNameReferences:
         assert "severity" in schema["properties"]
         assert "confidence" in schema["properties"]
         assert "findings" in schema["properties"]
+
+
+class TestEvidenceSurvivesSuspension:
+    """Evidence recorded before tier-3 suspension is citable after resume."""
+
+    def test_evidence_survives_suspend_resume_cycle(self):
+        """Verify that TurnEvidence is preserved across suspend/resume."""
+        from fsr_playbooks.llm.approvals import SuspendedSession
+        from fsr_playbooks.mcp_server._citation_validator import (
+            TurnEvidence, set_turn_evidence, get_turn_evidence,
+        )
+
+        # Create evidence before suspension
+        evidence = TurnEvidence()
+        evidence.register("id1", "get_record", True)
+        evidence.register("id2", "search_records", True)
+        set_turn_evidence(evidence)
+
+        # Simulate suspension: serialize evidence into SuspendedSession
+        evidence_state = evidence.to_dict()
+        suspended = SuspendedSession(
+            approval_id="ap-test",
+            session_id="s-test",
+            tool="some_tool",
+            tool_use_id="tu-test",
+            args={},
+            tier=3,
+            history_snapshot=[],
+            prior_tool_result_blocks=[],
+            remaining_tool_calls=[],
+            system="sys",
+            tags={},
+            tools=[],
+            turn_evidence_state=evidence_state,
+        )
+
+        # Simulate resuming on a different thread: restore evidence
+        restored_evidence = TurnEvidence.from_dict(suspended.turn_evidence_state)
+        set_turn_evidence(restored_evidence)
+
+        # Verify evidence is intact after restore
+        current_evidence = get_turn_evidence()
+        assert current_evidence is not None
+        ids = current_evidence.valid_ids()
+        assert "id1" in ids
+        assert ids["id1"]["name"] == "get_record"
+        assert ids["id1"]["ok"] is True
+        assert "id2" in ids
+        assert ids["id2"]["name"] == "search_records"
+        assert ids["id2"]["ok"] is True
+
+    def test_restored_evidence_passes_citation_check(self):
+        """Verdict can cite evidence after resume."""
+        from fsr_playbooks.llm.approvals import SuspendedSession
+        from fsr_playbooks.mcp_server._citation_validator import (
+            TurnEvidence, set_turn_evidence,
+        )
+
+        # Create evidence before suspension
+        evidence = TurnEvidence()
+        evidence.register("id1", "get_record", True)
+        set_turn_evidence(evidence)
+
+        # Serialize for suspension
+        evidence_state = evidence.to_dict()
+        suspended = SuspendedSession(
+            approval_id="ap-test",
+            session_id="s-test",
+            tool="some_tool",
+            tool_use_id="tu-test",
+            args={},
+            tier=3,
+            history_snapshot=[],
+            prior_tool_result_blocks=[],
+            remaining_tool_calls=[],
+            system="sys",
+            tags={},
+            tools=[],
+            turn_evidence_state=evidence_state,
+        )
+
+        # Resume: restore evidence
+        restored = TurnEvidence.from_dict(suspended.turn_evidence_state)
+        set_turn_evidence(restored)
+
+        # Now emit_verdict should succeed using restored evidence
+        r = emit_verdict(
+            disposition="benign",
+            severity="low",
+            confidence=0.9,
+            summary="Activity is normal",
+            findings=[{"claim": "All checks passed", "evidence": ["id1"]}],
+        )
+        assert r["ok"] is True
+        assert r["card"]["type"] == "verdict_card"

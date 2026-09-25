@@ -672,7 +672,6 @@ class FortiAIProxyProvider(CapabilityMixin):
                     dur_ms = int((time.perf_counter() - _t0) * 1000)
                     # Register tool result for citation validation
                     from ..mcp_server._citation_validator import register_tool_result
-                    from ..llm.tools import _is_error_result
                     register_tool_result(call_id, tool_name, not _is_error_result(result))
                     yield ToolResultEvent(
                         call_id=call_id, result=result, duration_ms=dur_ms
@@ -705,6 +704,11 @@ class FortiAIProxyProvider(CapabilityMixin):
                             )
                             for _si, (_sname, _sargs) in enumerate(calls[_ci + 1:])
                         ]
+                        # Capture the current turn evidence so citations survive resume.
+                        from ..mcp_server._citation_validator import get_turn_evidence
+                        evidence = get_turn_evidence()
+                        evidence_state = evidence.to_dict() if evidence else {}
+
                         suspended_session = _approvals.SuspendedSession(
                             approval_id=approval_id,
                             # The CHAT session id, not `session_id` -- that local
@@ -728,6 +732,7 @@ class FortiAIProxyProvider(CapabilityMixin):
                             summary=result.get("summary"),
                             # the advertised slice -- resume re-enters with it
                             tools=list(tools or []),
+                            turn_evidence_state=evidence_state,
                         )
                         _approvals.bind(suspended_session)
                         if self._approval_gateway is not None:

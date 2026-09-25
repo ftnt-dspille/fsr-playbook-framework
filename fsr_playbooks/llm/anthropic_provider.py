@@ -1204,8 +1204,7 @@ class AnthropicProvider(CapabilityMixin):
                 _build_progress.note_result(name, args, result)
                 # Register the tool result for citation validation
                 if call_id:
-                    from .tools import _is_error_result as _check_error
-                    success = not _check_error(result)
+                    success = not _is_error_result(result)
                     from ..mcp_server._citation_validator import register_tool_result
                     register_tool_result(call_id, name, success)
                 content_str = _stringify(result)
@@ -1280,6 +1279,11 @@ class AnthropicProvider(CapabilityMixin):
                     # can fill them with placeholder denials.
                     pending_remaining = list(tool_calls[i + 1:])
                     approval_id = result["approval_id"]
+                    # Capture the current turn evidence so citations survive resume.
+                    from ..mcp_server._citation_validator import get_turn_evidence
+                    evidence = get_turn_evidence()
+                    evidence_state = evidence.to_dict() if evidence else {}
+
                     suspended_session = _approvals.SuspendedSession(
                         approval_id=approval_id,
                         # The CHAT session id, not `session_id` -- that local
@@ -1308,6 +1312,7 @@ class AnthropicProvider(CapabilityMixin):
                         summary=result.get("summary"),
                         # the advertised slice -- resume re-enters with it
                         tools=list(tools or []),
+                        turn_evidence_state=evidence_state,
                     )
                     # Phase 3.1: HMAC-bind the session to its args before
                     # stashing, so store tampering is detected on resume.

@@ -192,6 +192,10 @@ class SuspendedSession:
     # re-checks tiers on every call, so advertisement is not authorization.
     tools: list[Any] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
+    # Serialized turn evidence (tool_use_id -> {name, ok}) so citations survive
+    # suspension and resume on a different thread. TurnEvidence.to_dict() serializes
+    # it; TurnEvidence.from_dict() deserializes it.
+    turn_evidence_state: dict[str, Any] = field(default_factory=dict)
     # HMAC token binding (approval_id, tool, args_hash, created_at) under the
     # server secret. Set by `bind()` before stash; checked by `verify()` on
     # resume. Empty until bound (verify fails closed on empty).

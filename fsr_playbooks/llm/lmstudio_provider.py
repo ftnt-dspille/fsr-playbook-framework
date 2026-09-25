@@ -279,7 +279,6 @@ class LMStudioProvider(CapabilityMixin):
                 result = dispatch(name, args)
                 # Register tool result for citation validation
                 from ..mcp_server._citation_validator import register_tool_result
-                from ..llm.tools import _is_error_result
                 register_tool_result(call_id, name, not _is_error_result(result))
                 yield ToolResultEvent(call_id=call_id, result=result)
                 content_str = _stringify(result)

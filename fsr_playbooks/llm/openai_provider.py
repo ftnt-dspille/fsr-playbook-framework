@@ -921,8 +921,10 @@ class OpenAIProvider(CapabilityMixin):
                     _verdict_guard.mark_forced()
                     yield _emit_usage("verdict_guard_forced")
                     # Build list of successful evidence tool_use_ids for the directive
-                    from ..mcp_server._citation_validator import _get_tool_registry, _TRIAGE_EVIDENCE_TOOLS
-                    registry = _get_tool_registry()
+                    from ..mcp_server._citation_validator import get_turn_evidence
+                    from ._loop_helpers import _TRIAGE_EVIDENCE_TOOLS
+                    evidence = get_turn_evidence()
+                    registry = evidence.valid_ids() if evidence else {}
                     evidence_ids = [
                         eid for eid, info in registry.items()
                         if info.get("ok") is True and info.get("name") in _TRIAGE_EVIDENCE_TOOLS
@@ -1082,6 +1084,11 @@ class OpenAIProvider(CapabilityMixin):
                     # history (incl. the assistant tool_calls turn) is the
                     # snapshot, minus the leading system message -- stream()
                     # re-prepends system on resume.
+                    # Capture the current turn evidence so citations survive resume.
+                    from ..mcp_server._citation_validator import get_turn_evidence
+                    evidence = get_turn_evidence()
+                    evidence_state = evidence.to_dict() if evidence else {}
+
                     suspended_session = _approvals.SuspendedSession(
                         approval_id=approval_id,
                         # The CHAT session id, not `session_id` -- that local
@@ -1110,6 +1117,7 @@ class OpenAIProvider(CapabilityMixin):
                         summary=result.get("summary"),
                         # the advertised slice -- resume re-enters with it
                         tools=list(tools or []),
+                        turn_evidence_state=evidence_state,
                     )
                     _approvals.bind(suspended_session)
                     if self._approval_gateway is not None:
