@@ -272,3 +272,99 @@ def test_no_gold_eval_files_in_recipes() -> None:
     # Check for overlap
     overlap = recipe_hashes & gold_hashes
     assert not overlap, f"Found {len(overlap)} gold eval files in recipes table (eval leakage)"
+
+
+def test_harvest_preserves_db_structure() -> None:
+    """Test that harvest adds rows without clobbering core tables.
+
+    Regression test: harvest script must never CREATE TABLE IF NOT EXISTS
+    on the packaged DB - it should only INSERT/REPLACE into recipes of
+    an existing DB. If the DB loses tables, harvest failed to validate.
+    """
+    import shutil
+    from scripts.harvest_examples import (
+        _insert_recipes,
+        _validate_db_structure,
+    )
+
+    # Use the packaged DB as source of truth
+    packaged_db = Path(__file__).parent.parent.parent / "fsr_playbooks" / "_data" / "fsr_reference.db"
+
+    if not packaged_db.exists():
+        pytest.skip("packaged DB not found")
+
+    # Count tables and recipes before
+    with sqlite3.connect(str(packaged_db)) as conn:
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+        )
+        tables_before = cursor.fetchone()[0]
+
+        # Count step_types (should be stable)
+        try:
+            cursor = conn.execute("SELECT COUNT(*) FROM step_types")
+            step_types_before = cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            step_types_before = 0
+
+        # Count existing recipes
+        try:
+            cursor = conn.execute("SELECT COUNT(*) FROM recipes")
+            recipes_before = cursor.fetchone()[0]
+        except sqlite3.OperationalError:
+            recipes_before = 0
+
+    # Validate DB structure
+    is_valid, error_msg = _validate_db_structure(packaged_db)
+    assert is_valid, f"Packaged DB validation failed: {error_msg}"
+
+    # Create a copy and run harvest simulation
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_db = Path(tmpdir) / "test_packaged.db"
+        shutil.copy2(packaged_db, test_db)
+
+        # Insert a few test recipes
+        test_rows = [
+            {
+                "name": "Test Recipe",
+                "kind": "example",
+                "when_to_use": "Test purposes",
+                "yaml_template": "playbooks:\n  - name: Test\n    steps: []",
+                "source_playbook": "test.yaml",
+                "_content_hash": "abc123",
+            }
+        ]
+
+        inserted, skipped = _insert_recipes(test_db, test_rows)
+        assert inserted > 0, "Failed to insert test rows"
+
+        # Verify structure is preserved
+        with sqlite3.connect(str(test_db)) as conn:
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+            )
+            tables_after = cursor.fetchone()[0]
+
+            # Must have same number of tables
+            assert tables_after == tables_before, (
+                f"DB lost tables: {tables_before} → {tables_after}. "
+                f"Harvest must only add rows, not alter schema."
+            )
+
+            # step_types row count must be unchanged
+            try:
+                cursor = conn.execute("SELECT COUNT(*) FROM step_types")
+                step_types_after = cursor.fetchone()[0]
+                assert step_types_after == step_types_before, (
+                    f"step_types changed: {step_types_before} → {step_types_after}. "
+                    f"Harvest should not modify core tables."
+                )
+            except sqlite3.OperationalError:
+                pass
+
+            # recipes must have gained rows
+            cursor = conn.execute("SELECT COUNT(*) FROM recipes")
+            recipes_after = cursor.fetchone()[0]
+            assert recipes_after >= recipes_before + 1, (
+                f"recipes did not gain rows: {recipes_before} → {recipes_after}"
+            )

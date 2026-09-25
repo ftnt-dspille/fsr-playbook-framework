@@ -31,6 +31,36 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def _validate_db_structure(db_path: Path) -> tuple[bool, str]:
+    """Validate that DB has the expected core tables.
+
+    Returns (is_valid, error_message).
+    Must have at least: step_types, picklists, operations, recipes.
+    Refuse to run if DB is missing these tables - harvest must only
+    add/replace rows in recipes of an existing DB, never initialize it.
+    """
+    required_tables = {"step_types", "picklists", "operations", "recipes"}
+
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+            existing_tables = {row[0] for row in cursor.fetchall()}
+
+            missing = required_tables - existing_tables
+            if missing:
+                return False, (
+                    f"DB {db_path} missing required tables: {missing}. "
+                    f"Harvest must only add rows to an existing DB, not initialize it. "
+                    f"Restore from main or use a reference DB with all core tables."
+                )
+
+            return True, ""
+    except Exception as e:
+        return False, f"Failed to validate DB {db_path}: {e}"
+
+
 def _has_real_credentials(text: str) -> bool:
     """Check if text contains real credential values (not placeholders).
 
@@ -438,17 +468,6 @@ def _insert_recipes(
 
     try:
         with sqlite3.connect(str(db_path)) as conn:
-            # Create table if it doesn't exist
-            conn.execute(
-                """CREATE TABLE IF NOT EXISTS recipes (
-                    name            TEXT PRIMARY KEY,
-                    kind            TEXT NOT NULL,
-                    when_to_use     TEXT,
-                    yaml_template   TEXT NOT NULL,
-                    source_playbook TEXT
-                )"""
-            )
-
             # Delete junk rows
             for name in junk_names:
                 try:
@@ -564,6 +583,26 @@ def main() -> int:
     if args.dry_run:
         print(f"\nDry run: would insert {len(rows)} rows into {len(dbs)} DB(s)")
         return 0
+
+    # Validate all DBs have required tables before proceeding
+    print(f"\nValidating DB structure...")
+    for db_path in dbs:
+        if not db_path.exists():
+            print(f"  Warning: {db_path} does not exist, will skip it")
+            continue
+
+        is_valid, error_msg = _validate_db_structure(db_path)
+        if not is_valid:
+            print(f"  ERROR: {error_msg}")
+            return 1
+
+        # Count tables for verification
+        with sqlite3.connect(str(db_path)) as conn:
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+            )
+            table_count = cursor.fetchone()[0]
+            print(f"  ✓ {db_path}: {table_count} tables found")
 
     # Estimate DB size change
     total_yaml_size = sum(len(r["yaml_template"]) for r in rows)
