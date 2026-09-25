@@ -389,6 +389,10 @@ class FortiAIProxyProvider(CapabilityMixin):
         max_tool_turns: int | None = None,
     ) -> AsyncIterator[Event]:
         """Non-streaming agent loop via the on-appliance fortiai-proxy."""
+        # Clear per-turn citation validator state for structured verdicts
+        from ..mcp_server._citation_validator import clear_tool_registry
+        clear_tool_registry()
+
         tags = tags or {}
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
@@ -666,6 +670,10 @@ class FortiAIProxyProvider(CapabilityMixin):
                     _t0 = time.perf_counter()
                     result = _guarded_dispatch(tool_name, parsed_args)
                     dur_ms = int((time.perf_counter() - _t0) * 1000)
+                    # Register tool result for citation validation
+                    from ..mcp_server._citation_validator import register_tool_result
+                    from ..llm.tools import _is_error_result
+                    register_tool_result(call_id, tool_name, not _is_error_result(result))
                     yield ToolResultEvent(
                         call_id=call_id, result=result, duration_ms=dur_ms
                     )

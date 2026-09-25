@@ -129,6 +129,10 @@ class LMStudioProvider(CapabilityMixin):
             yield ErrorEvent(message="No LM Studio model selected -- pick one in Settings.")
             return
 
+        # Clear per-turn citation validator state for structured verdicts
+        from ..mcp_server._citation_validator import clear_tool_registry
+        clear_tool_registry()
+
         history = _to_openai_messages(system, messages)
         self_repair_turns = 0
         session_id = _uuid.uuid4().hex[:8]
@@ -273,6 +277,10 @@ class LMStudioProvider(CapabilityMixin):
                     args = {}
                 yield ToolUseEvent(name=name, arguments=args, call_id=call_id)
                 result = dispatch(name, args)
+                # Register tool result for citation validation
+                from ..mcp_server._citation_validator import register_tool_result
+                from ..llm.tools import _is_error_result
+                register_tool_result(call_id, name, not _is_error_result(result))
                 yield ToolResultEvent(call_id=call_id, result=result)
                 content_str = _stringify(result)
                 history.append({
