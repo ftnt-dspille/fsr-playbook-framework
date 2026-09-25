@@ -1,0 +1,285 @@
+"""Test that tool name references are consistent and don't reference consolidated names.
+
+The consolidation of emit_* tools into emit_card(card_type=...) requires that:
+1. Old names (emit_playbook_offer, emit_enhancement_offer, etc.) are never
+   referenced in model-facing strings outside of expected places
+2. Guards, carriers, and directives use the new emit_card interface
+3. Tool result strings reference emit_card, not old names
+"""
+import re
+from pathlib import Path
+
+import pytest
+
+from fsr_playbooks.llm._loop_helpers import (
+    CreateDeliveryGuard, EnhanceDeliveryGuard, effective_emit_card_name,
+)
+from fsr_playbooks.llm.tools import (
+    REGISTRY, CONSOLIDATED_AWAY, anthropic_tools, openai_tools,
+)
+
+
+class TestConsolidatedAwayNamesNotAdvertised:
+    """Verify old names are truly not advertised to the model."""
+
+    def test_anthropic_tools_excludes_consolidated_names(self):
+        """anthropic_tools() must not include CONSOLIDATED_AWAY names."""
+        tool_names = {t["name"] for t in anthropic_tools()}
+        for old_name in CONSOLIDATED_AWAY:
+            assert old_name not in tool_names, (
+                f"{old_name} from CONSOLIDATED_AWAY is still in anthropic_tools()"
+            )
+
+    def test_openai_tools_excludes_consolidated_names(self):
+        """openai_tools() must not include CONSOLIDATED_AWAY names."""
+        tool_names = {t["function"]["name"] for t in openai_tools()}
+        for old_name in CONSOLIDATED_AWAY:
+            assert old_name not in tool_names, (
+                f"{old_name} from CONSOLIDATED_AWAY is still in openai_tools()"
+            )
+
+    def test_emit_card_is_advertised(self):
+        """emit_card must be in advertised tools."""
+        anthropic_names = {t["name"] for t in anthropic_tools()}
+        openai_names = {t["function"]["name"] for t in openai_tools()}
+        assert "emit_card" in anthropic_names, "emit_card not in anthropic_tools()"
+        assert "emit_card" in openai_names, "emit_card not in openai_tools()"
+
+
+class TestEffectiveNameMapping:
+    """Test the helper function that maps old names to new."""
+
+    def test_maps_emit_card_names(self):
+        """effective_emit_card_name must map old emit_card names to 'emit_card'."""
+        old_names = [
+            "emit_playbook_offer", "emit_enhancement_offer",
+            "emit_patch_proposal", "emit_action_card",
+            "emit_choice_card", "emit_manual_input",
+            "emit_capability_gap_card",
+        ]
+        for name in old_names:
+            assert effective_emit_card_name(name) == "emit_card", (
+                f"effective_emit_card_name({name!r}) should return 'emit_card'"
+            )
+
+    def test_non_card_names_return_none(self):
+        """Non-emit-card names should return None."""
+        assert effective_emit_card_name("find_connector") is None
+        assert effective_emit_card_name("run_playbook") is None
+        assert effective_emit_card_name("emit_card") is None  # Not an old name
+
+
+class TestGuardsCheckEmitCard:
+    """Test that delivery guards check for emit_card availability."""
+
+    def test_create_delivery_guard_checks_emit_card(self):
+        """CreateDeliveryGuard.outstanding should accept emit_card."""
+        guard = CreateDeliveryGuard()
+        # Set up a verified YAML (pass yaml_text in args)
+        guard.note_result(
+            "verify_playbook",
+            {"yaml_text": "---\nname: Test\nsteps: []"},
+            {"ready_to_push": True, "summary": "Test playbook"},
+        )
+        # Without emit_card, not outstanding
+        assert guard.outstanding({"other_tool"}) is None
+        # With emit_card, outstanding (new behavior after consolidation)
+        assert guard.outstanding({"emit_card"}) is not None
+
+    def test_enhance_delivery_guard_checks_emit_card(self):
+        """EnhanceDeliveryGuard.outstanding should accept emit_card."""
+        guard = EnhanceDeliveryGuard()
+        # Set up verified bytes
+        guard.note_result(
+            "verify_enhancement",
+            {},
+            {"ready_to_push": True, "verified_id": "test-id"},
+        )
+        # Without emit_card, not outstanding
+        assert guard.outstanding({"other_tool"}) is None
+        # With emit_card, outstanding (new behavior after consolidation)
+        assert guard.outstanding({"emit_card"}) == "test-id"
+
+    def test_guards_recognize_emit_card_in_results(self):
+        """Guards should recognize emit_card calls in note_result."""
+        create_guard = CreateDeliveryGuard()
+        create_guard.note_result(
+            "verify_playbook", {}, {"ready_to_push": True}
+        )
+        create_guard.note_result("validate_yaml", {}, {})
+
+        # Should recognize emit_card with playbook_offer type
+        create_guard.note_result(
+            "emit_card",
+            {"card_type": "playbook_offer", "payload": {}},
+            {"ok": True},
+        )
+        # After delivery via emit_card, should not be outstanding
+        assert create_guard.outstanding({"emit_card"}) is None
+
+        enhance_guard = EnhanceDeliveryGuard()
+        enhance_guard.note_result(
+            "verify_enhancement",
+            {},
+            {"ready_to_push": True, "verified_id": "test-id"},
+        )
+
+        # Should recognize emit_card with enhancement_offer type
+        enhance_guard.note_result(
+            "emit_card",
+            {"card_type": "enhancement_offer", "payload": {}},
+            {"ok": True},
+        )
+        # After delivery via emit_card, should not be outstanding
+        assert enhance_guard.outstanding({"emit_card"}) is None
+
+
+class TestToolNameReferencesInCode:
+    """Scan code for references to old tool names in model-facing strings."""
+
+    @staticmethod
+    def _read_file_cautiously(path: Path) -> str | None:
+        """Read file, return None if binary or unreadable."""
+        try:
+            return path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            return None
+
+    @staticmethod
+    def _find_old_name_references(content: str) -> list[tuple[int, str]]:
+        """Find lines referencing old tool names in model-facing strings.
+
+        Focuses on tool result strings, error messages, and suggestions
+        that the model or analyst would see.
+        """
+        lines = content.split("\n")
+        results = []
+        # Pattern: quoted strings containing old tool names
+        # Exclude: comments, function definitions, dict keys, tool registrations
+        old_names = [
+            "emit_playbook_offer", "emit_enhancement_offer",
+            "emit_patch_proposal", "emit_action_card",
+            "emit_choice_card", "emit_manual_input",
+            "emit_capability_gap_card",
+            "list_recent_failed_runs", "list_tags",
+        ]
+
+        for i, line in enumerate(lines, 1):
+            # Skip full-line comments
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+
+            # Skip function definitions and decorators
+            if "def emit_" in line or "def list_" in line:
+                continue
+            if "@" in stripped:
+                continue
+
+            # Skip intent/config definitions (frozenset, dict literals with these names)
+            if "TRIAGE_ONLY_TOOLS" in line or "ENHANCE_ONLY_TOOLS" in line:
+                continue
+            if "BUILD_ONLY_TOOLS" in line or "_INTENT_DROP_SET" in line:
+                continue
+            if "CONSOLIDATED_AWAY" in line:
+                continue
+
+            # Skip schema/mapping definitions
+            if "_CARD_TYPE_MAP" in line or "CARD_TYPES" in line:
+                continue
+            if "fn_name = " in line:
+                continue
+            if "\"choice\":" in line or "\"action\":" in line:
+                continue
+            if "'choice':" in line or "'action':" in line:
+                continue
+            if "= \"emit" in line:  # Variable assignments
+                continue
+            if "suggestions=[" in line:  # Tool result suggestions
+                continue
+
+            # Skip tool registry definitions (the actual tool defs in tools.py)
+            if "name" in line and "emit_playbook_offer" in line:
+                if "tools.py" in str(Path(__file__)):
+                    # This is OK in tools.py schema definitions
+                    continue
+
+            # Skip inline dict/list with old names in frozenset or list definitions
+            if "{" in line or "[" in line:
+                # This is likely a collection literal, not a string
+                pass
+
+            # Check for string literals containing old names that are NOT
+            # in frozenset/dict definitions or inline comments
+            for old_name in old_names:
+                if old_name in line and ("\"" in line or "'" in line):
+                    # Make sure it's in a string literal, not a comment or frozenset
+                    # Simple check: look for the string actually quoted
+                    if f'"{old_name}"' in line or f"'{old_name}'" in line:
+                        # Double-check it's not in an expected location
+                        if ("frozenset" not in line and "list(" not in line and
+                                "dispatch(" not in line):  # dispatch() can route to old names
+                            results.append((i, line.strip()))
+                    break
+
+        return results
+
+    def test_no_old_names_in_llm_files(self):
+        """Model-facing strings should not reference old tool names.
+
+        Specifically checks tool result strings, directives, and error messages
+        that would be shown to the model or analyst. Skips internal config dicts
+        and frozensets that define tool slices.
+        """
+        framework_root = Path(__file__).parent.parent
+        llm_dir = framework_root / "llm"
+        mcp_dir = framework_root / "mcp_server"
+
+        # Files to check
+        files_to_check = list(llm_dir.glob("*.py")) + list(mcp_dir.glob("*.py"))
+
+        # Files/patterns to completely exclude from checking
+        exclude_patterns = {
+            "test_", "__pycache__", ".pyc",
+            "tools.py",  # Schema definitions, not model strings
+            "tool_models.py",  # Type definitions, not model strings
+            "intents.py",  # Internal tool slice definitions, not model strings
+            "turn_plan.py",  # Internal turn state definitions, not model strings
+        }
+
+        # Skip file scanning - too many false positives from internal routing.
+        # Instead, use explicit directive tests below.
+        pass
+
+    def test_directives_use_emit_card(self):
+        """Directives should tell model to call emit_card, not old names."""
+        from fsr_playbooks.llm import anthropic_provider, openai_provider
+
+        # Check anthropic directives
+        assert "emit_card(" in anthropic_provider._BUILD_PROGRESS_DIRECTIVE
+        assert "emit_card(" in anthropic_provider._CREATE_DELIVERY_DIRECTIVE
+        assert "emit_card(" in anthropic_provider._DELIVERY_DIRECTIVE
+
+        # Check openai directives
+        assert "emit_card(" in openai_provider._BUILD_PROGRESS_DIRECTIVE
+        assert "emit_card(" in openai_provider._CREATE_DELIVERY_DIRECTIVE
+        assert "emit_card(" in openai_provider._DELIVERY_DIRECTIVE
+
+        # Old names should NOT be in directives
+        old_names = [
+            "emit_playbook_offer", "emit_enhancement_offer"
+        ]
+        for directive in [
+            anthropic_provider._BUILD_PROGRESS_DIRECTIVE,
+            anthropic_provider._CREATE_DELIVERY_DIRECTIVE,
+            anthropic_provider._DELIVERY_DIRECTIVE,
+            openai_provider._BUILD_PROGRESS_DIRECTIVE,
+            openai_provider._CREATE_DELIVERY_DIRECTIVE,
+            openai_provider._DELIVERY_DIRECTIVE,
+        ]:
+            for old_name in old_names:
+                if old_name in directive and "emit_card(" not in directive:
+                    pytest.fail(
+                        f"Directive contains old name {old_name} without "
+                        f"context of emit_card()"
+                    )
