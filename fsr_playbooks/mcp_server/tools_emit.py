@@ -960,6 +960,116 @@ def emit_manual_input(
     }
 
 
+def emit_verdict(
+    disposition: str,
+    severity: str,
+    confidence: float,
+    summary: str,
+    findings: list[dict[str, Any]],
+    unknowns: list[str] | None = None,
+    recommended_actions: list[dict[str, Any]] | None = None,
+    id: str | None = None,
+) -> dict[str, Any]:
+    """Emit a `verdict` card with a structured investigation conclusion.
+
+    NOTE: This is an internal implementation function. The public interface is
+    emit_card(card_type='verdict', payload={...}). Do not advertise this tool
+    separately; it is only callable through emit_card routing.
+
+    Args:
+      disposition: one of true_positive, false_positive, benign, suspicious, needs_more_info
+      severity: one of critical, high, medium, low, info
+      confidence: float 0.0-1.0, how sure the verdict is
+      summary: plain-English summary (≤600 chars)
+      findings: list of {claim: str, evidence: [tool_call_id, ...]}; each must have
+        ≥1 finding and ≥1 evidence id (a tool_use id from THIS session)
+      unknowns: open questions that could shift the verdict; empty only if confidence ≥ 0.8
+      recommended_actions: optional list of {label, tool?, args?} for next steps
+      id: optional card id; generated if absent
+    """
+    if not isinstance(disposition, str) or disposition not in (
+            "true_positive", "false_positive", "benign", "suspicious", "needs_more_info"):
+        return _err("bad_disposition",
+                    f"disposition must be one of: true_positive, false_positive, "
+                    f"benign, suspicious, needs_more_info (got {disposition!r})")
+    if not isinstance(severity, str) or severity not in (
+            "critical", "high", "medium", "low", "info"):
+        return _err("bad_severity",
+                    f"severity must be one of: critical, high, medium, low, info "
+                    f"(got {severity!r})")
+    if not isinstance(confidence, (int, float)):
+        return _err("bad_confidence", "confidence must be a number")
+    if not (0.0 <= confidence <= 1.0):
+        return _err("bad_confidence", "confidence must be between 0.0 and 1.0")
+    if not isinstance(summary, str) or not summary.strip():
+        return _err("missing_summary", "summary must be a non-empty string")
+    if len(summary) > 600:
+        return _err("summary_too_long", "summary must be ≤600 chars")
+    if not isinstance(findings, list) or not findings:
+        return _err("no_findings",
+                    "findings must be a non-empty list of {claim, evidence}")
+    for i, f in enumerate(findings):
+        if not isinstance(f, dict):
+            return _err("bad_finding", f"findings[{i}] must be an object")
+        if not f.get("claim") or not isinstance(f["claim"], str):
+            return _err("bad_finding",
+                        f"findings[{i}] must have a non-empty string 'claim'")
+        if not f.get("evidence"):
+            return _err("bad_finding_evidence",
+                        f"findings[{i}].evidence must be a non-empty list of "
+                        f"tool_call_ids (strings)")
+        if not isinstance(f["evidence"], list):
+            return _err("bad_finding_evidence",
+                        f"findings[{i}].evidence must be a list")
+        for j, eid in enumerate(f["evidence"]):
+            if not isinstance(eid, str) or not eid.strip():
+                return _err("bad_evidence_id",
+                            f"findings[{i}].evidence[{j}] must be a non-empty "
+                            f"string (a tool_use_id)")
+    # Check unknowns and confidence consistency
+    unknowns_list: list[str] = []
+    if unknowns is not None:
+        if not isinstance(unknowns, list):
+            return _err("bad_unknowns", "unknowns must be a list of strings or null")
+        unknowns_list = [str(u).strip() for u in unknowns if u]
+    if not unknowns_list and confidence < 0.8:
+        return _err("confidence_unknowns_conflict",
+                    "unknowns list cannot be empty when confidence < 0.8; list "
+                    "open questions or raise confidence to ≥0.8")
+    if recommended_actions is not None:
+        if not isinstance(recommended_actions, list):
+            return _err("bad_actions", "recommended_actions must be a list")
+        for i, a in enumerate(recommended_actions):
+            if not isinstance(a, dict):
+                return _err("bad_action", f"recommended_actions[{i}] must be an object")
+            if not a.get("label") or not isinstance(a["label"], str):
+                return _err("bad_action",
+                            f"recommended_actions[{i}] must have a 'label' field")
+    # Validate evidence ids exist in this session. Import the citation validator.
+    from ._citation_validator import validate_evidence_ids
+    validation_err = validate_evidence_ids([eid for f in findings for eid in f["evidence"]])
+    if validation_err is not None:
+        return validation_err
+    # Generate id if missing
+    if not id or not isinstance(id, str):
+        import uuid  # noqa: PLC0415
+        id = uuid.uuid4().hex[:16]
+    card: dict[str, Any] = {
+        "type": "verdict_card",
+        "id": id,
+        "disposition": disposition,
+        "severity": severity,
+        "confidence": float(confidence),
+        "summary": summary.strip(),
+        "findings": findings,
+    }
+    if unknowns_list:
+        card["unknowns"] = unknowns_list
+    if recommended_actions:
+        card["recommended_actions"] = recommended_actions
+    return {"ok": True, "card": card}
+
+
 # ---------------------------------------------------------------------------
 # Phase 1 consolidation: one card emitter over the seven emit_* card tools.
 # The specialized names stay registered during the migration; each one's
@@ -1059,6 +1169,7 @@ CARD_TYPES: dict[str, str] = {
     "playbook_offer": "emit_playbook_offer",
     "patch_proposal": "emit_patch_proposal",
     "enhancement_offer": "emit_enhancement_offer",
+    "verdict": "emit_verdict",
 }
 
 
@@ -1076,7 +1187,9 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     terminal action of a build turn). `enhancement_offer` = apply a verified
     edit to the OPEN playbook (terminal action of an enhance turn; needs
     `verified_id` from verify_enhancement). `patch_proposal` = one-click
-    before/after fix to one step or field of the open playbook.
+    before/after fix to one step or field of the open playbook. `verdict` =
+    structured investigation conclusion with disposition, severity, confidence,
+    and cited findings (evidence tied to tool_call_ids).
     """
     kt = (card_type or "").strip().lower()
     fn_name = CARD_TYPES.get(kt)

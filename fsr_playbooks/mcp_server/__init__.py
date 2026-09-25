@@ -122,6 +122,7 @@ from .tools_emit import (
     emit_manual_input,
     emit_patch_proposal,
     emit_playbook_offer,
+    emit_verdict,  # Internal only; not exported in __all__
 )
 from .tools_enhancement import verify_enhancement
 
@@ -251,6 +252,16 @@ __all__ = [
     "set_failed_run_provider",
     # Verify
     "verify_playbook",
+    # Emit / card tools
+    "emit_card",
+    "emit_choice_card",
+    "emit_action_card",
+    "emit_capability_gap_card",
+    "emit_playbook_offer",
+    "emit_patch_proposal",
+    "emit_enhancement_offer",
+    "emit_manual_input",
+    "emit_decision_step",
     # Catalog (Phase 0 + 0.5)
     "find_api_example",
     "find_api_fixture",

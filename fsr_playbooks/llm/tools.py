@@ -1067,14 +1067,14 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                 "type": "string",
                 "enum": ["choice", "action", "manual_input", "capability_gap",
                          "playbook_offer", "patch_proposal",
-                         "enhancement_offer"],
+                         "enhancement_offer", "verdict"],
                 "description": "Which card to render; see the tool "
                                "description for when each applies.",
             },
             "payload": {
                 "type": "object",
                 "description": "The chosen card's fields -- identical to the "
-                               "matching emit_<card_type>_card tool's "
+                               "matching emit_<card_type> tool's "
                                "arguments (e.g. choice: id, prompt, options).",
             },
         },
@@ -1331,6 +1331,81 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                     "agent has hand-authored validated YAML and the "
                     "compiler has no trace to build from."
                 ),
+            },
+        },
+    },
+    "emit_verdict": {
+        "type": "object",
+        "required": ["disposition", "severity", "confidence", "summary", "findings"],
+        "additionalProperties": False,
+        "properties": {
+            "disposition": {
+                "type": "string",
+                "enum": ["true_positive", "false_positive", "benign", "suspicious", "needs_more_info"],
+                "description": "Investigation outcome classification.",
+            },
+            "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low", "info"],
+                "description": "Risk level if true_positive.",
+            },
+            "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Confidence in verdict (0.0-1.0).",
+            },
+            "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600,
+                "description": "Plain-English verdict summary (≤600 chars).",
+            },
+            "findings": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Supporting evidence claims + tool_use_ids.",
+                "items": {
+                    "type": "object",
+                    "required": ["claim", "evidence"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "claim": {"type": "string", "minLength": 1,
+                                  "description": "Plain-English finding."},
+                        "evidence": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string", "minLength": 1},
+                            "description": "tool_use_ids from THIS session that support this finding.",
+                        },
+                    },
+                },
+            },
+            "unknowns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Open questions; required if confidence < 0.8.",
+            },
+            "recommended_actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["label"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1,
+                                  "description": "Action description."},
+                        "tool": {"type": "string",
+                                 "description": "Optional tool name."},
+                        "args": {"type": "object",
+                                 "description": "Optional tool arguments."},
+                    },
+                },
+                "description": "Optional next steps.",
+            },
+            "id": {
+                "type": "string",
+                "description": "Optional card id; generated if absent.",
             },
         },
     },
