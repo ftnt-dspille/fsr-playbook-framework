@@ -960,7 +960,6 @@ def emit_manual_input(
     }
 
 
-@mcp.tool()
 def emit_verdict(
     disposition: str,
     severity: str,
@@ -972,6 +971,10 @@ def emit_verdict(
     id: str | None = None,
 ) -> dict[str, Any]:
     """Emit a `verdict` card with a structured investigation conclusion.
+
+    NOTE: This is an internal implementation function. The public interface is
+    emit_card(card_type='verdict', payload={...}). Do not advertise this tool
+    separately; it is only callable through emit_card routing.
 
     Args:
       disposition: one of true_positive, false_positive, benign, suspicious, needs_more_info

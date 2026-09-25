@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsr_playbooks.mcp_server import emit_verdict, emit_card
+from fsr_playbooks.mcp_server import emit_card
+from fsr_playbooks.mcp_server.tools_emit import emit_verdict
 from fsr_playbooks.mcp_server._citation_validator import (
     clear_tool_registry, register_tool_result, validate_evidence_ids,
 )

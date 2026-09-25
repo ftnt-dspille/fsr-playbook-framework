@@ -178,6 +178,21 @@ _CREATE_DELIVERY_DIRECTIVE = (
 )
 
 
+def _verdict_directive(evidence_ids: list[str]) -> str:
+    """Forced-round directive for the verdict guard.
+
+    Lists valid evidence tool_use_ids from this turn so the model can cite them.
+    """
+    ids_str = ", ".join(evidence_ids[:10]) + ("..." if len(evidence_ids) > 10 else "")
+    return (
+        "You investigated using evidence tools but did not emit a verdict. "
+        "Call `emit_card(card_type='verdict', payload={...})` now with a structured "
+        "conclusion (disposition, severity, confidence, findings with citations). "
+        f"Evidence tool_use_ids from this turn: {ids_str}. "
+        "The findings.evidence list must cite these ids."
+    )
+
+
 def _max_tokens_param(model: str, value: int) -> dict[str, int]:
     """The output-cap kwarg for `model`, under its correct name.
 
@@ -481,6 +496,9 @@ class OpenAIProvider(CapabilityMixin):
         self_repair_turns = 0
         any_tools_run = False
         assessment_forced = False
+        # Clear per-turn citation validator state for structured verdicts
+        from ..mcp_server._citation_validator import clear_tool_registry
+        clear_tool_registry()
         # Enhance mode: guarantees a passing verify is actually delivered via
         # emit_enhancement_offer rather than narrated. Inert unless the offer
         # tool is in the advertised slice (see EnhanceDeliveryGuard).
@@ -490,6 +508,9 @@ class OpenAIProvider(CapabilityMixin):
         _create_delivery = CreateDeliveryGuard()
         # Research-but-never-authored detector -- see BuildProgressGuard.
         _build_progress = BuildProgressGuard()
+        # Triage verdict guard -- fires when evidence tools ran but no verdict.
+        from ._loop_helpers import VerdictDeliveryGuard
+        _verdict_guard = VerdictDeliveryGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -895,6 +916,69 @@ class OpenAIProvider(CapabilityMixin):
                     yield DoneEvent(stop_reason="end_turn")
                     return
 
+                # Verdict guard: triage turns with evidence tools must emit a verdict
+                if _verdict_guard.outstanding(allowed_names, _authoring):
+                    _verdict_guard.mark_forced()
+                    yield _emit_usage("verdict_guard_forced")
+                    # Build list of successful evidence tool_use_ids for the directive
+                    from ..mcp_server._citation_validator import _get_tool_registry, _TRIAGE_EVIDENCE_TOOLS
+                    registry = _get_tool_registry()
+                    evidence_ids = [
+                        eid for eid, info in registry.items()
+                        if info.get("ok") is True and info.get("name") in _TRIAGE_EVIDENCE_TOOLS
+                    ]
+                    # Look for emit_card in the advertised tools
+                    card_schema = next(
+                        (t for t in tools
+                         if (t.get("function") or {}).get("name") == "emit_card"), None)
+                    if card_schema is not None:
+                        turn_idx += 1
+                        history.append({
+                            "role": "user",
+                            "content": _verdict_directive(evidence_ids),
+                        })
+                        try:
+                            resp = await self._client.chat.completions.create(
+                                model=self.model, messages=history,
+                                tools=[card_schema],
+                                tool_choice={
+                                    "type": "function",
+                                    "function": {"name": "emit_card"},
+                                },
+                                **_max_tokens_param(self.model, 512),
+                            )
+                            msg = resp.choices[0].message
+                            raw = (msg.tool_calls[0].function.arguments
+                                   if msg.tool_calls else "{}")
+                            try:
+                                oargs = json.loads(raw) if raw else {}
+                            except Exception:
+                                oargs = {}
+                            if not isinstance(oargs, dict):
+                                oargs = {}
+                            # Ensure card_type is set to verdict
+                            if not oargs.get("card_type"):
+                                oargs["card_type"] = "verdict"
+                            # Wrap arguments in payload for emit_card
+                            if not isinstance(oargs.get("payload"), dict):
+                                oargs["payload"] = {}
+                            call_id = (msg.tool_calls[0].id
+                                       if msg.tool_calls else _uuid.uuid4().hex[:8])
+                            yield ToolUseEvent(
+                                name="emit_card", arguments=oargs,
+                                call_id=call_id,
+                                tier=_tier_for("emit_card", oargs))
+                            _t0 = time.perf_counter()
+                            oresult = _guarded_dispatch("emit_card", oargs)
+                            _dur = int((time.perf_counter() - _t0) * 1000)
+                            yield ToolResultEvent(
+                                call_id=call_id, result=oresult, duration_ms=_dur)
+                        except Exception:
+                            import logging
+                            logging.exception("forced verdict delivery failed")
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
+
                 if not text_buf.strip() and any_tools_run and not assessment_forced:
                     assessment_forced = True
                     yield _emit_usage("assessment_forced")
@@ -940,7 +1024,12 @@ class OpenAIProvider(CapabilityMixin):
             tool_messages: list[dict[str, Any]] = []
 
             def _record(name: str, args: dict[str, Any], result: Any,
-                        duration_ms: int | None = None) -> str:
+                        duration_ms: int | None = None, call_id: str | None = None) -> str:
+                # Register the tool result for citation validation
+                if call_id:
+                    from ..mcp_server._citation_validator import register_tool_result
+                    success = not _is_error_result(result)
+                    register_tool_result(call_id, name, success)
                 content_str = _stringify(result)
                 try:
                     args_chars = len(json.dumps(args, default=str))
@@ -968,10 +1057,11 @@ class OpenAIProvider(CapabilityMixin):
                 )
                 for (call_id, name, args), (result, dur_ms) in zip(parallel_batch, batch_results):
                     yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
-                    content_str = _record(name, args, result, dur_ms)
+                    content_str = _record(name, args, result, dur_ms, call_id=call_id)
                     _delivery.note_result(name, args, result)
                     _create_delivery.note_result(name, args, result)
                     _build_progress.note_result(name, args, result)
+                    _verdict_guard.note_result(name, args, result)
                     tool_messages.append({
                         "role": "tool", "tool_call_id": call_id, "content": content_str,
                     })
@@ -1039,10 +1129,11 @@ class OpenAIProvider(CapabilityMixin):
                     break
 
                 yield ToolResultEvent(call_id=call_id, result=result, duration_ms=dur_ms)
-                content_str = _record(name, args, result, dur_ms)
+                content_str = _record(name, args, result, dur_ms, call_id=call_id)
                 _delivery.note_result(name, args, result)
                 _create_delivery.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)
+                _verdict_guard.note_result(name, args, result)
                 tool_messages.append({
                     "role": "tool", "tool_call_id": call_id, "content": content_str,
                 })

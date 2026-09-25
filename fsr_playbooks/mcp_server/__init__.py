@@ -122,7 +122,7 @@ from .tools_emit import (
     emit_manual_input,
     emit_patch_proposal,
     emit_playbook_offer,
-    emit_verdict,
+    emit_verdict,  # Internal only; not exported in __all__
 )
 from .tools_enhancement import verify_enhancement
 
@@ -262,7 +262,6 @@ __all__ = [
     "emit_enhancement_offer",
     "emit_manual_input",
     "emit_decision_step",
-    "emit_verdict",
     # Catalog (Phase 0 + 0.5)
     "find_api_example",
     "find_api_fixture",
