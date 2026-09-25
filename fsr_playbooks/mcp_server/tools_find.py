@@ -29,7 +29,7 @@ def find(kind: str, query: str = "", connector: str = "",
 
     Which kind to pick: `action` = what can be done to a TARGET on THIS
     instance, only what is configured and healthy -- containment (tier 3+,
-    stage via emit_action_card), enrichment (read-only, run via run_op), or
+    stage via emit_card(card_type='action')), enrichment (read-only, run via run_op), or
     record writes (comment/update/create, tier 3+); prefer it over
     connector+operation whenever the analyst named a target or asked to act;
     filter with `target_type` (ip/host/user/url/domain/hash/file/email) and

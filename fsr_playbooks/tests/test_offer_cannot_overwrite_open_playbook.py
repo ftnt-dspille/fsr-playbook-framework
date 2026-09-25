@@ -80,7 +80,7 @@ def test_the_refusal_points_at_the_tool_that_would_be_correct(grounded):
     """A refusal that dead-ends the turn just becomes a retry loop."""
     grounded(OPEN)
     out = _offer(PLACEHOLDERED)
-    assert any("emit_enhancement_offer" in s for s in out.get("suggestions") or [])
+    assert any("emit_card" in s and "enhancement_offer" in s for s in out.get("suggestions") or [])
 
 
 def test_offering_a_new_playbook_with_nothing_open_is_untouched(grounded):

@@ -322,8 +322,9 @@ async def drain_with_idle_timeout(pump, *, timeout: float):
 # slice excludes them) are unaffected.
 
 # Containment-staging tools -- refused until the hunt floor is met.
+# Uses INTERNAL canonical names (what _effective_tool_name returns), not model-facing names.
 _CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
-    "find_containment_actions", "emit_card",
+    "find_containment_actions", "emit_action_card",
 })
 # Evidence-gathering tools that count toward the floor. get_record (the alert
 # pull) and the find_* discovery meta-tools are deliberately EXCLUDED so the

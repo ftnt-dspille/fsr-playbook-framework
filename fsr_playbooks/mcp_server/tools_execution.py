@@ -1691,7 +1691,7 @@ def run_op(
     automatically; remediation, containment, and management ops are
     destructive and return {requires_confirmation: true} unless you pass
     confirm=True. Pass confirm=True only when the analyst has approved the
-    action -- in a triage turn, stage containment with emit_action_card
+    action -- in a triage turn, stage containment with emit_card(card_type='action')
     instead of executing it here. The observed output shape is cached, so
     get_op_schema returns it afterwards for free.
 
