@@ -1634,14 +1634,16 @@ class BuildProgressGuard:
             return False
         if _CREATE_VERIFY_TOOL not in allowed_names:
             return False
-        # Both providers treat "emit_action_card is advertised" as "this is a
-        # triage turn" (`_authoring = "emit_action_card" not in allowed_names`).
-        # Reuse this one discriminator rather than inventing a second: when a
-        # caller passes NO tool slice the providers substitute the FULL registry,
-        # which advertises the build pair AND emit_action_card -- and a
-        # research-heavy triage turn on that slice would otherwise be nudged to
-        # go author YAML it was never asked for.
-        if "emit_action_card" in allowed_names:
+        # Triage turns lack build-only tools like verify_playbook, push_playbook,
+        # verify_enhancement. If none of those are present, this is a triage turn
+        # and the guard should not fire (a research-heavy triage turn on a full
+        # registry should not be nudged to author YAML it was never asked for).
+        is_build = (
+            "verify_playbook" in allowed_names or
+            "push_playbook" in allowed_names or
+            "verify_enhancement" in allowed_names
+        )
+        if not is_build:
             return False
         if self._forced or self._authored or not self._any_tool:
             return False

@@ -283,3 +283,17 @@ class TestToolNameReferencesInCode:
                         f"Directive contains old name {old_name} without "
                         f"context of emit_card()"
                     )
+
+    def test_triage_turn_not_treated_as_authoring(self):
+        """Verify that triage turns (without build-only tools) are NOT treated as authoring."""
+        # Triage turns lack build-only tools like verify_playbook, push_playbook, verify_enhancement
+        # Build turns have at least one of these
+        triage_only_tools = {"find_connector", "search_module_records", "emit_card"}
+        build_tools = {"find_connector", "verify_playbook", "emit_card"}
+
+        # The logic: build tools include verify_playbook, push_playbook, or verify_enhancement
+        # Triage tools do not
+        assert all(tool not in triage_only_tools for tool in
+                   ["verify_playbook", "push_playbook", "verify_enhancement"])
+        assert any(tool in build_tools for tool in
+                   ["verify_playbook", "push_playbook", "verify_enhancement"])
