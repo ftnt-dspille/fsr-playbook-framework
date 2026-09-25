@@ -273,10 +273,14 @@ def review_recent_thumbs_down(limit: int = 10) -> dict[str, Any]:
 def find_step_examples(step_type: str,
                        contains: str | None = None,
                        limit: int = 20) -> list[dict[str, Any]]:
-    """Search the `playbook_steps` corpus for real-world examples of a step type.
+    """Search for real-world examples of a step type.
 
-    Backed by `probe_playbook_steps`, which indexes every step from every
-    FSR playbook JSON export on disk (SP bundles + data/incoming drops).
+    Primary source: `playbook_steps` corpus (indexed every step from every
+    FSR playbook JSON export on disk via `probe_playbook_steps`).
+
+    Fallback: when `playbook_steps` is empty (e.g. in a packaged library),
+    extracts matching steps from the harvested example playbooks.
+
     Use this when tightening linting/validation to mine real-world
     argument shapes -- e.g. "show me every ManualInput that uses
     formType=lookup" or "every Decision with a timeout block".
@@ -295,6 +299,7 @@ def find_step_examples(step_type: str,
     Returns: list of {step_name, playbook_name, source, source_path, arguments}.
     """
     with _db() as conn:
+        # Try primary source: playbook_steps
         sql = ("SELECT step_name, playbook_name, source, source_path, "
                "arguments_json FROM playbook_steps WHERE step_type_name = ?")
         params: list[Any] = [step_type]
@@ -304,12 +309,44 @@ def find_step_examples(step_type: str,
         sql += " LIMIT ?"
         params.append(limit)
         rows = _rows(conn, sql, tuple(params))
+
+        # If empty, fall back to harvested examples
+        if not rows:
+            rows = _find_step_examples_in_recipes(
+                conn, step_type, contains, limit
+            )
+
     for r in rows:
         try:
             r["arguments"] = json.loads(r.pop("arguments_json"))
         except (json.JSONDecodeError, KeyError):
             pass
     return rows
+
+
+def _find_step_examples_in_recipes(
+    conn: sqlite3.Connection,
+    step_type: str,
+    contains: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Extract step examples from harvested playbooks when playbook_steps is empty."""
+    # Query recipes table for examples that mention this step type
+    # in their metadata (stored as comma-separated _step_types during harvest).
+    sql = (
+        "SELECT name AS step_name, source_playbook AS playbook_name, "
+        "       'harvested_examples' AS source, 'recipes_table' AS source_path, "
+        "       yaml_template AS arguments_json "
+        "FROM recipes "
+        "WHERE kind = 'example' AND source_playbook LIKE ? "
+    )
+    params: list[Any] = [f"%{step_type}%"]
+    if contains:
+        sql += " AND yaml_template LIKE ?"
+        params.append(f"%{contains}%")
+    sql += " LIMIT ?"
+    params.append(limit)
+    return _rows(conn, sql, tuple(params))
 
 
 @mcp.tool()

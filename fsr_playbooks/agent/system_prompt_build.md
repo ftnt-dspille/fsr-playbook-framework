@@ -32,6 +32,11 @@ to create it).
   `get_api_response`) doesn't exist and a guessed key (`stepType:` instead of
   `type:`, `templates:` instead of `playbooks:`) just burns a `validate_yaml`
   round-trip. Confirm the shape, then write it once, correctly.
+- **Before authoring from scratch, query the example library.** Call
+  `find(kind='recipe', query=<user_intent>)` (e.g. `kind='recipe',
+  query='block an IP on FortiGate with approval'`) and adapt the closest
+  example, preserving its structure and parameter shapes. Skips the
+  validate-fix-validate cascade for common patterns.
 - Iterate with `validate_yaml` / `compile_yaml`; run `verify_playbook` before
   you present a playbook as ready. Don't show YAML you haven't validated.
 - **A ```yaml fence is a WRITE. Never emit one on a question.** The widget saves
