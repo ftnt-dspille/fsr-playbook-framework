@@ -67,12 +67,14 @@ def _has_real_infrastructure_ips(text: str) -> bool:
 
     Allows:
     - Documentation ranges: 192.0.2.x, 198.51.100.x, 203.0.113.x
+    - Placeholder ranges: 1.2.3.x, 4.3.2.x
+    - Public DNS resolvers (demo values): 8.8.8.8, 8.8.4.4, 1.1.1.1, 1.0.0.1, 9.9.9.9
     - Private ranges: 10.x, 172.16-31.x, 192.168.x
     - Loopback: 127.x, ::1
     - Placeholders: <IP>, <hostname>
 
     Rejects:
-    - Real public IPs (not in documentation ranges)
+    - Real public IPs (not in documentation/placeholder/demo ranges)
     - Fortinet internal hostnames (*.fortinet.com, *.fortilab)
     """
     import re
@@ -85,10 +87,18 @@ def _has_real_infrastructure_ips(text: str) -> bool:
     ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
     ips = re.findall(ip_pattern, text)
 
+    # Public DNS resolvers used as demo values
+    demo_ips = {'8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '9.9.9.9'}
+
     for ip in ips:
+        # Skip known demo/resolver IPs
+        if ip in demo_ips:
+            continue
+
         octets = ip.split('.')
         first_octet = int(octets[0])
         second_octet = int(octets[1]) if len(octets) > 1 else 0
+        third_octet = int(octets[2]) if len(octets) > 2 else 0
 
         # Skip documentation/example ranges
         if first_octet == 192 and second_octet == 0:  # 192.0.x.x
@@ -96,6 +106,11 @@ def _has_real_infrastructure_ips(text: str) -> bool:
         if first_octet == 198 and second_octet == 51:  # 198.51.x.x
             continue
         if first_octet == 203 and second_octet == 0:  # 203.0.x.x
+            continue
+        # Placeholder ranges
+        if first_octet == 1 and second_octet == 2 and third_octet == 3:  # 1.2.3.x
+            continue
+        if first_octet == 4 and second_octet == 3 and third_octet == 2:  # 4.3.2.x
             continue
         if first_octet == 10:  # 10.x.x.x (private)
             continue
@@ -108,7 +123,7 @@ def _has_real_infrastructure_ips(text: str) -> bool:
         if first_octet in (0, 255):  # Special ranges
             continue
 
-        # This IP is not in a documentation or private range - it's real
+        # This IP is not in a documentation, placeholder, demo, or private range - it's real
         return True
 
     return False
@@ -226,6 +241,10 @@ def _process_playbook_file(
     - success=False, skip_reason=msg: file should be skipped
     - skip_reason="hash_dup": already seen this content
     """
+    # Skip test fixtures
+    if file_path.name.endswith(".test.yaml"):
+        return False, "test_fixture", None
+
     try:
         yaml_text = file_path.read_text(encoding="utf-8")
     except Exception as e:
@@ -419,6 +438,17 @@ def _insert_recipes(
 
     try:
         with sqlite3.connect(str(db_path)) as conn:
+            # Create table if it doesn't exist
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS recipes (
+                    name            TEXT PRIMARY KEY,
+                    kind            TEXT NOT NULL,
+                    when_to_use     TEXT,
+                    yaml_template   TEXT NOT NULL,
+                    source_playbook TEXT
+                )"""
+            )
+
             # Delete junk rows
             for name in junk_names:
                 try:

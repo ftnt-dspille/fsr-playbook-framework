@@ -4,6 +4,7 @@
 # real hostnames, IPs, credentials, or capture dates.
 
 # Framework examples (excluding *.test.yaml and broken/)
+# Note: manifest globs cannot exclude; filtering happens in harvest_examples.py
 ../fsr-playbook-framework/examples/*.yaml
 
 # pyfsr examples

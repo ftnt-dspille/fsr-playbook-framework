@@ -294,13 +294,14 @@ def find_recipe(query: str = "", kind: str | None = None,
             like_parts = [
                 "name LIKE ? OR source_playbook LIKE ? OR when_to_use LIKE ?"
             ]
-            like_args = []
+            like_args: list[Any] = []
             if query:
                 like = f"%{query}%"
                 like_args.extend([like, like, like])
 
             kind_sql = "kind IN ('threat_feed', 'data_ingest')"
             if is_generated_kind:
+                assert kind is not None
                 kind_str = kind.replace("-", "_")
                 kind_sql = f"kind = '{kind_str}'"
 

@@ -95,7 +95,7 @@ playbooks:
   - name: Test
     steps:
       - name: Step 1
-        resolver: "8.8.8.8"
+        resolver: "8.8.8.9"
 """
     assert _has_credentials_or_ips(yaml_with_real_public_ip)
 
