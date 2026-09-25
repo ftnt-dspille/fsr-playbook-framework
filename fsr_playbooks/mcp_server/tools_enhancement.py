@@ -456,7 +456,7 @@ def verify_enhancement(
     live_probe: bool = False,
 ) -> dict[str, Any]:
     """The pre-submit gate for an EDIT to an existing open playbook -- run this
-    before `emit_enhancement_offer`, and only when editing. Requires BOTH the
+    before `emit_card(card_type='enhancement_offer', ...)`, and only when editing. Requires BOTH the
     before and after YAML, so it needs a playbook the analyst already has
     open. Authoring a NEW playbook from scratch has no `before_yaml` to pass:
     gate that with `verify_playbook` instead.
@@ -516,7 +516,7 @@ def verify_enhancement(
 
     When the verdict passes, the result also carries **`verified_id`** -- an
     opaque handle to the exact `after_yaml` bytes that just cleared the gate.
-    Pass it to `emit_enhancement_offer(verified_id=…)` to apply the edit. That
+    Pass it to `emit_card(card_type='enhancement_offer', payload={verified_id: ...})` to apply the edit. That
     tool takes no YAML, so the document you verified is the document that
     lands; re-typing the playbook into chat instead is the one way to lose the
     edit (see `_verified_yaml` for the live failure this closes).
@@ -601,7 +601,7 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
 
     Only a PASSING verdict gets a handle: `verified_id` is a claim that these
     exact bytes cleared the gate, so minting one for a failing verify would let
-    `emit_enhancement_offer` apply a document the gate rejected. On a failure we
+    `emit_card(card_type='enhancement_offer')` apply a document the gate rejected. On a failure we
     instead say -- in the envelope the model actually reads -- that the next move
     is to fix and re-verify, not to paste YAML into chat. The live regression
     was a model that treated a green verify as permission to free-hand the
@@ -641,7 +641,8 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
         acknowledged_drops=out["acknowledged_drops"],
     )
     out["how_to_apply"] = (
-        "Call emit_enhancement_offer(verified_id=…) to apply this edit. That "
+        "Call emit_card(card_type='enhancement_offer', "
+        "payload={verified_id: ...}) to apply this edit. That "
         "is the ONLY way the edit reaches the analyst's playbook. Do not "
         "re-type the YAML into your reply -- the offer card carries the exact "
         "text verified here."

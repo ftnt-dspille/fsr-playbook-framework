@@ -323,7 +323,7 @@ async def drain_with_idle_timeout(pump, *, timeout: float):
 
 # Containment-staging tools -- refused until the hunt floor is met.
 _CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
-    "find_containment_actions", "emit_action_card",
+    "find_containment_actions", "emit_card",
 })
 # Evidence-gathering tools that count toward the floor. get_record (the alert
 # pull) and the find_* discovery meta-tools are deliberately EXCLUDED so the
@@ -745,7 +745,7 @@ class TriageDiscipline:
                         f"re-attempted. Do not retry it. Either pick a "
                         f"configured alternative (`list_configured_connectors` "
                         f"shows what IS available), or surface the gap to the "
-                        f"analyst via `emit_capability_gap_card` so they can "
+                        f"analyst via `emit_card(card_type='capability_gap_card')` so they can "
                         f"fix the connector and resume."
                     ),
                 }

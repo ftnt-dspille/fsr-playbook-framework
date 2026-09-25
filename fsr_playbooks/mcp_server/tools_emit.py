@@ -745,21 +745,21 @@ def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
             + ", ".join(repr(n) for n in lost[:6])
             + ("..." if len(lost) > 6 else "")
             + ". Accepting it would delete them. If you meant to change the "
-            "open playbook, use verify_enhancement + emit_enhancement_offer, "
+            "open playbook, use verify_enhancement + emit_card(card_type='enhancement_offer'), "
             "which edits it in place and keeps a restore point. If a step "
             "references a connector this box does not have, say so in prose -- "
             "replacing it with a placeholder loses the analyst's real step.",
             suggestions=[
-                "emit_enhancement_offer(verified_id=...) to edit the open playbook",
+                "emit_card(card_type='enhancement_offer', payload={verified_id: ...}) to edit the open playbook",
                 "answer in prose if the analyst only asked you to explain",
             ],
         )
     return _err(
         "playbook_already_open",
         "A playbook is already open, so this is an edit, not a new playbook. "
-        "emit_playbook_offer CREATES; use verify_enhancement + "
-        "emit_enhancement_offer to UPDATE the open one in place.",
-        suggestions=["emit_enhancement_offer(id, summary, verified_id)"],
+        "emit_card(card_type='playbook_offer') CREATES; use verify_enhancement + "
+        "emit_card(card_type='enhancement_offer') to UPDATE the open one in place.",
+        suggestions=["emit_card(card_type='enhancement_offer', payload={id, summary, verified_id})"],
     )
 
 

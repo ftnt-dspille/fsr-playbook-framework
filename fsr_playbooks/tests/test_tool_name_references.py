@@ -6,6 +6,7 @@ The consolidation of emit_* tools into emit_card(card_type=...) requires that:
 2. Guards, carriers, and directives use the new emit_card interface
 3. Tool result strings reference emit_card, not old names
 """
+import ast
 import re
 from pathlib import Path
 
@@ -297,3 +298,108 @@ class TestToolNameReferencesInCode:
                    ["verify_playbook", "push_playbook", "verify_enhancement"])
         assert any(tool in build_tools for tool in
                    ["verify_playbook", "push_playbook", "verify_enhancement"])
+
+    @staticmethod
+    def _find_old_names_in_ast(filepath: Path) -> list[tuple[int, str]]:
+        """Scan Python file with AST to find old tool names in string constants."""
+        try:
+            content = filepath.read_text(encoding="utf-8")
+            tree = ast.parse(content, filename=str(filepath))
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            return []
+
+        old_names = [
+            "emit_playbook_offer", "emit_enhancement_offer",
+            "emit_patch_proposal", "emit_action_card",
+            "emit_choice_card", "emit_manual_input",
+            "emit_capability_gap_card",
+            "list_recent_failed_runs", "list_tags",
+        ]
+
+        results = []
+        for node in ast.walk(tree):
+            # Check string constants
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for old_name in old_names:
+                    if old_name in node.value:
+                        # Exclude obvious non-model-facing contexts
+                        context = repr(node.value)[:100]
+                        # Skip if it's a frozenset/dict definition
+                        if "frozenset" not in context and "dict" not in context:
+                            results.append((node.lineno, context))
+                        break
+            # Check docstrings
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                if isinstance(node.value.value, str):
+                    for old_name in old_names:
+                        if old_name in node.value.value:
+                            context = repr(node.value.value)[:100]
+                            results.append((node.lineno, context))
+                            break
+
+        return results
+
+    def test_ast_scan_mcp_server_no_old_names(self):
+        """AST-scan mcp_server/*.py for old tool names in string constants."""
+        framework_root = Path(__file__).parent.parent
+        mcp_dir = framework_root / "mcp_server"
+
+        # Files to exclude (internal routing definitions)
+        exclude = {
+            "test_", "__pycache__", ".pyc",
+            "tools.py",  # Schema definitions
+            "tool_models.py",  # Type definitions
+        }
+
+        failures = []
+        for py_file in sorted(mcp_dir.glob("*.py")):
+            if any(ex in py_file.name for ex in exclude):
+                continue
+
+            hits = self._find_old_names_in_ast(py_file)
+            # Filter out expected internal mappings
+            filtered_hits = [
+                h for h in hits
+                if "_CARD_TYPE_MAP" not in h[1]  # Internal mapping
+                and "dispatch(" not in h[1]  # Routing logic
+                and "CONSOLIDATED_AWAY" not in h[1]  # Definition
+            ]
+            if filtered_hits:
+                failures.append((py_file.name, filtered_hits[:3]))
+
+        assert not failures, (
+            f"Found old tool names in model-facing strings: "
+            f"{failures}"
+        )
+
+    def test_agent_markdown_no_old_names(self):
+        """Scan fsr_playbooks/agent/*.md files for old tool names."""
+        framework_root = Path(__file__).parent.parent
+        agent_dir = framework_root / "agent"
+
+        old_names = [
+            "emit_playbook_offer", "emit_enhancement_offer",
+            "emit_patch_proposal", "emit_action_card",
+            "emit_choice_card", "emit_manual_input",
+            "emit_capability_gap_card",
+            "list_recent_failed_runs", "list_tags",
+        ]
+
+        failures = []
+        for md_file in sorted(agent_dir.glob("*.md")):
+            content = md_file.read_text(encoding="utf-8")
+            for old_name in old_names:
+                if old_name in content:
+                    # Count occurrences and get context
+                    lines = content.split("\n")
+                    for i, line in enumerate(lines, 1):
+                        if old_name in line:
+                            failures.append(
+                                (md_file.name, i, line.strip()[:100])
+                            )
+                            break
+
+        assert not failures, (
+            f"Found old tool names in markdown docs: "
+            f"{failures}"
+        )
