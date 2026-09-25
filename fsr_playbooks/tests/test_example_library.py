@@ -76,7 +76,7 @@ playbooks:
   - name: Test
     steps:
       - name: Step 1
-        password: "secret123"
+        password: "myRealPassword123!"
 """
     assert _has_credentials_or_ips(yaml_with_password)
 
@@ -85,18 +85,29 @@ playbooks:
   - name: Test
     steps:
       - name: Step 1
-        api_key: "key_abc123"
+        api_key: "key_abc123def456"
 """
     assert _has_credentials_or_ips(yaml_with_api_key)
 
-    yaml_with_ip = """
+    # Real public IPs (not in documentation ranges) should be rejected
+    yaml_with_real_public_ip = """
+playbooks:
+  - name: Test
+    steps:
+      - name: Step 1
+        resolver: "8.8.8.8"
+"""
+    assert _has_credentials_or_ips(yaml_with_real_public_ip)
+
+    # Private IPs should NOT be rejected
+    yaml_with_private_ip = """
 playbooks:
   - name: Test
     steps:
       - name: Step 1
         ip_address: "192.168.1.1"
 """
-    assert _has_credentials_or_ips(yaml_with_ip)
+    assert not _has_credentials_or_ips(yaml_with_private_ip)
 
     # Valid YAML should not be rejected
     clean_yaml = """

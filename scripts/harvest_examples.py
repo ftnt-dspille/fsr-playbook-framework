@@ -26,41 +26,97 @@ MANIFEST_PATH = REPO_ROOT / "data" / "example_sources.txt"
 DEV_DB = REPO_ROOT / "data" / "fsr_reference.db"
 PACKAGED_DB = REPO_ROOT / "fsr_playbooks" / "_data" / "fsr_reference.db"
 
-# Patterns to reject (credentials, real infrastructure)
-REJECTED_PATTERNS = (
-    "password:",
-    "api_key:",
-    "secret:",
-    "credential:",
-    "token:",
-    "10.",  # RFC1918 private networks
-    "172.1",  # RFC1918
-    "192.168.",  # RFC1918
-)
-
-
 def _content_hash(text: str) -> str:
     """Compute SHA-256 content hash."""
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def _has_credentials_or_ips(text: str) -> bool:
-    """Check if text contains credentials or infrastructure details."""
-    text_lower = text.lower()
-    for pattern in REJECTED_PATTERNS:
-        if pattern.lower() in text_lower:
-            return True
-    # Check for public IPs (rough heuristic: numbers like X.X.X.X)
+def _has_real_credentials(text: str) -> bool:
+    """Check if text contains real credential values (not placeholders).
+
+    Rejects actual secrets but allows:
+    - Variable references like `vars.api_key`, `{{ vars.password }}`
+    - Placeholders like `<your-password>`, `<API_KEY>`
+    - Parameter names like `api_key:` in step definitions
+    """
     import re
-    # Match IP-like patterns in string fields
-    ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
-    if re.search(ip_pattern, text):
-        # Exclude 127.x, 0.x, 255.x ranges and documented test ranges
-        ips = re.findall(ip_pattern, text)
-        for ip in ips:
-            if not any(ip.startswith(prefix) for prefix in ("127.", "0.", "255.")):
+
+    # Real credential values are quoted strings/values, not parameter names or placeholders
+    # Look for: password: "something", api_key: "something", token: "something"
+    # But NOT: password:, api_key: (parameter definitions)
+    # And NOT: <your-password>, <API_KEY> (placeholders)
+
+    # Match quoted credential values that look real
+    # password: "abc123" or api_key: "key_xyz" or token: "token_abc"
+    real_secret_pattern = r'(?:password|api_key|api_secret|secret|token|credential):\s*"([^"]{4,})"'
+
+    if re.search(real_secret_pattern, text, re.IGNORECASE):
+        # Check if the matched value looks like a placeholder or variable
+        matches = re.findall(real_secret_pattern, text, re.IGNORECASE)
+        for match in matches:
+            # Skip if it looks like a placeholder or variable
+            if not any(x in match.lower() for x in ['<', 'your', 'replace', 'example', '{{', 'vars.']):
+                # It looks like a real credential
                 return True
+
     return False
+
+
+def _has_real_infrastructure_ips(text: str) -> bool:
+    """Check if text contains real public IPs or infrastructure hostnames.
+
+    Allows:
+    - Documentation ranges: 192.0.2.x, 198.51.100.x, 203.0.113.x
+    - Private ranges: 10.x, 172.16-31.x, 192.168.x
+    - Loopback: 127.x, ::1
+    - Placeholders: <IP>, <hostname>
+
+    Rejects:
+    - Real public IPs (not in documentation ranges)
+    - Fortinet internal hostnames (*.fortinet.com, *.fortilab)
+    """
+    import re
+
+    # Check for fortinet.com or fortilab hostnames (internal infrastructure)
+    if re.search(r'\.(fortinet\.com|fortilab)\b', text, re.IGNORECASE):
+        return True
+
+    # Match public IPs
+    ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+    ips = re.findall(ip_pattern, text)
+
+    for ip in ips:
+        octets = ip.split('.')
+        first_octet = int(octets[0])
+        second_octet = int(octets[1]) if len(octets) > 1 else 0
+
+        # Skip documentation/example ranges
+        if first_octet == 192 and second_octet == 0:  # 192.0.x.x
+            continue
+        if first_octet == 198 and second_octet == 51:  # 198.51.x.x
+            continue
+        if first_octet == 203 and second_octet == 0:  # 203.0.x.x
+            continue
+        if first_octet == 10:  # 10.x.x.x (private)
+            continue
+        if first_octet == 172 and 16 <= second_octet <= 31:  # 172.16-31.x.x (private)
+            continue
+        if first_octet == 192 and second_octet == 168:  # 192.168.x.x (private)
+            continue
+        if first_octet == 127:  # 127.x.x.x (loopback)
+            continue
+        if first_octet in (0, 255):  # Special ranges
+            continue
+
+        # This IP is not in a documentation or private range - it's real
+        return True
+
+    return False
+
+
+def _has_credentials_or_ips(text: str) -> bool:
+    """Check if text contains real credentials or infrastructure details."""
+    return _has_real_credentials(text) or _has_real_infrastructure_ips(text)
 
 
 def _extract_step_types(playbook_data: dict) -> list[str]:
@@ -193,14 +249,36 @@ def _process_playbook_file(
     except Exception as e:
         return False, f"yaml_parse_error: {e}", None
 
-    # Compile to check validity
-    ok, result = _compile_yaml(yaml_text, db_path)
-    if not ok:
-        error_msg = result if isinstance(result, str) else str(result)[:100]
-        return False, f"compile_error: {error_msg}", None
-
     # Determine if this is a playbook or step fragment
-    if "playbooks" in data:
+    # Step fragments from tooling/recipes/steps/ have name, description, steps_yaml, etc.
+    # but no "playbooks" key
+    if data.get("steps_yaml"):
+        # This is a step fragment from tooling/recipes/steps/
+        kind = "step"
+        name = data.get("name", file_path.stem)
+        description = data.get("description", "")
+        step_types = data.get("step_types") or []
+
+        return True, None, {
+            "name": f"step:{name}".replace(":", "_")[:200],
+            "kind": kind,
+            "when_to_use": description[:500] or f"Step pattern: {', '.join(step_types)}",
+            "yaml_template": (data.get("steps_yaml") or yaml_text)[:6000],  # Use steps_yaml field if present
+            "source_playbook": file_path.name,
+            "_summary": f"Step pattern: {', '.join(step_types)}",
+            "_step_types": ",".join(step_types),
+            "_connectors": data.get("connector") or "",
+            "_trigger_kind": "fragment",
+            "_tags": "step_fragment",
+            "_content_hash": content_hash,
+        }
+    elif "playbooks" in data:
+        # Compile playbooks to check validity
+        ok, result = _compile_yaml(yaml_text, db_path)
+        if not ok:
+            error_msg = result if isinstance(result, str) else str(result)[:100]
+            return False, f"compile_error: {error_msg}", None
+
         kind = "example"
         name, description = _extract_name_and_description(data)
         step_types = _extract_step_types(data)
@@ -230,8 +308,8 @@ def _process_playbook_file(
             "_content_hash": content_hash,
         }
     elif "steps" in data:
+        # Generic steps fragment (not the structured format)
         kind = "step"
-        # Step fragment
         step_types = []
         steps = data.get("steps") or []
         for step in steps:
