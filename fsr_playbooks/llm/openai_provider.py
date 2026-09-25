@@ -155,9 +155,9 @@ _ASSESSMENT_DIRECTIVE = (
 # deliver the blessed bytes. Directive is belt-and-suspenders for the summary.
 _DELIVERY_DIRECTIVE = (
     "You verified an edit to the open playbook and it is ready to apply, but "
-    "you have not delivered it. Call `emit_enhancement_offer` now with "
+    "you have not delivered it. Call `emit_card(card_type='enhancement_offer', ...)` now with "
     "verified_id {vid!r} to apply it -- a written description is NOT a "
-    "substitute for the call. Write the `summary` as one or two plain-English "
+    "substitute for the call. Write the `summary` (in the payload) as one or two plain-English "
     "lines describing what the edit changes."
 )
 
@@ -166,14 +166,14 @@ _BUILD_PROGRESS_DIRECTIVE = (
     "You have researched the step types and connector operations but have not "
     "authored anything yet -- describing what you WILL build is not building it. "
     "Draft the full playbook YAML now and call `verify_playbook` with it, then "
-    "deliver it with `emit_playbook_offer`. Do not end the turn with a plan."
+    "deliver it with `emit_card(card_type='playbook_offer', ...)`. Do not end the turn with a plan."
 )
 
 _CREATE_DELIVERY_DIRECTIVE = (
     "You drafted a playbook and `verify_playbook` cleared it, but you have not "
-    "delivered it. Call `emit_playbook_offer` now -- describing the playbook in "
+    "delivered it. Call `emit_card(card_type='playbook_offer', ...)` now -- describing the playbook in "
     "prose is NOT a substitute for the call, and the analyst has no way to save "
-    "it without the card. Write the `summary` as one or two plain-English lines "
+    "it without the card. Write the `summary` (in the payload) as one or two plain-English lines "
     "describing what the playbook does."
 )
 
@@ -521,10 +521,16 @@ class OpenAIProvider(CapabilityMixin):
             getattr(case_state, "investigation", None)
             if case_state is not None else None
         )
-        # Authoring/build turns lack the triage-only staging tool
-        # `emit_action_card`; the hunt-floor gate must not block
-        # find_containment_actions DISCOVERY there. Fully in force for triage.
-        _authoring = "emit_action_card" not in allowed_names
+        # Authoring/build turns are detected by the presence of build-only tools
+        # like verify_playbook or push_playbook -- triage never advertises these.
+        # Old check ("emit_action_card" not in allowed_names) no longer works
+        # since emit_action_card is consolidated into emit_card (both triage and
+        # build have emit_card, but with different card_type affordances).
+        _authoring = (
+            "verify_playbook" in allowed_names or
+            "push_playbook" in allowed_names or
+            "verify_enhancement" in allowed_names
+        )
         _discipline = TriageDiscipline(
             state=investigation_state,
             capabilities=(getattr(case_state, "capabilities", None)
@@ -763,10 +769,10 @@ class OpenAIProvider(CapabilityMixin):
                 if _vid is not None:
                     _delivery.mark_forced()
                     yield _emit_usage("enhance_delivery_forced")
+                    # Look for emit_card in the advertised tools (old name no longer advertised)
                     offer_schema = next(
                         (t for t in tools
-                         if (t.get("function") or {}).get("name")
-                         == _ENHANCE_OFFER_TOOL), None)
+                         if (t.get("function") or {}).get("name") == "emit_card"), None)
                     if offer_schema is not None:
                         turn_idx += 1
                         history.append({
@@ -779,7 +785,7 @@ class OpenAIProvider(CapabilityMixin):
                                 tools=[offer_schema],
                                 tool_choice={
                                     "type": "function",
-                                    "function": {"name": _ENHANCE_OFFER_TOOL},
+                                    "function": {"name": "emit_card"},
                                 },
                                 **_max_tokens_param(self.model, 512),
                             )
@@ -792,17 +798,22 @@ class OpenAIProvider(CapabilityMixin):
                                 oargs = {}
                             if not isinstance(oargs, dict):
                                 oargs = {}
-                            # The whole point of the guard: never trust a
-                            # forced round to carry the right handle.
-                            oargs["verified_id"] = _vid
+                            # Ensure card_type is set to enhancement_offer
+                            if not oargs.get("card_type"):
+                                oargs["card_type"] = "enhancement_offer"
+                            # Wrap payload with verified_id if using enhancement_offer
+                            if oargs.get("card_type") == "enhancement_offer":
+                                if not isinstance(oargs.get("payload"), dict):
+                                    oargs["payload"] = {}
+                                oargs["payload"]["verified_id"] = _vid
                             call_id = (msg.tool_calls[0].id
                                        if msg.tool_calls else _uuid.uuid4().hex[:8])
                             yield ToolUseEvent(
-                                name=_ENHANCE_OFFER_TOOL, arguments=oargs,
+                                name="emit_card", arguments=oargs,
                                 call_id=call_id,
-                                tier=_tier_for(_ENHANCE_OFFER_TOOL, oargs))
+                                tier=_tier_for("emit_card", oargs))
                             _t0 = time.perf_counter()
-                            oresult = _guarded_dispatch(_ENHANCE_OFFER_TOOL, oargs)
+                            oresult = _guarded_dispatch("emit_card", oargs)
                             _dur = int((time.perf_counter() - _t0) * 1000)
                             yield ToolResultEvent(
                                 call_id=call_id, result=oresult, duration_ms=_dur)
@@ -821,10 +832,10 @@ class OpenAIProvider(CapabilityMixin):
                 if _vyaml is not None:
                     _create_delivery.mark_forced()
                     yield _emit_usage("create_delivery_forced")
+                    # Look for emit_card in the advertised tools (old name no longer advertised)
                     offer_schema = next(
                         (t for t in tools
-                         if (t.get("function") or {}).get("name")
-                         == _CREATE_OFFER_TOOL), None)
+                         if (t.get("function") or {}).get("name") == "emit_card"), None)
                     if offer_schema is not None:
                         turn_idx += 1
                         history.append({
@@ -837,7 +848,7 @@ class OpenAIProvider(CapabilityMixin):
                                 tools=[offer_schema],
                                 tool_choice={
                                     "type": "function",
-                                    "function": {"name": _CREATE_OFFER_TOOL},
+                                    "function": {"name": "emit_card"},
                                 },
                                 **_max_tokens_param(self.model, 512),
                             )
@@ -850,24 +861,31 @@ class OpenAIProvider(CapabilityMixin):
                                 oargs = {}
                             if not isinstance(oargs, dict):
                                 oargs = {}
+                            # Ensure card_type is set to playbook_offer
+                            if not oargs.get("card_type"):
+                                oargs["card_type"] = "playbook_offer"
+                            # Wrap arguments in payload for emit_card
+                            if not isinstance(oargs.get("payload"), dict):
+                                oargs["payload"] = {}
+                            payload = oargs["payload"]
                             # Never trust a forced round to carry the right
                             # bytes -- only verified YAML may reach the card.
-                            oargs["yaml"] = _vyaml
-                            if not str(oargs.get("id") or "").strip():
-                                oargs["id"] = f"offer-{_uuid.uuid4().hex[:8]}"
-                            if not str(oargs.get("summary") or "").strip():
-                                oargs["summary"] = (
+                            payload["yaml"] = _vyaml
+                            if not str(payload.get("id") or "").strip():
+                                payload["id"] = f"offer-{_uuid.uuid4().hex[:8]}"
+                            if not str(payload.get("summary") or "").strip():
+                                payload["summary"] = (
                                     _create_delivery.summary_hint
                                     or "Playbook drafted and verified."
                                 )
                             call_id = (msg.tool_calls[0].id
                                        if msg.tool_calls else _uuid.uuid4().hex[:8])
                             yield ToolUseEvent(
-                                name=_CREATE_OFFER_TOOL, arguments=oargs,
+                                name="emit_card", arguments=oargs,
                                 call_id=call_id,
-                                tier=_tier_for(_CREATE_OFFER_TOOL, oargs))
+                                tier=_tier_for("emit_card", oargs))
                             _t0 = time.perf_counter()
-                            oresult = _guarded_dispatch(_CREATE_OFFER_TOOL, oargs)
+                            oresult = _guarded_dispatch("emit_card", oargs)
                             _dur = int((time.perf_counter() - _t0) * 1000)
                             yield ToolResultEvent(
                                 call_id=call_id, result=oresult, duration_ms=_dur)

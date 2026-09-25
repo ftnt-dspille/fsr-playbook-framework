@@ -322,6 +322,7 @@ async def drain_with_idle_timeout(pump, *, timeout: float):
 # slice excludes them) are unaffected.
 
 # Containment-staging tools -- refused until the hunt floor is met.
+# Uses INTERNAL canonical names (what _effective_tool_name returns), not model-facing names.
 _CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
     "find_containment_actions", "emit_action_card",
 })
@@ -745,7 +746,7 @@ class TriageDiscipline:
                         f"re-attempted. Do not retry it. Either pick a "
                         f"configured alternative (`list_configured_connectors` "
                         f"shows what IS available), or surface the gap to the "
-                        f"analyst via `emit_capability_gap_card` so they can "
+                        f"analyst via `emit_card(card_type='capability_gap_card')` so they can "
                         f"fix the connector and resume."
                     ),
                 }
@@ -1066,6 +1067,9 @@ _DELIVERY_CARRIERS: dict[str, tuple[str, ...]] = {
     "emit_playbook_offer": ("yaml",),
     "emit_patch_proposal": ("after_yaml",),
     "push_playbook": ("yaml_text",),
+    # The consolidated emit_card also carries deliverables when a playbook_offer
+    # or patch_proposal card_type is used. The payload field holds the YAML.
+    "emit_card": ("payload",),
 }
 
 
@@ -1124,7 +1128,33 @@ def _carries_delivery(name: Any, args: Any) -> bool:
     Accepts both the raw dict and the JSON string OpenAI sends. A stub body is
     ignored: `yaml_text: ""` on a probing call delivers nothing.
     """
-    keys = _DELIVERY_CARRIERS.get(str(name or ""))
+    # Handle emit_card by checking card_type and payload.
+    name_str = str(name or "")
+    if name_str == "emit_card":
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:  # noqa: BLE001 -- a malformed arg blob carries nothing
+                return False
+        if not isinstance(args, dict):
+            return False
+        # emit_card carries delivery only for playbook_offer or patch_proposal types
+        card_type = args.get("card_type")
+        if card_type not in ("playbook_offer", "patch_proposal"):
+            return False
+        payload = args.get("payload", {})
+        if not isinstance(payload, dict):
+            return False
+        # Check if payload has substantive YAML
+        yaml_val = payload.get("yaml")
+        if isinstance(yaml_val, str) and len(yaml_val.strip()) > 40:
+            return True
+        after_yaml = payload.get("after_yaml")
+        if isinstance(after_yaml, str) and len(after_yaml.strip()) > 40:
+            return True
+        return False
+
+    keys = _DELIVERY_CARRIERS.get(name_str)
     if not keys:
         return False
     if isinstance(args, str):
@@ -1136,6 +1166,30 @@ def _carries_delivery(name: Any, args: Any) -> bool:
         return False
     return any(isinstance(args.get(k), str) and len(args[k].strip()) > 40
                for k in keys)
+
+
+def effective_emit_card_name(old_name: str) -> str | None:
+    """Map old emit tool names to emit_card, or return None if not applicable.
+
+    Old tools like emit_playbook_offer now route through emit_card(card_type=...).
+    This helper derives the effective advertised tool name for checks like
+    'is the tool in allowed_names'.
+
+    Returns "emit_card" for names that consolidated, None otherwise.
+    """
+    # Map consolidated names to their card_type equivalents
+    _CARD_TYPE_MAP = {
+        "emit_playbook_offer": "playbook_offer",
+        "emit_enhancement_offer": "enhancement_offer",
+        "emit_patch_proposal": "patch_proposal",
+        "emit_action_card": "action",
+        "emit_choice_card": "choice",
+        "emit_manual_input": "manual_input",
+        "emit_capability_gap_card": "capability_gap",
+    }
+    if old_name in _CARD_TYPE_MAP:
+        return "emit_card"
+    return None
 
 
 # One no-tools round is forced when the tool budget runs out, so the chat never
@@ -1357,7 +1411,14 @@ class EnhanceDeliveryGuard:
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         """Fold one executed tool result into the delivery state."""
-        if name == _ENHANCE_OFFER_TOOL:
+        # Handle both old name and new emit_card
+        is_offer_delivery = (
+            name == _ENHANCE_OFFER_TOOL or
+            (name == "emit_card" and
+             isinstance(args, dict) and
+             args.get("card_type") == "enhancement_offer")
+        )
+        if is_offer_delivery:
             # An offer was attempted. Only a genuinely successful one counts as
             # delivery; a rejected handle (`unknown_verified_id`) still needs a
             # forced re-delivery, so leave `_delivered` False in that case.
@@ -1375,7 +1436,9 @@ class EnhanceDeliveryGuard:
     def outstanding(self, allowed_names: set[str]) -> str | None:
         """The verified_id that a passing verify blessed but no offer applied,
         or None. Returns None once forced, so the guard fires at most once."""
-        if _ENHANCE_OFFER_TOOL not in allowed_names:
+        # The old name is in CONSOLIDATED_AWAY so never advertised. Check for
+        # the consolidated emit_card (or old name if transitioning).
+        if _ENHANCE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
             return None
         if self._forced or self._delivered or not self._verified_id:
             return None
@@ -1436,7 +1499,14 @@ class CreateDeliveryGuard:
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         """Fold one executed tool result into the delivery state."""
-        if name == _CREATE_OFFER_TOOL:
+        # Handle both old name and new emit_card
+        is_offer_delivery = (
+            name == _CREATE_OFFER_TOOL or
+            (name == "emit_card" and
+             isinstance(args, dict) and
+             args.get("card_type") == "playbook_offer")
+        )
+        if is_offer_delivery:
             # Only a genuinely successful offer counts as delivery; a rejected
             # one still needs forcing, so leave `_delivered` False there.
             if not (isinstance(result, dict) and result.get("ok") is False):
@@ -1458,7 +1528,9 @@ class CreateDeliveryGuard:
     def outstanding(self, allowed_names: set[str]) -> str | None:
         """The verified YAML a passing verify blessed but no offer delivered,
         or None. Returns None once forced, so the guard fires at most once."""
-        if _CREATE_OFFER_TOOL not in allowed_names:
+        # The old name is in CONSOLIDATED_AWAY so never advertised. Check for
+        # the consolidated emit_card (or old name if transitioning).
+        if _CREATE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
             return None
         if self._forced or self._delivered or not self._verified_yaml:
             return None
@@ -1498,11 +1570,15 @@ class CreateDeliveryGuard:
 # backstopping the delivery end. Fires at most once per turn.
 
 # Tools that prove a turn actually entered the authoring half of the loop.
+# Note: emit_card with playbook_offer, enhancement_offer, or patch_proposal
+# card_type also proves authoring intent (handled in BuildProgressGuard.note_result).
 _AUTHORING_PROGRESS_TOOLS = frozenset({
     "validate_yaml", "compile_yaml", "verify_playbook",
     "emit_playbook_offer", "build_playbook_from_trace",
     # Enhance authors too -- its own pair means the turn is not stalled.
     "verify_enhancement", "emit_enhancement_offer", "emit_patch_proposal",
+    # The consolidated emit_card when used for offer types also proves authoring.
+    "emit_card",
 })
 
 # Tools that mean the analyst asked to RUN or DIAGNOSE an existing playbook, not
@@ -1553,18 +1629,22 @@ class BuildProgressGuard:
 
     def outstanding(self, allowed_names: set[str]) -> bool:
         """True when a build turn is ending with research but no authoring."""
-        if _CREATE_OFFER_TOOL not in allowed_names:
+        # Check for either old name OR new consolidated emit_card
+        if (_CREATE_OFFER_TOOL not in allowed_names and
+                "emit_card" not in allowed_names):
             return False
         if _CREATE_VERIFY_TOOL not in allowed_names:
             return False
-        # Both providers treat "emit_action_card is advertised" as "this is a
-        # triage turn" (`_authoring = "emit_action_card" not in allowed_names`).
-        # Reuse that one discriminator rather than inventing a second: when a
-        # caller passes NO tool slice the providers substitute the FULL registry,
-        # which advertises the build pair AND emit_action_card -- and a
-        # research-heavy triage turn on that slice would otherwise be nudged to
-        # go author YAML it was never asked for.
-        if "emit_action_card" in allowed_names:
+        # Triage turns lack build-only tools like verify_playbook, push_playbook,
+        # verify_enhancement. If none of those are present, this is a triage turn
+        # and the guard should not fire (a research-heavy triage turn on a full
+        # registry should not be nudged to author YAML it was never asked for).
+        is_build = (
+            "verify_playbook" in allowed_names or
+            "push_playbook" in allowed_names or
+            "verify_enhancement" in allowed_names
+        )
+        if not is_build:
             return False
         if self._forced or self._authored or not self._any_tool:
             return False

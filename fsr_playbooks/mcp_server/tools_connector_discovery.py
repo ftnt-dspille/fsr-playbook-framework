@@ -1209,7 +1209,7 @@ def list_playbook_runs(playbook: str | None = None,
     why_did_playbook_fail, which chains the diagnosis in one call. Defaults
     to failures; include_finished=True for all.
 
-    Faster + more reliable than `list_recent_failed_runs(playbook=...)`
+    Faster + more reliable than `list_playbook_runs(playbook=...)`
     when you know which playbook you care about -- the API uses
     template_iri to do the filter on its side, so we don't waste a fetch
     of irrelevant rows.

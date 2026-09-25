@@ -622,7 +622,7 @@ def verify_playbook(
     db_path: str | None = None,
 ) -> dict[str, Any]:
     """The pre-submit gate for a WHOLE playbook you authored -- run this before
-    `emit_playbook_offer`. Takes the full YAML text and runs compile → typed
+    `emit_card(card_type='playbook_offer')`. Takes the full YAML text and runs compile → typed
     walk → per-step schema checks (→ optional live probe), returning one
     structured punch list. Never show a playbook to the analyst, and never
     offer it, until this returns `ready_to_push=True`. NOT for editing a

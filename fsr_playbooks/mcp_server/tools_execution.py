@@ -719,7 +719,7 @@ def _op_not_in_live(connector: str, op: str,
     close = difflib.get_close_matches(op, op_names, n=5, cutoff=0.4)
     suggestions = [
         f"Use find_operation(connector={connector!r}) to list the real ops",
-        "Then get_op_schema(connector, op) before run_op/emit_action_card",
+        "Then get_op_schema(connector, op) before run_op/emit_card(card_type='action')",
     ]
     if close:
         suggestions.insert(0, f"Did you mean one of: {close}?")
@@ -994,7 +994,7 @@ def _live_client_for_grounding():
 def validate_op_grounded(connector: str, op: str,
                          params: dict[str, Any] | None = None,
                          client=None) -> dict[str, Any] | None:
-    """Grounding guarantee shared by `run_op` AND `emit_action_card`: a
+    """Grounding guarantee shared by `run_op` AND `emit_card(card_type='action')`: a
     hallucinated/typo'd op -- or, when `params` is supplied, a call with
     unknown/missing-required arguments -- must NEVER reach the analyst (as an
     approval card) or the live box (as an execute). Returns an
@@ -1013,7 +1013,7 @@ def validate_op_grounded(connector: str, op: str,
        agent stops discovering param names by trial-and-error live (the
        `invest_excessive_mail_egress` flail / the deferred half of 1.6).
        Requires a configured live client; `run_op` passes its already-
-       resolved+preflighted client, `emit_action_card` lets us resolve lazily.
+       resolved+preflighted client, `emit_card(card_type='action')` lets us resolve lazily.
 
     Fails OPEN (returns None) on any client/preflight/lookup hiccup, so a
     transient problem never false-rejects a real op. This is why the live half
@@ -1691,7 +1691,7 @@ def run_op(
     automatically; remediation, containment, and management ops are
     destructive and return {requires_confirmation: true} unless you pass
     confirm=True. Pass confirm=True only when the analyst has approved the
-    action -- in a triage turn, stage containment with emit_action_card
+    action -- in a triage turn, stage containment with emit_card(card_type='action')
     instead of executing it here. The observed output shape is cached, so
     get_op_schema returns it afterwards for free.
 
@@ -2061,7 +2061,7 @@ def _fetch_live_collection(client, coll_uuid: str) -> dict[str, Any] | None:
 def push_playbook(yaml_text: str,
                   acknowledged_drops: list[str] | None = None) -> dict[str, Any]:
     """Write a playbook directly to the live FortiSOAR instance, immediately
-    and without asking. Prefer emit_playbook_offer for anything an analyst
+    and without asking. Prefer emit_card(card_type='playbook_offer') for anything an analyst
     is meant to review: that gives them a one-click card and a restore
     point, and is the correct terminal action of a build turn. Reach for
     push_playbook only when explicitly told to push or deploy right now.

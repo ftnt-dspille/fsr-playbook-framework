@@ -488,8 +488,8 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                 f"op cannot run once approved. Call "
                 f"find_containment_actions(target_type=...) instead: it returns "
                 f"only what is configured and healthy HERE, with the tier and "
-                f"required params, ready for emit_action_card. Every one of "
-                f"these must be staged via emit_action_card, never run_op."
+                f"required params, ready for emit_card(card_type='action'). Every one of "
+                f"these must be staged via emit_card(card_type='action'), never run_op."
             )
         if op_failed:
             out["warning"] = (

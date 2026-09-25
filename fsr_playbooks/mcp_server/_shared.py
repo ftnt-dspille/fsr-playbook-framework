@@ -382,7 +382,7 @@ def _validate_op_exists(connector: str, op: str) -> dict[str, Any] | None:
     close = difflib.get_close_matches(op, all_ops, n=5, cutoff=0.4)
     suggestions = [
         f"Use find_operation(connector={connector!r}) to list the real ops",
-        "Then get_op_schema(connector, op) before run_op/emit_action_card",
+        "Then get_op_schema(connector, op) before run_op/emit_card(card_type='action')",
     ]
     if close:
         suggestions.insert(0, f"Did you mean one of: {close}?")

@@ -4,7 +4,7 @@ The agentic surface runs in one of two intents:
 
   - ``triage``  -- incident-response: investigate the record in front of the
     analyst, pivot across modules, enrich indicators read-only, and stage any
-    mutating/containment action via ``emit_action_card`` for approval. The
+    mutating/containment action via ``emit_card(card_type='action')`` for approval. The
     YAML-authoring + playbook-mutation tools are dropped.
   - ``build``   -- playbook authoring: the full tool registry.
 
@@ -58,8 +58,8 @@ BUILD_ONLY_TOOLS = frozenset({
 # verify+write pair. A from-scratch CREATE (build intent, no playbook mounted)
 # has nothing to enhance, yet the build slice = full registry minus TRIAGE_ONLY,
 # so it still advertises these. A drifting model can then terminate a create via
-# emit_enhancement_offer (stop=awaiting_enhancement_offer) instead of delivering
-# a NEW playbook via emit_playbook_offer. The connector's _intent_drop_set gates
+# emit_card(card_type='enhancement_offer') instead of delivering
+# a NEW playbook via emit_card(card_type='playbook_offer'). The connector's _intent_drop_set gates
 # this set out of a no-open-playbook build; EnhanceDeliveryGuard is keyed on the
 # SAME names (asserted in a test) so the guard and the advertised slice can never
 # drift. This is a SUBSET of BUILD_ONLY_TOOLS -- dropping it never touches triage.
@@ -71,8 +71,8 @@ ENHANCE_ONLY_TOOLS = frozenset({
 # plan Track C5): the live alert/incident investigation + containment-staging
 # surface. Build mode authors playbooks -- it discovers ops with
 # find_connector/find_operation/get_op_schema and offers them via
-# emit_playbook_offer; it must NOT stage live containment action-cards
-# (emit_action_card) or run connector ops directly (run_op). find_containment_actions /
+# emit_card(card_type='playbook_offer'); it must NOT stage live containment action-cards
+# (emit_card(card_type='action')) or run connector ops directly (run_op). find_containment_actions /
 # find_enrichment_actions are connector-AWARENESS (authoring) and stay in build.
 #
 # This set is MUTABLE on purpose: the connector's
@@ -297,7 +297,7 @@ def tools_for_intent(intent: str) -> list[dict[str, Any]]:
     - ``triage`` -- the full registry minus the build-only (YAML-authoring +
       playbook-mutation) tools.
     - ``build``  -- the full registry minus the triage-only (containment-staging
-      ``emit_action_card``, direct ``run_op``, alert/incident investigation)
+      ``emit_card(card_type='action')``, direct ``run_op``, alert/incident investigation)
       tools, so authoring mode never stages containment action-cards.
 
     ``RUN_VERB_TOOLS`` survives BOTH subtractions: running an already-deployed

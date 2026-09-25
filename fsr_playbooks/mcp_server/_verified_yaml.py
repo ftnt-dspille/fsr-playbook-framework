@@ -18,7 +18,7 @@ green verification of something else entirely. From the analyst's seat the step
 simply never landed.
 
 The fix is structural, not a prompt plea: `verify_enhancement` stashes the
-blessed text HERE and hands back an opaque `verified_id`. `emit_enhancement_offer`
+blessed text HERE and hands back an opaque `verified_id`. `emit_card(card_type='enhancement_offer')`
 takes that id and *cannot* take YAML. The model never gets a chance to re-type
 the document, so verified and delivered are the same bytes by construction.
 

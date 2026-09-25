@@ -22,10 +22,12 @@ BUILD_SLICE = {_CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL,
                "get_op_schema", "validate_yaml"}
 # Triage advertises the offer tool (trace-compiled close) but NOT verify_playbook.
 TRIAGE_SLICE = {_CREATE_OFFER_TOOL, "run_op", "get_record"}
-# The FULL default registry: advertises the build pair *and* emit_action_card.
-# Providers substitute this when a caller passes no slice, so a research-heavy
-# triage turn lands here and must not be nudged into authoring.
-FULL_SLICE = BUILD_SLICE | {"emit_action_card", "run_op", "get_record"}
+# The FULL default registry: what triage gets when no intent can be inferred.
+# Includes discovery tools but NOT build-only tools like verify_playbook.
+# When a caller passes no slice (e.g., unknown client), triage modes should land here.
+# Note: Uses emit_card (advertised) not emit_action_card (internal canonical name).
+FULL_SLICE = {"get_step_type", "find_connector", "find_operation", "get_op_schema",
+              "validate_yaml", "emit_card", "run_op", "get_record"}
 
 
 def _research_only(g):

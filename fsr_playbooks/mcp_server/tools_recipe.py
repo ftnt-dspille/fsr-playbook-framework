@@ -44,7 +44,7 @@ def _tools_triage_or_err():
 # Finding a recent FAILED run is connector-owned: it queries the live
 # workflow-run tables through the connector's FSR client, and different
 # connectors keep that function in different modules (here it is
-# `fsr_soc_triage.tools_triage.list_recent_failed_runs`, NOT a
+# `fsr_soc_triage.tools_triage.list_playbook_runs`, NOT a
 # `fsr_playbooks.mcp_server.tools_triage` the library can import, and it is not
 # registered in the library REGISTRY by name). So the library's one-shot
 # troubleshooter cannot import it directly -- the connector injects it here at
@@ -60,7 +60,7 @@ def set_failed_run_provider(fn: Any) -> None:
     Signature: ``fn(limit: int = ..., playbook: str | None = ...) ->
     list[dict]`` where each dict carries at least ``task_id``/``pk``, ``name``,
     ``status`` and ``error_message`` (the shape of
-    ``list_recent_failed_runs``)."""
+    ``list_playbook_runs``)."""
     global _FAILED_RUN_PROVIDER
     _FAILED_RUN_PROVIDER = fn
 
@@ -471,7 +471,7 @@ def why_did_playbook_fail(
     render every Jinja block in the YAML against the run's vars to
     surface the failure cause.
 
-    Chains three existing tools (`list_recent_failed_runs` →
+    Chains three existing tools (`list_playbook_runs` →
     `get_run_env` → `diagnose_yaml_against_pb_execution`) plus a
     decompile pass when the caller doesn't ship YAML.
 
@@ -514,7 +514,7 @@ def why_did_playbook_fail(
                 f"no recent failed run found for {playbook_or_id!r}: {msg}",
                 suggestions=[
                     "Confirm the playbook name (substring match, case-insensitive)",
-                    "Try `list_recent_failed_runs(playbook=...)` directly",
+                    "Try `list_playbook_runs(playbook=...)` directly",
                     "Pass a workflow PK or task_id UUID instead of a name",
                 ],
                 playbook_or_id=playbook_or_id,

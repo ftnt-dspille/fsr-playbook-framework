@@ -303,7 +303,7 @@ def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
     adds the importable JSON string. This proves the document is well-formed
     -- it does NOT check that steps are wired correctly or that ops exist,
     and it does not deliver anything to the analyst. Gate with
-    verify_playbook, deliver with emit_playbook_offer.
+    verify_playbook, deliver with emit_card(card_type='playbook_offer').
 
     Returns `{ok: true, summary: {workflows, steps, uuid, name}}` by
     default -- the agent rarely needs the full JSON body, just a

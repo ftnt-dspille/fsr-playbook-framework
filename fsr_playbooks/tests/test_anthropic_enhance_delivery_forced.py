@@ -63,10 +63,9 @@ class _FakeStream:
 _ENHANCE_TOOLS = [
     {"name": "verify_enhancement", "description": "verify an edit",
      "input_schema": {"type": "object", "properties": {}}},
-    {"name": "emit_enhancement_offer", "description": "apply a verified edit",
+    {"name": "emit_card", "description": "emit a card",
      "input_schema": {"type": "object", "properties": {
-         "id": {"type": "string"}, "summary": {"type": "string"},
-         "verified_id": {"type": "string"}}}},
+         "card_type": {"type": "string"}, "payload": {"type": "object"}}}},
 ]
 
 
@@ -74,7 +73,7 @@ def _fake_dispatch(name, args):
     if name == "verify_enhancement":
         return {"ready_to_push": True, "verified_id": "v1",
                 "diff_summary": {"summary": "adds a manual-input gate"}}
-    if name == "emit_enhancement_offer":
+    if name == "emit_card":
         return {"ok": True, "card": {"type": "enhancement_offer"}}
     return {"ok": True}
 
@@ -122,14 +121,17 @@ def test_narrated_delivery_is_forced_into_a_real_offer_call():
             tools=_ENHANCE_TOOLS, tags={})))
 
     offer_uses = [e for e in events
-                  if isinstance(e, ToolUseEvent) and e.name == "emit_enhancement_offer"]
+                  if isinstance(e, ToolUseEvent) and e.name == "emit_card"]
     assert len(offer_uses) == 1, "guard did not force the offer call"
 
+    # The forced round now uses emit_card with card_type='enhancement_offer'
+    assert offer_uses[0].arguments.get("card_type") == "enhancement_offer"
+
     offer_dispatch = [c for c in disp.call_args_list
-                      if c[0][0] == "emit_enhancement_offer"]
+                      if c[0][0] == "emit_card"]
     assert len(offer_dispatch) == 1
-    # The blessed handle wins over the model's stale one.
-    assert offer_dispatch[0][0][1]["verified_id"] == "v1"
+    # The blessed handle wins over the model's stale one (in payload now).
+    assert offer_dispatch[0][0][1]["payload"]["verified_id"] == "v1"
 
     assert any(isinstance(e, ToolResultEvent)
                and isinstance(e.result, dict) and e.result.get("card")
@@ -142,8 +144,9 @@ def test_no_force_when_offer_already_made():
     # must stay inert -- no forced round, create() never called.
     turn1 = _FakeStream([], MagicMock(
         content=[_tool_use_block("c1", "verify_enhancement", {}),
-                 _tool_use_block("c2", "emit_enhancement_offer",
-                                 {"id": "x", "summary": "s", "verified_id": "v1"})],
+                 _tool_use_block("c2", "emit_card",
+                                 {"card_type": "enhancement_offer",
+                                  "payload": {"id": "x", "summary": "s", "verified_id": "v1"}})],
         stop_reason="tool_use", usage=_usage()))
     turn2 = _FakeStream(["Done -- applied."],
                         MagicMock(content=[_text_block("Done -- applied.")],
@@ -158,7 +161,7 @@ def test_no_force_when_offer_already_made():
             tools=_ENHANCE_TOOLS, tags={})))
     # Exactly one offer (the model's own), and the forced create() never fired.
     offer_uses = [e for e in events
-                  if isinstance(e, ToolUseEvent) and e.name == "emit_enhancement_offer"]
+                  if isinstance(e, ToolUseEvent) and e.name == "emit_card"]
     assert len(offer_uses) == 1
     p._client.messages.create.assert_not_called()
     assert isinstance(events[-1], DoneEvent)
