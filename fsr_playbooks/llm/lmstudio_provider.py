@@ -36,6 +36,7 @@ from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
+    unexecuted_tool_calls_note,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -221,6 +222,14 @@ class LMStudioProvider(CapabilityMixin):
                         "arguments": _history_safe_arguments(slot["args"]),
                     },
                 })
+            # Only a `tool_calls` finish executes its calls; replaying ones that
+            # never ran makes the next request a 400. See unexecuted_tool_calls_note.
+            if tool_calls_for_msg and finish_reason != "tool_calls":
+                if not text_buf:
+                    assistant_msg["content"] = unexecuted_tool_calls_note(
+                        finish_reason,
+                        [tc["function"]["name"] for tc in tool_calls_for_msg])
+                tool_calls_for_msg = []
             if tool_calls_for_msg:
                 assistant_msg["tool_calls"] = tool_calls_for_msg
             history.append(assistant_msg)

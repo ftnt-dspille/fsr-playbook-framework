@@ -38,6 +38,7 @@ from ._loop_helpers import (
     TriageDiscipline,
     drain_with_idle_timeout,
     latest_user_text,
+    unexecuted_tool_calls_note,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -946,6 +947,20 @@ class AnthropicProvider(CapabilityMixin):
                         "input": block.input,
                     })
                     tool_calls.append((block.id, block.name, dict(block.input)))
+
+            # Only a `tool_use` stop executes its calls; any other stop
+            # (`max_tokens` above all -- the block is cut off mid-input) takes
+            # the terminal branch below. A tool_use with no tool_result makes
+            # the next request a 400, so drop them. See unexecuted_tool_calls_note.
+            if tool_calls and final.stop_reason != "tool_use":
+                dropped = [n for (_i, n, _a) in tool_calls]
+                assistant_blocks = [b for b in assistant_blocks
+                                    if b["type"] != "tool_use"]
+                if not assistant_blocks:
+                    assistant_blocks = [{"type": "text",
+                                         "text": unexecuted_tool_calls_note(
+                                             final.stop_reason, dropped)}]
+                tool_calls = []
 
             history.append(Message(role="assistant", content=assistant_blocks))
 

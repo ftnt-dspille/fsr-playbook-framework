@@ -61,6 +61,7 @@ from ._loop_helpers import (
     TriageDiscipline,
     drain_with_idle_timeout,
     latest_user_text,
+    unexecuted_tool_calls_note,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -750,6 +751,16 @@ class OpenAIProvider(CapabilityMixin):
                                  "arguments": _history_safe_arguments(raw_args)},
                 })
                 tool_calls.append((call_id, slot["name"], parsed))
+            # Only a `tool_calls` finish executes its calls; any other stop
+            # (`length` above all -- the call is cut off mid-arguments) takes
+            # the terminal branch below. Replaying calls that never ran makes
+            # the next request a 400, so drop them. See unexecuted_tool_calls_note.
+            if tool_calls_for_msg and finish_reason != "tool_calls":
+                if not text_buf:
+                    assistant_msg["content"] = unexecuted_tool_calls_note(
+                        finish_reason,
+                        [tc["function"]["name"] for tc in tool_calls_for_msg])
+                tool_calls_for_msg, tool_calls = [], []
             if tool_calls_for_msg:
                 assistant_msg["tool_calls"] = tool_calls_for_msg
             history.append(assistant_msg)

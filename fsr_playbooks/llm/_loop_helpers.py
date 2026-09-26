@@ -35,6 +35,23 @@ from typing import Any
 DEFAULT_MAX_OUTPUT_TOKENS = 16384
 
 
+def unexecuted_tool_calls_note(stop_reason: str | None, names: list[str]) -> str:
+    """Assistant-turn text standing in for tool calls that will not run.
+
+    A round that stops for anything but a tool-call finish (`length` /
+    `max_tokens` above all) is treated as terminal, so its tool calls are
+    never executed. Leaving them in history anyway makes the NEXT request --
+    any guard nudge or forced round -- invalid: both OpenAI and Anthropic
+    reject a tool call with no matching tool result (HTTP 400). Found live:
+    a gpt-5.4-mini build round spent the whole 16384-token cap and stopped
+    mid-call, and the guard's follow-up request died on the dangling call.
+    Providers drop the calls and replay this note instead, so the model
+    knows why nothing ran."""
+    called = ", ".join(sorted(set(n for n in names if n))) or "a tool"
+    return (f"[My previous output stopped ({stop_reason or 'unknown'}) before "
+            f"the call to {called} completed, so it was not made.]")
+
+
 # Read-only reference tools: results are deterministic for the same
 # args, so we can replace duplicate tool_results with a stub pointing
 # back at the first call. Excludes anything that mutates remote state
