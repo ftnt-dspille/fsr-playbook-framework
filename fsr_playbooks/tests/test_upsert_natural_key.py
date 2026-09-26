@@ -24,9 +24,11 @@ import sqlite3
 
 import pytest
 
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
 
-_REFERENCE_DB = "data/fsr_reference.db"
+# The resolved catalog, not the gitignored dev cache: CI has only the packaged one.
+_REFERENCE_DB = str(default_db_path())
 
 
 @pytest.fixture
@@ -147,6 +149,15 @@ def test_the_warmed_reference_catalog_can_answer():
     # Guards the backfill itself: if the catalog loses the column or the data,
     # the check silently stops working and every test above still passes
     # because they build their own DB.
+    #
+    # Only a WARMED catalog carries the data. The packaged slim catalog (all CI
+    # has) is not warmed, so the check is dormant there until the modules probe
+    # runs on a box -- skip for exactly that file, assert for any other.
+    from pathlib import Path
+
+    from fsr_playbooks._db import PACKAGED_SLIM_DB
+    if Path(_REFERENCE_DB).resolve() == PACKAGED_SLIM_DB.resolve():
+        pytest.skip("packaged slim catalog is not warmed with modules.unique_constraint")
     assert _warnings("", _REFERENCE_DB), (
         "reference catalog has no natural key for alerts -- re-warm it "
         "(tooling/cli.py probe modules) or the check is dormant"

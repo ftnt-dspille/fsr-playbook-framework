@@ -23,8 +23,12 @@ from __future__ import annotations
 
 import yaml
 
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler import compile_yaml
 from fsr_playbooks.compiler.decompiler import decompile_to_yaml
+
+# The resolved catalog, not the gitignored dev cache: CI has only the packaged one.
+DB = str(default_db_path())
 
 
 def _compile(extra: str, step_type: str = "create_record"):
@@ -43,7 +47,7 @@ playbooks:
         module: alerts
         fields:
           name: "x"
-{extra}""", "data/fsr_reference.db")
+{extra}""", DB)
 
 
 def _args(extra: str) -> dict:
@@ -180,7 +184,7 @@ def test_link_is_not_warned_about():
 def _roundtrip(extra: str) -> dict:
     r = _compile(extra)
     assert r.ok, [e.to_dict() for e in r.errors]
-    back = yaml.safe_load(decompile_to_yaml(r.fsr_json, "data/fsr_reference.db"))
+    back = yaml.safe_load(decompile_to_yaml(r.fsr_json, DB))
     for st in back["playbooks"][0]["steps"]:
         if st.get("name") == "C":
             return st
