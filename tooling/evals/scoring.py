@@ -73,6 +73,7 @@ _CARD_TYPE_TO_TOOL = {
     "playbook_offer": "emit_playbook_offer",
     "patch_proposal": "emit_patch_proposal",
     "enhancement_offer": "emit_enhancement_offer",
+    "verdict": "emit_verdict",
 }
 _FIND_KIND_TO_TOOL = {
     "connector": "find_connector",
