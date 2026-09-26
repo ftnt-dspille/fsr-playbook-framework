@@ -42,6 +42,7 @@ from ._loop_helpers import (
     latest_user_text,
     unexecuted_tool_calls_note,
     verdict_directive,
+    verdict_repair_directive,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -1218,34 +1219,41 @@ class AnthropicProvider(CapabilityMixin):
                         (t for t in tools if t.get("name") == "emit_card"), None)
                     if card_schema is not None:
                         turn_idx += 1
-                        history.append(Message(
-                            role="user", content=verdict_directive(evidence_ids)))
-                        try:
-                            resp = await self._client.messages.create(
-                                model=self.model, max_tokens=2048,
-                                system=cached_system,
-                                messages=_with_history_breakpoint(
-                                    _to_anthropic_messages(history)),
-                                tools=[card_schema],
-                                tool_choice={"type": "tool", "name": "emit_card"},
-                            )
-                            tu = next((b for b in resp.content
-                                       if getattr(b, "type", None) == "tool_use"),
-                                      None)
-                            oargs = dict(getattr(tu, "input", {}) or {}) if tu else {}
-                            if not oargs.get("card_type"):
-                                oargs["card_type"] = "verdict"
-                            if not isinstance(oargs.get("payload"), dict):
-                                oargs["payload"] = {}
-                            call_id = getattr(tu, "id", None) or _uuid.uuid4().hex[:8]
-                            yield ToolUseEvent(
-                                name="emit_card", arguments=oargs, call_id=call_id,
-                                tier=_tier_for("emit_card", oargs))
-                            oresult = _guarded_dispatch("emit_card", oargs)
-                            yield ToolResultEvent(call_id=call_id, result=oresult)
-                        except Exception:
-                            import logging
-                            logging.exception("forced verdict delivery failed")
+                        directive = verdict_directive(evidence_ids)
+                        # One repair attempt -- see verdict_repair_directive.
+                        for _attempt in range(2):
+                            history.append(Message(role="user", content=directive))
+                            try:
+                                resp = await self._client.messages.create(
+                                    model=self.model, max_tokens=2048,
+                                    system=cached_system,
+                                    messages=_with_history_breakpoint(
+                                        _to_anthropic_messages(history)),
+                                    tools=[card_schema],
+                                    tool_choice={"type": "tool", "name": "emit_card"},
+                                )
+                                tu = next((b for b in resp.content
+                                           if getattr(b, "type", None) == "tool_use"),
+                                          None)
+                                oargs = dict(getattr(tu, "input", {}) or {}) if tu else {}
+                                if not oargs.get("card_type"):
+                                    oargs["card_type"] = "verdict"
+                                if not isinstance(oargs.get("payload"), dict):
+                                    oargs["payload"] = {}
+                                call_id = getattr(tu, "id", None) or _uuid.uuid4().hex[:8]
+                                yield ToolUseEvent(
+                                    name="emit_card", arguments=oargs, call_id=call_id,
+                                    tier=_tier_for("emit_card", oargs))
+                                oresult = _guarded_dispatch("emit_card", oargs)
+                                yield ToolResultEvent(call_id=call_id, result=oresult)
+                                if not (isinstance(oresult, dict)
+                                        and oresult.get("ok") is False):
+                                    break
+                                directive = verdict_repair_directive(oresult, oargs)
+                            except Exception:
+                                import logging
+                                logging.exception("forced verdict delivery failed")
+                                break
                     yield DoneEvent(stop_reason="end_turn")
                     return
                 # P1 -- forced-assessment guarantee. The turn ran tools but

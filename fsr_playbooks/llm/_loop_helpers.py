@@ -1787,16 +1787,36 @@ def is_verdict_evidence(name: str, args: Any = None) -> bool:
 def verdict_directive(evidence_ids: list[str]) -> str:
     """Forced-round directive for the verdict guard.
 
-    Lists valid evidence tool_use_ids from this turn so the model can cite them.
-    """
+    States the whole payload contract, from the validator's own constants: a
+    live forced verdict was refused for `disposition: "inconclusive"` because
+    the model was never told the set, and the round had no second try."""
+    from ..mcp_server.tools_emit import VERDICT_DISPOSITIONS, VERDICT_SEVERITIES
     ids_str = ", ".join(evidence_ids[:10]) + ("..." if len(evidence_ids) > 10 else "")
     return (
         "You investigated using evidence tools but did not emit a verdict. "
-        "Call `emit_card(card_type='verdict', payload={...})` now with a structured "
-        "conclusion (disposition, severity, confidence, findings with citations). "
-        f"Evidence tool_use_ids from this turn: {ids_str}. "
-        "The findings.evidence list must cite these ids."
+        "Call `emit_card(card_type='verdict', payload={...})` now. The payload "
+        f"MUST have: `disposition`, exactly one of {', '.join(VERDICT_DISPOSITIONS)} "
+        "(use needs_more_info when you cannot conclude); "
+        f"`severity`, one of {', '.join(VERDICT_SEVERITIES)}; "
+        "`confidence`, a number from 0.0 to 1.0; `summary`, plain English, at most "
+        "600 characters; `findings`, a non-empty list of {claim, evidence} where "
+        "`evidence` lists tool_use ids from this turn; and `unknowns`, a non-empty "
+        "list of open questions whenever confidence is below 0.8. "
+        f"Evidence tool_use_ids from this turn: {ids_str or 'none'}."
     )
+
+
+def verdict_repair_directive(result: Any, args: Any) -> str:
+    """One repair attempt after the validator refused a forced verdict: the
+    refusal is shown to the model verbatim, never silently remapped."""
+    msg = (result or {}).get("message") if isinstance(result, dict) else None
+    try:
+        sent = json.dumps(args, default=str)[:1500]
+    except Exception:  # noqa: BLE001
+        sent = str(args)[:1500]
+    return (f"Your verdict card was refused: {msg or 'invalid payload'}. You sent: "
+            f"{sent}. Call `emit_card(card_type='verdict', ...)` again with that "
+            "fixed; keep everything that was valid.")
 
 
 class VerdictDeliveryGuard:

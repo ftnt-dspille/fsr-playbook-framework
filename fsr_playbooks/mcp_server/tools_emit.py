@@ -960,6 +960,16 @@ def emit_manual_input(
     }
 
 
+
+#: The verdict vocabulary. The validator below and the forced-verdict directive
+#: (`_loop_helpers.verdict_directive`) both read these, so the model is told the
+#: exact set it will be checked against. `needs_more_info` is the "could not
+#: conclude" value -- a model left to guess writes `inconclusive` and is refused.
+VERDICT_DISPOSITIONS = ("true_positive", "false_positive", "benign", "suspicious",
+                        "needs_more_info")
+VERDICT_SEVERITIES = ("critical", "high", "medium", "low", "info")
+
+
 def emit_verdict(
     disposition: str,
     severity: str,
@@ -987,15 +997,13 @@ def emit_verdict(
       recommended_actions: optional list of {label, tool?, args?} for next steps
       id: optional card id; generated if absent
     """
-    if not isinstance(disposition, str) or disposition not in (
-            "true_positive", "false_positive", "benign", "suspicious", "needs_more_info"):
+    if not isinstance(disposition, str) or disposition not in VERDICT_DISPOSITIONS:
         return _err("bad_disposition",
-                    f"disposition must be one of: true_positive, false_positive, "
-                    f"benign, suspicious, needs_more_info (got {disposition!r})")
-    if not isinstance(severity, str) or severity not in (
-            "critical", "high", "medium", "low", "info"):
+                    f"disposition must be one of: {', '.join(VERDICT_DISPOSITIONS)} "
+                    f"(got {disposition!r})")
+    if not isinstance(severity, str) or severity not in VERDICT_SEVERITIES:
         return _err("bad_severity",
-                    f"severity must be one of: critical, high, medium, low, info "
+                    f"severity must be one of: {', '.join(VERDICT_SEVERITIES)} "
                     f"(got {severity!r})")
     if not isinstance(confidence, (int, float)):
         return _err("bad_confidence", "confidence must be a number")

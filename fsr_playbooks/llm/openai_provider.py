@@ -64,6 +64,7 @@ from ._loop_helpers import (
     latest_user_text,
     unexecuted_tool_calls_note,
     verdict_directive,
+    verdict_repair_directive,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -974,52 +975,56 @@ class OpenAIProvider(CapabilityMixin):
                          if (t.get("function") or {}).get("name") == "emit_card"), None)
                     if card_schema is not None:
                         turn_idx += 1
-                        history.append({
-                            "role": "user",
-                            "content": verdict_directive(evidence_ids),
-                        })
-                        try:
-                            resp = await self._client.chat.completions.create(
-                                model=self.model, messages=history,
-                                tools=[card_schema],
-                                tool_choice={
-                                    "type": "function",
-                                    "function": {"name": "emit_card"},
-                                },
-                                # A verdict carries findings with claims and
-                                # evidence ids; 512 could truncate the JSON and
-                                # the citation gate would refuse an empty payload.
-                                **_max_tokens_param(self.model, 2048),
-                            )
-                            msg = resp.choices[0].message
-                            raw = (msg.tool_calls[0].function.arguments
-                                   if msg.tool_calls else "{}")
+                        directive = verdict_directive(evidence_ids)
+                        # One repair attempt: a refused card is shown back to
+                        # the model verbatim (see verdict_repair_directive).
+                        for _attempt in range(2):
+                            history.append({"role": "user", "content": directive})
                             try:
-                                oargs = json.loads(raw) if raw else {}
+                                resp = await self._client.chat.completions.create(
+                                    model=self.model, messages=history,
+                                    tools=[card_schema],
+                                    tool_choice={
+                                        "type": "function",
+                                        "function": {"name": "emit_card"},
+                                    },
+                                    # A verdict carries findings with claims and
+                                    # evidence ids; 512 could truncate the JSON and
+                                    # the citation gate would refuse an empty payload.
+                                    **_max_tokens_param(self.model, 2048),
+                                )
+                                msg = resp.choices[0].message
+                                raw = (msg.tool_calls[0].function.arguments
+                                       if msg.tool_calls else "{}")
+                                try:
+                                    oargs = json.loads(raw) if raw else {}
+                                except Exception:
+                                    oargs = {}
+                                if not isinstance(oargs, dict):
+                                    oargs = {}
+                                if not oargs.get("card_type"):
+                                    oargs["card_type"] = "verdict"
+                                if not isinstance(oargs.get("payload"), dict):
+                                    oargs["payload"] = {}
+                                call_id = (msg.tool_calls[0].id
+                                           if msg.tool_calls else _uuid.uuid4().hex[:8])
+                                yield ToolUseEvent(
+                                    name="emit_card", arguments=oargs,
+                                    call_id=call_id,
+                                    tier=_tier_for("emit_card", oargs))
+                                _t0 = time.perf_counter()
+                                oresult = _guarded_dispatch("emit_card", oargs)
+                                _dur = int((time.perf_counter() - _t0) * 1000)
+                                yield ToolResultEvent(
+                                    call_id=call_id, result=oresult, duration_ms=_dur)
+                                if not (isinstance(oresult, dict)
+                                        and oresult.get("ok") is False):
+                                    break
+                                directive = verdict_repair_directive(oresult, oargs)
                             except Exception:
-                                oargs = {}
-                            if not isinstance(oargs, dict):
-                                oargs = {}
-                            # Ensure card_type is set to verdict
-                            if not oargs.get("card_type"):
-                                oargs["card_type"] = "verdict"
-                            # Wrap arguments in payload for emit_card
-                            if not isinstance(oargs.get("payload"), dict):
-                                oargs["payload"] = {}
-                            call_id = (msg.tool_calls[0].id
-                                       if msg.tool_calls else _uuid.uuid4().hex[:8])
-                            yield ToolUseEvent(
-                                name="emit_card", arguments=oargs,
-                                call_id=call_id,
-                                tier=_tier_for("emit_card", oargs))
-                            _t0 = time.perf_counter()
-                            oresult = _guarded_dispatch("emit_card", oargs)
-                            _dur = int((time.perf_counter() - _t0) * 1000)
-                            yield ToolResultEvent(
-                                call_id=call_id, result=oresult, duration_ms=_dur)
-                        except Exception:
-                            import logging
-                            logging.exception("forced verdict delivery failed")
+                                import logging
+                                logging.exception("forced verdict delivery failed")
+                                break
                     yield DoneEvent(stop_reason="end_turn")
                     return
 

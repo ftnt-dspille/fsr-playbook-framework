@@ -40,11 +40,11 @@ async def _drain(gen):
     return [ev async for ev in gen]
 
 
-def _forced_verdict_response():
+def _forced_verdict_response(disposition="true_positive"):
     fn = MagicMock()
     fn.name = "emit_card"
     fn.arguments = json.dumps({"card_type": "verdict", "payload": {
-        "disposition": "true_positive", "severity": "high", "confidence": 0.8,
+        "disposition": disposition, "severity": "high", "confidence": 0.8,
         "findings": [{"claim": "host beacons to a known C2", "evidence": ["c2"]}],
         "unknowns": []}})
     call = MagicMock(id="c_forced", function=fn)
@@ -143,3 +143,76 @@ def test_anthropic_triage_on_the_full_surface_ends_with_a_verdict():
                for c in disp.call_args_list), "Anthropic never forced a verdict"
     forced_call = client.messages.create.call_args
     assert forced_call.kwargs["tool_choice"] == {"type": "tool", "name": "emit_card"}
+
+
+def test_the_directive_states_the_validators_own_vocabulary():
+    from fsr_playbooks.llm._loop_helpers import verdict_directive
+    from fsr_playbooks.mcp_server.tools_emit import (
+        VERDICT_DISPOSITIONS,
+        VERDICT_SEVERITIES,
+    )
+    d = verdict_directive(["c1"])
+    for word in VERDICT_DISPOSITIONS + VERDICT_SEVERITIES:
+        assert word in d, word
+    assert "needs_more_info" in d and "c1" in d
+
+
+def _run_with_forced(responses, dispatch_results):
+    """Hunt round + prose, then forced verdict rounds answered in order."""
+    streams = [_FakeStream(_hunt_round()), _FakeStream(_prose())]
+    forced = list(responses)
+    sent: list = []
+
+    async def _create(*_a, **kw):
+        if kw.get("stream"):
+            return streams.pop(0)
+        sent.append([dict(m) for m in kw["messages"]])
+        return forced.pop(0)
+
+    client = MagicMock()
+    client.chat = MagicMock()
+    client.chat.completions = MagicMock(create=AsyncMock(side_effect=_create))
+    p = OpenAIProvider(model="gpt-5.4-mini", base_url="http://x/v1", api_key="x",
+                       client=client)
+    results = iter(dispatch_results)
+
+    def _dispatch(name, args):
+        return next(results) if name == "emit_card" else {"ok": True}
+
+    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+               MagicMock(side_effect=_dispatch)) as disp, \
+         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+        asyncio.run(_drain(p.stream(
+            system="s", messages=[Message(role="user", content="investigate")],
+            tools=_TOOLS, tags={})))
+    return sent, disp
+
+
+_REFUSED = {"ok": False, "code": "bad_disposition",
+            "message": "disposition must be one of: ... (got 'inconclusive')"}
+
+
+def test_a_refused_forced_verdict_gets_one_repair_attempt():
+    # The live refusal: `inconclusive` is not in the vocabulary. The repair
+    # sends a corrected payload (an identical retry is blocked upstream by the
+    # repeated-call guard, as it should be).
+    sent, disp = _run_with_forced(
+        [_forced_verdict_response("inconclusive"),
+         _forced_verdict_response("needs_more_info")],
+        [_REFUSED, {"ok": True}])
+    assert len(sent) == 2, "no repair attempt after the refusal"
+    repair = sent[1][-1]["content"]
+    assert "refused" in repair and "inconclusive" in repair
+    assert sum(1 for c in disp.call_args_list if c.args[0] == "emit_card") == 2
+
+
+def test_repair_is_attempted_once_not_forever():
+    sent, _ = _run_with_forced(
+        [_forced_verdict_response("inconclusive"), _forced_verdict_response("unsure")],
+        [_REFUSED, _REFUSED])
+    assert len(sent) == 2
+
+
+def test_an_accepted_forced_verdict_is_not_repaired():
+    sent, _ = _run_with_forced([_forced_verdict_response()], [{"ok": True}])
+    assert len(sent) == 1
