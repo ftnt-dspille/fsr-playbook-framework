@@ -51,6 +51,7 @@ from .openai_provider import _history_safe_arguments, _is_error_result
 from .provider import (
     CapabilityMixin,
     DoneEvent,
+    DroppedCall,
     ErrorEvent,
     Event,
     Message,
@@ -224,7 +225,12 @@ class LMStudioProvider(CapabilityMixin):
                 })
             # Only a `tool_calls` finish executes its calls; replaying ones that
             # never ran makes the next request a 400. See unexecuted_tool_calls_note.
+            dropped_calls: list[DroppedCall] = []
             if tool_calls_for_msg and finish_reason != "tool_calls":
+                dropped_calls = [
+                    DroppedCall(name=slot["name"] or "", arg_chars=len(slot["args"] or ""),
+                                tail=(slot["args"] or "")[-200:])
+                    for _i, slot in sorted(tool_buf.items())]
                 if not text_buf:
                     assistant_msg["content"] = unexecuted_tool_calls_note(
                         finish_reason,
@@ -263,6 +269,7 @@ class LMStudioProvider(CapabilityMixin):
                                 stop_reason=stop_reason,
                                 self_repair_turn=self_repair_turns - 1,
                                 tool_calls=tool_call_usage, tags=tags,
+                                dropped_calls=dropped_calls,
                             )
                             continue
                 yield UsageEvent(
@@ -273,6 +280,7 @@ class LMStudioProvider(CapabilityMixin):
                     stop_reason=stop_reason,
                     self_repair_turn=self_repair_turns,
                     tool_calls=tool_call_usage, tags=tags,
+                    dropped_calls=dropped_calls,
                 )
                 yield DoneEvent(stop_reason=stop_reason or "stop")
                 return
@@ -317,6 +325,7 @@ class LMStudioProvider(CapabilityMixin):
                 stop_reason=stop_reason or "tool_calls",
                 self_repair_turn=self_repair_turns,
                 tool_calls=tool_call_usage, tags=tags,
+                dropped_calls=dropped_calls,
             )
 
         yield DoneEvent(stop_reason="max_tool_turns")

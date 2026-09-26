@@ -1627,6 +1627,26 @@ _RUN_INTENT_TOOLS = frozenset({
 })
 
 
+# The draft-then-stop half (see BuildProgressGuard.unverified_draft): tools
+# that check a draft without blessing it, and the ones that close the loop.
+_DRAFT_CHECK_TOOLS = frozenset({"validate_yaml", "compile_yaml"})
+_DRAFT_CLOSING_TOOLS = frozenset({
+    "verify_playbook", "emit_playbook_offer", "build_playbook_from_trace",
+    "verify_enhancement", "emit_enhancement_offer", "emit_patch_proposal",
+})
+_DRAFT_CLOSING_CARD_TYPES = frozenset({
+    "playbook_offer", "enhancement_offer", "patch_proposal",
+})
+
+UNVERIFIED_DRAFT_DIRECTIVE = (
+    "You drafted playbook YAML and checked it, but you never ran "
+    "`verify_playbook`, so the analyst has nothing they can save. Call "
+    "`verify_playbook` with your final YAML now; when it is ready_to_push, "
+    "deliver it with `emit_card(card_type='playbook_offer', ...)`. Do not end "
+    "the turn with the YAML in prose."
+)
+
+
 class BuildProgressGuard:
     """Tracks a build turn that ran only research tools and never authored.
 
@@ -1642,6 +1662,10 @@ class BuildProgressGuard:
         self._authored = False
         self._run_intent = False
         self._forced = False
+        # Second stage -- see `unverified_draft`.
+        self._drafted = False
+        self._closed = False
+        self._verify_forced = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         self._any_tool = True
@@ -1649,6 +1673,34 @@ class BuildProgressGuard:
             self._authored = True
         if name in _RUN_INTENT_TOOLS:
             self._run_intent = True
+        if name in _DRAFT_CHECK_TOOLS:
+            self._drafted = True
+        if name in _DRAFT_CLOSING_TOOLS or (
+                name == "emit_card" and isinstance(args, dict)
+                and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES):
+            self._closed = True
+
+    def unverified_draft(self, allowed_names: set[str]) -> bool:
+        """True when a build turn drafted YAML but is ending without ever
+        running `verify_playbook` or delivering anything.
+
+        The gap between the two guards: BuildProgressGuard counts
+        validate/compile as progress, and CreateDeliveryGuard needs a PASSING
+        verify before it has bytes to offer -- so a turn that stops after
+        `validate_yaml` / `compile_yaml` ends with YAML in prose and no Create
+        button. Seen replaying the live build row on gpt-5.4-mini (1 of 3).
+        Nudges the NEXT step (verify, then offer) rather than forcing an offer
+        of unverified YAML. Fires at most once."""
+        if self._verify_forced or self._closed or not self._drafted:
+            return False
+        if self._run_intent or _CREATE_VERIFY_TOOL not in allowed_names:
+            return False
+        return (_CREATE_OFFER_TOOL in allowed_names
+                or "emit_card" in allowed_names)
+
+    def mark_verify_forced(self) -> None:
+        self._verify_forced = True
+        record_guard_fire("BuildProgressGuard.unverified_draft")
 
     def outstanding(self, allowed_names: set[str]) -> bool:
         """True when a build turn is ending with research but no authoring."""

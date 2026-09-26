@@ -55,6 +55,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    UNVERIFIED_DRAFT_DIRECTIVE,
     BuildProgressGuard,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
@@ -73,6 +74,7 @@ from .provider import (
     ApprovalRequestEvent,
     CapabilityMixin,
     DoneEvent,
+    DroppedCall,
     ErrorEvent,
     Event,
     Message,
@@ -755,7 +757,12 @@ class OpenAIProvider(CapabilityMixin):
             # (`length` above all -- the call is cut off mid-arguments) takes
             # the terminal branch below. Replaying calls that never ran makes
             # the next request a 400, so drop them. See unexecuted_tool_calls_note.
+            dropped_calls: list[DroppedCall] = []
             if tool_calls_for_msg and finish_reason != "tool_calls":
+                dropped_calls = [
+                    DroppedCall(name=slot["name"] or "", arg_chars=len(slot["args"]),
+                                tail=slot["args"][-200:])
+                    for _i, slot in sorted(tool_buf.items())]
                 if not text_buf:
                     assistant_msg["content"] = unexecuted_tool_calls_note(
                         finish_reason,
@@ -776,6 +783,7 @@ class OpenAIProvider(CapabilityMixin):
                     stop_reason=stop_reason,
                     self_repair_turn=self_repair_turns - repair_delta,
                     tool_calls=tool_call_usage, tags=tags,
+                    dropped_calls=dropped_calls,
                 )
 
             # Terminal turn (no tool calls) -- self-repair, P1 assessment, done.
@@ -810,6 +818,17 @@ class OpenAIProvider(CapabilityMixin):
                     turn_idx += 1
                     history.append({
                         "role": "user", "content": _BUILD_PROGRESS_DIRECTIVE,
+                    })
+                    continue
+
+                # Drafted and checked, never verified -- nothing to offer yet.
+                # See BuildProgressGuard.unverified_draft.
+                if _build_progress.unverified_draft(allowed_names):
+                    _build_progress.mark_verify_forced()
+                    yield _emit_usage("unverified_draft_forced")
+                    turn_idx += 1
+                    history.append({
+                        "role": "user", "content": UNVERIFIED_DRAFT_DIRECTIVE,
                     })
                     continue
 

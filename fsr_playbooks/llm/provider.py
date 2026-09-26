@@ -94,6 +94,17 @@ class ToolCallUsage:
 
 
 @dataclass
+class DroppedCall:
+    """A tool call the model started but the round never ran -- it stopped on
+    `length` / `max_tokens` mid-arguments. Kept so a runaway round (one live
+    build round spent the whole 16384-token cap) shows WHAT it was writing;
+    the call itself is dropped from history. `tail` is the last 200 chars."""
+    name: str
+    arg_chars: int
+    tail: str
+
+
+@dataclass
 class UsageEvent:
     """One emitted per LLM round-trip. Providers populate the fields
     they have access to; consumers (telemetry, history.db) are the
@@ -121,6 +132,8 @@ class UsageEvent:
     #: what `cache_read` alone can never tell you. Empty when a provider does
     #: not cache (the FortiAI proxy) or has not been taught to report it.
     prefix_fingerprint: str = ""
+    #: Calls this round started but never ran -- see `DroppedCall`.
+    dropped_calls: list[DroppedCall] = field(default_factory=list)
     kind: Literal["usage"] = "usage"
 
 

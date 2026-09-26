@@ -213,3 +213,52 @@ def test_anthropic_self_repair_after_a_truncated_call_is_well_formed():
     for msgs in requests:
         assert _anthropic_unanswered(msgs) == [], json.dumps(msgs, default=str)[:800]
     assert not disp.called, "a call cut off mid-input was executed"
+
+
+def _dropped(events):
+    from fsr_playbooks.llm.provider import UsageEvent
+    return [d for e in events if isinstance(e, UsageEvent) for d in e.dropped_calls]
+
+
+def test_openai_and_lmstudio_record_what_the_dropped_call_was_writing():
+    """The live runaway could not be diagnosed: the cut-off arguments were never
+    kept anywhere. The usage event for that round now carries them."""
+    for cls in (OpenAIProvider, LMStudioProvider):
+        _, _, events = _run_openai_like(
+            cls, [_truncated_round(text=_BROKEN_YAML_TEXT), _close_round()],
+            _BUILD_TOOLS)
+        dropped = _dropped(events)
+        assert len(dropped) == 1, cls.__name__
+        assert dropped[0].name == "emit_card"
+        assert dropped[0].arg_chars == len(_CUT_ARGS)
+        assert _CUT_ARGS.endswith(dropped[0].tail)
+
+
+def test_anthropic_records_the_dropped_call():
+    truncated = _AnthropicStream([], MagicMock(
+        content=[_tool_use_block("c_cut", "emit_card", {"card_type": "playbook_offer"})],
+        stop_reason="max_tokens", usage=_usage()))
+    client = MagicMock()
+    client.messages = MagicMock()
+    client.messages.stream = MagicMock(side_effect=[truncated])
+    client.messages.create = AsyncMock()
+    p = AnthropicProvider(model="claude-haiku-4-5-20251001", base_url="http://x",
+                          api_key="x", client=client)
+    with patch("fsr_playbooks.llm.anthropic_provider.dispatch", MagicMock()):
+        events = asyncio.run(_drain(p.stream(
+            system="s", messages=[Message(role="user", content="hi")],
+            tools=[{"name": "emit_card", "description": "d",
+                    "input_schema": {"type": "object", "properties": {}}}], tags={})))
+    dropped = _dropped(events)
+    assert [d.name for d in dropped] == ["emit_card"]
+    assert "playbook_offer" in dropped[0].tail
+
+
+def test_a_normal_round_records_no_drops():
+    research = [
+        _delta_chunk(tool_calls=[_tc(index=0, id="c1", name="get_step_type", args="{}")]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    _, _, events = _run_openai_like(OpenAIProvider, [research, _close_round()],
+                                    _BUILD_TOOLS)
+    assert _dropped(events) == []

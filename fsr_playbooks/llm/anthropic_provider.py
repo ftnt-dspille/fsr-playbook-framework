@@ -32,6 +32,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    UNVERIFIED_DRAFT_DIRECTIVE,
     BuildProgressGuard,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
@@ -54,6 +55,7 @@ from .provider import (
     ApprovalRequestEvent,
     CapabilityMixin,
     DoneEvent,
+    DroppedCall,
     ErrorEvent,
     Event,
     Message,
@@ -952,8 +954,13 @@ class AnthropicProvider(CapabilityMixin):
             # (`max_tokens` above all -- the block is cut off mid-input) takes
             # the terminal branch below. A tool_use with no tool_result makes
             # the next request a 400, so drop them. See unexecuted_tool_calls_note.
+            dropped_calls: list[DroppedCall] = []
             if tool_calls and final.stop_reason != "tool_use":
                 dropped = [n for (_i, n, _a) in tool_calls]
+                for (_i, n, a) in tool_calls:
+                    raw = json.dumps(a, default=str)
+                    dropped_calls.append(DroppedCall(name=n, arg_chars=len(raw),
+                                                     tail=raw[-200:]))
                 assistant_blocks = [b for b in assistant_blocks
                                     if b["type"] != "tool_use"]
                 if not assistant_blocks:
@@ -1006,6 +1013,7 @@ class AnthropicProvider(CapabilityMixin):
                                 stop_reason=final.stop_reason or "",
                                 self_repair_turn=self_repair_turns - 1,
                                 tool_calls=tool_call_usage, tags=tags,
+                                dropped_calls=dropped_calls,
                             )
                             continue
                 # Enhance-delivery guard -- a verify passed but no offer
@@ -1024,10 +1032,31 @@ class AnthropicProvider(CapabilityMixin):
                         stop_reason="build_progress_forced",
                         self_repair_turn=self_repair_turns,
                         tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
                     )
                     turn_idx += 1
                     history.append(Message(
                         role="user", content=_BUILD_PROGRESS_DIRECTIVE))
+                    continue
+
+                # Drafted and checked, never verified -- nothing to offer yet.
+                # See BuildProgressGuard.unverified_draft.
+                if _build_progress.unverified_draft(allowed_names):
+                    _build_progress.mark_verify_forced()
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
+                        history_chars=history_chars,
+                        stop_reason="unverified_draft_forced",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
+                    )
+                    turn_idx += 1
+                    history.append(Message(
+                        role="user", content=UNVERIFIED_DRAFT_DIRECTIVE))
                     continue
 
                 _vid = _delivery.outstanding(allowed_names)
@@ -1042,6 +1071,7 @@ class AnthropicProvider(CapabilityMixin):
                         stop_reason="enhance_delivery_forced",
                         self_repair_turn=self_repair_turns,
                         tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
                     )
                     # Look for emit_card in the advertised tools (old name no longer advertised)
                     offer_schema = next(
@@ -1103,6 +1133,7 @@ class AnthropicProvider(CapabilityMixin):
                         stop_reason="create_delivery_forced",
                         self_repair_turn=self_repair_turns,
                         tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
                     )
                     # Look for emit_card in the advertised tools (old name no longer advertised)
                     offer_schema = next(
@@ -1174,6 +1205,7 @@ class AnthropicProvider(CapabilityMixin):
                         stop_reason="assessment_forced",
                         self_repair_turn=self_repair_turns,
                         tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
                     )
                     turn_idx += 1
                     async for ev in self._wrapup_call(
@@ -1195,6 +1227,7 @@ class AnthropicProvider(CapabilityMixin):
                     stop_reason=final.stop_reason or "",
                     self_repair_turn=self_repair_turns,
                     tool_calls=tool_call_usage, tags=tags,
+                    dropped_calls=dropped_calls,
                 )
                 yield DoneEvent(stop_reason=final.stop_reason or "end_turn")
                 return
@@ -1369,6 +1402,7 @@ class AnthropicProvider(CapabilityMixin):
                     stop_reason="pending_approval",
                     self_repair_turn=self_repair_turns,
                     tool_calls=tool_call_usage, tags=tags,
+                    dropped_calls=dropped_calls,
                 )
                 yield DoneEvent(stop_reason="pending_approval")
                 return
@@ -1392,6 +1426,7 @@ class AnthropicProvider(CapabilityMixin):
                 stop_reason=final.stop_reason or "tool_use",
                 self_repair_turn=self_repair_turns,
                 tool_calls=tool_call_usage, tags=tags,
+                dropped_calls=dropped_calls,
             )
 
         # Tool-turn budget exhausted. Two paths:
@@ -1428,6 +1463,7 @@ class AnthropicProvider(CapabilityMixin):
                 stop_reason="max_tool_turns",
                 self_repair_turn=self_repair_turns,
                 tool_calls=[], tags=tags,
+                dropped_calls=dropped_calls,
             )
             turn_idx += 1
             async for ev in self._wrapup_call(
