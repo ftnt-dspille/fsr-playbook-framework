@@ -132,3 +132,12 @@ def test_no_offered_dropdown_option_is_a_model_we_measured_failing() -> None:
                 f"{provider} offers {model!r} in a dropdown but the catalog "
                 f"says nothing about it -- add an entry with evidence, or "
                 f"remove the option.")
+
+
+def test_the_frank_default_is_recognised_by_its_configured_id() -> None:
+    """The eval harnesses default to `coding-b200/max` and every run warned
+    "not in the tested-model list", because lookup() is exact and no row
+    carried that id."""
+    v = check("coding-b200/max")
+    assert v.level == "tested"
+    assert "20260926T184805Z" in v.message

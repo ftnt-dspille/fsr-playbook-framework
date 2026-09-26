@@ -146,6 +146,20 @@ CATALOG: tuple[ModelEntry, ...] = (
         endpoint_reachable_from_box=False,
     ),
     ModelEntry(
+        # The full id, as configured: lookup() is an exact match, and the
+        # runtime sees `coding-b200/max`, never a bare `max`.
+        "coding-b200/max", "frank", "tested", False,
+        "screen lane 20260926T184805Z -- 5/5, 3 repeats, consistent",
+        "The gateway's current working default, since the glm-5.2 alias "
+        "started resolving to a backend the dev key may not call. The alias "
+        "does not name its backing model, so `reasoning` is not measured. "
+        "Also clean on tool-gate 10/10 and conv-suite 6/6. It has been seen "
+        "streaming unparseable tool-call arguments; the providers replay "
+        "those as valid JSON so the turn repairs instead of 400ing.",
+        endpoint="Fortilab AI gateway",
+        endpoint_reachable_from_box=False,
+    ),
+    ModelEntry(
         "qwen3.6", "frank", "supported", False,
         "never measured on the gate slice",
         "The gateway's lower-end model. No reasoning, and unmeasured here -- "
