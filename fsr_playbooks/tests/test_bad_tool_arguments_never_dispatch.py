@@ -98,3 +98,46 @@ def test_emptied_args_would_have_downgraded_the_tier() -> None:
     assert _resolve_tier("run_op", {}) < 4, (
         "if emptied args no longer downgrade the tier, this rationale is "
         "stale -- but the bounce is still correct")
+
+
+@pytest.mark.parametrize("raw_args", [
+    '{"connector": "fortigate-firewall", "op":',   # truncated mid-stream
+    "not json at all",
+])
+def test_openai_replays_unparseable_args_as_valid_json(raw_args: str) -> None:
+    """The bounce above only helps if the NEXT request is accepted. Replaying
+    the raw string made an OpenAI-compatible gateway reject the whole history
+    ("function.arguments must be valid JSON", HTTP 400) and the turn died
+    instead of repairing. Every replayed tool call must parse, and must still
+    carry what the model actually sent."""
+    import json
+
+    from fsr_playbooks.llm.openai_provider import _UNPARSED_ARGS_KEY
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="c1",
+                                                  name="run_op", args=raw_args)]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    turn2 = [_delta_chunk(content="ok"), _delta_chunk(finish="stop"), _usage_chunk()]
+    p = _provider([turn1, turn2])
+    with patch("fsr_playbooks.llm.openai_provider.dispatch"):
+        asyncio.run(_drain(p.stream(
+            system="s", messages=[Message(role="user", content="block it")],
+            tools=_RUN_OP_TOOLS, tags={})))
+
+    create = p._client.chat.completions.create
+    assert create.call_count == 2, "the repair round-trip never happened"
+    replayed = [tc["function"]["arguments"]
+                for m in create.call_args_list[1].kwargs["messages"]
+                if m.get("role") == "assistant"
+                for tc in (m.get("tool_calls") or [])]
+    assert replayed, "the bad call vanished from history"
+    for a in replayed:
+        assert json.loads(a)[_UNPARSED_ARGS_KEY] == raw_args
+
+
+def test_history_safe_arguments_passes_valid_json_through_untouched() -> None:
+    from fsr_playbooks.llm.openai_provider import _history_safe_arguments
+    good = '{"connector": "x", "op": "y"}'
+    assert _history_safe_arguments(good) == good
+    assert _history_safe_arguments("") == "{}"

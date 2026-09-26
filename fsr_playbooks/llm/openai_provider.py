@@ -110,6 +110,28 @@ DEFAULT_MODEL = (
 # instead of each one silently running the tool with `{}`.
 _BAD_ARGS_KEY = "__bad_tool_arguments__"
 
+#: Where an unparseable tool-call argument string is kept in HISTORY.
+_UNPARSED_ARGS_KEY = "__unparsed_arguments__"
+
+
+def _history_safe_arguments(raw: str) -> str:
+    """The `arguments` string to replay in history for one tool call.
+
+    The model occasionally streams arguments that are not valid JSON. The tool
+    already gets a `_BAD_ARGS_KEY` error for that, so the model can repair it;
+    but replaying the raw string in the NEXT request makes an OpenAI-compatible
+    gateway reject the whole history ("Assistant tool call function.arguments
+    must be valid JSON", HTTP 400), and the turn dies instead of repairing.
+    Keep what the model sent, wrapped as valid JSON, so it can still see its
+    own mistake next to the error.
+    """
+    raw = raw or "{}"
+    try:
+        json.loads(raw)
+        return raw
+    except Exception:  # noqa: BLE001
+        return json.dumps({_UNPARSED_ARGS_KEY: raw[:4000]})
+
 _FINISH_TO_CONTRACT = {
     "stop": "end_turn",
     # The OUTPUT-TOKEN CAP, and nothing else. This used to map onto
@@ -724,7 +746,8 @@ class OpenAIProvider(CapabilityMixin):
                               f"arguments were not valid JSON ({exc})"}
                 tool_calls_for_msg.append({
                     "id": call_id, "type": "function",
-                    "function": {"name": slot["name"], "arguments": raw_args},
+                    "function": {"name": slot["name"],
+                                 "arguments": _history_safe_arguments(raw_args)},
                 })
                 tool_calls.append((call_id, slot["name"], parsed))
             if tool_calls_for_msg:

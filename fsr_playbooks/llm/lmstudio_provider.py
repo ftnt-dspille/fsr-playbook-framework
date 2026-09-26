@@ -46,7 +46,7 @@ from ._loop_helpers import (
 
 # Same wire `is_error` rule as every other provider; the citation registry
 # below needs it to tell a failed tool call from evidence.
-from .openai_provider import _is_error_result
+from .openai_provider import _history_safe_arguments, _is_error_result
 from .provider import (
     CapabilityMixin,
     DoneEvent,
@@ -218,7 +218,7 @@ class LMStudioProvider(CapabilityMixin):
                     "type": "function",
                     "function": {
                         "name": slot["name"],
-                        "arguments": slot["args"] or "{}",
+                        "arguments": _history_safe_arguments(slot["args"]),
                     },
                 })
             if tool_calls_for_msg:
