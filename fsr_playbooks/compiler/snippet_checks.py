@@ -67,6 +67,21 @@ _DEFAULT_CONSTRAINTS = {
     "banned_names": frozenset({
         "open", "os", "sys", "subprocess", "importlib", "imp",
         "eval", "exec", "compile", "__import__",
+        # INTROSPECTION BUILTINS. Measured on 8.0 by live runs, each of which
+        # cost a pipeline: the snippet reports the SAME
+        # "Uses of [...] is restricted" as the process/filesystem names above,
+        # so these are the same class of restriction, not a config question.
+        #
+        # `isinstance` is worth a note of its own: before it is refused as a
+        # name it fails differently, with "isinstance() arg 2 must be a type,
+        # a tuple of types, or a union" -- because `list` and `dict` are not
+        # bound in the sandbox at all. Both errors read as a bug in the
+        # snippet rather than as a sandbox restriction.
+        #
+        # The portable spelling for a type test is attribute access inside
+        # `try/except AttributeError` (e.g. probe `.keys` to tell a mapping
+        # from a list); for `enumerate`, a manual index counter.
+        "isinstance", "hasattr", "enumerate",
     }),
     "imports_allowed_by_default": False,
 }

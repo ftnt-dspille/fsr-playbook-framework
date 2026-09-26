@@ -614,6 +614,15 @@ def _decompile_step(s, pb_name: str | None = None,
         if args:
             _hoist_args(out, args)
     elif s.type == "manual_input" and isinstance(args, dict):
+        # The box stamps the render mode onto the step (`InputBased` /
+        # `DecisionBased`), but the compiler INFERS it -- `inputs:` present ->
+        # InputBased, absent -> DecisionBased -- and rejects `type:` outright
+        # as not settable. Carrying it back out is what made a pulled
+        # manual_input fail to recompile: the read loop produced YAML the
+        # author loop would not accept, which is the one thing a round trip
+        # exists to prevent. It is re-derived on recompile, so dropping it is
+        # lossless.
+        args.pop("type", None)
         rmap = args.pop("response_mapping", None)
         opts: list = []
         if isinstance(rmap, dict):
@@ -922,6 +931,32 @@ def _decompile_step(s, pb_name: str | None = None,
         # key, so recompile accepts either.
         if "resource" in args:
             args["fields"] = args.pop("resource")
+        # Uniqueness-conflict settings ride INSIDE the payload on the wire
+        # (`__replace` / `__fieldsToUpdate`). Lift them back out to the
+        # friendly `on_conflict:` / `update_fields:` keys, so a pulled playbook
+        # reads as the setting the author chose rather than as two
+        # double-underscored strings buried among the fields.
+        #
+        # Only meaningful on the upsert endpoint -- `__replace` is ignored on a
+        # plain create -- so this runs off `is_upsert`, which the collection
+        # rewrite above has already set. `on_conflict:` implies the upsert
+        # routing on recompile, so `is_upsert:` is dropped rather than emitted
+        # alongside it: carrying both would be redundant, and it reads as if
+        # the two keys were independent.
+        _fields = args.get("fields")
+        if args.get("is_upsert") and isinstance(_fields, dict):
+            replace = _fields.get("__replace")
+            listed = _fields.get("__fieldsToUpdate")
+            if listed is not None:
+                args["update_fields"] = listed
+            elif replace == "true":
+                args["on_conflict"] = "update_all"
+            elif replace == "false":
+                args["on_conflict"] = "keep_existing"
+            if listed is not None or replace in ("true", "false"):
+                _fields.pop("__replace", None)
+                _fields.pop("__fieldsToUpdate", None)
+                args.pop("is_upsert", None)
         # Phase C1: strip wire-internal defaults from record-CRUD steps.
         # These are re-derived by the compiler on recompile, so emitting
         # them is pure noise the agent may copy.

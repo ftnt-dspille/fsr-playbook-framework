@@ -267,10 +267,10 @@ _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
 _VARS_TOPLEVEL_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_]*)")
 # Output keys FSR adds to every step's `vars.steps.<key>` envelope.
 # Split into two tiers based on live-verified behavior (FSR 8.0.0-6034):
-# - _STEP_ENVELOPE_KEYS: status, result — only on connector/envelope step
+# - _STEP_ENVELOPE_KEYS: status, result -- only on connector/envelope step
 #   outputs ({data, status, message, operation}). NOT available on
 #   workflow_reference (output = child's vars) or for_each (output = list).
-# - _OBJECT_META_KEYS: @id, @type, uuid, name, id, step_id — Hydra/object
+# - _OBJECT_META_KEYS: @id, @type, uuid, name, id, step_id -- Hydra/object
 #   metadata, available on any object (e.g. records from find_record).
 _UNIVERSAL_OUTPUT_KEYS = {"status", "result", "id", "name", "uuid",
                            "@id", "@type", "step_id"}
@@ -944,13 +944,25 @@ def _validate_branch_jinja(
                     key = m.group(1)
                     rest = m.group(2) or ""
                     if key == _jinja_key(s):
-                        # self-reference: only universal keys are valid, EXCEPT
-                        # inside step_variables -- that mapping runs AFTER the
-                        # step executes, so the full result (including non-
-                        # universal keys like `data`) is available for
-                        # extraction. System playbooks use this idiom to pull
-                        # fields from a connector step's own HTTP response.
-                        if rest.startswith(".") and not sub.startswith("step_variables"):
+                        # self-reference: only universal keys are valid,
+                        # EXCEPT in the two places that are evaluated AFTER the
+                        # step executes, where the full result (including
+                        # non-universal keys like `data`) is available:
+                        #
+                        #   step_variables -- the extraction mapping. System
+                        #     playbooks use this to pull fields out of a
+                        #     connector step's own HTTP response.
+                        #   do_until.condition -- the loop test. A poll is a
+                        #     self-reference BY CONSTRUCTION: the only thing
+                        #     worth re-testing is what this step just returned.
+                        #     Live-verified on 8.0.0 that a condition reading
+                        #     the step's own `data` loops and exits correctly.
+                        #
+                        # Warning on either one means warning on every poll
+                        # anyone writes, which trains people to ignore the
+                        # diagnostic that would have caught a real typo.
+                        if rest.startswith(".") and not sub.startswith(
+                                ("step_variables", "do_until")):
                             first = rest.lstrip(".").split(".", 1)[0].split("[", 1)[0]
                             if first and first not in _UNIVERSAL_OUTPUT_KEYS:
                                 diags.append(Diagnostic(

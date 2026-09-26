@@ -91,18 +91,43 @@ def _picklist_options_for(attr: dict, picklist_lists: dict[str, list[str]]) -> l
     return picklist_lists.get(list_name)
 
 
+def _unique_columns(m: dict) -> list[str]:
+    """The module's natural-key column(s), from its uniqueConstraint.
+
+    Shape on the wire is a list of single-entry dicts::
+
+        [{"c_v_es_unique": {"columns": ["cVEID"]}}]
+
+    Most modules define one constraint; the columns of all of them are
+    collected so a composite key is not silently halved.
+    """
+    out: list[str] = []
+    for entry in (m.get("uniqueConstraint") or []):
+        if not isinstance(entry, dict):
+            continue
+        for spec in entry.values():
+            if isinstance(spec, dict):
+                for col in (spec.get("columns") or []):
+                    if isinstance(col, str) and col not in out:
+                        out.append(col)
+    return out
+
+
 def _insert_module(conn: sqlite3.Connection, m: dict) -> str | None:
     name = m.get("type") or m.get("module")
     if not name:
         return None
+    unique = _unique_columns(m)
     conn.execute(
-        """INSERT OR REPLACE INTO modules (name, label, plural, description)
-           VALUES (?, ?, ?, ?)""",
+        """INSERT OR REPLACE INTO modules
+             (name, label, plural, description, unique_constraint)
+           VALUES (?, ?, ?, ?, ?)""",
         (
             name,
             _scalarize(m.get("displayName") or m.get("module") or name),
             _scalarize(m.get("module")),
             _scalarize(m.get("descriptions")),
+            json.dumps(unique) if unique else None,
         ),
     )
     return name
@@ -495,6 +520,18 @@ def main() -> int:
         if "picklist_name" not in cols:
             conn.execute(
                 "ALTER TABLE module_fields ADD COLUMN picklist_name TEXT"
+            )
+        # The module's NATURAL KEY -- the column(s) an upsert matches on. A
+        # create_record routed at /api/3/upsert/<m> whose payload omits these
+        # has nothing to match against, so it inserts a new record on every
+        # run instead of updating. Carried into the catalog so the compiler can
+        # say so offline; older catalogs simply lack the column and the check
+        # stays quiet rather than guessing.
+        mcols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(modules)").fetchall()}
+        if "unique_constraint" not in mcols:
+            conn.execute(
+                "ALTER TABLE modules ADD COLUMN unique_constraint TEXT"
             )
         # Default (always-re-pull) path wipes before _live rewrites. When
         # FSR_CONDITIONAL_REFETCH is on, _live owns the wipe (only on a refreshed

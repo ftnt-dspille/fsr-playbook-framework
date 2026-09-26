@@ -82,7 +82,7 @@ playbooks:
 | `decision` | Branches based on conditions. | `conditions: [{display, when, next}]`, `default: <step>` |
 | `connector` | Calls a connector operation. | `connector`, `operation`, `params`, `config` |
 | `find_record` | Queries records from a module. | `module`, `filters: [{field, operator, value}]`, `limit`, `logic`, `sort`, `select`, `relationships`, `max_relations` |
-| `create_record` | Creates a new record. | `module` (required), `fields: {field: value}`, `operation`, `is_upsert` |
+| `create_record` | Creates a new record. | `module` (required), `fields: {field: value}`, `operation`, `is_upsert`, `on_conflict`, `update_fields` |
 | `update_record` | Updates an existing record. | `record` (IRI), `module` (required), `fields: {field: value}`, `link:`/`unlink: {rel: [uuid]}` (append/detach), `operation` |
 | `delete_record` | Deletes a record. | `record:`, or `module:` + `record_id:`, or `module:` + `filters:` (bulk); `show_deleted:` |
 | `manual_input` | Pauses for human input (form or buttons). | `title`, `description`, `options`, `inputs`, `email`, `assign_to`, `is_approval` |
@@ -369,6 +369,7 @@ busy module can pull an unbounded child set.
     severity: High
   operation: Overwrite
   is_upsert: false                # optional
+  on_conflict: update_all         # optional -- see below
 
 - name: Update Alert
   type: update_record
@@ -379,6 +380,90 @@ busy module can pull an unbounded child set.
     description: "Updated by triage playbook"
   operation: Replace
 ```
+
+#### What happens when the record already exists (`on_conflict:`)
+
+An upsert is a **PUT**: every field in the payload overwrites, so a field this
+run could not fetch is not left alone, it is **erased**. If NVD is unreachable,
+an empty description replaces a good one; if only some sources carry a vendor,
+every other source blanks it on arrival.
+
+`on_conflict:` settles that. It is the step editor's "Uniqueness conflict
+settings", and it compiles to `__replace` / `__fieldsToUpdate` inside the
+`resource` payload:
+
+| `on_conflict:` | when the record already exists |
+|---|---|
+| `fail` | the collision **fails the step** and halts the run |
+| `keep_existing` | the existing record is left untouched |
+| `update_all` | every field in `fields:` overwrites |
+| `update_listed` | only the fields named in `update_fields:` are written |
+
+```yaml
+- name: Upsert CVE
+  type: create_record
+  module: c_v_es
+  update_fields: [cVSSv3, ePSSScore]   # implies on_conflict: update_listed
+  fields:
+    cVEID: "CVE-2024-0001"
+    description: "..."                 # NOT in update_fields -> preserved
+    cVSSv3: "9.8"                      # listed -> refreshed
+```
+
+`update_fields:` on its own implies `on_conflict: update_listed`; naming the
+fields is the intent. It may be an **interpolation** rather than a literal
+list, which is usually what you want -- it lets the set mean "the fields this
+run actually filled" instead of a fixed author-time allowlist:
+
+```yaml
+  update_fields: "{{ vars.item.updatable }}"
+```
+
+Three things measured on 8.0, each case run twice (once with no record present,
+once against a seeded one):
+
+* **`fail` is a different endpoint, not a setting.** It keeps the step on the
+  plain `/api/3/<module>` collection, where a duplicate is a real 409. The other
+  three route at `/api/3/upsert/<module>`, which is where `__replace` is read at
+  all -- it is ignored outright on the plain endpoint.
+* **Omitting the key is not `fail`.** A bare `is_upsert: true` with no
+  `on_conflict:` **overwrites everything**. That is the destructive default this
+  key exists to make explicit.
+* **No setting prevents the initial create**, and none produced a duplicate.
+
+`on_conflict:` is rejected on `update_record`, which already targets one record
+by IRI and so has no uniqueness conflict to settle.
+
+#### An upsert needs the module's natural key in the payload
+
+An upsert reconciles duplicates by the module's **unique constraint** --
+`sourceId` on alerts and incidents, `value` + `typeofindicator` on indicators,
+`cVEID` on CVEs. If the payload does not set those columns there is nothing to
+match on, so the step **inserts a new record on every run**:
+
+```yaml
+- name: Upsert alert            # WRONG -- a new alert every run
+  type: create_record
+  module: alerts
+  is_upsert: true
+  fields:
+    name: "test alert"          # `sourceId` never set
+```
+
+This is worth knowing because of how it presents. Nothing errors, the run is
+green, and each run's record holds whatever that run wrote -- so from the
+outside it reads as "the update isn't applying" or "tags aren't appending",
+which sends you looking at merge semantics rather than at a field that is not
+there. The compiler warns when it can see the constraint:
+
+> upsert on `alerts` does not set 'sourceId' -- the column(s) it matches
+> duplicates on. With no natural key in the payload it inserts a NEW record on
+> every run instead of updating.
+
+It is a **warning**, not an error: the column may be filled by a Jinja value
+the compiler cannot evaluate. It stays silent when the catalog has no
+constraint recorded for the module, so an unwarmed catalog says nothing rather
+than guessing.
 
 #### Writing a multi-value field REPLACES it
 
@@ -408,7 +493,15 @@ which 349 of 370 live update steps set -- but 15 combinations were tested across
 both versions and both field types (`Append`, `Overwrite`, `Replace`,
 per-field overrides, `OverwriteTags`, `AppendTags`, and omitting them entirely)
 and **every one replaced the collection**. The keys are accepted for wire
-fidelity; do not rely on them to preserve data. Use `link:`.
+fidelity -- and the compiler now emits a **warning** when you set them -- but
+do not rely on them to preserve data. Use `link:`.
+
+Re-measured on 8.0 on the upsert path as well, since that is where the UI's
+Tags Overwrite/Append control lives: `field_operations` Append, `Overwrite`,
+naming `recordTags` in `update_fields:`, and setting no key at all **all**
+replaced the tag list, including with `on_conflict: update_all`. Only `link:`
+appended. `update_fields:` protects scalar fields; it does not make a `fields:`
+write to a collection additive.
 
 To REMOVE a related record, use `unlink:` -- the same primitive in reverse
 (measured: 2 linked indicators, unlink 1, leaves 1):
@@ -592,6 +685,42 @@ For cross-collection references, use the IRI directly:
   workflowReference: /api/3/workflows/<uuid>
   arguments: {hostname: "fsr-1"}
 ```
+
+#### Looping a child playbook (when `do_until` isn't enough)
+
+`retry:` works on a `workflow_reference`, which is how you poll something that
+takes more than one step to observe. `do_until` loops a SINGLE step, so a wait
+that needs a *pair* -- ask for fresh data, then read it -- has to put the pair
+in a child and loop the child:
+
+```yaml
+- name: Await Patch
+  type: workflow_reference
+  target: Refresh And Read Host
+  apply_async: false          # required: an async child returns nothing to test
+  host_id: "{{ vars.host_id }}"
+  retry:
+    times: 12
+    delay: 15
+    until: "{{ vars.steps.Await_Patch.patched == 'yes' }}"
+```
+
+**The child must SET the variable, not return it.** The parent reads
+`vars.steps.<step>.<var the child set>` -- a `code_output` the child never
+promoted to a variable is invisible from the caller, and the `until:` then
+never resolves. It does not fail loudly: the loop burns its whole budget on
+every run, including the successful ones, and the step still reports success.
+So the child ends in a `set_variable`:
+
+```yaml
+- name: Answer                # last step of the child
+  type: set_variable
+  vars:
+    patched: "{{ vars.steps.Check_Version.data.code_output.patched }}"
+```
+
+Live-verified on 8.0.0: with the child setting `patched: "no"` the parent ran
+the full budget; with `"yes"` it stopped after one call.
 
 ### `api_endpoint`
 
