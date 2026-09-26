@@ -27,8 +27,6 @@ except ImportError:
 
 from . import approvals as _approvals
 from ._loop_helpers import (
-    _CREATE_OFFER_TOOL,
-    _ENHANCE_OFFER_TOOL,
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,

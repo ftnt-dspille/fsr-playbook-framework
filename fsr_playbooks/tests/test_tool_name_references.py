@@ -6,15 +6,15 @@ The consolidation of emit_* tools into emit_card(card_type=...) requires that:
 2. Guards, carriers, and directives use the new emit_card interface
 3. Tool result strings reference emit_card, not old names
 """
-import ast
-import re
 from pathlib import Path
 
 import pytest
 
 # Import these unconditionally - they're used in early test classes
 from fsr_playbooks.llm.tools import (
-    REGISTRY, CONSOLIDATED_AWAY, anthropic_tools, openai_tools,
+    CONSOLIDATED_AWAY,
+    anthropic_tools,
+    openai_tools,
 )
 
 
@@ -115,7 +115,8 @@ class TestGuardsCheckEmitCard:
         """Guards should recognize emit_card calls in note_result."""
         pytest.importorskip("fsr_playbooks.llm._loop_helpers")
         from fsr_playbooks.llm._loop_helpers import (
-            CreateDeliveryGuard, EnhanceDeliveryGuard,
+            CreateDeliveryGuard,
+            EnhanceDeliveryGuard,
         )
 
         create_guard = CreateDeliveryGuard()
@@ -240,33 +241,6 @@ class TestToolNameReferencesInCode:
 
         return results
 
-    def test_no_old_names_in_llm_files(self):
-        """Model-facing strings should not reference old tool names.
-
-        Specifically checks tool result strings, directives, and error messages
-        that would be shown to the model or analyst. Skips internal config dicts
-        and frozensets that define tool slices.
-        """
-        framework_root = Path(__file__).parent.parent
-        llm_dir = framework_root / "llm"
-        mcp_dir = framework_root / "mcp_server"
-
-        # Files to check
-        files_to_check = list(llm_dir.glob("*.py")) + list(mcp_dir.glob("*.py"))
-
-        # Files/patterns to completely exclude from checking
-        exclude_patterns = {
-            "test_", "__pycache__", ".pyc",
-            "tools.py",  # Schema definitions, not model strings
-            "tool_models.py",  # Type definitions, not model strings
-            "intents.py",  # Internal tool slice definitions, not model strings
-            "turn_plan.py",  # Internal turn state definitions, not model strings
-        }
-
-        # Skip file scanning - too many false positives from internal routing.
-        # Instead, use explicit directive tests below.
-        pass
-
     def test_directives_use_emit_card(self):
         """Directives should tell model to call emit_card, not old names."""
         from fsr_playbooks.llm import anthropic_provider, openai_provider
@@ -384,3 +358,11 @@ class TestToolNameReferencesInCode:
             f"Found old tool names in markdown docs: "
             f"{failures}"
         )
+
+
+def test_lmstudio_provider_resolves_its_error_classifier():
+    """lmstudio_provider called `_is_error_result` without defining or
+    importing it, so its first tool result raised NameError. Pin the name."""
+    from fsr_playbooks.llm import lmstudio_provider
+    assert lmstudio_provider._is_error_result({"ok": False}) is True
+    assert lmstudio_provider._is_error_result({"ok": True}) is False

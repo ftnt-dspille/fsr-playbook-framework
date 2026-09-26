@@ -277,7 +277,6 @@ def find_recipe(query: str = "", kind: str | None = None,
     into the editor verbatim.
     """
     # Import token ranking function
-    from .tools_corpus import _token_fallback as _rank_by_tokens
 
     sql_parts = ["1=1"]
     args: list[Any] = []
@@ -319,10 +318,9 @@ def find_recipe(query: str = "", kind: str | None = None,
 
         # Then, token-rank the examples corpus for natural-language queries.
         # Reuse the token_fallback ranking from tools_corpus.
-        import re
 
         def _tokens(q: str) -> list[str]:
-            from .tools_corpus import _STOPWORDS, _tokens as _corpus_tokens
+            from .tools_corpus import _tokens as _corpus_tokens
             return _corpus_tokens(q)
 
         if query or not kind:

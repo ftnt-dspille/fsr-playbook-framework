@@ -1,13 +1,12 @@
 """Structured verdict card: payload validation, citation enforcement, delivery guard."""
 from __future__ import annotations
 
-import pytest
-
 from fsr_playbooks.mcp_server import emit_card
-from fsr_playbooks.mcp_server.tools_emit import emit_verdict
 from fsr_playbooks.mcp_server._citation_validator import (
-    clear_tool_registry, register_tool_result, validate_evidence_ids,
+    clear_tool_registry,
+    register_tool_result,
 )
+from fsr_playbooks.mcp_server.tools_emit import emit_verdict
 
 
 class TestVerdictPayloadValidation:
@@ -386,7 +385,9 @@ class TestEvidenceSurvivesSuspension:
         """Verify that TurnEvidence is preserved across suspend/resume."""
         from fsr_playbooks.llm.approvals import SuspendedSession
         from fsr_playbooks.mcp_server._citation_validator import (
-            TurnEvidence, set_turn_evidence, get_turn_evidence,
+            TurnEvidence,
+            get_turn_evidence,
+            set_turn_evidence,
         )
 
         # Create evidence before suspension
@@ -432,7 +433,8 @@ class TestEvidenceSurvivesSuspension:
         """Verdict can cite evidence after resume."""
         from fsr_playbooks.llm.approvals import SuspendedSession
         from fsr_playbooks.mcp_server._citation_validator import (
-            TurnEvidence, set_turn_evidence,
+            TurnEvidence,
+            set_turn_evidence,
         )
 
         # Create evidence before suspension

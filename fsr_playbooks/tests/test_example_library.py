@@ -17,9 +17,9 @@ def temp_manifest(tmp_path: Path) -> Path:
     # Point to the framework examples directory
     manifest.write_text(
         "# Test manifest\n"
-        f"../fsr-playbook-framework/examples/demo_alert_on_create.yaml\n"
-        f"../fsr-playbook-framework/examples/demo_record_create.yaml\n"
-        f"../fsr-playbook-framework/examples/manual_input_then_act.yaml\n"
+        "../fsr-playbook-framework/examples/demo_alert_on_create.yaml\n"
+        "../fsr-playbook-framework/examples/demo_record_create.yaml\n"
+        "../fsr-playbook-framework/examples/manual_input_then_act.yaml\n"
     )
     return manifest
 
@@ -55,7 +55,7 @@ def temp_db(tmp_path: Path) -> Path:
 
 def test_harvest_script_finds_valid_files(temp_manifest: Path) -> None:
     """Test that the harvest script can find and process valid YAML files."""
-    from scripts.harvest_examples import _expand_manifests, _process_playbook_file
+    from scripts.harvest_examples import _expand_manifests
 
     files = _expand_manifests(temp_manifest)
     assert len(files) > 0, "Should find YAML files from manifest"
@@ -233,8 +233,8 @@ def test_no_gold_eval_files_in_recipes() -> None:
 
     This is a safety check to ensure eval leakage doesn't happen during harvest.
     """
-    from pathlib import Path
     import hashlib
+    from pathlib import Path
 
     # Get the DB path
     db_path = Path(__file__).parent.parent / "_data" / "fsr_reference.db"
@@ -282,6 +282,7 @@ def test_harvest_preserves_db_structure() -> None:
     an existing DB. If the DB loses tables, harvest failed to validate.
     """
     import shutil
+
     from scripts.harvest_examples import (
         _insert_recipes,
         _validate_db_structure,

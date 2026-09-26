@@ -43,6 +43,10 @@ from ._loop_helpers import (
 from ._loop_helpers import (
     extract_yaml_block as _extract_yaml_block,
 )
+
+# Same wire `is_error` rule as every other provider; the citation registry
+# below needs it to tell a failed tool call from evidence.
+from .openai_provider import _is_error_result
 from .provider import (
     CapabilityMixin,
     DoneEvent,

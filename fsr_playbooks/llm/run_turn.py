@@ -518,7 +518,10 @@ async def resume_agent_turn(
     seq_in_turn = 0
 
     # Restore the turn evidence from the suspended session so citations survive.
-    from fsr_playbooks.mcp_server._citation_validator import TurnEvidence, set_turn_evidence
+    from fsr_playbooks.mcp_server._citation_validator import (
+        TurnEvidence,
+        set_turn_evidence,
+    )
     if getattr(suspended, "turn_evidence_state", None):
         evidence = TurnEvidence.from_dict(suspended.turn_evidence_state)
         set_turn_evidence(evidence)
