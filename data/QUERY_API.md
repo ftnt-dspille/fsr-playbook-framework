@@ -11,7 +11,7 @@ topics:
 - semantics
 canonical: false
 summary: 'Pointer -- full Query API reference consolidated into the hub canonical
-  (Miscellaneous/fortisoar/FortiSOAR_Query_Aggregation_and_Filter_Options.md).'
+  (Miscellaneous/fortisoar/docs/architecture/FortiSOAR_Query_Aggregation_and_Filter_Options.md).'
 see_also:
 - <fortisoar-docs>/FortiSOAR_Query_Aggregation_and_Filter_Options.md
 ---
