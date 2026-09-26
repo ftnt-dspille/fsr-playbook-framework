@@ -37,9 +37,11 @@ from ._loop_helpers import (
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     TriageDiscipline,
+    VerdictDeliveryGuard,
     drain_with_idle_timeout,
     latest_user_text,
     unexecuted_tool_calls_note,
+    verdict_directive,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -680,6 +682,8 @@ class AnthropicProvider(CapabilityMixin):
         _delivery = EnhanceDeliveryGuard()
         # CREATE counterpart -- see CreateDeliveryGuard.
         _create_delivery = CreateDeliveryGuard()
+        # Triage turns that gathered evidence must close with a verdict card.
+        _verdict_guard = VerdictDeliveryGuard()
         _build_progress = BuildProgressGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
@@ -1185,6 +1189,65 @@ class AnthropicProvider(CapabilityMixin):
                             logging.exception("forced create delivery failed")
                     yield DoneEvent(stop_reason="end_turn")
                     return
+                # Verdict guard: a triage turn that gathered evidence and never
+                # concluded gets ONE forced emit_card(verdict) round, citing
+                # this turn's evidence ids (the citation gate checks them).
+                if _verdict_guard.outstanding(allowed_names):
+                    _verdict_guard.mark_forced()
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
+                        history_chars=history_chars,
+                        stop_reason="verdict_guard_forced",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
+                    )
+                    from ..mcp_server._citation_validator import get_turn_evidence
+                    from ._loop_helpers import is_verdict_evidence
+                    evidence = get_turn_evidence()
+                    registry = evidence.valid_ids() if evidence else {}
+                    evidence_ids = [
+                        eid for eid, info in registry.items()
+                        if info.get("ok") is True
+                        and is_verdict_evidence(info.get("name") or "")
+                    ]
+                    card_schema = next(
+                        (t for t in tools if t.get("name") == "emit_card"), None)
+                    if card_schema is not None:
+                        turn_idx += 1
+                        history.append(Message(
+                            role="user", content=verdict_directive(evidence_ids)))
+                        try:
+                            resp = await self._client.messages.create(
+                                model=self.model, max_tokens=2048,
+                                system=cached_system,
+                                messages=_with_history_breakpoint(
+                                    _to_anthropic_messages(history)),
+                                tools=[card_schema],
+                                tool_choice={"type": "tool", "name": "emit_card"},
+                            )
+                            tu = next((b for b in resp.content
+                                       if getattr(b, "type", None) == "tool_use"),
+                                      None)
+                            oargs = dict(getattr(tu, "input", {}) or {}) if tu else {}
+                            if not oargs.get("card_type"):
+                                oargs["card_type"] = "verdict"
+                            if not isinstance(oargs.get("payload"), dict):
+                                oargs["payload"] = {}
+                            call_id = getattr(tu, "id", None) or _uuid.uuid4().hex[:8]
+                            yield ToolUseEvent(
+                                name="emit_card", arguments=oargs, call_id=call_id,
+                                tier=_tier_for("emit_card", oargs))
+                            oresult = _guarded_dispatch("emit_card", oargs)
+                            yield ToolResultEvent(call_id=call_id, result=oresult)
+                        except Exception:
+                            import logging
+                            logging.exception("forced verdict delivery failed")
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
                 # P1 -- forced-assessment guarantee. The turn ran tools but
                 # the final assistant block has no text (only tool_use /
                 # emitted cards). Emit the usage for the round we paid for,
@@ -1247,6 +1310,7 @@ class AnthropicProvider(CapabilityMixin):
                 # tool_use order intact.
                 _delivery.note_result(name, args, result)
                 _create_delivery.note_result(name, args, result)
+                _verdict_guard.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)
                 # Register the tool result for citation validation
                 if call_id:

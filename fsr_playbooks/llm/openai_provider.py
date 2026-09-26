@@ -63,6 +63,7 @@ from ._loop_helpers import (
     drain_with_idle_timeout,
     latest_user_text,
     unexecuted_tool_calls_note,
+    verdict_directive,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -201,19 +202,6 @@ _CREATE_DELIVERY_DIRECTIVE = (
 )
 
 
-def _verdict_directive(evidence_ids: list[str]) -> str:
-    """Forced-round directive for the verdict guard.
-
-    Lists valid evidence tool_use_ids from this turn so the model can cite them.
-    """
-    ids_str = ", ".join(evidence_ids[:10]) + ("..." if len(evidence_ids) > 10 else "")
-    return (
-        "You investigated using evidence tools but did not emit a verdict. "
-        "Call `emit_card(card_type='verdict', payload={...})` now with a structured "
-        "conclusion (disposition, severity, confidence, findings with citations). "
-        f"Evidence tool_use_ids from this turn: {ids_str}. "
-        "The findings.evidence list must cite these ids."
-    )
 
 
 def _max_tokens_param(model: str, value: int) -> dict[str, int]:
@@ -968,17 +956,17 @@ class OpenAIProvider(CapabilityMixin):
                     return
 
                 # Verdict guard: triage turns with evidence tools must emit a verdict
-                if _verdict_guard.outstanding(allowed_names, _authoring):
+                if _verdict_guard.outstanding(allowed_names):
                     _verdict_guard.mark_forced()
                     yield _emit_usage("verdict_guard_forced")
                     # Build list of successful evidence tool_use_ids for the directive
                     from ..mcp_server._citation_validator import get_turn_evidence
-                    from ._loop_helpers import _TRIAGE_EVIDENCE_TOOLS
+                    from ._loop_helpers import is_verdict_evidence
                     evidence = get_turn_evidence()
                     registry = evidence.valid_ids() if evidence else {}
                     evidence_ids = [
                         eid for eid, info in registry.items()
-                        if info.get("ok") is True and info.get("name") in _TRIAGE_EVIDENCE_TOOLS
+                        if info.get("ok") is True and is_verdict_evidence(info.get("name") or "")
                     ]
                     # Look for emit_card in the advertised tools
                     card_schema = next(
@@ -988,7 +976,7 @@ class OpenAIProvider(CapabilityMixin):
                         turn_idx += 1
                         history.append({
                             "role": "user",
-                            "content": _verdict_directive(evidence_ids),
+                            "content": verdict_directive(evidence_ids),
                         })
                         try:
                             resp = await self._client.chat.completions.create(
@@ -998,7 +986,10 @@ class OpenAIProvider(CapabilityMixin):
                                     "type": "function",
                                     "function": {"name": "emit_card"},
                                 },
-                                **_max_tokens_param(self.model, 512),
+                                # A verdict carries findings with claims and
+                                # evidence ids; 512 could truncate the JSON and
+                                # the citation gate would refuse an empty payload.
+                                **_max_tokens_param(self.model, 2048),
                             )
                             msg = resp.choices[0].message
                             raw = (msg.tool_calls[0].function.arguments

@@ -189,3 +189,25 @@ def test_anthropic_draft_then_stop_is_nudged():
     names = _names(events)
     assert "verify_playbook" in names and "emit_card" in names
     assert isinstance(events[-1], DoneEvent)
+
+
+# The research-only nudge must tell a triage turn from a build turn by what it
+# looked up: live, both advertise the same full surface.
+_FULL = set(_NAMES) | {"get_record", "siem_search", "get_op_schema", "find"}
+
+
+def test_a_triage_turn_is_not_nudged_to_write_a_playbook():
+    guard = BuildProgressGuard()
+    guard.note_result("get_record", {"record": "a"}, {"ok": True})
+    guard.note_result("siem_search", {"q": "10.0.0.5"}, {"ok": True})
+    guard.note_result("find", {"kind": "action", "target_type": "ip"}, {"ok": True})
+    assert not guard.outstanding(_FULL)
+
+
+def test_a_build_turn_that_only_researched_is_still_nudged():
+    for name, args in (("get_step_type", {"name": "connector"}),
+                       ("get_op_schema", {"connector": "c", "op": "o"}),
+                       ("find", {"kind": "recipe", "query": "block ip"})):
+        guard = BuildProgressGuard()
+        guard.note_result(name, args, {"ok": True})
+        assert guard.outstanding(_FULL), name

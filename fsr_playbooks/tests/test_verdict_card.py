@@ -285,40 +285,69 @@ class TestVerdictDeliveryCarrier:
 
 
 class TestVerdictGuardFires:
-    """VerdictDeliveryGuard fires when evidence tools run but no verdict."""
+    """VerdictDeliveryGuard fires when evidence tools run but no verdict.
 
-    def test_guard_inert_on_build_turns(self):
+    Live, triage and build advertise the SAME full surface (verify_playbook,
+    push_playbook, emit_card ...), so every test here uses it. The guard used to
+    decide "build turn" from that slice -- true on every live turn -- and never
+    fired; and its evidence list held pre-consolidation names, so `siem_search`
+    counted as nothing."""
+
+    FULL = {"get_record", "siem_search", "faz_search", "run_op", "emit_card",
+            "verify_playbook", "push_playbook", "verify_enhancement",
+            "validate_yaml", "compile_yaml"}
+
+    def _guard(self):
         from fsr_playbooks.llm._loop_helpers import VerdictDeliveryGuard
-        guard = VerdictDeliveryGuard()
+        return VerdictDeliveryGuard()
+
+    def test_fires_on_the_full_surface_after_evidence(self):
+        guard = self._guard()
         guard.note_result("get_record", {"record": "x"}, {"ok": True})
-        # Authoring=True (build turn)
-        assert guard.outstanding(set(), authoring=True) is False
+        assert guard.outstanding(self.FULL) is True
 
-    def test_guard_inert_without_evidence_tools(self):
-        from fsr_playbooks.llm._loop_helpers import VerdictDeliveryGuard
-        guard = VerdictDeliveryGuard()
-        guard.note_result("find_connector", {}, {"ok": True})
-        assert guard.outstanding(set(), authoring=False) is False
+    def test_consolidated_hunt_tools_count_as_evidence(self):
+        for name in ("siem_search", "siem_events_for_incident", "faz_search",
+                     "faz_get_alerts", "search_module_records", "fmg_device"):
+            guard = self._guard()
+            guard.note_result(name, {}, {"ok": True})
+            assert guard.outstanding(self.FULL) is True, name
 
-    def test_guard_fires_on_evidence_then_prose(self):
-        from fsr_playbooks.llm._loop_helpers import VerdictDeliveryGuard
-        guard = VerdictDeliveryGuard()
-        guard.note_result("get_record", {"record": "x"}, {"ok": True})
-        assert guard.outstanding(set(), authoring=False) is True
+    def test_inert_once_the_turn_authored(self):
+        for name, args in (("validate_yaml", {}), ("verify_playbook", {}),
+                           ("emit_card", {"card_type": "playbook_offer"})):
+            guard = self._guard()
+            guard.note_result("get_record", {"record": "x"}, {"ok": True})
+            guard.note_result(name, args, {"ok": True})
+            assert guard.outstanding(self.FULL) is False, name
 
-    def test_guard_inert_after_verdict(self):
-        from fsr_playbooks.llm._loop_helpers import VerdictDeliveryGuard
-        guard = VerdictDeliveryGuard()
+    def test_a_capability_gap_card_is_not_authoring(self):
+        guard = self._guard()
+        guard.note_result("siem_search", {}, {"ok": True})
+        guard.note_result("emit_card", {"card_type": "capability_gap"}, {"ok": True})
+        assert guard.outstanding(self.FULL) is True
+
+    def test_inert_without_evidence_tools(self):
+        guard = self._guard()
+        guard.note_result("find", {"kind": "connector"}, {"ok": True})
+        assert guard.outstanding(self.FULL) is False
+
+    def test_inert_after_verdict(self):
+        guard = self._guard()
         guard.note_result("get_record", {"record": "x"}, {"ok": True})
         guard.note_result("emit_card", {"card_type": "verdict"}, {"ok": True})
-        assert guard.outstanding(set(), authoring=False) is False
+        assert guard.outstanding(self.FULL) is False
 
-    def test_guard_inert_after_forced(self):
-        from fsr_playbooks.llm._loop_helpers import VerdictDeliveryGuard
-        guard = VerdictDeliveryGuard()
+    def test_inert_after_forced(self):
+        guard = self._guard()
         guard.note_result("get_record", {"record": "x"}, {"ok": True})
         guard.mark_forced()
-        assert guard.outstanding(set(), authoring=False) is False
+        assert guard.outstanding(self.FULL) is False
+
+    def test_inert_when_no_card_tool_is_advertised(self):
+        guard = self._guard()
+        guard.note_result("get_record", {"record": "x"}, {"ok": True})
+        assert guard.outstanding({"get_record"}) is False
 
 
 class TestWireEventShape:

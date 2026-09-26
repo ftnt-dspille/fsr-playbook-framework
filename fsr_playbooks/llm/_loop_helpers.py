@@ -1647,6 +1647,18 @@ UNVERIFIED_DRAFT_DIRECTIVE = (
 )
 
 
+# Research only an AUTHORING turn does. Triage and build advertise the same full
+# surface, so "the slice has verify_playbook" cannot tell them apart; what the
+# turn looked up can. A triage turn (get_record, siem_search ...) never needs a
+# step type or an op schema. `find` counts only for its authoring kinds --
+# kind=action/operation/connector are shared with triage.
+_BUILD_RESEARCH_TOOLS = frozenset({
+    "get_step_type", "get_op_schema", "find_step_examples",
+    "find_jinja_pattern", "get_filter_examples",
+})
+_BUILD_RESEARCH_FIND_KINDS = frozenset({"example", "recipe", "jinja", "api"})
+
+
 class BuildProgressGuard:
     """Tracks a build turn that ran only research tools and never authored.
 
@@ -1662,6 +1674,7 @@ class BuildProgressGuard:
         self._authored = False
         self._run_intent = False
         self._forced = False
+        self._build_research = False
         # Second stage -- see `unverified_draft`.
         self._drafted = False
         self._closed = False
@@ -1673,6 +1686,10 @@ class BuildProgressGuard:
             self._authored = True
         if name in _RUN_INTENT_TOOLS:
             self._run_intent = True
+        if name in _BUILD_RESEARCH_TOOLS or (
+                name == "find" and isinstance(args, dict)
+                and args.get("kind") in _BUILD_RESEARCH_FIND_KINDS):
+            self._build_research = True
         if name in _DRAFT_CHECK_TOOLS:
             self._drafted = True
         if name in _DRAFT_CLOSING_TOOLS or (
@@ -1726,7 +1743,10 @@ class BuildProgressGuard:
         # A run/diagnose turn is not a stalled build -- see _RUN_INTENT_TOOLS.
         if self._run_intent:
             return False
-        return True
+        # Nor is a triage turn. Live, every turn advertises verify_playbook, so
+        # without this a triage turn that pulled the record and searched the
+        # SIEM was told to "draft the full playbook YAML now".
+        return self._build_research
 
     def mark_forced(self) -> None:
         self._forced = True
@@ -1747,19 +1767,36 @@ class BuildProgressGuard:
 # rather than terminating, so the model authors a verdict -> emits the card.
 # Only fires for triage turns (authoring turns have their own P1 guard).
 
-_TRIAGE_EVIDENCE_TOOLS = frozenset({
-    # Direct record/search lookups
-    "get_record", "search_records", "search_records_by_module",
-    # SIEM enrichment
-    "siem_search_incidents", "siem_search_observables",
-    "siem_get_correlation_details", "siem_get_incident_events",
-    # FAZ enrichment
-    "faz_get_logs", "faz_search_events",
-    # Connector operations (mcp_* read tools)
-    "run_op",
-    # Generic find with enrichment
-    "find_record",
-})
+def is_verdict_evidence(name: str, args: Any = None) -> bool:
+    """True when a tool's result can back a verdict finding.
+
+    ONE rule shared with the hunt floor (`counts_as_investigation`), plus the
+    record pull itself -- the floor excludes `get_record` so containment needs
+    evidence BEYOND the alert, but a verdict may cite the alert. This used to be
+    its own frozenset of pre-consolidation names (`siem_search_incidents`,
+    `faz_get_logs`, `search_records` ...); after the tools were consolidated only
+    `get_record` and `run_op` still matched, so a live investigation through
+    `siem_search` / `faz_search` / `mcp_*` counted as no evidence at all."""
+    if name == "get_record":
+        return True
+    if name == "find_record":
+        return isinstance(args, dict) and args.get("kind") == "enrichment"
+    return counts_as_investigation(name)
+
+
+def verdict_directive(evidence_ids: list[str]) -> str:
+    """Forced-round directive for the verdict guard.
+
+    Lists valid evidence tool_use_ids from this turn so the model can cite them.
+    """
+    ids_str = ", ".join(evidence_ids[:10]) + ("..." if len(evidence_ids) > 10 else "")
+    return (
+        "You investigated using evidence tools but did not emit a verdict. "
+        "Call `emit_card(card_type='verdict', payload={...})` now with a structured "
+        "conclusion (disposition, severity, confidence, findings with citations). "
+        f"Evidence tool_use_ids from this turn: {ids_str}. "
+        "The findings.evidence list must cite these ids."
+    )
 
 
 class VerdictDeliveryGuard:
@@ -1775,16 +1812,19 @@ class VerdictDeliveryGuard:
         self._ran_evidence_tool = False
         self._emitted_verdict = False
         self._forced = False
+        self._authored = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         """Fold one executed tool result into the verdict state."""
-        if name in _TRIAGE_EVIDENCE_TOOLS:
-            # Special case: find_record only counts if kind=enrichment
-            if name == "find_record":
-                if isinstance(args, dict) and args.get("kind") == "enrichment":
-                    self._ran_evidence_tool = True
-            else:
-                self._ran_evidence_tool = True
+        if is_verdict_evidence(name, args):
+            self._ran_evidence_tool = True
+        # Authoring is what the turn DID, not what it was offered: triage and
+        # build advertise the same full surface, so a slice-based check read
+        # every live turn as a build and the guard never fired.
+        if name in _DRAFT_CHECK_TOOLS or name in _DRAFT_CLOSING_TOOLS or (
+                name == "emit_card" and isinstance(args, dict)
+                and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES):
+            self._authored = True
         # Check if a verdict was emitted
         is_verdict = (
             name == "emit_verdict" or
@@ -1795,26 +1835,14 @@ class VerdictDeliveryGuard:
         if is_verdict and isinstance(result, dict) and result.get("ok") is True:
             self._emitted_verdict = True
 
-    def outstanding(self, allowed_names: set[str], authoring: bool) -> bool:
-        """True when triage ran evidence tools but never emitted a verdict.
-
-        Returns False if:
-          - This is an authoring/build turn (has build-only tools)
-          - No evidence tools were called
-          - A verdict was already emitted
-          - Guard has already forced once this turn
-        """
-        # Only fires on triage, not build
-        if authoring:
+    def outstanding(self, allowed_names: set[str]) -> bool:
+        """True when this turn gathered evidence, authored nothing, and ended
+        without a verdict. Fires at most once."""
+        if "emit_card" not in allowed_names and "emit_verdict" not in allowed_names:
             return False
-        # Only fires if evidence tools were called
-        if not self._ran_evidence_tool:
+        if self._authored or not self._ran_evidence_tool:
             return False
-        # Already emitted or forced
-        if self._forced or self._emitted_verdict:
-            return False
-        # Guard fires
-        return True
+        return not (self._forced or self._emitted_verdict)
 
     def mark_forced(self) -> None:
         self._forced = True
