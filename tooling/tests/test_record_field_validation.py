@@ -51,7 +51,8 @@ def _seed(conn: sqlite3.Connection, *, stamped: bool) -> None:
          ("AlertState", "New", _STATE_NEW)])
     from fsr_playbooks import _catalog_meta
     _catalog_meta.ensure_table(conn)
-    conn.execute("DELETE FROM _catalog_meta WHERE key='base_url_hash'")
+    conn.execute("DELETE FROM _catalog_meta WHERE key IN "
+                 "('base_url_hash', 'modules_warmed_at')")
     if stamped:
         _catalog_meta.set_(conn, "base_url_hash", "deadbeef")
     conn.commit()
@@ -199,3 +200,19 @@ def test_unknown_write_field_strict_and_directives(catalog):
         "module 'incidents' has no field 'slaDueDate'"]
     assert loose[0]["severity"] == "warning"
     assert strict[0]["severity"] == "error"
+
+
+def test_on_platform_warm_counts_as_the_box(catalog):
+    """The connector's on-platform warm has no base URL to stamp (it reaches
+    its own appliance), so it records `modules_warmed_at` instead. Found live:
+    the box verified the SLA playbook ready_to_push with both defects as
+    warnings, because only `base_url_hash` was consulted."""
+    from fsr_playbooks import _catalog_meta
+    _, conn, _ = catalog
+    conn.execute("DELETE FROM _catalog_meta WHERE key='base_url_hash'")
+    assert not module_schema.catalog_is_instance(conn)
+    _catalog_meta.record_modules_warmed(conn)
+    assert module_schema.catalog_is_instance(conn)
+    errs = _filter_errs(conn, [{"field": "slaDueDate", "operator": "lt",
+                                "value": "1"}])
+    assert errs[0].severity == "error"

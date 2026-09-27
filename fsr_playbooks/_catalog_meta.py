@@ -26,6 +26,8 @@ key                         meaning
 ``last_publish_time``       ``GET /api/publish/error`` epoch (Tier-1 watermark)
 ``structural_warmed_at``    ISO-8601 UTC of the last Tier-1 warm
 ``data_warmed_at``          ISO-8601 UTC of the last Tier-2 warm
+``modules_warmed_at``       ISO-8601 UTC module_fields/picklists were read
+                            from the instance itself (on-platform warm)
 ``count:<coll>``            ``$limit=0`` ``hydra:totalItems`` per collection
 ``etag:<coll>``             last seen response ETag per collection
 ``schema_version``          ``_catalog_meta`` layout version
@@ -139,6 +141,19 @@ def record_count(conn: sqlite3.Connection, collection: str, total: int) -> None:
 
 def record_etag(conn: sqlite3.Connection, collection: str, etag: str) -> None:
     set_(conn, f"etag:{collection}", etag)
+
+
+def record_modules_warmed(conn: sqlite3.Connection) -> None:
+    """Mark ``module_fields``/``picklists`` as read from the instance they are
+    used on.
+
+    Separate from :func:`stamp_instance` on purpose: the connector's on-platform
+    warm reaches its own appliance through crudhub with no ``FSR_BASE_URL``, so
+    it has no base URL to stamp -- yet its module schema is exactly the box's.
+    Without this marker a box-warmed catalog was indistinguishable from the
+    generic shipped snapshot, and field checks stayed warnings there.
+    """
+    set_(conn, "modules_warmed_at", _utcnow())
 
 
 def record_data_warmed_at(conn: sqlite3.Connection) -> None:

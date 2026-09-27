@@ -106,13 +106,18 @@ def picklist_fields_holding(
 
 
 def catalog_is_instance(conn: sqlite3.Connection) -> bool:
-    """True when the store was warmed from a specific box (stamped).
+    """True when the module schema was read from a specific box.
 
     That is when "not in the catalog" means "not on the box", which is what
-    lets a missing field be an error rather than a guess.
+    lets a missing field be an error rather than a guess. Two markers say so:
+    ``base_url_hash`` (a dev/CLI warm stamps the URL it read) and
+    ``modules_warmed_at`` (the connector's on-platform warm, which has no URL
+    to stamp -- it reaches its own appliance -- but read that appliance's
+    modules). Checking only the first left every real box on warnings.
     """
     try:
         from . import _catalog_meta
-        return bool(_catalog_meta.get(conn, "base_url_hash"))
+        return bool(_catalog_meta.get(conn, "base_url_hash")
+                    or _catalog_meta.get(conn, "modules_warmed_at"))
     except sqlite3.Error:
         return False
