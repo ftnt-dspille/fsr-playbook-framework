@@ -1276,6 +1276,33 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     if "id" in params and not payload.get("id"):
         import uuid  # noqa: PLC0415
         payload["id"] = uuid.uuid4().hex[:16]
+    # Name what is MISSING, not just what is accepted. Live (B3a sweep): the
+    # model passed a `find(kind="action")` row -- connector/op/title/
+    # required_params -- as an action card. `op`/`title` normalize, but it had
+    # no `args`; the refusal listed all seven params, and the model narrated
+    # the fix to the analyst instead of resending the card.
+    sig = inspect.signature(fn).parameters
+    missing = [k for k, p in sig.items()
+               if p.default is inspect.Parameter.empty and k not in payload]
+    if kt == "action" and "args" in missing:
+        # editable_fields defaults from args (_normalize_card_payload), so it
+        # is only "missing" because args is; naming both sends the model after
+        # a field it never needed to write.
+        missing = [k for k in missing if k != "editable_fields"]
+    if missing:
+        hints = [f"missing: {missing} -- resend emit_card(card_type={kt!r}) "
+                 f"with them in `payload`; it takes {params}"]
+        if kt == "action" and "args" in missing:
+            hints.append("`args` is the operation's parameter VALUES as an "
+                         "object, filled from the request (e.g. {\"ip\": "
+                         "\"<the IP>\"}) -- not the catalog's "
+                         "`required_params` list; get the names from "
+                         "get_op_schema(connector, operation)")
+        if kt == "verdict":
+            hints.append(verdict_contract())
+        return _err("bad_payload",
+                    f"payload for card_type {kt!r} is missing {missing}",
+                    suggestions=hints)
     try:
         out = fn(**payload)
     except TypeError:

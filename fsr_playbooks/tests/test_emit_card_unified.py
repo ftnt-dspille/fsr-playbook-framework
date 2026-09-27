@@ -48,7 +48,8 @@ def test_bad_payload_keys_name_the_real_signature():
     what the card takes -- that is the case the model cannot repair blind."""
     r = emit_card("choice", {"id": "c1"})
     assert r["ok"] is False and r["code"] == "bad_payload"
-    assert "emit_choice_card takes:" in r["suggestions"][0]
+    assert "missing: ['prompt', 'options']" in r["suggestions"][0]
+    assert "it takes ['id', 'prompt', 'options'" in r["suggestions"][0]
 
 
 def test_every_card_type_resolves_to_a_registered_emitter():
@@ -231,3 +232,22 @@ def test_a_missing_card_id_is_generated_not_refused():
         "summary": "Block IP"})
     assert r["ok"] is True, r
     assert r["card"]["id"]
+
+
+def test_an_action_card_built_from_a_find_row_names_the_missing_args():
+    """Live (B3a sweep, containment row): the model passed a
+    find(kind="action") row as the payload. op/title normalize; `args` was
+    absent. The refusal listed every accepted field and the model gave up in
+    prose. It must say WHICH field is missing and what `args` holds."""
+    from fsr_playbooks.mcp_server.tools_emit import emit_card
+    fn = getattr(emit_card, "fn", emit_card)
+    out = fn(card_type="action", payload={
+        "connector": "fortigate-firewall", "op": "block_ip_new",
+        "title": "Block IP Address", "category": "containment", "tier": 4,
+        "requires_approval": True,
+        "required_params": [{"name": "method", "type": "select"}],
+    })
+    assert out["ok"] is False and out["code"] == "bad_payload"
+    assert "['args']" in str(out)
+    hints = " ".join(out["suggestions"])
+    assert "required_params" in hints and "get_op_schema" in hints
