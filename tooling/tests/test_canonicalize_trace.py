@@ -85,5 +85,6 @@ def test_retired_names_stay_dispatchable_but_unadvertised():
     for name in CONSOLIDATED_AWAY:
         assert name in REGISTRY, f"{name} left the registry -- resumes break"
         assert name not in advertised, f"{name} is still advertised"
-    for name in ("find", "picklist", "connector_health", "emit_card"):
+    # connector_health itself retired into list_configured_connectors (B3a).
+    for name in ("find", "picklist", "list_configured_connectors", "emit_card"):
         assert name in advertised

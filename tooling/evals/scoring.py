@@ -82,6 +82,9 @@ _FIND_KIND_TO_TOOL = {
     "playbook": "search_playbooks",
     "recipe": "find_recipe",
     "api": "find_api_product",
+    "step": "find_step_examples",
+    "jinja_block": "find_jinja_pattern",
+    "filter_usage": "get_filter_examples",
 }
 _ACTION_TYPE_TO_TOOL = {
     "containment": "find_containment_actions",
