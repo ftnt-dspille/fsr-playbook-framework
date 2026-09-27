@@ -24,6 +24,7 @@ import json
 import sys
 from typing import Any
 
+from fsr_playbooks import module_schema
 from fsr_playbooks.compiler.record_op_checks import (
     check_connector_config,
     check_op_params,
@@ -183,14 +184,7 @@ def _module_fields_fn():
     conn = _db()
 
     def lookup(module: str) -> list[str]:
-        try:
-            rows = conn.execute(
-                "SELECT field_name FROM module_fields WHERE module_name=?",
-                (module,),
-            ).fetchall()
-            return [r[0] for r in rows]
-        except Exception:  # noqa: BLE001
-            return []
+        return sorted(module_schema.field_names(conn, module))
 
     return lookup
 
@@ -311,16 +305,9 @@ def _module_required_fields(module: str) -> list[str]:
 
 
 def _module_field_names(module: str) -> list[str]:
-    """All field_names for a module (unknown-field check). Empty when un-warmed."""
-    conn = _db()
-    try:
-        rows = conn.execute(
-            "SELECT field_name FROM module_fields WHERE module_name=?",
-            (module,),
-        ).fetchall()
-        return [r[0] for r in rows]
-    except Exception:  # noqa: BLE001
-        return []
+    """All fields a record of `module` can carry (declared + system), for the
+    unknown-field check. Empty when un-warmed."""
+    return sorted(module_schema.field_names(_db(), module))
 
 
 def _op_declared_params(connector: str, op: str) -> list[str]:
@@ -519,6 +506,7 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
                         module=module, resource=a.get("resource"),
                         known_fields=_module_field_names(module),
                         step_id=s.id, path=spath,
+                        strict=module_schema.catalog_is_instance(_db()),
                     ))
                     if t != "update_record":
                         fixes.extend(check_required_record_fields(

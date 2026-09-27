@@ -24,9 +24,9 @@ playbooks:
         when:
           logic: AND
           filters:
-            - field: tags
-              op: contains
-              value: impossible_travel
+            - field: recordTags
+              op: in
+              value: ["/api/3/tags/impossible_travel"]
 
       - name: Score User
         type: connector

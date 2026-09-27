@@ -1,8 +1,17 @@
-"""Field and value validation for trigger conditions against the catalog.
+"""Field and value validation for record filters against the catalog.
 
-Validates trigger filter fields against module schema and values against
-field type/picklist constraints. Designed to be called from resolver/validator
-when the database connection is available, keeping trigger.py database-free.
+Validates filter fields against module schema and values against field
+type/picklist constraints. The same `{field, operator, value}` leaf /
+`{logic, filters}` group shape is used by a trigger's `fieldbasedtrigger` and
+by a find_record step's `query`, so both run through here. Designed to be
+called from the resolver when the database connection is available, keeping
+trigger.py database-free.
+
+Known fields come from :mod:`fsr_playbooks.module_schema` (declared plus the
+implicit system fields such as ``createDate``). Severity follows the catalog's
+provenance: warmed from the target box -> an unknown field or picklist value is
+an error (it will not exist at run time either); a generic snapshot -> a
+warning (a Solution Pack or custom field may simply be absent from it).
 
 The validation runs AFTER structural validation (expand_when) completes with
 valid WhenGroup/WhenLeaf objects, and pairs with module-name validation to
@@ -14,6 +23,7 @@ import difflib
 import sqlite3
 from typing import Any
 
+from ... import module_schema
 from ..errors import CompileError, ErrorCode
 
 
@@ -35,9 +45,39 @@ class FieldValueValidator:
         "isnull", "isnotnull", "exists", "changed",
     })
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, *, strict: bool | None = None):
         self.conn = conn
         self.conn.row_factory = sqlite3.Row
+        # Unknown field / picklist value is an error only when the catalog is
+        # the target box's own schema; see the module docstring.
+        if strict is None:
+            strict = module_schema.catalog_is_instance(conn)
+        self._catalog_severity = "error" if strict else "warning"
+
+    def validate_filters(
+        self,
+        filters: list[dict],
+        module_name: str,
+        path: str,
+        errors: list[CompileError],
+    ) -> None:
+        """Validate a filter list (a find_record `query.filters`, or any
+        trigger-shaped filter tree) against `module_name`."""
+        self.validate_trigger_filters(filters, module_name, path, errors)
+
+    def validate_field_names(
+        self,
+        fields: list[tuple[str, str]],
+        module_name: str,
+        errors: list[CompileError],
+    ) -> None:
+        """Existence-only check for `(field, path)` pairs -- e.g. sort keys or
+        a field projection, where there is no value to validate."""
+        for field, fpath in fields:
+            if isinstance(field, str) and field and "{{" not in field:
+                self._validate_field(field, {"operator": "exists"},
+                                     module_name, fpath, errors,
+                                     field_path=fpath)
 
     def validate_trigger_filters(
         self,
@@ -92,39 +132,47 @@ class FieldValueValidator:
         module_name: str,
         path: str,
         errors: list[CompileError],
+        *,
+        field_path: str | None = None,
     ) -> None:
         """Validate a field name and (if found) its value."""
         if filt.get("template") == "tags":
             return
+        # A dotted filter walks a relationship (`assignedTo.name`); only the
+        # first segment is a field of this module.
+        base = field.split(".", 1)[0]
 
         row = self.conn.execute(
             "SELECT field_name, type, picklist_name FROM module_fields "
             "WHERE module_name=? AND field_name=?",
-            (module_name, field),
+            (module_name, base),
         ).fetchone()
 
         if not row:
-            known = [r[0] for r in self.conn.execute(
-                "SELECT field_name FROM module_fields WHERE module_name=?",
-                (module_name,),
-            ).fetchall()]
-            if not known:
-                return
+            known = module_schema.field_names(self.conn, module_name)
+            if not known or base in known:
+                return  # un-warmed module, or an implicit system field
 
-            sug = difflib.get_close_matches(field, known, n=1, cutoff=0.6)
+            declared = sorted(module_schema.declared_fields(
+                self.conn, module_name))
+            sug = difflib.get_close_matches(base, declared, n=1, cutoff=0.6)
+            hint = module_schema.FIELD_HINTS.get(base)
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
-                    f"field {field!r} does not exist on module {module_name!r} "
-                    f"(valid: {', '.join(sorted(known)[:8])}"
-                    f"{'…' if len(known) > 8 else ''})"
+                    f"field {base!r} does not exist on module {module_name!r} "
+                    f"(valid: {', '.join(declared[:8])}"
+                    f"{'…' if len(declared) > 8 else ''})"
                 ),
-                path=f"{path}.field",
+                path=field_path or f"{path}.field",
                 near=sug[0] if sug else None,
-                suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
-                severity="warning",
+                suggestion=hint or (f"did you mean {sug[0]!r}?" if sug else None),
+                severity=self._catalog_severity,
+                check="unknown_record_field",
             ))
             return
+        if base != field:
+            return  # the value belongs to the related record's field
 
         operator = filt.get("operator")
         if operator in self._VALUE_IRRELEVANT_OPS:
@@ -140,7 +188,8 @@ class FieldValueValidator:
 
         if picklist_name:
             self._validate_picklist_value(
-                value, picklist_name, field, path, errors
+                value, picklist_name, field, path, errors,
+                module_name=module_name,
             )
         else:
             self._validate_field_value(value, field_type, field, path, errors)
@@ -152,6 +201,8 @@ class FieldValueValidator:
         field: str,
         path: str,
         errors: list[CompileError],
+        *,
+        module_name: str = "",
     ) -> None:
         """Validate that a value (or list of values) exists in the picklist.
 
@@ -191,21 +242,36 @@ class FieldValueValidator:
         for v in values_to_check:
             if v in valid_values or v in valid_iris:
                 continue
+            # The editor writes a picklist filter's value as the bare item
+            # uuid (with the label in `_value`), not the full IRI.
+            if f"/api/3/picklists/{v}" in valid_iris:
+                continue
             sug = difflib.get_close_matches(
                 v, list(valid_values) or list(valid_iris), n=1, cutoff=0.6,
             )
+            # The value may be real and just on a sibling field -- say which,
+            # since "did you mean" on this list cannot find it.
+            owners = module_schema.picklist_fields_holding(
+                self.conn, module_name, v, exclude=field,
+            ) if module_name else []
+            hint = (f"; {v!r} is a value of "
+                    f"{' / '.join(repr(o) for o in owners)}, not {field!r}"
+                    if owners else "")
+            suggestion = (f"filter on {owners[0]!r} instead" if owners
+                          else f"did you mean {sug[0]!r}?" if sug else None)
             errors.append(CompileError(
                 code=ErrorCode.BAD_VALUE,
                 message=(
                     f"value {v!r} is not in picklist {picklist_name!r} "
                     f"for field {field!r} (valid: "
                     f"{', '.join(sorted(valid_values)[:8])}"
-                    f"{'…' if len(valid_values) > 8 else ''})"
+                    f"{'…' if len(valid_values) > 8 else ''}){hint}"
                 ),
                 path=f"{path}.value",
-                near=sug[0] if sug else None,
-                suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
-                severity="warning",
+                near=(owners[0] if owners else sug[0] if sug else None),
+                suggestion=suggestion,
+                severity=self._catalog_severity,
+                check="picklist_drift",
             ))
 
     def _validate_field_value(

@@ -29,9 +29,9 @@ playbooks:
         when:
           logic: AND
           filters:
-            - field: tags
-              op: contains
-              value: phishing
+            - field: recordTags
+              op: in
+              value: ["/api/3/tags/phishing"]
 
       - name: Score Sender IPs
         type: connector

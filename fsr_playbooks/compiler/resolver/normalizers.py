@@ -5,6 +5,7 @@ import difflib
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from ... import module_schema
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
 
@@ -934,7 +935,8 @@ class NormalizerMixin:
         # Phase B1: friendly `filters:` → wire `query:` envelope.
         # Only transform when `filters:` is present AND `query:` is not
         # (an explicit `query:` wins -- back-compat for authored wire shapes).
-        if isinstance(a.get("filters"), list) and "query" not in a:
+        friendly_filters = isinstance(a.get("filters"), list) and "query" not in a
+        if friendly_filters:
             filters_in = a.pop("filters")
             limit = a.pop("limit", 30)
             logic = a.pop("logic", "AND")
@@ -1054,6 +1056,34 @@ class NormalizerMixin:
         q = a.get("query")
         if isinstance(q, dict) and not a.get("checkboxFields"):
             q.pop("__selectFields", None)
+
+        self._validate_find_record_fields(a, friendly_filters, path, errors)
+
+    def _validate_find_record_fields(
+        self, a: dict, friendly: bool, path: str, errors: list[CompileError],
+    ) -> None:
+        """Filter / sort / projection fields and picklist values against the
+        module -- the same checks a trigger's filters get. A find on a field
+        the module does not have, or on a picklist value from the wrong list
+        (`state: Open`), otherwise compiles clean and quietly matches nothing.
+        """
+        module = module_schema.module_name(a.get("module"))
+        q = a.get("query")
+        if not module or not isinstance(q, dict):
+            return
+        validator = FieldValueValidator(self.conn)
+        # The validator appends `.filters[i]` itself.
+        base = f"{path}.arguments" if friendly else f"{path}.arguments.query"
+        if isinstance(q.get("filters"), list):
+            validator.validate_filters(q["filters"], module, base, errors)
+        named: list[tuple[str, str]] = []
+        for i, so in enumerate(q.get("sort") or []):
+            if isinstance(so, dict):
+                named.append((so.get("field"),
+                              f"{path}.arguments.sort[{i}].field"))
+        for i, f in enumerate(q.get("__selectFields") or []):
+            named.append((f, f"{path}.arguments.select[{i}]"))
+        validator.validate_field_names(named, module, errors)
 
     def _normalize_send_email_args(
         self, step: Step, path: str, errors: list[CompileError],

@@ -19,9 +19,9 @@ playbooks:
         when:
           logic: AND
           filters:
-            - field: tags
-              op: contains
-              value: disk_full
+            - field: recordTags
+              op: in
+              value: ["/api/3/tags/disk_full"]
 
       - name: Find Affected Host
         type: find_record
@@ -29,7 +29,7 @@ playbooks:
         module: assets
         filters:
           - type: primitive
-            field: ipAddress
+            field: ip
             value: "{{ vars.input.records[0].affected_host }}"
             operator: eq
             _operator: eq

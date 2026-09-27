@@ -142,24 +142,33 @@ def check_unknown_record_fields(
     known_fields: Iterable[str],
     step_id: str = "",
     path: str = "",
+    strict: bool = False,
 ) -> list[dict[str, Any]]:
     """A `resource` key that is not a field of the target module.
 
     The field-level analogue of `op_param_unknown_name`, and the inverse of
-    `check_required_record_fields`. **Warning**, not error: our `module_fields`
-    snapshot is a subset (e.g. it omits some system fields like `sourceData`),
-    so a hard error would false-block legitimate writes. Gated on the module's
-    field set being known (non-empty).
+    `check_required_record_fields`. Pass `known_fields` from
+    `module_schema.field_names` (declared + implicit system fields). A
+    **warning** by default -- a generic catalog snapshot can lack a Solution
+    Pack or custom field; `strict=True` (the catalog was warmed from the target
+    box, `module_schema.catalog_is_instance`) makes it an **error**, since the
+    field will not exist at run time either. Gated on the module's field set
+    being known (non-empty). Keys starting `__` (`__link`, `__replace`, ...) are
+    write directives, not fields.
     """
     known = {f for f in (known_fields or []) if f}
     if not module or not known or not isinstance(resource, dict):
         return []
     issues: list[dict[str, Any]] = []
-    for key in sorted(k for k in resource.keys() if k not in known):
+    for key in sorted(k for k in resource.keys()
+                      if k not in known and not str(k).startswith("__")):
         near = difflib.get_close_matches(key, sorted(known), n=1, cutoff=0.7)
         msg = f"module {module!r} has no field {key!r}"
         sug = None
-        if near:
+        from fsr_playbooks.module_schema import FIELD_HINTS
+        if key in FIELD_HINTS:
+            sug = FIELD_HINTS[key]
+        elif near:
             msg += f" -- did you mean {near[0]!r}?"
             sug = f"rename field {key!r} → {near[0]!r}"
         issues.append({
@@ -169,7 +178,7 @@ def check_unknown_record_fields(
             "path": f"{path}.arguments.resource.{key}" if path else "",
             "suggestion": sug,
             "near": near,
-            "severity": "warning",
+            "severity": "error" if strict else "warning",
         })
     return issues
 

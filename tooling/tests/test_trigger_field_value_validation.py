@@ -72,7 +72,7 @@ class TestFieldValidatorBasics:
         """An unknown field should warn with a 'did you mean' suggestion."""
         conn = _get_db()
         try:
-            validator = FieldValueValidator(conn)
+            validator = FieldValueValidator(conn, strict=False)
             errors: list[CompileError] = []
             filters = [{
                 "type": "primitive",
@@ -141,7 +141,7 @@ class TestPicklistValidation:
         """A value not in the picklist should warn."""
         conn = _get_db()
         try:
-            validator = FieldValueValidator(conn)
+            validator = FieldValueValidator(conn, strict=False)
             errors: list[CompileError] = []
             # Use a real picklist field but invalid value
             filters = [{
@@ -587,7 +587,7 @@ class TestPicklistIRIValues:
         """An IRI-shaped value not in the picklist should still warn."""
         conn = _get_db()
         try:
-            validator = FieldValueValidator(conn)
+            validator = FieldValueValidator(conn, strict=False)
             errors: list[CompileError] = []
             filters = [{
                 "type": "object",
