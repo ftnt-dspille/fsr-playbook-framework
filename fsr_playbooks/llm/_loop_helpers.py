@@ -239,12 +239,12 @@ def shrink_history(history: list[Any]) -> int:
     return saved
 
 
-# Per-turn tool-round ceiling. Raised 12 → 16 so a live hunt that fans out
-# across alerts/incidents/asset/identity lookups + multi-connector TI
-# enrichment still has rounds left to stage its containment action card.
-# §2.8 parallel dispatch collapses each independent fan-out into one round,
-# so the effective headroom is much larger than the raw count suggests.
-MAX_TOOL_TURNS = 16
+# Per-turn tool-round CEILING -- a cost/time net, not the runaway guard.
+# Raised 16 → 40 (2026-09-27): over 362 sweep turns the 16 cap fired 5 times
+# and every one was productive (28-33 calls, 100% distinct), cutting builds
+# off mid-authoring. Runaways are stopped by ProgressMeter instead, which
+# ends a turn on repetition or sustained failure long before this.
+MAX_TOOL_TURNS = 40
 # Cap on extra "fix the YAML" turns auto-issued when the assistant's
 # final message contains a yaml block that fails to compile. Each repair
 # turn is roughly one extra LLM round-trip; 2 keeps cost bounded.
@@ -1904,3 +1904,228 @@ class VerdictDeliveryGuard:
     def mark_forced(self) -> None:
         self._forced = True
         record_guard_fire(type(self).__name__)
+
+
+# --------------------------------------------------------------------------
+# Readable dates in the MODEL's view of a tool result
+# --------------------------------------------------------------------------
+# FortiSOAR stores dates as epoch numbers (`dueBy: 1791046800`,
+# `createDate: 1784052208.18`). Left to convert them itself the model is often
+# wrong -- live on Frank a task due 2026-10-03 was reported as "Jun 2026" and
+# one due 2027-02-01 as "Feb 1, 2025". So every dict that carries an
+# epoch-valued date field gets a sibling `_dates` map with the UTC rendering.
+# The raw value is never rewritten: filters compare epochs, and other code
+# (the widget, evidence builders) reads the same result.
+_DATE_KEY = re.compile(
+    r"(?i)(date|time|timestamp|stamp|dueby|due|expir\w*|seen|since|until)$"
+    r"|(?:[a-z0-9])(At|On)$")
+_EPOCH_S = (946_684_800, 4_102_444_800)          # 2000-01-01 .. 2100-01-01
+
+
+def _epoch_seconds(v: Any) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if _EPOCH_S[0] <= v < _EPOCH_S[1]:
+        return float(v)
+    if _EPOCH_S[0] * 1000 <= v < _EPOCH_S[1] * 1000:
+        return v / 1000.0
+    return None
+
+
+def _render_utc(secs: float) -> str:
+    import datetime as _dt
+    t = _dt.datetime.fromtimestamp(secs, tz=_dt.timezone.utc)
+    return t.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def with_readable_dates(obj: Any, _depth: int = 0) -> Any:
+    """A copy of ``obj`` where each dict holding epoch date fields also carries
+    ``_dates: {field: "YYYY-MM-DD HH:MM UTC"}``. Unchanged when there are none."""
+    if _depth > 8:
+        return obj
+    if isinstance(obj, list):
+        return [with_readable_dates(x, _depth + 1) for x in obj]
+    if not isinstance(obj, dict):
+        return obj
+    out: dict[str, Any] = {}
+    dates: dict[str, str] = {}
+    for k, v in obj.items():
+        if isinstance(k, str) and k != "_dates" and _DATE_KEY.search(k):
+            secs = _epoch_seconds(v)
+            if secs is not None:
+                dates[k] = _render_utc(secs)
+        out[k] = with_readable_dates(v, _depth + 1)
+    if dates:
+        out["_dates"] = {**dates, **(obj.get("_dates") or {})} \
+            if isinstance(obj.get("_dates"), dict) else dates
+    return out
+
+
+def today_line(now: Any = None) -> str:
+    """One prompt line stating today's date. The model is otherwise never told,
+    so "overdue", "due Friday" and "last week" were guesses. ``FSRPB_TODAY``
+    pins it (tests, goldens)."""
+    import datetime as _dt
+    import os as _os
+    pinned = _os.environ.get("FSRPB_TODAY")
+    if pinned:
+        day = pinned
+    else:
+        day = (now or _dt.datetime.now(_dt.timezone.utc)).strftime("%Y-%m-%d (%A)")
+    return (f"Today is {day}, UTC. Dates in tool results appear under `_dates` "
+            "already converted -- use those, never convert epoch numbers "
+            "yourself.")
+
+
+# --------------------------------------------------------------------------
+# PromisedActionGuard -- "please approve the card" with no card
+# --------------------------------------------------------------------------
+# Live on Frank the model closed turns with "I'll proceed with the update now
+# -- please approve the card" (and "Once you approve the card, block_ip_new
+# runs ...") having made NO call: nothing ran and no card existed. Measured
+# over 362 sweep turns: 7 such closes, every one hollow, and the promise
+# pattern matched no legitimate close. A close that ASKS ("Shall I
+# proceed?") is fine and is not matched.
+_PROMISE_VERBS = (r"proceed|go ahead|update|set|create|block|isolate|stage|raise|"
+                  r"run|apply|mark|change|close|assign|add|submit|execute|push|"
+                  r"deploy|save")
+_PROMISE = re.compile(
+    r"(?:approv(?:e|ing) (?:the|this) (?:card|action|request|change)"
+    r"|(?:the|an?) (?:approval |action )?card (?:below|above|is (?:ready|staged|coming))"
+    r"|\bi(?:'ll| will| am going to|'m going to) (?:now )?(?:" + _PROMISE_VERBS
+    + r")\b[^.?!\n]{0,100}\bnow\b"
+    r"|\bi(?:'m| am) (?:now )?(?:updating|setting|creating|blocking|staging|"
+    r"applying|running|marking|submitting)\b)",
+    re.I)
+
+
+def promised_action(text: str) -> str | None:
+    """The sentence in a turn's closing text that promises an action or a card,
+    or None. A sentence ending in '?' asks permission -- a legitimate stop."""
+    tail = (text or "")[-600:]
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", tail):
+        s = sent.strip()
+        if s and not s.endswith("?") and _PROMISE.search(s):
+            return s[:200]
+    return None
+
+
+PROMISED_ACTION_DIRECTIVE = (
+    'You told the analyst: "{said}" -- but this turn made no call, so nothing '
+    "ran and there is no card for them to approve. If you mean to do it, make "
+    "the call now: the approval card is raised BY the call. If you are not "
+    "doing it -- it needs the analyst's choice first, or you cannot from here "
+    "-- say that plainly instead. Never describe a card or an action that does "
+    "not exist."
+)
+
+
+class PromisedActionGuard:
+    """Fires once when a turn ends promising an action/card it never produced."""
+
+    def __init__(self) -> None:
+        self._delivered = False
+        self._forced = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        if not isinstance(result, dict):
+            return
+        if (name == "emit_card" or name.startswith("emit_")) and result.get("ok") is True:
+            self._delivered = True
+        if (result.get("pending_approval") or result.get("approval_id")
+                or result.get("status") == "pending_approval"):
+            self._delivered = True
+
+    def outstanding(self, text: str) -> str | None:
+        if self._forced or self._delivered:
+            return None
+        return promised_action(text)
+
+    def directive(self, said: str) -> str:
+        return PROMISED_ACTION_DIRECTIVE.format(said=said.replace('"', "'"))
+
+    def mark_forced(self) -> None:
+        self._forced = True
+        record_guard_fire(type(self).__name__)
+
+
+
+# --------------------------------------------------------------------------
+# ProgressMeter -- stop a turn that has stopped learning
+# --------------------------------------------------------------------------
+# A fixed round count cannot tell a deep build from a loop. What a runaway
+# actually looks like, measured on 362 sweep turns:
+#   * repetition -- rounds whose every call was already made this turn;
+#   * flailing   -- a long run of rounds in which EVERY call failed (one turn
+#     guessed seven module names in a row, each a 404).
+# An error followed by a DIFFERENT call is the model correcting itself (a
+# refused card, re-sent with the fix) and is progress. Replayed over all 362
+# turns this rule stopped 2, both flailing, and cut no productive work.
+STALL_REPEAT_ROUNDS = 3
+STALL_ERROR_ROUNDS = 6
+
+
+class ProgressMeter:
+    def __init__(self, repeat_rounds: int = STALL_REPEAT_ROUNDS,
+                 error_rounds: int = STALL_ERROR_ROUNDS) -> None:
+        self._repeat_rounds = repeat_rounds
+        self._error_rounds = error_rounds
+        self._seen: set[str] = set()
+        self._round: list[tuple[str, bool]] = []   # (signature, errored)
+        self._repeat = 0
+        self._errors = 0
+
+    def note_result(self, name: str, args: Any, result: Any) -> None:
+        self._round.append((call_signature(name, args), _stall_error(result)))
+
+    def end_round(self) -> str | None:
+        """Fold the round just executed; return 'repeat' / 'flail' on a stall."""
+        calls, self._round = self._round, []
+        if not calls:
+            return None
+        all_repeat = all(sig in self._seen for sig, _ in calls)
+        all_error = all(err for _, err in calls)
+        self._seen.update(sig for sig, _ in calls)
+        self._repeat = self._repeat + 1 if all_repeat else 0
+        self._errors = self._errors + 1 if all_error else 0
+        if self._repeat >= self._repeat_rounds:
+            record_guard_fire("ProgressMeter.repeat")
+            return "repeat"
+        if self._errors >= self._error_rounds:
+            record_guard_fire("ProgressMeter.flail")
+            return "flail"
+        return None
+
+
+def call_signature(name: str, args: Any) -> str:
+    """Identity of a call: name plus canonical args (same form the providers'
+    repeated-failure guard keys on)."""
+    try:
+        return name + "|" + json.dumps(args, sort_keys=True, default=str)
+    except Exception:
+        return name + "|" + repr(args)
+
+
+def _stall_error(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if result.get("kind") in ("guard_redirect", "guard_defer"):
+        return False
+    return result.get("ok") is False or bool(result.get("error"))
+
+
+_STALL_WHY = {
+    "repeat": "only repeated calls you had already made this turn",
+    "flail": "failed on every call",
+}
+_STALL_DIRECTIVE = (
+    "Your last rounds {why} -- more calls will not change that. Stop calling "
+    "tools and answer the analyst now from what you have: what you "
+    "established, what you could not get and why, and the one thing they can "
+    "do next. If they asked for a playbook and have none yet, deliver your "
+    "best draft in one ```yaml fence and say what is unverified."
+)
+
+
+def stall_directive(reason: str) -> str:
+    return _STALL_DIRECTIVE.format(why=_STALL_WHY.get(reason, reason))

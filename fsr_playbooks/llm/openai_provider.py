@@ -59,12 +59,16 @@ from ._loop_helpers import (
     BuildProgressGuard,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
+    ProgressMeter,
+    PromisedActionGuard,
     TriageDiscipline,
     drain_with_idle_timeout,
     latest_user_text,
+    stall_directive,
     unexecuted_tool_calls_note,
     verdict_directive,
     verdict_repair_directive,
+    with_readable_dates,
 )
 from ._loop_helpers import (
     compile_errors as _compile_errors,
@@ -523,6 +527,8 @@ class OpenAIProvider(CapabilityMixin):
         # Triage verdict guard -- fires when evidence tools ran but no verdict.
         from ._loop_helpers import VerdictDeliveryGuard
         _verdict_guard = VerdictDeliveryGuard()
+        _promise_guard = PromisedActionGuard()
+        _progress = ProgressMeter()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
@@ -801,6 +807,18 @@ class OpenAIProvider(CapabilityMixin):
                 # call and does not end the turn: it appends a directive and lets
                 # the loop run on, so the model drafts -> verifies -> offers on
                 # its own and CreateDeliveryGuard still backstops the far end.
+                # Promised an action or a card and made no call -- nothing ran,
+                # no card exists. One directive; the model acts or says so.
+                _said = _promise_guard.outstanding(text_buf)
+                if _said:
+                    _promise_guard.mark_forced()
+                    yield _emit_usage("promised_action_forced")
+                    turn_idx += 1
+                    history.append({
+                        "role": "user", "content": _promise_guard.directive(_said),
+                    })
+                    continue
+
                 if _build_progress.outstanding(allowed_names):
                     _build_progress.mark_forced()
                     yield _emit_usage("build_progress_forced")
@@ -1111,6 +1129,8 @@ class OpenAIProvider(CapabilityMixin):
                     _create_delivery.note_result(name, args, result)
                     _build_progress.note_result(name, args, result)
                     _verdict_guard.note_result(name, args, result)
+                    _promise_guard.note_result(name, args, result)
+                    _progress.note_result(name, args, result)
                     tool_messages.append({
                         "role": "tool", "tool_call_id": call_id, "content": content_str,
                     })
@@ -1189,6 +1209,8 @@ class OpenAIProvider(CapabilityMixin):
                 _create_delivery.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)
                 _verdict_guard.note_result(name, args, result)
+                _promise_guard.note_result(name, args, result)
+                _progress.note_result(name, args, result)
                 tool_messages.append({
                     "role": "tool", "tool_call_id": call_id, "content": content_str,
                 })
@@ -1210,6 +1232,22 @@ class OpenAIProvider(CapabilityMixin):
                                 "content": f"[turn budget] {_bnote}"})
             any_tools_run = True
             yield _emit_usage(finish_reason or "tool_calls")
+
+            # No progress (repetition / sustained failure): answer now rather
+            # than spending the ceiling. See ProgressMeter.
+            _stall = _progress.end_round()
+            if _stall:
+                turn_idx += 1
+                async for ev in self._wrapup_call(
+                    history=history, directive=stall_directive(_stall),
+                    session_id=session_id, turn_idx=turn_idx, tags=tags,
+                    self_repair_turns=self_repair_turns,
+                    stop_reason_label=f"stalled_{_stall}",
+                    max_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
+                ):
+                    yield ev
+                yield DoneEvent(stop_reason="end_turn")
+                return
 
         # Tool-turn budget exhausted. Two paths (see anthropic_provider for
         # the full rationale): when nothing has been delivered, skip the
@@ -1261,7 +1299,7 @@ def _stringify(result: Any) -> str:
     if isinstance(result, str):
         return result
     try:
-        return json.dumps(result, default=str)
+        return json.dumps(with_readable_dates(result), default=str)
     except Exception:
         return str(result)
 

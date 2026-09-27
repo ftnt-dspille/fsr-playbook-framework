@@ -44,7 +44,7 @@ def test_prompt_carries_prior_constraints_and_gap_rule():
     assert "alert record #37326" in p
     assert "build_playbook_from_trace" in p           # trace affordance stated
     assert "capability_gap" in p                       # never-dead-end rule
-    assert f"at most {plan.budget.max_tool_turns} tool calls" in p
+    assert f"up to {plan.budget.max_tool_turns} this turn" in p
     assert "Approval tier" in p
 
 

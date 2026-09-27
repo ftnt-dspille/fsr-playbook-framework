@@ -36,10 +36,13 @@ from ._loop_helpers import (
     BuildProgressGuard,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
+    ProgressMeter,
+    PromisedActionGuard,
     TriageDiscipline,
     VerdictDeliveryGuard,
     drain_with_idle_timeout,
     latest_user_text,
+    stall_directive,
     unexecuted_tool_calls_note,
     verdict_directive,
     verdict_repair_directive,
@@ -685,6 +688,8 @@ class AnthropicProvider(CapabilityMixin):
         _create_delivery = CreateDeliveryGuard()
         # Triage turns that gathered evidence must close with a verdict card.
         _verdict_guard = VerdictDeliveryGuard()
+        _promise_guard = PromisedActionGuard()
+        _progress = ProgressMeter()
         _build_progress = BuildProgressGuard()
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
@@ -1026,6 +1031,29 @@ class AnthropicProvider(CapabilityMixin):
                 # the delivery is a real tool call, then override verified_id
                 # with the blessed handle so the forced call can only apply the
                 # bytes the gate actually cleared.
+                # Promised an action or a card and made no call -- see
+                # PromisedActionGuard.
+                _said = _promise_guard.outstanding("".join(
+                    b.get("text", "") for b in assistant_blocks
+                    if b.get("type") == "text"))
+                if _said:
+                    _promise_guard.mark_forced()
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
+                        history_chars=history_chars,
+                        stop_reason="promised_action_forced",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
+                    )
+                    turn_idx += 1
+                    history.append(Message(
+                        role="user", content=_promise_guard.directive(_said)))
+                    continue
+
                 if _build_progress.outstanding(allowed_names):
                     _build_progress.mark_forced()
                     yield UsageEvent(
@@ -1319,6 +1347,8 @@ class AnthropicProvider(CapabilityMixin):
                 _delivery.note_result(name, args, result)
                 _create_delivery.note_result(name, args, result)
                 _verdict_guard.note_result(name, args, result)
+                _promise_guard.note_result(name, args, result)
+                _progress.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)
                 # Register the tool result for citation validation
                 if call_id:
@@ -1501,6 +1531,23 @@ class AnthropicProvider(CapabilityMixin):
                 dropped_calls=dropped_calls,
             )
 
+            # No progress (repetition / sustained failure): answer now rather
+            # than spending the ceiling. See ProgressMeter.
+            _stall = _progress.end_round()
+            if _stall:
+                turn_idx += 1
+                async for ev in self._wrapup_call(
+                    history=history, directive=stall_directive(_stall),
+                    cached_system=cached_system, session_id=session_id,
+                    turn_idx=turn_idx, tags=tags,
+                    self_repair_turns=self_repair_turns,
+                    stop_reason_label=f"stalled_{_stall}",
+                    max_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
+                ):
+                    yield ev
+                yield DoneEvent(stop_reason="end_turn")
+                return
+
         # Tool-turn budget exhausted. Two paths:
         #
         # 1. Nothing delivered (no YAML, no offer card): skip the budget-ask
@@ -1581,7 +1628,8 @@ def _stringify(result: Any) -> str:
     if isinstance(result, str):
         return result
     try:
-        return json.dumps(result, default=str)
+        from ._loop_helpers import with_readable_dates
+        return json.dumps(with_readable_dates(result), default=str)
     except Exception:
         return str(result)
 

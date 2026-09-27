@@ -41,6 +41,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from ._loop_helpers import MAX_TOOL_TURNS, today_line
 from .intents import (
     classify_message,
     gate_directive,
@@ -51,7 +52,7 @@ from .provider import TurnRequest
 
 # Default hard ceiling mirrors the historical connector loop cap. The plan
 # turns it from an invisible cliff into a stated budget + graceful close.
-DEFAULT_MAX_TOOL_TURNS = 16
+DEFAULT_MAX_TOOL_TURNS = MAX_TOOL_TURNS   # one ceiling, not two copies
 # When this many calls remain, budget_note() starts telling the model to
 # wrap up instead of letting the ceiling truncate it mid-thought.
 SOFT_CLOSE_REMAINING = 3
@@ -340,9 +341,12 @@ def _context_prior(intent: str, ctx: TurnContext) -> str:
 def _constraints(budget: TurnBudget) -> str:
     return (
         "\n\n## Constraints (stated up front)\n"
-        f"- Tool budget: at most {budget.max_tool_turns} tool calls this "
-        "turn. When told few calls remain, wrap up -- deliver a result, "
-        "don't open a new line of investigation.\n"
+        f"- {today_line()}\n"
+        f"- Tool rounds: up to {budget.max_tool_turns} this turn -- use what "
+        "the task needs, no more. Repeating calls you already made, or "
+        "failing call after call, ends the turn early; when told few rounds "
+        "remain, wrap up -- deliver a result, don't open a new line of "
+        "investigation.\n"
         "- Every tool's description declares its Approval tier. A tier-3 "
         "call suspends this turn for analyst approval -- that is normal; "
         "plan for it rather than avoiding the action.\n"
