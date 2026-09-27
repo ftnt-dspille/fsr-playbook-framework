@@ -553,9 +553,9 @@ def why_did_playbook_fail(
     render every Jinja block in the YAML against the run's vars to
     surface the failure cause.
 
-    Chains three existing tools (`list_playbook_runs` →
-    `get_run_env` → `diagnose_yaml_against_pb_execution`) plus a
-    decompile pass when the caller doesn't ship YAML.
+    Chains run lookup → the run's live Jinja env → a per-step render
+    diagnosis in one call, plus a decompile pass when the caller doesn't
+    ship YAML. Pass a run id to diagnose that specific run.
 
     Args:
         playbook_or_id: a playbook display name ("Block Indicator"),

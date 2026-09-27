@@ -627,14 +627,14 @@ def analyze_playbook(yaml_text: str = "",
     """Render-path validator: simulate the playbook then run heuristic
     checks against the trace.
 
-    Wraps `step_through_playbook` + `compiler.render_analyzer.analyze`
+    Walks the playbook step by step (the render trace) and runs
+    `compiler.render_analyzer.analyze` over it,
     so a single call returns:
 
       { ok, playbook, trace, diagnostics, error_count, warning_count,
         first_error }
 
-    `execute_safe_ops` defaults to False here (vs. True on
-    step_through_playbook) because the analyzer is meant to run
+    `execute_safe_ops` defaults to False because the analyzer is meant to run
     purely offline -- users explicitly opt in to live ops.
 
     **OMIT `yaml_text` to analyse the OPEN PLAYBOOK** -- the

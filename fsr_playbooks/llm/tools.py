@@ -1031,7 +1031,8 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
             "kind": {
                 "type": "string",
                 "enum": ["connector", "operation", "action", "example",
-                         "recipe", "api", "jinja", "playbook"],
+                         "recipe", "api", "jinja", "playbook",
+                         "step", "jinja_block", "filter_usage"],
                 "description": "Catalog to search; see the tool description "
                                "for when each applies.",
             },
@@ -1565,33 +1566,75 @@ def _ensure_mcp_materialized() -> None:
     materializer.ensure_initialized()
 
 
-# Phase 1 retirement: names subsumed by the consolidated tools. They STAY in
-# REGISTRY -- dispatch, approval resumes, and non-LLM callers keep working --
-# but are no longer advertised, so the model reasons over one entry point per
-# capability instead of the historical spread. The seven emit_* card names are
-# deliberately NOT here yet: their union crosses the intent-slice boundary
-# (emit_action_card is triage-only; emit_enhancement_offer / emit_patch_proposal
-# are build-only), and retiring them before Phase 2's dispatch-level gate would
-# let emit_card reach a card family the analyst's slice dropped.
-CONSOLIDATED_AWAY = frozenset({
-    # → find(kind=...)
-    "find_connector", "find_operation", "find_jinja_filter",
-    "search_playbooks", "find_containment_actions",
-    "find_enrichment_actions", "find_record_actions",
+# Retired tool name → the ADVERTISED tool that subsumes it. Retired names STAY
+# in REGISTRY -- dispatch, approval resumes, old sessions and non-LLM callers
+# keep working -- but are not advertised, so the model reasons over one entry
+# point per capability. The union is what a persona allowlist naming the old
+# tool is granted instead (the connector reads this map), so a retirement never
+# silently drops a capability a persona was configured with.
+RETIRED_TO_UNION: dict[str, str] = {
+    # Phase 1 → find(kind=...)
+    "find_connector": "find", "find_operation": "find",
+    "find_jinja_filter": "find", "search_playbooks": "find",
+    "find_containment_actions": "find", "find_enrichment_actions": "find",
+    "find_record_actions": "find",
     # → picklist(...)
-    "list_picklists", "picklist_for_field", "resolve_picklist_value",
-    # → connector_health(...)
-    "healthcheck_connector",
+    "list_picklists": "picklist", "picklist_for_field": "picklist",
+    "resolve_picklist_value": "picklist",
     # → emit_card(card_type=...) -- retired once Phase 2's dispatch-level
     # affordance gate landed (turn_plan.gate_refusal + the read-only-turn
     # refusal keyed on emit_card's card_type): the union can no longer reach
-    # a card family the turn's state doesn't afford, so the per-card names
-    # need not stay advertised to keep the frontier partitioned.
-    # emit_decision_step is NOT a card (it authors a YAML step) and stays.
-    "emit_choice_card", "emit_action_card", "emit_manual_input",
-    "emit_capability_gap_card", "emit_playbook_offer",
-    "emit_enhancement_offer", "emit_patch_proposal",
-})
+    # a card family the turn's state doesn't afford.
+    "emit_choice_card": "emit_card", "emit_action_card": "emit_card",
+    "emit_manual_input": "emit_card", "emit_capability_gap_card": "emit_card",
+    "emit_playbook_offer": "emit_card", "emit_enhancement_offer": "emit_card",
+    "emit_patch_proposal": "emit_card",
+    # B3a (2026-09). Every name below was called 0-2 times in 287 live
+    # sessions on .159 while its schema rode on every turn (41 tools, ~40k
+    # chars, identical for triage and build).
+    # connector health: one tool answers configured + healthy for all or one.
+    "healthcheck_connector": "list_configured_connectors",
+    "connector_health": "list_configured_connectors",
+    # validation: validate ⊂ compile ⊂ verify; step_through is what
+    # analyze_playbook wraps. dry_run pushes and RUNS the playbook's real side
+    # effects with no approval -- off the default surface for that alone.
+    "compile_yaml": "validate_yaml",
+    "step_through_playbook": "analyze_playbook",
+    "dry_run_playbook": "analyze_playbook",
+    # run diagnosis: why_did_playbook_fail chains both.
+    "diagnose_yaml_against_pb_execution": "why_did_playbook_fail",
+    "get_run_env": "why_did_playbook_fail",
+    # corpus searches → find(kind=step|jinja_block|filter_usage|api).
+    "find_step_examples": "find", "find_jinja_pattern": "find",
+    "get_filter_examples": "find", "propose_http_fallback": "find",
+    # authoring: decision shape is enforced by validate/verify.
+    "emit_decision_step": "validate_yaml",
+    # delivery: push_playbook writes to the live box without asking; the
+    # build turn's terminal action is the playbook_offer card, whose accept
+    # the CONNECTOR pushes.
+    "push_playbook": "emit_card",
+}
+CONSOLIDATED_AWAY = frozenset(RETIRED_TO_UNION)
+
+# Retirements registered by a host (the connector retires its own merged hunt
+# helpers here). Kept apart from the literal above so the framework's set is
+# reviewable on its own.
+_HOST_RETIRED: dict[str, str] = {}
+
+
+def retire_tools(mapping: dict[str, str]) -> None:
+    """Take host-registered tools off the advertised surface, each naming the
+    advertised tool that subsumes it. Idempotent."""
+    _HOST_RETIRED.update({str(k): str(v) for k, v in (mapping or {}).items()})
+
+
+def retired_to_union() -> dict[str, str]:
+    """Every retired name → its union, framework and host retirements."""
+    return {**RETIRED_TO_UNION, **_HOST_RETIRED}
+
+
+def _advertised(name: str) -> bool:
+    return name not in CONSOLIDATED_AWAY and name not in _HOST_RETIRED
 
 
 def anthropic_tools() -> list[dict[str, Any]]:
@@ -1599,7 +1642,7 @@ def anthropic_tools() -> list[dict[str, Any]]:
     _ensure_mcp_materialized()
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
-        for t in REGISTRY.values() if t.name not in CONSOLIDATED_AWAY
+        for t in REGISTRY.values() if _advertised(t.name)
     ]
 
 
@@ -1616,7 +1659,7 @@ def openai_tools() -> list[dict[str, Any]]:
                 "parameters": t.input_schema,
             },
         }
-        for t in REGISTRY.values() if t.name not in CONSOLIDATED_AWAY
+        for t in REGISTRY.values() if _advertised(t.name)
     ]
 
 

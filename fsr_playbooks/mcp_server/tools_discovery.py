@@ -991,9 +991,9 @@ def get_op_schema(connector: str, op: str,
     """STEP 3 of building a connector step: get the parameter schema for one
     connector operation, so you wire its arguments from the real field names
     instead of guessing. Slim by default (~1.5 KB); verbose=True returns the
-    full output schemas. Skip this when find_operation already embedded a
+    full output schemas. Skip this when find(kind='operation') already embedded a
     schema for a single match. On a miss it returns `connector_not_found`
-    (call find_connector first) or `not_found` with a `near` list of close
+    (call find(kind='connector') first) or `not_found` with a `near` list of close
     op names.
 
     Slim by default (~1.5 KB): `op_name`, `title`, `description`, and a
@@ -1005,7 +1005,7 @@ def get_op_schema(connector: str, op: str,
     Returns the canonical `_err()` envelope (`ok:false, code, ...`) on
     miss:
     - `code: "connector_not_found"` when the connector itself is
-      unknown -- call `find_connector` first.
+      unknown -- call `find(kind='connector')` first.
     - `code: "not_found"` when the connector exists but the op doesn't
       -- the response includes a `near` list of close op names.
 
@@ -2198,7 +2198,7 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
     the `friendly_form` block it returns: that is the YAML our compiler
     actually accepts, and it is what you should author against rather than
     the wire-format args_schema_json. NOT for connector steps -- those are
-    find_connector → find_operation → get_op_schema. Slim by default;
+    find(kind='connector') → find(kind='operation') → get_op_schema. Slim by default;
     verbose=True dumps corpus examples and is rarely needed.
 
     `name` can be the friendly YAML short type (`manual_input`,

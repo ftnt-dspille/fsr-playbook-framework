@@ -17,6 +17,9 @@ from ._shared import mcp
 FIND_KINDS = (
     "connector", "operation", "action", "example", "recipe",
     "api", "jinja", "playbook",
+    # B3a: three corpus searches that were their own tools, called 0 times in
+    # 287 live sessions while each cost a schema on every turn.
+    "step", "jinja_block", "filter_usage",
 )
 
 
@@ -27,20 +30,18 @@ def find(kind: str, query: str = "", connector: str = "",
     """ONE search tool for every discovery catalog -- pick `kind`, pass a
     plain-language `query`; each result names the follow-up call that uses it.
 
-    Which kind to pick: `action` = what can be done to a TARGET on THIS
-    instance, only what is configured and healthy -- containment (tier 3+,
-    stage via emit_card(card_type='action')), enrichment (read-only, run via run_op), or
-    record writes (comment/update/create, tier 3+); prefer it over
-    connector+operation whenever the analyst named a target or asked to act;
-    filter with `target_type` (ip/host/user/url/domain/hash/file/email) and
-    `action_type`, and read each result's `action_type` for its family.
-    `connector` = which integration handles X; follow with kind=operation.
-    `operation` = one named connector's ops (requires `connector`); follow
-    with get_op_schema then run_op. `example` = a worked call (`connector`
-    set: that connector's ops; empty: vendor API docs). `recipe` = a
-    step-sequence pattern for a build intent. `api` = a vendor product's raw
-    API surface for HTTP-fallback steps. `jinja` = a filter for a transform.
-    `playbook` = existing playbooks matching the query.
+    Which kind to pick: `action` = what can be done to a TARGET here, only what is
+    configured and healthy -- containment (stage via emit_card
+    card_type='action'), enrichment (run_op), record writes; prefer it when
+    the analyst named a target or asked to act; filter with `target_type`
+    (ip/host/user/url/domain/hash/file/email) and `action_type`. `connector`
+    = which integration handles X, then `operation` (needs `connector`) →
+    get_op_schema → run_op. `example` = a worked call (`connector` set) or
+    vendor API docs. `recipe` = a step-sequence pattern for a build. `api` =
+    a vendor's raw API for HTTP-fallback steps. `playbook` = existing
+    playbooks. `step` = real examples of one step type (query = the type).
+    `jinja` = a filter for a transform; `filter_usage` = real usages of one
+    named filter; `jinja_block` = whole {% set %}/{% for %} idioms.
     """
     k = (kind or "").strip().lower()
     if k not in FIND_KINDS:
@@ -88,6 +89,15 @@ def find(kind: str, query: str = "", connector: str = "",
         out = find_api_product(query, limit=limit)
     elif k == "jinja":
         out = find_jinja_filter(query, limit=limit)
+    elif k == "step":
+        from .tools_corpus import find_step_examples  # noqa: PLC0415
+        out = find_step_examples(query, limit=limit)
+    elif k == "jinja_block":
+        from .tools_jinja import find_jinja_pattern  # noqa: PLC0415
+        out = find_jinja_pattern(query, limit=limit)
+    elif k == "filter_usage":
+        from .tools_jinja import get_filter_examples  # noqa: PLC0415
+        out = get_filter_examples(query, limit=limit)
     else:  # playbook
         out = search_playbooks(query, limit=limit)
     if isinstance(out, dict):

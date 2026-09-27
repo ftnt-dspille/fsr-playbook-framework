@@ -97,7 +97,8 @@ def test_intent_is_prior_not_slice():
     build_names = {t["name"] for t in plan_turn("build").tools}
     assert {"emit_card", "run_op"} <= build_names
     triage_names = {t["name"] for t in plan_turn("triage").tools}
-    assert {"validate_yaml", "push_playbook", "emit_card"} <= triage_names
+    # (push_playbook left the surface in B3a -- delivery is the offer card.)
+    assert {"validate_yaml", "verify_playbook", "emit_card"} <= triage_names
 
 
 def test_low_signal_message_still_gated():

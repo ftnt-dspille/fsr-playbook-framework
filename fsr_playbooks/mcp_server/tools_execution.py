@@ -2175,7 +2175,7 @@ def run_playbook(playbook: str,
     playbook <name>", "execute the deployed playbook <name>", or "trigger the
     existing playbook <name>" request -- the platform resolves the named
     playbook and launches it. Do NOT author YAML or call verify_playbook /
-    validate_yaml / compile_yaml for such a request; those are for building a
+    validate_yaml for such a request; those are for building a
     NEW playbook, not running one that already exists.
 
     Args:

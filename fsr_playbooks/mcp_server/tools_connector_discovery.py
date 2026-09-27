@@ -1038,13 +1038,15 @@ def list_configured_connectors(probe: bool = False,
                                only: set[str] | None = None) -> dict[str, Any]:
     """List the connectors actually CONFIGURED and ACTIVE on this instance.
     Call this BEFORE committing to a connector in a playbook: a connector
-    can appear in find_connector and still be unusable here, because without
+    can appear in find(kind='connector') and still be unusable here, because without
     a configuration it fails at runtime. Returns name + status cheaply;
     probe=True additionally healthchecks each one concurrently, and
-    verbose=True adds label, version, and config_count.
+    verbose=True adds label, version, and config_count. This is also THE
+    health check: a connector missing from the list is not configured, and
+    probe=True reports each one Available or Disconnected.
 
     A connector with no configuration cannot be called -- it'll fail at runtime
-    even if it appears in `find_connector`. Use this BEFORE picking which
+    even if it appears in `find(kind='connector')`. Use this BEFORE picking which
     connector to put in a playbook.
 
     Args:

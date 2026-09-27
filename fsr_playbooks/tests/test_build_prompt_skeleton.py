@@ -191,7 +191,9 @@ def test_the_mentions_check_actually_sees_the_prompts_tools():
     # the test above would pass vacuously -- an oracle that only ever passes is
     # the bug this plan exists to catch, one level up.
     mentions = _prompt_tool_mentions()
-    assert len(mentions) >= 10, f"suspiciously few tool mentions parsed: {mentions}"
+    # 9 since B3a: the prompt stopped naming compile_yaml, step_through,
+    # dry_run, push_playbook and diagnose_* when they left the surface.
+    assert len(mentions) >= 8, f"suspiciously few tool mentions parsed: {mentions}"
     assert {"analyze_playbook", "verify_playbook", "get_step_type"} <= mentions
 
 
@@ -206,13 +208,11 @@ def test_prompt_does_not_claim_a_playbook_can_be_analyzed_by_iri():
 
 
 def _build_tool_schema(tool: str) -> dict:
-    from fsr_playbooks.llm.intents import tools_for_intent
-    by_name = {}
-    for t in tools_for_intent("build"):
-        n = t["name"] if isinstance(t, dict) else getattr(t, "name", None)
-        by_name[n] = t
-    spec = by_name[tool]
-    return spec["input_schema"] if isinstance(spec, dict) else spec.input_schema
+    # From the REGISTRY, not the advertised build slice: B3a retired
+    # compile_yaml / step_through_playbook from the surface, but they stay
+    # dispatchable (old sessions, approval resumes), so the contract still holds.
+    from fsr_playbooks.llm.tools import REGISTRY
+    return REGISTRY[tool].input_schema
 
 
 @pytest.mark.parametrize("tool", ["verify_playbook", "validate_yaml",
