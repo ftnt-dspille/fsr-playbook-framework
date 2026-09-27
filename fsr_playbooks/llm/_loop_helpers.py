@@ -1841,6 +1841,16 @@ def verdict_repair_directive(result: Any, args: Any) -> str:
             "fixed; keep everything that was valid.")
 
 
+def _answered(result: Any) -> bool:
+    """A tool result that carries an answer: not an error envelope, and not a
+    guard's redirect or deferral (steering, not evidence)."""
+    if not isinstance(result, dict):
+        return result is not None
+    if result.get("kind") in ("guard_redirect", "guard_defer"):
+        return False
+    return not (result.get("ok") is False or "error" in result)
+
+
 class VerdictDeliveryGuard:
     """Tracks triage turns that ran evidence tools but never emitted a verdict.
 
@@ -1858,7 +1868,12 @@ class VerdictDeliveryGuard:
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         """Fold one executed tool result into the verdict state."""
-        if is_verdict_evidence(name, args):
+        # Evidence is a lookup that ANSWERED. Live on .159 a containment turn
+        # ("Block the IP ... on FortiGate") called get_record with no iri, got
+        # an argument error, and was forced into a verdict round -- which could
+        # cite nothing (the citation gate refuses failed calls) and displaced
+        # the block the analyst asked for.
+        if is_verdict_evidence(name, args) and _answered(result):
             self._ran_evidence_tool = True
         # Authoring is what the turn DID, not what it was offered: triage and
         # build advertise the same full surface, so a slice-based check read

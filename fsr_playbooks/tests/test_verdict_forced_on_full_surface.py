@@ -216,3 +216,20 @@ def test_repair_is_attempted_once_not_forever():
 def test_an_accepted_forced_verdict_is_not_repaired():
     sent, _ = _run_with_forced([_forced_verdict_response()], [{"ok": True}])
     assert len(sent) == 1
+
+
+def test_a_failed_lookup_is_not_evidence():
+    """Live: a containment turn's get_record failed on its arguments and the
+    guard still forced a verdict -- one that could cite nothing -- in place of
+    the block the analyst asked for."""
+    from fsr_playbooks.llm._loop_helpers import VerdictDeliveryGuard
+    allowed = {"emit_card", "get_record"}
+    for bad in ({"error": "invalid arguments for get_record"},
+                {"ok": False, "code": "not_found"},
+                {"ok": False, "kind": "guard_redirect", "error": "Skipped"}):
+        g = VerdictDeliveryGuard()
+        g.note_result("get_record", {"module": "alerts"}, bad)
+        assert not g.outstanding(allowed), bad
+    g = VerdictDeliveryGuard()
+    g.note_result("get_record", {"iri": "/api/3/alerts/x"}, {"ok": True, "name": "C2"})
+    assert g.outstanding(allowed)
