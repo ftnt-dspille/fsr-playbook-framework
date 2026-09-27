@@ -1818,18 +1818,12 @@ def verdict_directive(evidence_ids: list[str]) -> str:
     States the whole payload contract, from the validator's own constants: a
     live forced verdict was refused for `disposition: "inconclusive"` because
     the model was never told the set, and the round had no second try."""
-    from ..mcp_server.tools_emit import VERDICT_DISPOSITIONS, VERDICT_SEVERITIES
+    from ..mcp_server.tools_emit import verdict_contract
     ids_str = ", ".join(evidence_ids[:10]) + ("..." if len(evidence_ids) > 10 else "")
     return (
         "You investigated using evidence tools but did not emit a verdict. "
-        "Call `emit_card(card_type='verdict', payload={...})` now. The payload "
-        f"MUST have: `disposition`, exactly one of {', '.join(VERDICT_DISPOSITIONS)} "
-        "(use needs_more_info when you cannot conclude); "
-        f"`severity`, one of {', '.join(VERDICT_SEVERITIES)}; "
-        "`confidence`, a number from 0.0 to 1.0; `summary`, plain English, at most "
-        "600 characters; `findings`, a non-empty list of {claim, evidence} where "
-        "`evidence` lists tool_use ids from this turn; and `unknowns`, a non-empty "
-        "list of open questions whenever confidence is below 0.8. "
+        "Call `emit_card(card_type='verdict', payload={...})` now, where "
+        + verdict_contract() + ". "
         f"Evidence tool_use_ids from this turn: {ids_str or 'none'}."
     )
 

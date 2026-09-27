@@ -970,6 +970,21 @@ VERDICT_DISPOSITIONS = ("true_positive", "false_positive", "benign", "suspicious
 VERDICT_SEVERITIES = ("critical", "high", "medium", "low", "info")
 
 
+def verdict_contract() -> str:
+    """The verdict payload contract in one sentence, from the validator's own
+    constants. Read by the refusal (so a repair is one retry) and by the
+    forced-verdict directive, so the two can't state different rules."""
+    return (
+        "payload = {disposition: one of " + ", ".join(VERDICT_DISPOSITIONS)
+        + " (needs_more_info when you cannot conclude); severity: one of "
+        + ", ".join(VERDICT_SEVERITIES) + "; confidence: a number 0.0-1.0; "
+        "summary: plain English, at most 600 characters; findings: a non-empty "
+        "list of {claim: string, evidence: [tool_use ids from this turn]}; "
+        "unknowns: a list of open questions, required when confidence < 0.8; "
+        "recommended_actions (optional): a list of {label: string, tool?, args?}}"
+    )
+
+
 def emit_verdict(
     disposition: str,
     severity: str,
@@ -997,67 +1012,97 @@ def emit_verdict(
       recommended_actions: optional list of {label, tool?, args?} for next steps
       id: optional card id; generated if absent
     """
+    # Collect EVERY problem, not the first. Live, a verdict took nine
+    # emit_card calls: each refusal named one defect (shape, disposition,
+    # confidence type, claim, evidence type, action shape, action label, ids)
+    # and the model fixed exactly that one. One refusal listing all of them,
+    # plus the contract, is one repair.
+    problems: list[tuple[str, str]] = []
+
+    def bad(code: str, message: str) -> None:
+        problems.append((code, message))
+
     if not isinstance(disposition, str) or disposition not in VERDICT_DISPOSITIONS:
-        return _err("bad_disposition",
-                    f"disposition must be one of: {', '.join(VERDICT_DISPOSITIONS)} "
-                    f"(got {disposition!r})")
+        bad("bad_disposition",
+            f"disposition must be one of: {', '.join(VERDICT_DISPOSITIONS)} "
+            f"(got {disposition!r})")
     if not isinstance(severity, str) or severity not in VERDICT_SEVERITIES:
-        return _err("bad_severity",
-                    f"severity must be one of: {', '.join(VERDICT_SEVERITIES)} "
-                    f"(got {severity!r})")
-    if not isinstance(confidence, (int, float)):
-        return _err("bad_confidence", "confidence must be a number")
-    if not (0.0 <= confidence <= 1.0):
-        return _err("bad_confidence", "confidence must be between 0.0 and 1.0")
+        bad("bad_severity",
+            f"severity must be one of: {', '.join(VERDICT_SEVERITIES)} "
+            f"(got {severity!r})")
+    numeric = isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+    if not numeric:
+        bad("bad_confidence", "confidence must be a number")
+    elif not (0.0 <= confidence <= 1.0):
+        bad("bad_confidence", "confidence must be between 0.0 and 1.0")
     if not isinstance(summary, str) or not summary.strip():
-        return _err("missing_summary", "summary must be a non-empty string")
-    if len(summary) > 600:
-        return _err("summary_too_long", "summary must be ≤600 chars")
+        bad("missing_summary", "summary must be a non-empty string")
+    elif len(summary) > 600:
+        bad("summary_too_long", "summary must be ≤600 chars")
     if not isinstance(findings, list) or not findings:
-        return _err("no_findings",
-                    "findings must be a non-empty list of {claim, evidence}")
+        bad("no_findings", "findings must be a non-empty list of {claim, evidence}")
+        findings = []
     for i, f in enumerate(findings):
         if not isinstance(f, dict):
-            return _err("bad_finding", f"findings[{i}] must be an object")
+            bad("bad_finding", f"findings[{i}] must be an object")
+            continue
         if not f.get("claim") or not isinstance(f["claim"], str):
-            return _err("bad_finding",
-                        f"findings[{i}] must have a non-empty string 'claim'")
+            bad("bad_finding", f"findings[{i}] must have a non-empty string 'claim'")
         if not f.get("evidence"):
-            return _err("bad_finding_evidence",
-                        f"findings[{i}].evidence must be a non-empty list of "
-                        f"tool_call_ids (strings)")
-        if not isinstance(f["evidence"], list):
-            return _err("bad_finding_evidence",
-                        f"findings[{i}].evidence must be a list")
-        for j, eid in enumerate(f["evidence"]):
-            if not isinstance(eid, str) or not eid.strip():
-                return _err("bad_evidence_id",
-                            f"findings[{i}].evidence[{j}] must be a non-empty "
-                            f"string (a tool_use_id)")
+            bad("bad_finding_evidence",
+                f"findings[{i}].evidence must be a non-empty list of "
+                f"tool_call_ids (strings)")
+        elif not isinstance(f["evidence"], list):
+            bad("bad_finding_evidence", f"findings[{i}].evidence must be a list")
+        else:
+            for j, eid in enumerate(f["evidence"]):
+                if not isinstance(eid, str) or not eid.strip():
+                    bad("bad_evidence_id",
+                        f"findings[{i}].evidence[{j}] must be a non-empty "
+                        f"string (a tool_use_id)")
     # Check unknowns and confidence consistency
     unknowns_list: list[str] = []
     if unknowns is not None:
         if not isinstance(unknowns, list):
-            return _err("bad_unknowns", "unknowns must be a list of strings or null")
-        unknowns_list = [str(u).strip() for u in unknowns if u]
-    if not unknowns_list and confidence < 0.8:
-        return _err("confidence_unknowns_conflict",
-                    "unknowns list cannot be empty when confidence < 0.8; list "
-                    "open questions or raise confidence to ≥0.8")
+            bad("bad_unknowns", "unknowns must be a list of strings or null")
+        else:
+            unknowns_list = [str(u).strip() for u in unknowns if u]
+    if numeric and not unknowns_list and confidence < 0.8:
+        bad("confidence_unknowns_conflict",
+            "unknowns list cannot be empty when confidence < 0.8; list "
+            "open questions or raise confidence to ≥0.8")
     if recommended_actions is not None:
         if not isinstance(recommended_actions, list):
-            return _err("bad_actions", "recommended_actions must be a list")
-        for i, a in enumerate(recommended_actions):
-            if not isinstance(a, dict):
-                return _err("bad_action", f"recommended_actions[{i}] must be an object")
-            if not a.get("label") or not isinstance(a["label"], str):
-                return _err("bad_action",
-                            f"recommended_actions[{i}] must have a 'label' field")
-    # Validate evidence ids exist in this session. Import the citation validator.
+            bad("bad_actions", "recommended_actions must be a list")
+        else:
+            for i, a in enumerate(recommended_actions):
+                if not isinstance(a, dict):
+                    bad("bad_action", f"recommended_actions[{i}] must be an object")
+                elif not a.get("label") or not isinstance(a["label"], str):
+                    bad("bad_action",
+                        f"recommended_actions[{i}] must have a 'label' field")
+    # Evidence ids are checked in the same pass: the ninth live attempt was
+    # refused for citing prose instead of tool_use ids, AFTER eight structural
+    # repairs -- it could have been told the first time.
     from ._citation_validator import validate_evidence_ids
-    validation_err = validate_evidence_ids([eid for f in findings for eid in f["evidence"]])
-    if validation_err is not None:
-        return validation_err
+    cited = [eid for f in findings if isinstance(f, dict)
+             and isinstance(f.get("evidence"), list)
+             for eid in f["evidence"] if isinstance(eid, str) and eid.strip()]
+    id_hints: list[str] = []
+    if cited:
+        id_err = validate_evidence_ids(cited)
+        if id_err is not None:
+            bad(id_err.get("code") or "invalid_evidence_ids",
+                id_err.get("message") or "unknown evidence ids")
+            id_hints = list(id_err.get("suggestions") or [])
+    if problems:
+        code, message = problems[0]
+        if len(problems) > 1:
+            message = (f"{len(problems)} problems -- fix all of them in one retry: "
+                       + "; ".join(f"({n}) {m}" for n, (_, m)
+                                   in enumerate(problems, 1)))
+        return _err(code, message, suggestions=[*id_hints, verdict_contract()],
+                    problems=[{"code": c, "message": m} for c, m in problems])
     # Generate id if missing
     if not id or not isinstance(id, str):
         import uuid  # noqa: PLC0415
@@ -1234,9 +1279,12 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         out = fn(**payload)
     except TypeError:
+        hints = [f"{fn_name} takes: {params}"]
+        if kt == "verdict":
+            hints.append(verdict_contract())
         return _err("bad_payload",
                     f"payload does not match card_type {kt!r}",
-                    suggestions=[f"{fn_name} takes: {params}"])
+                    suggestions=hints)
     if isinstance(out, dict):
         out.setdefault("card_type", kt)
         if ignored and out.get("ok"):
