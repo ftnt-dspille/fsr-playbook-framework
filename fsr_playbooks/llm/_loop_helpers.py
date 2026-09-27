@@ -595,6 +595,33 @@ def _detect_analyst_order(user_text: str) -> bool:
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
+# Internal = an address that can only live inside the customer's network. Not
+# `ip.is_private`: Python also counts the RFC 5737 documentation ranges
+# (192.0.2/24, 198.51.100/24, 203.0.113/24) and other reserved blocks as
+# "private". Every seeded demo alert uses a TEST-NET address as its EXTERNAL
+# C2 destination, so live on .159 the hunt's one external indicator,
+# 203.0.113.42, was refused correlation search as "an internal (private)
+# address", and a TI lookup on it would have been refused the same way.
+_INTERNAL_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",   # RFC 1918
+    "100.64.0.0/10",                                     # RFC 6598 carrier NAT
+    "fc00::/7",                                          # RFC 4193 ULA
+))
+
+
+def is_internal_ip(ip: Any) -> bool:
+    """True for an address that exists only inside a network: RFC 1918,
+    carrier-grade NAT, IPv6 ULA, loopback, link-local."""
+    if isinstance(ip, str):
+        try:
+            ip = ipaddress.ip_address(ip.strip())
+        except ValueError:
+            return False
+    if ip.is_loopback or ip.is_link_local:
+        return True
+    return any(ip.version == n.version and ip in n for n in _INTERNAL_NETS)
+
+
 def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
     """Return (internal, external) IPv4 literals found anywhere in ``args``."""
     internal: set[str] = set()
@@ -608,7 +635,7 @@ def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
             ip = ipaddress.ip_address(tok)
         except ValueError:
             continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
+        if is_internal_ip(ip):
             internal.add(tok)
         else:
             external.add(tok)
@@ -784,7 +811,8 @@ class TriageDiscipline:
                             f"addresses have no public TI reputation; enriching "
                             f"them wastes budget and pollutes the verdict. Pivot "
                             f"on internal hosts via the SIEM/CMDB context ops "
-                            f"(get_ip_context / siem_search_ip) and reserve TI "
+                            f"(get_ip_context / siem_search_ip, when they are in "
+                            f"your tool list) and reserve TI "
                             f"connectors for EXTERNAL, routable indicators."
                         ),
                     }
@@ -819,8 +847,7 @@ class TriageDiscipline:
                 _ip = ipaddress.ip_address(q)
             except ValueError:
                 pass
-            if _ip is not None and (_ip.is_private or _ip.is_loopback
-                                    or _ip.is_link_local):
+            if _ip is not None and is_internal_ip(_ip):
                 return {
                     "ok": False,
                     "kind": "guard_redirect",
@@ -830,8 +857,9 @@ class TriageDiscipline:
                         f"cross-module correlation search is reserved for the "
                         f"EXTERNAL indicator, which identifies the campaign. "
                         f"Pivot internal hosts through the SIEM/CMDB context "
-                        f"ops instead (get_ip_context / siem_search), or read "
-                        f"the alert's own linked records. Do not retry this "
+                        f"ops instead (get_ip_context / siem_search, when they "
+                        f"are in your tool list), or read the alert's own "
+                        f"linked records. Do not retry this "
                         f"search."
                     ),
                 }
