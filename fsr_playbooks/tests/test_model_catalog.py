@@ -141,3 +141,13 @@ def test_the_frank_default_is_recognised_by_its_configured_id() -> None:
     v = check("coding-b200/max")
     assert v.level == "tested"
     assert "20260926T184805Z" in v.message
+
+
+def test_the_offline_tier_models_are_screened():
+    """doctor graded the sweep (qwen) and loop-smoke (deepseek) models
+    UNSCREENED; both passed the gate slice 5/5 x3 on 2026-09-28."""
+    from fsr_playbooks.llm import model_catalog as mc
+    for m in ("coding-b200/qwen3.8-27b-nvfp4", "coding-b200/deepseek-v4-flash-0731"):
+        v = mc.check(m, "frank")
+        assert v.level == "tested", m
+        assert v.endpoint_warning, "gateway is not reachable from a box"

@@ -160,6 +160,31 @@ CATALOG: tuple[ModelEntry, ...] = (
         endpoint_reachable_from_box=False,
     ),
     ModelEntry(
+        "coding-b200/qwen3.8-27b-nvfp4", "frank", "tested", False,
+        "screen lane 20260928T131413Z -- 5/5, 3 repeats, consistent (the "
+        "archive predates the concrete-model stamp; model set via "
+        "FRANK_MODEL, per run log)",
+        "The FRANK_MODEL default for the offline sweeps. The gate is five "
+        "ROUTING fixtures: it did not see the prompt, guard and fixture "
+        "defects the 2026-09-27 sweeps surfaced on this model "
+        "(ka_authorized_scanner, general_asset_containment_refused), and qwen "
+        "once closed a turn with no text at all. Reasoning not measured.",
+        endpoint="Fortilab AI gateway",
+        endpoint_reachable_from_box=False,
+    ),
+    ModelEntry(
+        "coding-b200/deepseek-v4-flash-0731", "frank", "tested", False,
+        "screen lane 20260928T131316Z -- 5/5, 3 repeats, consistent (the "
+        "archive predates the concrete-model stamp; model set via "
+        "FRANK_MODEL, per run log)",
+        "The `make loop` agent-smoke model (fastest here) and the one the "
+        "known-answer rows were measured on. Same caveat as qwen: the gate is "
+        "five routing fixtures and does not cover the prompt, guard and "
+        "fixture defects found 2026-09-27. Reasoning not measured.",
+        endpoint="Fortilab AI gateway",
+        endpoint_reachable_from_box=False,
+    ),
+    ModelEntry(
         "qwen3.6", "frank", "supported", False,
         "never measured on the gate slice",
         "The gateway's lower-end model. No reasoning, and unmeasured here -- "
