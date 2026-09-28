@@ -78,8 +78,16 @@ class Skill:
 
 
 def _apply_wires(inputs: dict[str, Any], wired_refs: dict[str, str]) -> dict[str, Any]:
-    """Overlay value-match jinja wires onto the resolved literals."""
-    merged = dict(inputs)
+    """Overlay value-match jinja wires onto the resolved literals.
+
+    A DEEP copy: the step is edited after this (record-input wiring rewrites
+    nested leaves like `call_mcp_tool`'s `args.value` in place), and a shallow
+    copy shared those nested dicts with the trace. The offer-time compile then
+    wrote `{{ vars.steps.Set_Inputs.* }}` into the recorded call itself, so the
+    accept-time compile found no literal to stage, emitted no `Set Inputs` step,
+    and the playbook could not save (N2, `triage_then_save_as_playbook`)."""
+    import copy
+    merged = copy.deepcopy(dict(inputs))
     for param, ref in (wired_refs or {}).items():
         merged[param] = ref
     return merged

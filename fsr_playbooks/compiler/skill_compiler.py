@@ -323,12 +323,39 @@ def _rules_lookup():
         from .resolver import Resolver
         resolver = Resolver(default_db_path())
     except Exception:  # noqa: BLE001 -- no catalog: leave params untouched
-        return lambda _c, _o: []
+        def _none(_c, _o):
+            return []
+        _none.enum = lambda _c, _o, _p: (None, None)
+        return _none
 
     def _lookup(connector: str, operation: str):
         return resolver.operation_param_rules(connector, operation)
 
+    # Same catalog, second question: a param's declared select options.
+    _lookup.enum = resolver.operation_param_enum
     return _lookup
+
+
+def _is_fixed_choice(rules_for: Any, inputs: dict[str, Any], param: str) -> bool:
+    """True when the recorded value is drawn entirely from the param's DECLARED
+    select/multiselect options -- a choice the analyst made, not an indicator a
+    re-run must re-derive. Live: VirusTotal `query_ip` recorded
+    `relationships: ["Votes", "Comments", "Resolutions"]`, which counted as an
+    unwired gap and failed the offer's verified check. Catalog-backed, never a
+    heuristic: a plain-word host list is an indicator and must stay a gap."""
+    enum = getattr(rules_for, "enum", None)
+    connector, op = inputs.get("connector"), inputs.get("operation")
+    if enum is None or not connector or not op:
+        return False
+    try:
+        _ptype, options = enum(connector, op, param)
+    except Exception:  # noqa: BLE001 -- unknown param: not a known choice
+        return False
+    if not options:
+        return False
+    value = inputs.get(param)
+    values = value if isinstance(value, list) else [value]
+    return bool(values) and all(isinstance(v, str) and v in options for v in values)
 
 
 def _visible_params(
@@ -991,6 +1018,8 @@ def compile_trace(
         if skill is None:
             continue
         wired, unwired = wire_inputs(call.resolved_inputs, calls[:i])
+        unwired = [p for p in unwired
+                   if not _is_fixed_choice(rules_for, call.resolved_inputs, p)]
         step = skill.compile(call.resolved_inputs, wired, call.step_name)
         # Drop params the recorded discriminator values make invisible, BEFORE
         # wiring/gaps are reported -- a pruned param is not a gap, it is a

@@ -393,3 +393,59 @@ def test_a_trace_compiled_playbook_reports_no_unmocked_containment():
     out = build_playbook_from_trace(
         _contain_trace({"attributes": {"last_analysis_stats": {"malicious": 7}}}).to_json())
     assert unmocked_containment_steps(yaml.safe_load(out["yaml"])) == []
+
+
+# --- compiling must not rewrite the trace (N2) -----------------------------------
+# Live, the connector compiles the SAME in-process trace twice: once for the
+# offer card, once on accept (the one that saves). The first compile wrote
+# `{{ vars.steps.Set_Inputs.* }}` into the recorded call's nested `args`, so the
+# second found no literal to stage, emitted no `Set Inputs` step, and every
+# trace-built playbook failed to save. `to_json()` per call hid it -- each call
+# parsed a fresh copy -- so this drives the active-trace path, as production does.
+
+def test_a_second_compile_of_the_active_trace_still_stages_the_inputs():
+    from fsr_playbooks.agent import skill_trace as st
+    t = SkillTrace(module="alerts", record_fields={"destinationIp": "198.51.100.77"})
+    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+                    {"tool": "siem_search",
+                     "args": {"by": "ip", "value": "198.51.100.77", "window": "2h"}},
+                    {"results": []}, step_name="siem_search")
+    before = json.loads(t.to_json())
+    st.set_active_trace(t)
+    try:
+        first = build_playbook_from_trace("", name="Twice")
+        second = build_playbook_from_trace("", name="Twice")
+    finally:
+        st.set_active_trace(None)
+    assert json.loads(t.to_json()) == before, "compiling mutated the recorded trace"
+    for out in (first, second):
+        assert out["ok"] is True
+        _doc, steps = _conn_steps(out)
+        assert "Set Inputs" in steps
+        assert not out.get("static_errors"), out.get("static_errors")
+    assert first["yaml"] == second["yaml"]
+
+
+# --- a declared select choice is not a gap -----------------------------------
+# Live (N2 run): VirusTotal query_ip recorded `relationships: [Votes, Comments,
+# Resolutions]`; the list counted as unwired and the offer failed its verified
+# check. The catalog declares `relationships` a multiselect over those options.
+
+def _vt_trace(relationships):
+    t = SkillTrace(module="alerts", record_fields={"destinationIp": "198.51.100.77"})
+    t.record_run_op("virustotal", "query_ip",
+                    {"ip": "198.51.100.77", "relationships": relationships},
+                    {"attributes": {}}, ref_prefix="data", step_name="VT")
+    return t
+
+
+def test_declared_select_options_are_not_gaps():
+    out = build_playbook_from_trace(_vt_trace(["Votes", "Comments"]).to_json(), name="VT")
+    assert out["ok"] is True
+    assert "VT" not in (out.get("gaps") or {}), out.get("gaps")
+
+
+def test_a_value_outside_the_declared_options_is_still_a_gap():
+    """Catalog-backed, not a plain-word heuristic: an undeclared value stays."""
+    out = build_playbook_from_trace(_vt_trace(["smithDesktop"]).to_json(), name="VT")
+    assert "relationships" in (out.get("gaps") or {}).get("VT", [])
