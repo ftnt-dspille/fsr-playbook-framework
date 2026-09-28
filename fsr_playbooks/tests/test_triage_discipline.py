@@ -963,3 +963,15 @@ def test_emit_card_action_union_sets_the_staged_gag():
 def test_emit_card_non_action_types_are_not_staging():
     d = _fresh128()
     assert d.evaluate("emit_card", {"card_type": "choice", "payload": {}}) is None
+
+
+def test_internal_ip_asset_lookup_is_not_correlation():
+    """ka_authorized_scanner: the asset record held the deciding evidence (an
+    authorized scanner) and the guard refused the lookup its own message
+    recommends -- every run judged the host blind."""
+    d = _fresh128()
+    assert d.evaluate("search_module_records",
+                      {"module": "assets", "q": "10.20.5.50"}) is None
+    r = d.evaluate("search_module_records",
+                   {"module": "alerts", "q": "10.20.5.50"})
+    assert r is not None and r.get("internal_correlation_guard")

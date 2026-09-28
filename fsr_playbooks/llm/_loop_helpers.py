@@ -642,6 +642,11 @@ def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
     return internal, external
 
 
+# Modules that describe the estate (the CMDB) rather than detections: a lookup
+# there identifies a host, it does not correlate a campaign.
+_CMDB_MODULES = frozenset({"assets"})
+
+
 def _effective_tool_name(name: str, args: Any) -> str:
     """Fold the consolidated `emit_card` union onto the retired per-type
     emitter name every discipline rule keys on. Without this the union tool
@@ -858,7 +863,12 @@ class TriageDiscipline:
                 _ip = ipaddress.ip_address(q)
             except ValueError:
                 pass
-            if _ip is not None and is_internal_ip(_ip):
+            # The asset/CMDB module is exempt: looking an internal host up
+            # there IDENTIFIES it (owner, role, an authorized scanner) -- the
+            # very pivot this guard's message recommends. Blocking it left
+            # ka_authorized_scanner judging a host it was never allowed to see.
+            if (_ip is not None and is_internal_ip(_ip)
+                    and module not in _CMDB_MODULES):
                 return {
                     "ok": False,
                     "kind": "guard_redirect",
