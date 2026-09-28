@@ -28,6 +28,7 @@ def test_skeleton_identifies_steps_by_name_and_wires_with_next():
 # branch to land on. See PLAN_demoable_three_pillars.md (Track C / C1).
 
 _QUICK_ACTION_MODES = [
+    "create",
     "explain",
     "add_step",
     "find_issues",
@@ -136,7 +137,7 @@ _FLAT = re.sub(r"\s+", " ", _PROMPT).lower()
 # if you add one, say why, because the default answer is "then don't name it".
 _NOT_TOOLS = {
     # Quick-action chip keys (`# Active quick-action` markers), not callables.
-    "explain", "add_step", "find_issues", "add_error_handling", "optimize",
+    "create", "explain", "add_step", "find_issues", "add_error_handling", "optimize",
     "quick_action",
     # The prompt's own example of a GUESSED op that does not exist. Naming it is
     # the point -- it teaches the model not to invent it.

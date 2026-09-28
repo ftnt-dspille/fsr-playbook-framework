@@ -210,6 +210,19 @@ def test_yaml_offer_needs_no_trace():
     assert "review the steps" in card["advisory"]
 
 
+def test_yaml_offer_names_each_connector_steps_operation():
+    """A saved investigation's card listed every step as "siem_search (.)":
+    the YAML-path summary dropped the step's connector and operation."""
+    yaml_text = _BUILD_YAML.replace(
+        "        type: connector\n",
+        "        type: connector\n        connector: fortigate-firewall\n"
+        "        operation: block_ip\n")
+    card = emit_playbook_offer(id="o4", summary="Deploy?", yaml=yaml_text)["card"]
+    start, block = card["ops_summary"]
+    assert "connector" not in start and "operation" not in start
+    assert (block["connector"], block["operation"]) == ("fortigate-firewall", "block_ip")
+
+
 def test_yaml_offer_unparseable_yaml_still_offers():
     # The YAML already passed verify before the model offers it; the step
     # summary is display-only and must never block the affordance.

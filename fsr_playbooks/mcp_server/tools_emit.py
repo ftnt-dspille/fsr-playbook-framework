@@ -786,6 +786,29 @@ def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
     )
 
 
+def _yaml_ops_summary(yaml_text: str) -> list[dict[str, Any]]:
+    """The offer card's step list, read from verified YAML. A connector step
+    keeps its connector + operation: without them the card listed every step
+    of a saved investigation as "siem_search (.)". Display only -- a parse
+    failure yields an empty list, never a refusal."""
+    out: list[dict[str, Any]] = []
+    try:
+        doc, _ = load_yaml_text(yaml_text)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+        for s in steps:
+            if not (isinstance(s, dict) and s.get("name")):
+                continue
+            entry = {"label": str(s["name"]), "step_type": str(s.get("type") or "")}
+            for key in ("connector", "operation"):
+                if s.get(key):
+                    entry[key] = str(s[key])
+            out.append(entry)
+    except Exception:  # noqa: BLE001 -- display summary only, never block
+        return []
+    return out
+
+
 def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
                      title_suggestion: str | None,
                      editable_title: bool) -> dict[str, Any]:
@@ -801,17 +824,7 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
     if guard is not None:
         return guard
 
-    ops_summary: list[dict[str, Any]] = []
-    try:
-        doc, _ = load_yaml_text(yaml_text)
-        pbs = (doc or {}).get("playbooks") or []
-        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
-        for s in steps:
-            if isinstance(s, dict) and s.get("name"):
-                ops_summary.append({"label": str(s["name"]),
-                                    "step_type": str(s.get("type") or "")})
-    except Exception:  # noqa: BLE001 -- display summary only, never block
-        ops_summary = []
+    ops_summary = _yaml_ops_summary(yaml_text)
 
     card: dict[str, Any] = {
         "type": "playbook_offer",
@@ -901,17 +914,7 @@ def emit_enhancement_offer(
         )
 
     yaml_text = entry["yaml"]
-    ops_summary: list[dict[str, Any]] = []
-    try:
-        doc, _ = load_yaml_text(yaml_text)
-        pbs = (doc or {}).get("playbooks") or []
-        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
-        for s in steps:
-            if isinstance(s, dict) and s.get("name"):
-                ops_summary.append({"label": str(s["name"]),
-                                    "step_type": str(s.get("type") or "")})
-    except Exception:  # noqa: BLE001 -- display summary only, never block
-        ops_summary = []
+    ops_summary = _yaml_ops_summary(yaml_text)
 
     diff = entry.get("diff_summary") or {}
     card: dict[str, Any] = {

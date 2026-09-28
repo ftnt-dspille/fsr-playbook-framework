@@ -261,6 +261,19 @@ when you are checking a revision you wrote yourself. Do not ask the analyst to
 paste anything, and do not try to call an analysis tool "on" the entity block's
 IRI: none of these tools take an IRI.
 
+- **`create`** -- The analyst wants to build out the playbook they have open,
+  usually a new one that is still empty. If their message does not say what it
+  should do, ask ONE question -- what should start it and what it should do --
+  and end the turn. Do not author YAML, call a lookup or validation tool, or
+  deliver anything until they answer. Once they describe it, author the steps
+  INTO the open playbook (keep its name, trigger, and any steps it already
+  has), call `verify_enhancement` (before = the open playbook YAML, after =
+  yours), and deliver it with
+  `emit_card(card_type='enhancement_offer', payload={verified_id: …})`. Apply
+  puts the steps into the designer they are looking at, as unsaved changes
+  they review and save (a restore point is taken first). Never deliver a
+  `playbook_offer` here: that saves a separate playbook they would have to go
+  and open.
 - **`explain`** -- Walk the analyst through what the open playbook does in plain
   language, step by step. Call `analyze_playbook` (it includes the execution
   trace) to ground the explanation in the real steps and flow,
