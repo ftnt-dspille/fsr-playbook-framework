@@ -174,8 +174,12 @@ class Plan:
     def describe(self) -> str:
         sub = ("offline" if self.lane.offline else "LIVE BOX") + (
             f" + {self.lane.bundle}" if self.lane.bundle else "")
+        from evals.providers import resolved_model
+        names = [m.strip() for m in self.lane.models.split(",") if m.strip()]
+        shown = ",".join(f"{m} ({resolved_model(m) or 'model unset'})"
+                         for m in names)
         return (f"lane={self.lane.name} ({self.lane.why})  "
-                f"model={self.lane.models}  substrate={sub}  "
+                f"model={shown}  substrate={sub}  "
                 f"mode={self.mode}  tasks={len(self.tasks)}")
 
 

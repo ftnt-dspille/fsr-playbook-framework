@@ -21,7 +21,7 @@ from typing import Any
 
 from agent import load_system_prompt
 
-from evals.providers import ProviderFn, get_provider, set_tool_slice
+from evals.providers import ProviderFn, get_provider, resolved_model, set_tool_slice
 from evals.scoring import SCORER_VERSION as _SCORER_VERSION
 from evals.scoring import canonicalize_trace, delivered_yaml, score
 from evals.tasks import Task, load_tasks
@@ -43,6 +43,11 @@ _NEUTRAL_PROMPT = (
     "user's request, decide which tool actually answers it, and call that "
     "tool. Do not narrate a plan instead of acting."
 )
+
+
+
+def _resolved_models(model_names) -> dict[str, str | None]:
+    return {m: resolved_model(m) for m in model_names}
 
 
 def _prompt_for(task: Task, default: str) -> str:
@@ -447,6 +452,9 @@ def run_matrix(
         "lane": os.environ.get("EVAL_LANE", "").strip() or "adhoc",
         "tasks": [t.name for t in tasks],
         "models": list(model_names),
+        # The concrete model behind each provider name (see
+        # providers._MODEL_SOURCE) -- "agentic_frank" alone names a gateway.
+        "resolved_models": _resolved_models(model_names),
         "rows": rows,
         "summary": summary,
     }
@@ -513,6 +521,7 @@ def screen_models(
         else:
             verdicts[m] = "flaky"
     return {"repeats": repeats, "tasks": tasks, "models": list(model_names),
+            "resolved_models": _resolved_models(model_names),
             "cells": cells, "verdicts": verdicts, "runs": runs}
 
 

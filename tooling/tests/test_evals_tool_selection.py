@@ -274,3 +274,32 @@ def test_a_succeeding_run_of_distinct_args_is_left_to_the_flail_gate():
              for i in range(6)]
     run, _, _ = scoring._longest_spiral(trace)
     assert run == 1
+
+
+# --- provenance: the archive names the CONCRETE model ---------------------------
+# 2026-09-28: qwen3.8-27b and deepseek-v4-flash were screened the same night and
+# both archives said only "agentic_frank" -- indistinguishable on disk.
+
+def test_screen_archive_names_the_concrete_frank_model(monkeypatch):
+    monkeypatch.setenv("FRANK_MODEL", "coding-b200/some-model")
+    h = _stub_runs(monkeypatch, [{"agentic_frank": {"t": (1, 1)}}])
+    out = h.screen_models(model_names=["agentic_frank"], repeats=2)
+    assert out["resolved_models"] == {"agentic_frank": "coding-b200/some-model"}
+
+
+def test_resolved_model_is_the_one_the_provider_uses(monkeypatch):
+    """One table feeds both, so the archive cannot name another model."""
+    from evals import providers
+    monkeypatch.delenv("EVAL_OPENAI_MODEL", raising=False)
+    assert providers.resolved_model("agentic_openai_api") == "gpt-4.1-mini"
+    monkeypatch.setenv("EVAL_OPENAI_MODEL", "gpt-5.4-mini")
+    assert providers.resolved_model("agentic_openai_api") == "gpt-5.4-mini"
+    assert providers.resolved_model("gold") is None
+    assert set(providers._MODEL_SOURCE) == set(providers._LAZY_FACTORIES)
+
+
+def test_lane_header_names_the_concrete_model(monkeypatch):
+    from evals.lanes import resolve
+    monkeypatch.setenv("FRANK_MODEL", "coding-b200/some-model")
+    plan = resolve(lane="screen", mode="gate", tasks=None, allow_live=False)
+    assert "agentic_frank (coding-b200/some-model)" in plan.describe()

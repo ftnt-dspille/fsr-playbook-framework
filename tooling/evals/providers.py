@@ -64,7 +64,7 @@ def _anthropic_provider() -> ProviderFn:
         raise RuntimeError("ANTHROPIC_API_KEY not set")
     import anthropic  # type: ignore[import-not-found]
     client = anthropic.Anthropic()
-    model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    model = resolved_model("anthropic")
 
     def _call(system: str, prompt: str) -> str:
         resp = client.messages.create(
@@ -81,7 +81,7 @@ def _openai_provider() -> ProviderFn:
         raise RuntimeError("OPENAI_API_KEY not set")
     from openai import OpenAI  # type: ignore[import-not-found]
     client = OpenAI()
-    model = os.environ.get("EVAL_OPENAI_MODEL", "gpt-4o-mini")
+    model = resolved_model("openai")
 
     def _call(system: str, prompt: str) -> str:
         resp = client.chat.completions.create(
@@ -102,7 +102,7 @@ def _lmstudio_provider() -> ProviderFn:
     `LMSTUDIO_MODEL` to talk to whatever model is currently loaded.
     """
     base_url = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LMSTUDIO_MODEL", "local-model")
+    model = resolved_model("lmstudio")
     import requests  # type: ignore[import-untyped]
 
     def _call(system: str, prompt: str) -> str:
@@ -223,7 +223,7 @@ def _agentic_anthropic_provider() -> Callable:
 
     import anthropic  # type: ignore[import-not-found]
     client = anthropic.Anthropic()
-    model = os.environ.get("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    model = resolved_model("agentic_anthropic")
     anthropic_tools, _, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
     raw_tools = anthropic_tools()
 
@@ -496,7 +496,7 @@ def _agentic_lmstudio_provider() -> Callable:
     """LM Studio's local OpenAI-compatible endpoint. No auth."""
     return _agentic_openai_compatible(
         base_url=os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
-        model=os.environ.get("LMSTUDIO_MODEL", "local-model"),
+        model=resolved_model("agentic_lmstudio"),
     )
 
 
@@ -516,7 +516,7 @@ def _agentic_frank_provider() -> Callable:
     base_url = os.environ.get("FRANK_BASE_URL")
     if not base_url:
         raise RuntimeError("FRANK_BASE_URL not set (see .env)")
-    model = os.environ.get("FRANK_MODEL")
+    model = resolved_model("agentic_frank")
     if not model:
         raise RuntimeError("FRANK_MODEL not set (see .env)")
     return _agentic_openai_compatible(
@@ -539,9 +539,35 @@ def _agentic_openai_api_provider() -> Callable:
     return _agentic_openai_compatible(
         base_url=os.environ.get("EVAL_OPENAI_BASE_URL",
                                 "https://api.openai.com/v1"),
-        model=os.environ.get("EVAL_OPENAI_MODEL", "gpt-4.1-mini"),
+        model=resolved_model("agentic_openai_api"),
         headers={"Authorization": f"Bearer {key}"},
     )
+
+
+#: Where each provider's CONCRETE model id comes from: (env var, default).
+#: One table, read by the providers AND stamped into archived runs, so an
+#: archive can never name a different model than the one that ran. Before it,
+#: a screen archived only "agentic_frank" -- two runs on different Frank models
+#: (qwen3.8-27b, deepseek-v4-flash) were indistinguishable on disk.
+_MODEL_SOURCE: dict[str, tuple[str, str | None]] = {
+    "anthropic": ("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+    "openai": ("EVAL_OPENAI_MODEL", "gpt-4o-mini"),
+    "lmstudio": ("LMSTUDIO_MODEL", "local-model"),
+    "agentic_anthropic": ("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+    "agentic_lmstudio": ("LMSTUDIO_MODEL", "local-model"),
+    "agentic_frank": ("FRANK_MODEL", None),
+    "agentic_openai_api": ("EVAL_OPENAI_MODEL", "gpt-4.1-mini"),
+}
+
+
+def resolved_model(name: str) -> str | None:
+    """The concrete model id provider `name` runs, or None (gold/echo, or a
+    provider whose model env var is unset and has no default)."""
+    src = _MODEL_SOURCE.get(name)
+    if src is None:
+        return None
+    env, default = src
+    return os.environ.get(env) or default
 
 
 _LAZY_FACTORIES: dict[str, Callable[[], ProviderFn]] = {

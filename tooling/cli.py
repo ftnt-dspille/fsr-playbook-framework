@@ -2945,6 +2945,10 @@ def cmd_matrix(args: argparse.Namespace) -> int:
 
     # Say what will run before it runs. A lane run is minutes long; finding out
     # afterwards that it took the wrong substrate wastes the whole thing.
+    # Load .env first (setdefault, idempotent) so the header can name the
+    # CONCRETE model -- FRANK_MODEL usually lives there.
+    from probes import _env  # type: ignore
+    _env._load_dotenv()
     print(f"▶ matrix: {plan.describe()}", file=sys.stderr)
 
     # The lane rides in the environment because `run_matrix` records it, and
