@@ -46,12 +46,29 @@ def is_usable_sqlite(path: Path) -> bool:
     "no such table: picklists". Running the tooling suite and then the
     fsr_playbooks suite in one checkout did exactly that: 95 tests red, with
     nothing in the diff to explain it.
+
+    Checked through sqlite itself, NEVER a raw ``open()``: on POSIX, closing any
+    file descriptor on a file drops every fcntl lock the PROCESS holds on it --
+    including a live sqlite connection's. ``default_db_path()`` runs this on
+    every call and the enrichment writers call that per write, so under
+    parallel sweeps a writer lost its lock mid-transaction and a page landed at
+    offset 0 (``data/fsr_reference.db`` corrupted 2026-09-27, and three times
+    in August). sqlite shares one lock set per inode across a process's
+    connections and defers closing its fds while locks are held, so opening
+    through it is safe. ``mode=ro`` never creates the file.
     """
+    import sqlite3
     try:
-        with open(path, "rb") as fh:
-            return fh.read(16) == _SQLITE_MAGIC
-    except OSError:
+        con = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True)
+    except sqlite3.Error:
         return False
+    try:
+        # 0 on an empty (0-byte) file; raises on a non-database header.
+        return con.execute("PRAGMA schema_version").fetchone()[0] > 0
+    except sqlite3.Error:
+        return False
+    finally:
+        con.close()
 
 
 def default_db_path() -> Path:
@@ -83,7 +100,14 @@ def writable_reference_db() -> Path | None:
     ``None`` means "no writable reference DB" -- callers skip the write. That
     is the honest outcome for enrichment: it is a nice-to-have that a later
     ``warmup`` reproduces, never something correctness depends on.
+
+    OPT-IN (``FSRPB_ENRICH=1``). Every chat sweep, known-answer run and pytest
+    worker used to write this store, in parallel -- the load under which it
+    corrupted. Nothing correctness-bearing is lost: on an appliance (wheel
+    install, no ``$FSRPB_DB``) this already resolved to None.
     """
+    if os.environ.get("FSRPB_ENRICH") != "1":
+        return None
     db = default_db_path()
     return None if db == PACKAGED_SLIM_DB else db
 
@@ -101,18 +125,21 @@ def runtime_cache_db_path() -> Path:
     * installed as a wheel, it writes into ``site-packages`` -- which is
       root-owned or read-only in plenty of real deployments.
 
-    A DB the caller named (``$FSRPB_DB``) or the dev cache are both writable and
-    already instance-scoped, so they keep taking the cache. Only the packaged
-    read-only case is redirected, to the user cache dir.
+    A DB the caller named (``$FSRPB_DB``) is writable and instance-scoped, so it
+    keeps taking the cache. The packaged catalog and the dev corpus
+    (``data/fsr_reference.db``) are both redirected to the user cache dir.
     """
     env = os.environ.get("FSRPB_CACHE_DB")
     if env:
         return Path(env)
     db = default_db_path()
-    if db != PACKAGED_SLIM_DB:
+    if db not in (PACKAGED_SLIM_DB, REPO_PROBED_DB):
         return db
+    # The dev corpus is redirected too: it is the pinned reference store the
+    # evals measure and the one that keeps corrupting under parallel writers.
     root = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
-    path = Path(root) / "fsr_playbooks" / "runtime_cache.db"
+    name = "runtime_cache.dev.db" if db == REPO_PROBED_DB else "runtime_cache.db"
+    path = Path(root) / "fsr_playbooks" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -18,6 +18,7 @@ tests failing somewhere else entirely.
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -27,7 +28,7 @@ from fsr_playbooks import _db
 @pytest.fixture
 def no_env(monkeypatch):
     """Resolution must be decided by the files, not an ambient override."""
-    for var in ("FSRPB_DB", "FSRPB_CACHE_DB"):
+    for var in ("FSRPB_DB", "FSRPB_CACHE_DB", "FSRPB_ENRICH"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -100,10 +101,14 @@ def test_packaged_catalog_is_never_a_write_target(monkeypatch, tmp_path, no_env)
     assert _db.writable_reference_db() is None
 
 
-def test_dev_cache_is_a_write_target(monkeypatch, tmp_path, no_env):
+def test_dev_cache_is_written_only_on_opt_in(monkeypatch, tmp_path, no_env):
+    """Ordinary runs wrote the dev corpus in parallel and corrupted it
+    (2026-09-27, and three times in August). Enrichment is now opt-in."""
     dev = tmp_path / "fsr_reference.db"
     sqlite3.connect(dev).execute("CREATE TABLE t (x)")
     monkeypatch.setattr(_db, "REPO_PROBED_DB", dev)
+    assert _db.writable_reference_db() is None
+    monkeypatch.setenv("FSRPB_ENRICH", "1")
     assert _db.writable_reference_db() == dev
 
 
@@ -116,10 +121,38 @@ def test_runtime_cache_never_lands_on_the_packaged_catalog(
     assert _db.runtime_cache_db_path() != _db.PACKAGED_SLIM_DB
 
 
-def test_runtime_cache_follows_a_writable_db(monkeypatch, tmp_path, no_env):
-    """A dev/instance DB is writable and instance-scoped, so the cache stays
-    with it rather than splitting across two files."""
+def test_runtime_cache_follows_a_named_instance_db(monkeypatch, tmp_path, no_env):
+    """A DB the caller named is instance-scoped, so the cache stays with it."""
+    inst = tmp_path / "instance.db"
+    sqlite3.connect(inst).execute("CREATE TABLE t (x)")
+    monkeypatch.setenv("FSRPB_DB", str(inst))
+    assert _db.runtime_cache_db_path() == inst
+
+
+def test_runtime_cache_never_lands_on_the_dev_corpus(monkeypatch, tmp_path, no_env):
+    """The dev corpus is the pinned store evals measure; caches go elsewhere."""
     dev = tmp_path / "fsr_reference.db"
     sqlite3.connect(dev).execute("CREATE TABLE t (x)")
     monkeypatch.setattr(_db, "REPO_PROBED_DB", dev)
-    assert _db.runtime_cache_db_path() == dev
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    assert _db.default_db_path() == dev
+    assert _db.runtime_cache_db_path() != dev
+
+
+def test_resolving_the_store_never_opens_a_raw_fd_on_it(monkeypatch, tmp_path, no_env):
+    """POSIX: closing ANY fd on a file drops the process's fcntl locks on it,
+    including a live sqlite connection's -- the corruption mechanism."""
+    import builtins
+    dev = tmp_path / "fsr_reference.db"
+    held = sqlite3.connect(dev)
+    held.execute("CREATE TABLE t (x)")
+    held.commit()
+    monkeypatch.setattr(_db, "REPO_PROBED_DB", dev)
+    real_open = builtins.open
+
+    def guarded(file, *a, **k):
+        assert Path(str(file)).resolve() != dev.resolve(), "raw open() on the live store"
+        return real_open(file, *a, **k)
+    monkeypatch.setattr(builtins, "open", guarded)
+    assert _db.default_db_path() == dev
+    held.close()
