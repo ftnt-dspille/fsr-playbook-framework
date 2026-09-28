@@ -62,6 +62,7 @@ from ._loop_helpers import (
     ProgressMeter,
     PromisedActionGuard,
     TriageDiscipline,
+    _effective_tool_name,
     drain_with_idle_timeout,
     latest_user_text,
     stall_directive,
@@ -1082,7 +1083,7 @@ class OpenAIProvider(CapabilityMixin):
             # through the sequential path, where the guard applies.
             card_idx = next(
                 (i for i, (_c, nm, _a) in enumerate(tool_calls)
-                 if nm == "emit_action_card"), None
+                 if _effective_tool_name(nm, _a) == "emit_action_card"), None
             )
             batch_end = (approval_idx if card_idx is None
                          else min(approval_idx, card_idx + 1))

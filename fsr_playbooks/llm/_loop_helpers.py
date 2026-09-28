@@ -655,6 +655,14 @@ def _effective_tool_name(name: str, args: Any) -> str:
     return name
 
 
+def _is_verdict_emit(name: str, args: Any) -> bool:
+    """True for a verdict-card emission, under either the retired or the
+    consolidated name."""
+    return name == "emit_verdict" or (
+        name == "emit_card" and isinstance(args, dict)
+        and str(args.get("card_type") or "").strip().lower() == "verdict")
+
+
 class TriageDiscipline:
     """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
     three discipline rules and, when the call is allowed, records it -- returning
@@ -751,7 +759,10 @@ class TriageDiscipline:
         # enrichment of an IP the analyst had already declared the confirmed C2.
         # Deferral, not failure: the model should close with its verdict, and an
         # `ok: false` here would read as a tool error worth retrying.
-        if self._action_card_staged:
+        # The verdict is exempt: it is the close this very directive asks for,
+        # and it is analyst-facing, not an action. Deferring it (ka_c2_beacon,
+        # 2/2 on deepseek) left the analyst a block card with no stated finding.
+        if self._action_card_staged and not _is_verdict_emit(name, args):
             return {
                 "ok": True,
                 "kind": "guard_defer",
@@ -1882,14 +1893,11 @@ class VerdictDeliveryGuard:
                 name == "emit_card" and isinstance(args, dict)
                 and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES):
             self._authored = True
-        # Check if a verdict was emitted
-        is_verdict = (
-            name == "emit_verdict" or
-            (name == "emit_card" and
-             isinstance(args, dict) and
-             args.get("card_type") == "verdict")
-        )
-        if is_verdict and isinstance(result, dict) and result.get("ok") is True:
+        # A verdict counts only when it was DELIVERED. A guard deferral also
+        # carries `ok: True` (it must not read as a failure), and counting it
+        # silenced this guard on exactly the turn that needed it.
+        if (_is_verdict_emit(name, args) and isinstance(result, dict)
+                and result.get("ok") is True and _answered(result)):
             self._emitted_verdict = True
 
     def outstanding(self, allowed_names: set[str]) -> bool:

@@ -66,3 +66,36 @@ def test_the_flag_is_turn_scoped() -> None:
     _staged()
     fresh = TriageDiscipline(authoring=False, user_text="now isolate the host")
     assert fresh.evaluate("run_op", {"connector": "x", "op": "y"}) is None
+
+
+# --- the verdict is the close, not another action ---------------------------
+# ka_c2_beacon (known-answer, 2/2 on deepseek): the model staged the block card,
+# then called emit_card(verdict) -- and this guard deferred it. The analyst got
+# "block this" with no finding. The directive above asks for a verdict, so the
+# verdict itself must get through.
+
+def test_the_verdict_card_is_not_gagged_after_a_card_is_staged() -> None:
+    d = _staged()
+    assert d.evaluate("emit_card", {"card_type": "verdict", "payload": {}}) is None
+    assert d.evaluate("emit_verdict", {}) is None
+
+
+def test_the_consolidated_action_card_stages_too() -> None:
+    """`emit_card(card_type='action')` is the only name the model is offered."""
+    d = TriageDiscipline(authoring=False, user_text="block 1.2.3.4")
+    d.note_result("emit_card", {"card_type": "action"}, _CARD_OK)
+    assert d.evaluate("run_op", {"connector": "x", "op": "y"}) is not None
+    assert d.evaluate("emit_card", {"card_type": "action"}) is not None
+    assert d.evaluate("emit_card", {"card_type": "verdict"}) is None
+
+
+def test_a_deferred_verdict_does_not_satisfy_the_verdict_guard() -> None:
+    """The deferral carries `ok: True`; counting it silenced the one guard that
+    would have forced the verdict. Pin the pair together, as they run live."""
+    from fsr_playbooks.llm._loop_helpers import VerdictDeliveryGuard
+    g = VerdictDeliveryGuard()
+    g.note_result("siem_search", {}, {"ok": True, "rows": [1]})
+    deferred = {"ok": True, "kind": "guard_defer", "action_card_staged": True,
+                "directive": "NOT RUN"}
+    g.note_result("emit_card", {"card_type": "verdict"}, deferred)
+    assert g.outstanding({"emit_card", "siem_search"}) is True
