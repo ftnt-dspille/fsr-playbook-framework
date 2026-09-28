@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import _verified_yaml
-from ._shared import get_turn_user_message, mcp
+from ._shared import _err, get_grounded_yaml, get_turn_user_message, mcp
 from .tools_verify import verify_playbook
 
 
@@ -450,24 +450,30 @@ def _diff_collections(before, after, user_message: str | None
 
 @mcp.tool()
 def verify_enhancement(
-    before_yaml: str,
-    after_yaml: str,
+    before_yaml: str | None = None,
+    after_yaml: str | None = None,
     user_message: str | None = None,
     live_probe: bool = False,
 ) -> dict[str, Any]:
-    """The pre-submit gate for an EDIT to an existing open playbook -- run this
-    before `emit_card(card_type='enhancement_offer', ...)`, and only when editing. Requires BOTH the
-    before and after YAML, so it needs a playbook the analyst already has
-    open. Authoring a NEW playbook from scratch has no `before_yaml` to pass:
-    gate that with `verify_playbook` instead.
+    """The pre-submit gate for a WHOLESALE rewrite of the open playbook -- run
+    this before `emit_card(card_type='enhancement_offer', ...)`. For a targeted
+    edit (add/change/remove/re-route a few steps) use `edit_playbook` instead:
+    it applies the change to the open playbook itself, so you never re-type the
+    document. Authoring a NEW playbook from scratch has no open playbook: gate
+    that with `verify_playbook` instead.
+
+    Leave `before_yaml` out -- it defaults to the open playbook as read from
+    FortiSOAR. Copying the open playbook into the call is how steps and links go
+    missing. Pass only `after_yaml`, your complete revised playbook.
 
     Runs `verify_playbook(after_yaml)` for the shape check, then
     structurally diffs `before_yaml` vs `after_yaml` and reports
     regressions the build-mode gate cannot see.
 
     Args:
-      before_yaml: the playbook YAML the user started with.
-      after_yaml: the proposed edited YAML.
+      before_yaml: omit it. Defaults to the open playbook; pass it only when
+        verifying against some other baseline.
+      after_yaml: the proposed edited YAML (required).
       user_message: the chat turn that asked for the edit. Used to mark
         which steps were "fair game" to touch -- steps changed outside
         the user's named scope fire a `behavior_changed_outside_diff`
@@ -537,8 +543,24 @@ def verify_enhancement(
     if user_message is None:
         user_message = get_turn_user_message()
 
+    # The baseline is the open playbook, read from FortiSOAR -- never a copy the
+    # model typed. Same pattern as analyze_playbook's empty `yaml_text`.
+    if not (isinstance(before_yaml, str) and before_yaml.strip()):
+        before_yaml = get_grounded_yaml()
+        if not before_yaml:
+            return _err(
+                "no_open_playbook",
+                "there is no open playbook to compare against. For a NEW "
+                "playbook use verify_playbook; to verify against a specific "
+                "baseline pass before_yaml.")
+    if not (isinstance(after_yaml, str) and after_yaml.strip()):
+        return _err("missing_field",
+                    "after_yaml is required: the complete revised playbook. "
+                    "For a targeted edit use edit_playbook(operations=[...]).")
+
     # 1. Shape check on the after YAML.
-    after_result = verify_playbook(after_yaml, live_probe=live_probe)
+    after_result = _grandfather_orphans(
+        verify_playbook(after_yaml, live_probe=live_probe), before_yaml)
 
     # 2. Parse both for the diff.
     before_coll, before_errs = _parse(before_yaml)
@@ -595,6 +617,42 @@ def verify_enhancement(
     return _issue_verified_id(out, after_yaml, before_yaml)
 
 
+def _grandfather_orphans(result: dict[str, Any],
+                         before_yaml: str) -> dict[str, Any]:
+    """An orphan step the analyst's playbook ALREADY had is theirs, not the
+    edit's: keep it visible as a warning instead of blocking an unrelated
+    change. Only orphans the edit introduced stay required fixes -- that is the
+    dropped-link failure `unreachable_step` exists to catch."""
+    orphans = [f for f in result.get("required_fixes") or []
+               if f.get("code") == "unreachable_step"]
+    if not orphans:
+        return result
+    from fsr_playbooks.compiler import compile_yaml
+
+    from ._shared import DB_PATH
+    try:
+        before = compile_yaml(before_yaml, DB_PATH)
+    except Exception:  # noqa: BLE001 -- no baseline means nothing to excuse
+        return result
+    already = {e.message for e in before.errors
+               if e.code.value == "unreachable_step"}
+    keep = [f for f in result["required_fixes"]
+            if f.get("code") != "unreachable_step" or f.get("message") not in already]
+    if len(keep) == len(result["required_fixes"]):
+        return result
+    moved = [dict(f, severity="warning", pre_existing=True)
+             for f in result["required_fixes"] if f not in keep]
+    out = dict(result)
+    out["required_fixes"] = keep
+    out["warnings"] = list(result.get("warnings") or []) + moved
+    out["ok"] = out["ready_to_push"] = not keep
+    out["next_actions"] = [a for a in result.get("next_actions") or []
+                           if not (a.startswith("unreachable_step:")
+                                   and not any(f.get("code") == "unreachable_step"
+                                               for f in keep))]
+    return out
+
+
 def _issue_verified_id(out: dict[str, Any], after_yaml: str,
                        before_yaml: str) -> dict[str, Any]:
     """Bind the verdict to the bytes it blessed, on the way out.
@@ -647,4 +705,370 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
         "re-type the YAML into your reply -- the offer card carries the exact "
         "text verified here."
     )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# edit_playbook -- targeted edits as OPERATIONS on the open playbook.
+#
+# Live: an agent re-typed a verified playbook to deliver an edit and dropped two
+# `next:` links; the saved playbook ran only its first search. `verified_id`
+# already stops a re-typed document from being DELIVERED, but every edit still
+# made the model re-type the whole playbook to AUTHOR it (and, before
+# `before_yaml` defaulted to the open playbook, re-type it twice). Here the
+# model names only the change; the tool applies it to the open playbook with a
+# round-trip YAML load, so every step it was not asked to touch -- links,
+# uuids, layout, comments -- is carried over untouched by construction.
+# ---------------------------------------------------------------------------
+
+_EDIT_OPS = ("add_step", "update_step", "rename_step", "remove_step",
+             "set_route", "remove_route")
+# Step-level keys an update may not change: `name` has its own op because
+# routes point at it; `uuid` ties the step to its live record.
+_UPDATE_FORBIDDEN = frozenset({"name", "uuid"})
+
+
+class _EditError(Exception):
+    pass
+
+
+def _rt_yaml():
+    from ruamel.yaml import YAML
+    y = YAML(typ="rt")
+    y.preserve_quotes = True
+    y.width = 4096
+    return y
+
+
+def _slug(name: str) -> str:
+    from fsr_playbooks.compiler.parser import _slugify
+    return _slugify(name)
+
+
+def _refs(step) -> set[str]:
+    """Every form a route may use to name this step (name or slug)."""
+    name = str(step.get("name") or "")
+    out = {name, _slug(name)}
+    if step.get("id"):
+        out.add(str(step["id"]))
+    return {r for r in out if r}
+
+
+def _route_slots(step):
+    """(container, key) for every route out of a step: `next`, each
+    decision condition / manual-input option `next`, and unlabeled fan-out."""
+    slots = []
+    if "next" in step:
+        slots.append((step, "next"))
+    for list_key in ("conditions", "options"):
+        for entry in step.get(list_key) or []:
+            if isinstance(entry, dict) and "next" in entry:
+                slots.append((entry, "next"))
+    fan = step.get("unlabeled_next")
+    if isinstance(fan, list):
+        slots.extend((fan, i) for i in range(len(fan)))
+    return slots
+
+
+def _find(steps, ref: Any):
+    if not isinstance(ref, str) or not ref.strip():
+        raise _EditError("a step reference must be the step's name")
+    ref = ref.strip()
+    for i, s in enumerate(steps):
+        if ref in _refs(s):
+            return i, s
+    names = ", ".join(repr(str(s.get("name"))) for s in steps)
+    raise _EditError(f"no step named {ref!r} -- steps are: {names}")
+
+
+def _branch_entry(step, option: str):
+    for list_key in ("conditions", "options"):
+        for entry in step.get(list_key) or []:
+            if not isinstance(entry, dict):
+                continue
+            labels = {str(entry.get(k)) for k in ("display", "option", "label")
+                      if entry.get(k) is not None}
+            if option in labels or (option.lower() == "default" and entry.get("default")):
+                return entry
+    raise _EditError(f"step {step.get('name')!r} has no branch {option!r}")
+
+
+# Canvas placement for added steps. A step with no `top`/`left` falls to the
+# emitter's whole-graph auto-layout while every existing step keeps its saved
+# spot, so the two grids collide (live: a spliced step landed off to the side
+# and End sat above the steps now routed into it). Same strides as the emitter.
+_ROW = 130
+
+
+def _pos(step) -> tuple[int, int] | None:
+    try:
+        return int(step["top"]), int(step["left"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _set_pos(step, top: int, left: int) -> None:
+    step["top"], step["left"] = str(top), str(left)
+
+
+def _downstream(steps, first) -> list:
+    """Steps reachable from `first` (inclusive), following every route."""
+    seen, out, todo = set(), [], [first]
+    while todo:
+        s = todo.pop()
+        if id(s) in seen:
+            continue
+        seen.add(id(s))
+        out.append(s)
+        for box, key in _route_slots(s):
+            ref = box[key]
+            todo.extend(t for t in steps if isinstance(ref, str) and ref in _refs(t))
+    return out
+
+
+def _place_after(steps, prev, new) -> None:
+    """Put `new` one row under `prev` and push what follows down a row, so the
+    canvas reads in route order. No-op when `prev` has no saved position."""
+    anchor = _pos(prev)
+    if anchor is None or _pos(new) is not None:
+        return
+    top, left = anchor[0] + _ROW, anchor[1]
+    below = [t for t in steps if t is not prev]
+    nxt = new.get("next")
+    first = next((t for t in below if isinstance(nxt, str) and nxt in _refs(t)), None)
+    for t in _downstream(below, first) if first is not None else []:
+        p = _pos(t)
+        if p is not None and p[0] >= top:
+            _set_pos(t, p[0] + _ROW, p[1])
+    _set_pos(new, top, left)
+
+
+def _place_below_all(steps, new) -> None:
+    placed = [p for p in (_pos(s) for s in steps) if p is not None]
+    if placed and _pos(new) is None:
+        _set_pos(new, max(t for t, _ in placed) + _ROW, min(lf for _, lf in placed))
+
+
+def _normalize_op(op: dict) -> dict:
+    """Canonical `{op: <kind>, ...}` from the two unambiguous shapes models
+    send instead: the op name as the key (`{add_step: {...}}`, seen live), and
+    add_step with the step's keys inline beside `after` rather than under
+    `step`. Anything else passes through for `_apply_op` to refuse."""
+    if "op" not in op and len(op) == 1:
+        (kind, body), = op.items()
+        if kind in _EDIT_OPS and isinstance(body, dict):
+            op = {"op": kind, **body}
+    if op.get("op") == "add_step" and "step" not in op and op.get("name"):
+        step = {k: v for k, v in op.items() if k not in ("op", "after")}
+        op = {"op": "add_step", "step": step,
+              **({"after": op["after"]} if "after" in op else {})}
+    return op
+
+
+def _apply_op(steps, op: dict) -> str:
+    op = _normalize_op(op)
+    kind = op.get("op")
+    if kind == "add_step":
+        new = op.get("step")
+        if not (isinstance(new, dict) and new.get("name") and new.get("type")):
+            raise _EditError("add_step needs step={name, type, ...}")
+        if any(str(new["name"]) in _refs(s) or _slug(str(new["name"])) in _refs(s)
+               for s in steps):
+            raise _EditError(f"a step named {new['name']!r} already exists")
+        from ruamel.yaml.comments import CommentedMap
+        new = CommentedMap(new)
+        after = op.get("after")
+        if after is None:
+            _place_below_all(steps, new)
+            steps.append(new)
+            return f"added {new['name']!r} (unrouted -- route to it with set_route)"
+        i, prev = _find(steps, after)
+        if any(k in prev for k in ("conditions", "options")) and "next" not in prev:
+            raise _EditError(
+                f"{prev.get('name')!r} branches; insert with add_step (no "
+                f"`after`) and wire it with set_route(from, to, option)")
+        # Splice into the chain: prev -> new -> whatever prev pointed at.
+        if prev.get("next") and "next" not in new:
+            new["next"] = prev["next"]
+        prev["next"] = str(new["name"])
+        _place_after(steps, prev, new)
+        steps.insert(i + 1, new)
+        return f"added {new['name']!r} after {prev.get('name')!r}"
+
+    if kind == "update_step":
+        _, step = _find(steps, op.get("name"))
+        sets = op.get("set") or {}
+        unset = op.get("unset") or []
+        if not isinstance(sets, dict) or not isinstance(unset, list):
+            raise _EditError("update_step takes set={key: value} and unset=[key]")
+        bad = sorted(_UPDATE_FORBIDDEN & (set(sets) | set(unset)))
+        if bad:
+            raise _EditError(f"update_step cannot change {bad}; use rename_step "
+                             f"to rename")
+        if not sets and not unset:
+            raise _EditError("update_step with nothing to set or unset")
+        for k, v in sets.items():
+            step[k] = v
+        for k in unset:
+            step.pop(k, None)
+        return f"updated {step.get('name')!r}: {sorted(set(sets) | set(unset))}"
+
+    if kind == "rename_step":
+        _, step = _find(steps, op.get("name"))
+        to = op.get("to")
+        if not isinstance(to, str) or not to.strip():
+            raise _EditError("rename_step needs to=<new name>")
+        old_refs = _refs(step)
+        step["name"] = to.strip()
+        for s in steps:
+            for box, key in _route_slots(s):
+                if str(box[key]) in old_refs:
+                    box[key] = to.strip()
+        return f"renamed {sorted(old_refs)[0]!r} to {to.strip()!r} (routes updated)"
+
+    if kind == "remove_step":
+        i, step = _find(steps, op.get("name"))
+        old_refs = _refs(step)
+        successor = step.get("next") if op.get("reconnect", True) else None
+        for s in steps:
+            if s is step:
+                continue
+            fan = s.get("unlabeled_next")
+            if isinstance(fan, list):
+                kept = [successor if str(r) in old_refs else r for r in fan]
+                fan[:] = [r for r in kept if r]
+            for box, key in _route_slots(s):
+                if isinstance(box, list) or str(box[key]) not in old_refs:
+                    continue
+                if successor:
+                    box[key] = successor
+                else:
+                    box.pop(key)
+        steps.pop(i)
+        return (f"removed {step.get('name')!r}"
+                + (f"; its predecessors now route to {successor!r}" if successor else ""))
+
+    if kind == "set_route":
+        _, src = _find(steps, op.get("from"))
+        _, dst = _find(steps, op.get("to"))
+        option = op.get("option")
+        if option:
+            _branch_entry(src, str(option))["next"] = str(dst["name"])
+            return f"routed {src.get('name')!r} [{option}] -> {dst.get('name')!r}"
+        if any(k in src for k in ("conditions", "options")):
+            raise _EditError(f"{src.get('name')!r} branches; name the option= "
+                             f"to route")
+        src["next"] = str(dst["name"])
+        return f"routed {src.get('name')!r} -> {dst.get('name')!r}"
+
+    if kind == "remove_route":
+        _, src = _find(steps, op.get("from"))
+        option = op.get("option")
+        box = _branch_entry(src, str(option)) if option else src
+        if "next" not in box:
+            raise _EditError(f"{src.get('name')!r} has no route to remove")
+        box.pop("next")
+        return f"removed route out of {src.get('name')!r}" + (f" [{option}]" if option else "")
+
+    raise _EditError(f"unknown op {kind!r}; each operation is "
+                     f"{{op: <kind>, ...}} with kind one of {list(_EDIT_OPS)}")
+
+
+@mcp.tool()
+def edit_playbook(
+    operations: list[dict[str, Any]],
+    playbook: str | None = None,
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    """EDIT the playbook the analyst has open -- the default way to change it.
+    Name only the change; this applies it to the open playbook (read from
+    FortiSOAR), verifies the result like `verify_enhancement`, and on a pass
+    returns a `verified_id`. Deliver it with
+    `emit_card(card_type='enhancement_offer', payload={verified_id: ...})`.
+    You never re-type the playbook, so no step or link you did not name can go
+    missing. Each call applies to the open playbook as it is, so on a failed
+    verify fix the operations and send the WHOLE list again.
+
+    `operations` is applied in order, all or nothing. Steps are named by their
+    `name:`. Each is an object with an `op`:
+      - {op: add_step, step: {name, type, ...step keys}, after: <step>}
+          inserts after <step> and splices it into that step's `next` chain;
+          omit `after` to add it unrouted (then use set_route).
+      - {op: update_step, name: <step>, set: {key: value}, unset: [key]}
+          changes step-level keys (params, vars, next, conditions, ...).
+      - {op: rename_step, name: <step>, to: <new name>}  -- routes follow.
+      - {op: remove_step, name: <step>, reconnect: true}
+          routes into it are re-pointed at its `next` (reconnect=false drops them).
+      - {op: set_route, from: <step>, to: <step>, option: <branch label>}
+          `option` for a decision condition / manual-input option; omit for `next`.
+      - {op: remove_route, from: <step>, option: <branch label>}
+
+    `playbook`: which playbook, when the open collection holds several.
+    Returns the verify_enhancement envelope plus `applied` (one line per op) and
+    `after_yaml`; on a bad operation, {ok: false, code: "bad_operation",
+    operation_index, message} and nothing is applied.
+    """
+    import io
+    import json
+
+    before = get_grounded_yaml()
+    if not before:
+        return _err("no_open_playbook",
+                    "no playbook is open to edit. For a NEW playbook author the "
+                    "YAML and use verify_playbook.")
+    if isinstance(operations, str):
+        try:
+            operations = json.loads(operations)
+        except ValueError:
+            return _err("bad_operation", "operations must be a list of objects")
+    if isinstance(operations, dict):
+        operations = [operations]
+    if not isinstance(operations, list) or not operations:
+        return _err("bad_operation", "operations must be a non-empty list")
+
+    y = _rt_yaml()
+    try:
+        doc = y.load(before)
+    except Exception as exc:  # noqa: BLE001
+        return _err("open_playbook_unreadable", f"could not read the open playbook: {exc}")
+    pbs = (doc or {}).get("playbooks") if isinstance(doc, dict) else None
+    if not isinstance(pbs, list) or not pbs:
+        return _err("open_playbook_unreadable", "the open playbook has no playbooks: list")
+    if playbook:
+        target = next((p for p in pbs if str(p.get("name")) == playbook), None)
+        if target is None:
+            return _err("bad_operation", f"no playbook named {playbook!r} is open",
+                        suggestions=[str(p.get("name")) for p in pbs])
+    elif len(pbs) == 1:
+        target = pbs[0]
+    else:
+        return _err("bad_operation", "the open collection has several playbooks; "
+                    "name one with playbook=",
+                    suggestions=[str(p.get("name")) for p in pbs])
+    steps = target.get("steps")
+    if not isinstance(steps, list):
+        return _err("open_playbook_unreadable", "the open playbook has no steps: list")
+
+    applied: list[str] = []
+    for i, op in enumerate(operations):
+        if not isinstance(op, dict):
+            return _err("bad_operation", f"operations[{i}] is not an object",
+                        operation_index=i)
+        try:
+            applied.append(_apply_op(steps, op))
+        except _EditError as exc:
+            return _err("bad_operation",
+                        f"operations[{i}] ({_normalize_op(op).get('op')}): {exc}",
+                        operation_index=i,
+                        suggestions=["nothing was applied -- fix this operation "
+                                     "and send the whole list again"])
+
+    buf = io.StringIO()
+    y.dump(doc, buf)
+    after = buf.getvalue()
+    out = verify_enhancement(before_yaml=before, after_yaml=after,
+                             user_message=user_message)
+    out = dict(out)
+    out["applied"] = applied
+    out["after_yaml"] = after
     return out

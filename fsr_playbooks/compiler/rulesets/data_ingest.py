@@ -27,6 +27,8 @@ from ._shared import (
     rule_step_type_collection_consistency,
     rule_tag_typos,
     rule_three_workflow_split_or_env_setup,
+    rule_wizard_create_step_collection,
+    rule_wizard_create_step_name,
 )
 
 
@@ -117,6 +119,8 @@ register("data-ingest", [
     rule_connector_slug_uniform,
     rule_collection_or_workflow_has_slug,
     rule_connector_param_visibility,
+    rule_wizard_create_step_name,
+    rule_wizard_create_step_collection,
     rule_create_record_has_dedup,
     rule_create_record_operation_is_overwrite,
     rule_picklist_mapping_for_severity_status,

@@ -180,6 +180,14 @@ class Collection:
     # as `tags: [name, ...]` (plain names); emitted verbatim.
     tags: list[str] = field(default_factory=list)
 
+    # The collection export's top-level `exported_tags`. Normally the emitter
+    # derives this automatically from the union of every playbook/collection
+    # tag. The Data Ingestion Wizard keys on these specific tags to decide
+    # whether to offer an ingestion configuration, so connectors need explicit
+    # control (e.g. ["fortinet-fortisiemv2", "Fortinet", "dataingestion",
+    # "fetch", "create", "ingest"]). None = auto-derive.
+    exported_tags: list[str] | None = None
+
     # --- Round-trip preservation ---
     # Original appliance UUID. When present, emitter uses this instead of
     # generating a deterministic uuid5. Preserves cross-collection references.

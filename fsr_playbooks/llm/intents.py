@@ -29,7 +29,8 @@ DEFAULT_INTENT = "build"
 BUILD_ONLY_TOOLS = frozenset({
     "validate_yaml", "compile_yaml", "build_playbook_from_trace",
     "analyze_playbook",
-    "verify_playbook", "verify_enhancement", "emit_decision_step",
+    "verify_playbook", "verify_enhancement", "edit_playbook",
+    "emit_decision_step",
     "search_playbooks", "get_step_type",
     "find_jinja_filter", "find_jinja_pattern", "get_filter_examples",
     "step_through_playbook", "dry_run_playbook",
@@ -64,7 +65,7 @@ BUILD_ONLY_TOOLS = frozenset({
 # SAME names (asserted in a test) so the guard and the advertised slice can never
 # drift. This is a SUBSET of BUILD_ONLY_TOOLS -- dropping it never touches triage.
 ENHANCE_ONLY_TOOLS = frozenset({
-    "verify_enhancement", "emit_enhancement_offer",
+    "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
 })
 
 # Triage-only tools dropped from the build slice (ROADMAP §4, three-pillar

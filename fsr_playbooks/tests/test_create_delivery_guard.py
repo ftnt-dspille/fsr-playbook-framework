@@ -22,8 +22,13 @@ BUILD_SLICE = {_CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL, "get_step_type"}
 # an enhance slice carries the enhancement pair instead.
 ENHANCE_SLICE = {"emit_enhancement_offer", "verify_enhancement"}
 
-YAML_A = "playbooks:\n  - name: A\n"
-YAML_B = "playbooks:\n  - name: B\n"
+# Real playbooks: the guard ignores a draft with no action steps.
+YAML_A = ("playbooks:\n  - name: A\n    steps:\n"
+    "      - {name: Start, type: start, next: Note}\n"
+    "      - {name: Note, type: set_variable, vars: {note: ok}}\n")
+YAML_B = ("playbooks:\n  - name: B\n    steps:\n"
+    "      - {name: Start, type: start, next: Note}\n"
+    "      - {name: Note, type: set_variable, vars: {note: ok}}\n")
 
 
 def _passing_verify(summary="enriches the sender domain"):

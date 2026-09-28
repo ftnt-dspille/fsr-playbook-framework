@@ -191,6 +191,8 @@ playbooks:
         next: Block IP
       - name: Block IP
         type: connector
+        connector: fortigate-firewall
+        operation: block_ip
 """
 
 
@@ -213,24 +215,21 @@ def test_yaml_offer_needs_no_trace():
 def test_yaml_offer_names_each_connector_steps_operation():
     """A saved investigation's card listed every step as "siem_search (.)":
     the YAML-path summary dropped the step's connector and operation."""
-    yaml_text = _BUILD_YAML.replace(
-        "        type: connector\n",
-        "        type: connector\n        connector: fortigate-firewall\n"
-        "        operation: block_ip\n")
-    card = emit_playbook_offer(id="o4", summary="Deploy?", yaml=yaml_text)["card"]
+    card = emit_playbook_offer(id="o4", summary="Deploy?", yaml=_BUILD_YAML)["card"]
     start, block = card["ops_summary"]
     assert "connector" not in start and "operation" not in start
     assert (block["connector"], block["operation"]) == ("fortigate-firewall", "block_ip")
 
 
-def test_yaml_offer_unparseable_yaml_still_offers():
-    # The YAML already passed verify before the model offers it; the step
-    # summary is display-only and must never block the affordance.
+def test_yaml_offer_unparseable_yaml_is_refused():
+    # The offer verifies the bytes it carries -- it used to assume the model
+    # had, and offered YAML no gate had seen (live: a re-typed playbook missing
+    # two links was saved and ran only its first step).
     res = emit_playbook_offer(id="o2", summary="Deploy?",
                               yaml="{{ not: [valid yaml")
-    assert res["ok"] is True
-    assert res["card"]["ops_summary"] == []
-    assert res["card"]["final_yaml"] == "{{ not: [valid yaml"
+    assert res["ok"] is False
+    assert res["code"] == "offer_not_verified"
+    assert res["required_fixes"]
 
 
 def test_yaml_offer_empty_yaml_rejected():

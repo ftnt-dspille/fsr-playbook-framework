@@ -734,7 +734,8 @@ class AnthropicProvider(CapabilityMixin):
         _authoring = (
             "verify_playbook" in allowed_names or
             "push_playbook" in allowed_names or
-            "verify_enhancement" in allowed_names
+            "verify_enhancement" in allowed_names or
+            "edit_playbook" in allowed_names
         )
         _discipline = TriageDiscipline(
             state=investigation_state,

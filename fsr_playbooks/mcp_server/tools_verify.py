@@ -62,6 +62,7 @@ CHECK_GROUPS: dict[str, frozenset[str]] = {
         "connector_config_no_default", "unknown_connector_config"}),
     "graph": frozenset({
         "unknown_step_reference", "unreachable_step_reference",
+        "unreachable_step",
         "branch_target_missing", "unknown_next_step",
         "workflow_reference_unresolvable"}),
     "vars": frozenset({
@@ -635,6 +636,10 @@ def verify_playbook(
     Required-fix codes (any present → ready_to_push=False):
       - unknown_step_reference
       - unreachable_step_reference
+      - unreachable_step                (a step no route from the trigger
+                                         reaches -- a dropped link; the
+                                         compiler only warns, since an
+                                         appliance playbook may park a step)
       - missing_field_on_step_output
       - non_list_indexed
       - type_mismatch                    (source→target type, Phase 4)
@@ -906,9 +911,29 @@ def _dedupe_diagnostics(diags: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# Compile-stage WARNINGS this gate treats as required fixes. The compiler has to
+# accept whatever an appliance holds, so it only warns; an authored playbook is
+# held to the stricter bar. Live: an agent re-typed a verified playbook, dropped
+# two `next:` links, and verify passed it -- the saved playbook ran only its
+# first search, because the other steps had no route in.
+AUTHORING_BLOCKING_WARNINGS: frozenset[str] = frozenset({"unreachable_step"})
+
+
+def _promote_authoring_blockers(required_fixes, warnings):
+    kept: list[dict[str, Any]] = []
+    for w in warnings:
+        if w.get("code") in AUTHORING_BLOCKING_WARNINGS:
+            required_fixes.append({**w, "severity": "error"})
+        else:
+            kept.append(w)
+    return required_fixes, kept
+
+
 def _finalize(checks_run, required_fixes, warnings, evidence,
               disabled_codes: frozenset[str] = frozenset(),
               unknown_tokens: list[str] | None = None) -> dict[str, Any]:
+    required_fixes, warnings = _promote_authoring_blockers(
+        list(required_fixes), warnings)
     # Apply check toggles: pull any disabled-code diagnostics out of the
     # blocking/​warning lists into `suppressed` so they never block -- but stay
     # visible. `ready_to_push` is computed on what remains.
@@ -948,6 +973,7 @@ def _finalize(checks_run, required_fixes, warnings, evidence,
         "unknown_module", "unknown_connector_config",
         "branch_target_missing", "unknown_connector", "unknown_operation",
         "unknown_step_reference", "unreachable_step_reference",
+        "unreachable_step",
         "missing_field_on_step_output",
         "non_list_indexed",
         "type_mismatch",

@@ -10,6 +10,7 @@ Playbook.tags / Collection.tags.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -251,6 +252,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
         "description": ir.description,
         "visible": ir.visible,
         "tags": list(ir.tags) or None,
+        "exported_tags": list(ir.exported_tags) if ir.exported_tags is not None else None,
         "playbooks": playbooks,
     }
 
@@ -357,6 +359,30 @@ def _decompile_step(s, pb_name: str | None = None,
                         "mock_result", "module", "modules"):
             if env_key in args:
                 out[env_key] = args.pop(env_key)
+
+        # Data Ingestion Wizard: the Fetch playbook's Start step carries the
+        # configuration-form schema as a JSON *string* under
+        # step_variables._configuration_schema. Reverse it back to a structured
+        # `configuration_schema:` so a pulled playbook round-trips the friendly
+        # dialect (and a stale JSON blob doesn't leak into the YAML). Only on
+        # start steps, where the parser knows this key.
+        if s.type == "start":
+            sv = out.get("step_variables")
+            if isinstance(sv, dict) and "_configuration_schema" in sv:
+                cs = sv.pop("_configuration_schema")
+                if isinstance(cs, str):
+                    try:
+                        parsed = json.loads(cs)
+                    except ValueError:
+                        parsed = None
+                    if parsed is not None:
+                        out["configuration_schema"] = parsed
+                # The remaining default `input` shape is re-derived by the
+                # resolver; drop it so the decompiled YAML stays minimal.
+                if sv == {"input": {"params": []}}:
+                    out.pop("step_variables", None)
+                    args.pop("step_variables", None)
+
         msg = args.get("message")
         if isinstance(msg, dict) and set(msg) == {"content"} \
                 and isinstance(msg["content"], str):
@@ -1154,12 +1180,21 @@ def decompile(fsr_json: dict[str, Any], db_path: Path) -> Collection:
     if isinstance(raw_coll_tags, str):
         raw_coll_tags = [raw_coll_tags]
 
+    # Collection-level exported_tags (the Data Ingestion Wizard contract).
+    # Preserve them verbatim so a pulled connector collection round-trips its
+    # explicit exported-tag list instead of being re-derived at emit time.
+    raw_exported = fsr_json.get("exported_tags") or []
+    if isinstance(raw_exported, str):
+        raw_exported = [raw_exported]
+
     return Collection(
         name=coll.get("name", "") or "",
         description=coll.get("description", "") or "",
         visible=bool(coll.get("visible", True)),
         playbooks=playbooks,
         tags=[str(t) for t in raw_coll_tags if str(t).strip()],
+        exported_tags=([str(t) for t in raw_exported if str(t).strip()]
+                       if raw_exported else None),
         # Round-trip: preserve original collection UUID.
         uuid=coll.get("uuid") or None,
     )

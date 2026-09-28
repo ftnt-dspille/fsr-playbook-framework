@@ -148,6 +148,7 @@ def emit_choice_card(
     multi: bool = False,
     min_select: int = 1,
     max_select: int | None = None,
+    allow_text: bool = False,
 ) -> dict[str, Any]:
     """Emit a `choice_card` so the widget renders pickable chips and
     halts the turn until the user picks. Use this for branching
@@ -155,7 +156,12 @@ def emit_choice_card(
     connector?", etc.) instead of asking in prose.
 
     `options` is a list of `{label, value, hint?}`. `value` is what the
-    widget echoes back on resume -- pick stable, machine-readable values."""
+    widget echoes back on resume -- pick stable, machine-readable values.
+
+    `allow_text=True` adds a text box under the chips so the analyst can
+    answer in their own words instead; the typed text comes back as the
+    value. Use it for open questions ("what should this playbook do?") where
+    the options are only starting points. Leave it off for a real fork."""
     if not isinstance(id, str) or not id.strip():
         return _err("missing_id", "id must be a non-empty string")
     if not isinstance(prompt, str) or not prompt.strip():
@@ -177,6 +183,8 @@ def emit_choice_card(
         seen_values.add(opt["value"])
     if not isinstance(multi, bool):
         return _err("bad_multi", "multi must be boolean")
+    if not isinstance(allow_text, bool):
+        return _err("bad_allow_text", "allow_text must be boolean")
     if not isinstance(min_select, int) or min_select < 0:
         return _err("bad_min_select", "min_select must be a non-negative int")
     if max_select is not None:
@@ -193,6 +201,7 @@ def emit_choice_card(
             "min_select": min_select,
             "max_select": max_select,
             "options": options,
+            **({"allow_text": True} if allow_text else {}),
         },
     }
 
@@ -710,6 +719,28 @@ def emit_patch_proposal(
     return {"ok": True, "card": card}
 
 
+_NON_ACTION_STEP_TYPES = frozenset({"end", "stop"})
+
+
+def _has_action_steps(yaml_text: str) -> bool:
+    """Whether any playbook in the YAML has a step other than its trigger and
+    end markers. Unparseable YAML counts as having actions -- verify already
+    judged it, and this check must not invent a second parse failure."""
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+    except Exception:  # noqa: BLE001
+        return True
+    if not isinstance(pbs, list) or not pbs:
+        return True
+    for pb in pbs:
+        for s in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
+            stype = str((s or {}).get("type") or "") if isinstance(s, dict) else ""
+            if stype and not stype.startswith("start") and stype not in _NON_ACTION_STEP_TYPES:
+                return True
+    return False
+
+
 def _step_names(yaml_text: str) -> list[str]:
     """Step `name:` values of the first playbook, in order. [] if unparseable."""
     try:
@@ -815,14 +846,46 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
     """Direct-build mode of `emit_playbook_offer` (§A): the card carries the
     final validated YAML; accept compiles + pushes THAT text deterministically
     (no trace involved). The steps list is a display summary parsed from the
-    YAML -- best-effort, never a gate (the YAML already passed validate/verify
-    before the model offers it)."""
+    YAML.
+
+    The card verifies the bytes it carries. It used to trust that the model
+    had verified them -- live, the model verified one playbook, re-typed it
+    into this call with two `next:` links missing, listed the warnings in
+    prose, and offered it anyway; the saved playbook ran only its first step.
+    The enhance path closes the same hole with `verified_id`; here the gate
+    runs on the offered text itself, so verified and delivered cannot differ.
+    """
     if not isinstance(yaml_text, str) or not yaml_text.strip():
         return _err("missing_field", "yaml must be a non-empty string")
 
     guard = _guard_against_open_playbook(yaml_text)
     if guard is not None:
         return guard
+
+    from .tools_verify import verify_playbook
+    verdict = verify_playbook(yaml_text)
+    if not verdict.get("ready_to_push"):
+        return _err(
+            "offer_not_verified",
+            "this YAML does not pass verify_playbook, so it cannot be offered. "
+            "Fix the required_fixes and offer again -- do not describe the "
+            "problems to the analyst and offer it anyway.",
+            suggestions=list(verdict.get("next_actions") or []),
+            required_fixes=verdict.get("required_fixes") or [],
+        )
+
+    if not _has_action_steps(yaml_text):
+        # Live: "I want to create a new playbook." ended on a Save card for a
+        # start -> end playbook. Saving it gives the analyst nothing; the turn
+        # should have asked what the playbook is for.
+        return _err(
+            "offer_has_no_actions",
+            "this playbook has only trigger/end steps -- there is nothing to "
+            "save yet. Ask the analyst what it should do (what starts it and "
+            "what it does), and end the turn.",
+            suggestions=["emit_card(card_type='choice', ...) or one plain "
+                         "question -- no playbook_offer until it does something"],
+        )
 
     ops_summary = _yaml_ops_summary(yaml_text)
 
@@ -839,6 +902,10 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
                      "-- review the steps before saving."),
         "final_yaml": yaml_text,
     }
+    # Non-blocking findings reach the analyst on the card, not only in the
+    # model's prose, which is where they were live -- and then ignored.
+    if verdict.get("warnings"):
+        card["warnings"] = verdict["warnings"]
     if title_suggestion and title_suggestion.strip():
         card["title_suggestion"] = title_suggestion.strip()
     return {"ok": True, "card": card}
@@ -862,8 +929,8 @@ def emit_enhancement_offer(
     accept through the designer's own snapshot-then-PUT path, so the analyst
     keeps a restore point in the Versions tab).
 
-    **You do not pass YAML.** You pass the `verified_id` that
-    `verify_enhancement` handed back when it returned `ready_to_push: True`,
+    **You do not pass YAML.** You pass the `verified_id` that `edit_playbook`
+    (or `verify_enhancement`) handed back when it returned `ready_to_push: True`,
     and the card carries those exact bytes. This is deliberate and it is the
     whole point of the tool: a live session verified one document and then
     re-typed a subtly different one into chat three times, the widget scraped
@@ -872,7 +939,7 @@ def emit_enhancement_offer(
     removes the failure mode.
 
     So the enhance turn is exactly:
-        verify_enhancement(before, after, user_message)  ->  verified_id
+        edit_playbook(operations=[...])                  ->  verified_id
         emit_enhancement_offer(id, summary, verified_id) ->  card, turn halts
 
     Never end an enhance turn by printing the revised playbook and hoping the
@@ -1180,6 +1247,7 @@ _CARD_SYNONYMS: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "choice": {
         "prompt": ("question", "title", "text"),
+        "allow_text": ("free_text", "allow_free_text"),
     },
     "capability_gap": {
         "missing": ("gap", "capability"),
@@ -1265,7 +1333,7 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     in prose. `playbook_offer` = deliver a NEW playbook (the mandatory
     terminal action of a build turn). `enhancement_offer` = apply a verified
     edit to the OPEN playbook (terminal action of an enhance turn; needs
-    `verified_id` from verify_enhancement). `patch_proposal` = one-click
+    `verified_id` from edit_playbook). `patch_proposal` = one-click
     before/after fix to one step or field of the open playbook. `verdict` =
     structured investigation conclusion with disposition, severity, confidence,
     and cited findings (evidence tied to tool_call_ids).

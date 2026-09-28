@@ -390,6 +390,66 @@ def rule_connector_param_visibility(doc: dict) -> Iterable[Issue]:
         conn.close()
 
 
+def rule_wizard_create_step_name(doc: dict) -> Iterable[Issue]:
+    """The Data Ingestion Wizard shows the Data Mapping page only if the
+    create playbook has a step whose name (case-insensitive) is exactly
+    "create record". This is a hard gate in the wizard controller
+    (``isStepAvailableInPlaybook(createPlaybook, "create record")``) --
+    a step named e.g. "Create Alerts" silently skips the mapping page.
+
+    Verified against app.unmin.js ``_mapPreparedPlaybooks`` and the
+    bambenek-feed reference connector (Create playbook step "Create Record").
+    """
+    for ci, _coll, wi, wf in _all_workflows(doc):
+        tags = set(wf.get("recordTags") or [])
+        if not ({"dataingestion", "create"} <= tags):
+            continue
+        names = [s.get("name", "").lower() for s in (wf.get("steps") or [])]
+        if "create record" not in names:
+            yield Issue(
+                rule_id="shared.wizard_create_step_name",
+                severity="fail",
+                message=(
+                    "create-tagged dataingestion workflow has no step named "
+                    "'Create Record'; the Data Ingestion Wizard will skip the "
+                    "Data Mapping page"
+                ),
+                path=f"data[{ci}].workflows[{wi}]({wf.get('name')!r})",
+                suggestion='Rename the record-creation step to "Create Record" (case-insensitive)',
+            )
+
+
+def rule_wizard_create_step_collection(doc: dict) -> Iterable[Issue]:
+    """The wizard's ``_getModuleName`` reads ``arguments.collection`` off the
+    step named "Create Record" (via ``getTagName("create_step_name")``) to
+    detect the target module. If that step lacks a collection, the wizard
+    cannot determine the module and the mapping page is broken.
+
+    Works for both data-ingest (``/api/3/alerts``) and feed-ingest
+    (``/api/ingest-feeds/threat_intel_feeds``) -- only presence is required.
+    """
+    for ci, _coll, wi, wf in _all_workflows(doc):
+        tags = set(wf.get("recordTags") or [])
+        if not ({"dataingestion", "create"} <= tags):
+            continue
+        for si, step in _all_steps(wf):
+            if step.get("name", "").lower() != "create record":
+                continue
+            coll = (step.get("arguments") or {}).get("collection") or ""
+            if not coll:
+                yield Issue(
+                    rule_id="shared.wizard_create_step_collection",
+                    severity="fail",
+                    message=(
+                        "step 'Create Record' has no arguments.collection; the "
+                        "wizard cannot detect the target module for the mapping page"
+                    ),
+                    path=f"data[{ci}].workflows[{wi}].steps[{si}]",
+                    suggestion="Set arguments.collection to the module endpoint (e.g. /api/3/alerts)",
+                )
+            break
+
+
 def rule_three_workflow_split_or_env_setup(doc: dict) -> Iterable[Issue]:
     """A dataingestion collection should expose at least one workflow with
     each of {fetch, create, ingest} as tags -- distributed across workflows

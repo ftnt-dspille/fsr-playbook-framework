@@ -8,6 +8,7 @@ followed, only in enhance mode, and at most once.
 from fsr_playbooks.llm._loop_helpers import (
     _ENHANCE_OFFER_TOOL,
     _ENHANCE_VERIFY_TOOL,
+    _ENHANCE_VERIFY_TOOLS,
     EnhanceDeliveryGuard,
 )
 from fsr_playbooks.llm.intents import ENHANCE_ONLY_TOOLS
@@ -18,7 +19,10 @@ def test_guard_names_match_the_canonical_enhance_set():
     # from-scratch create; this guard keys on the same two names. If they ever
     # drift, the guard could fire on a turn whose slice no longer carries the
     # offer tool (or vice versa). One canonical source, asserted here.
-    assert {_ENHANCE_VERIFY_TOOL, _ENHANCE_OFFER_TOOL} == set(ENHANCE_ONLY_TOOLS)
+    # edit_playbook is the operations form of verify_enhancement: both gate an
+    # edit and hand back the verified_id the offer consumes.
+    assert _ENHANCE_VERIFY_TOOL in _ENHANCE_VERIFY_TOOLS
+    assert _ENHANCE_VERIFY_TOOLS | {_ENHANCE_OFFER_TOOL} == set(ENHANCE_ONLY_TOOLS)
 
 
 ENHANCE_SLICE = {_ENHANCE_OFFER_TOOL, "verify_enhancement", "get_step_type"}

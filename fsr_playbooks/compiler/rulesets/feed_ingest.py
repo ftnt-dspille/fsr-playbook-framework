@@ -28,6 +28,8 @@ from ._shared import (
     rule_step_type_collection_consistency,
     rule_tag_typos,
     rule_three_workflow_split_or_env_setup,
+    rule_wizard_create_step_collection,
+    rule_wizard_create_step_name,
 )
 
 
@@ -262,6 +264,8 @@ register("feed-ingest", [
     rule_connector_slug_uniform,
     rule_collection_or_workflow_has_slug,
     rule_connector_param_visibility,
+    rule_wizard_create_step_name,
+    rule_wizard_create_step_collection,
     rule_threatintel_tag_in_sibling_info_json,
     rule_ibf_for_each_bulk_required,
     rule_ibf_resource_required_fields,

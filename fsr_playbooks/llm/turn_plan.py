@@ -97,6 +97,7 @@ _OPEN_PLAYBOOK_CARD_TYPES = frozenset({"patch_proposal", "enhancement_offer"})
 # intents.ENHANCE_ONLY_TOOLS + emit_patch_proposal.
 _OPEN_PLAYBOOK_TOOLS = frozenset({
     "emit_patch_proposal", "emit_enhancement_offer", "verify_enhancement",
+    "edit_playbook",
 })
 
 

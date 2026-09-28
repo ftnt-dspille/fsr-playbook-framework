@@ -17,7 +17,7 @@ pip install "fsr_playbooks[llm]"     # + OpenAI / Anthropic providers
 pip install "fsr_playbooks[mcp]"     # + MCP server (implies [llm])
 ```
 
-Requires Python 3.9+ (the base compiler). The `[mcp]` extra requires 3.10+.
+Requires Python 3.10+.
 
 ## End-to-end: author → compile → deploy → run
 
@@ -48,12 +48,11 @@ playbooks:
 
       - name: Get organization
         type: connector
-        arguments:
-          connector: fortinet-fortisiem
-          operation: get_org_name_by_org_id
-          config: ""
-          params:
-            domain_id: "{{ vars.target_org }}"
+        connector: fortinet-fortisiem
+        operation: get_org_name_by_org_id
+        config: ""
+        params:
+          domain_id: "{{ vars.target_org }}"
 ```
 
 ### 2. Compile it to FortiSOAR playbook JSON
@@ -114,38 +113,27 @@ client.workflow_collections.create(
 ### 4. Trigger the playbook and wait for it
 
 ```python
-import time
+result = client.playbooks.run_and_wait("Hello Connector", inputs={})
 
-wf_uuid = collection["workflows"][0]["uuid"]
-
-run = client.playbooks.trigger(playbook="Hello Connector", inputs={})
-task_id = run["task_id"]
-
-# Poll the run records (shaped dicts: task_id, name, status, error_message, ...)
-# until this run reaches a terminal state.
-while True:
-    match = next(
-        (r for r in client.playbooks.runs(playbook_uuid=wf_uuid, limit=5)
-         if r["task_id"] == task_id),
-        None,
-    )
-    status = match["status"] if match else "pending"
-    if status in ("finished", "failed", "terminated"):
-        print("execution status:", status)
-        break
-    time.sleep(2)
+print(result.status)          # 'finished' / 'failed' / 'terminated'
+print(result.succeeded)        # True iff status == 'finished'
+for step in result.steps:
+    print(f"  {step.name:40} {step.status:10} {step.duration_ms or 0:6}ms")
+if result.failure:
+    print("failed at:", result.failure.failing_step, "-", result.failure.error_message)
 ```
 
 > **What needs what:** step 2 (compile) is pure `fsr_playbooks` + the reference
-> DB. Steps 3-4 (deploy/run) additionally need `pyfsr` and a reachable
-> FortiSOAR instance. The `fsr_playbooks` package never imports `pyfsr` itself.
+> DB. Steps 3-4 (deploy/run) additionally need `pyfsr` and a reachable FortiSOAR
+> instance. `run_and_wait` triggers, polls to terminal, and returns a typed
+> `RunResult` with per-step timing and failure details in one call.
 
 ## Extras
 
-| Extra    | Adds                          | Use for                          |
-|----------|-------------------------------|----------------------------------|
-| (base)   | `pyyaml`, `ruamel.yaml`, `jinja2` | YAML → FSR JSON compilation  |
-| `[llm]`  | `openai`, `anthropic`         | LLM-assisted authoring / triage  |
+| Extra    | Adds                              | Use for                          |
+|----------|-----------------------------------|----------------------------------|
+| (base)   | `pyyaml`, `ruamel.yaml`, `jinja2`, `pydantic` | YAML → FSR JSON compilation  |
+| `[llm]`  | `openai`, `anthropic`, `httpx` | LLM-assisted authoring / triage  |
 | `[mcp]`  | `mcp` (+ `[llm]`)             | running the MCP server tools      |
 
 ## License

@@ -21,20 +21,31 @@ from fsr_playbooks.mcp_server._shared import (
 )
 from fsr_playbooks.mcp_server.tools_emit import _offer_from_yaml
 
+# A playbook that passes verify_playbook: the offer now verifies the bytes it
+# carries, and the no-guard cases below must reach the card. The guard itself
+# only compares step names, so the step types are incidental.
 OPEN = """
 playbooks:
   - name: Hunt Indicators
     steps:
       - name: Start
         type: start
+        next: Extract Indicators from Input
       - name: Extract Indicators from Input
-        type: connector
+        type: set_variable
+        vars: {extracted: "1"}
+        next: Hunt Domains
       - name: Hunt Domains
-        type: connector
+        type: set_variable
+        vars: {domains: "1"}
+        next: Hunt Files
       - name: Hunt Files
-        type: connector
+        type: set_variable
+        vars: {files: "1"}
+        next: Hunt IP address
       - name: Hunt IP address
-        type: connector
+        type: set_variable
+        vars: {ips: "1"}
 """
 
 # What the live model actually offered: the two steps whose connectors are not

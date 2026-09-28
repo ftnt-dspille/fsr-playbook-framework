@@ -5,6 +5,7 @@ We don't try to validate references here -- that's the resolver's job.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -47,6 +48,9 @@ _STEP_IR_KEYS = frozenset({
 _STEP_SUGAR_KEYS = frozenset({
     "post_comment", "set", "retry", "on_remote", "with",
     "conditions", "default", "options", "inputs", "title", "is_approval", "vars",
+    # Start-step only: the Data Ingestion Wizard's configuration-form schema.
+    # Serialized to a JSON string under arguments.step_variables.
+    "configuration_schema",
 })
 
 
@@ -145,6 +149,22 @@ def _parse_pb_tags(raw: Any) -> list[str]:
         name = str(raw).strip()
         return [name] if name else []
     return []
+
+
+def _parse_exported_tags(raw: Any, errors: list[CompileError]) -> list[str] | None:
+    """Coerce the collection-level `exported_tags:` (a list of tag names) used
+    by the Data Ingestion Wizard. None when absent (auto-derive); a list
+    otherwise. A non-list value is a hard error."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message="exported_tags must be a list of tag names",
+            path="exported_tags",
+        ))
+        return None
+    return [str(t).strip() for t in raw if str(t).strip()]
 
 
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
@@ -413,6 +433,47 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 else:
                     args["step_variables"] = dict(s_raw["set"])
 
+            # Start-step only: the Data Ingestion Wizard's configuration-form
+            # schema. Authored as a structured `configuration_schema:` list of
+            # field descriptors (select -> onchange -> per-option field lists);
+            # the wire stores it as a JSON *string* under
+            # `arguments.step_variables._configuration_schema`. We serialize
+            # here so the emitter/resolver never have to. `_configuration_schema`
+            # lives alongside the normal `input` shape, so merge rather than
+            # clobber whatever step_variables already holds.
+            if "configuration_schema" in s_raw:
+                if stype != "start":
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            "`configuration_schema:` is only valid on a "
+                            "`start` step (the Data Ingestion Wizard form)"
+                        ),
+                        path=f"{sp}.configuration_schema",
+                    ))
+                elif "step_variables" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            "step.configuration_schema conflicts with "
+                            "step_variables (both write arguments.step_variables) "
+                            "-- pick one"
+                        ),
+                        path=f"{sp}.configuration_schema",
+                    ))
+                else:
+                    cs = s_raw["configuration_schema"]
+                    if not isinstance(cs, (dict, list)):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message="configuration_schema must be a mapping or list",
+                            path=f"{sp}.configuration_schema",
+                        ))
+                    else:
+                        sv = {"input": {"params": []}}
+                        sv["_configuration_schema"] = json.dumps(cs)
+                        args["step_variables"] = sv
+
             # Universal-envelope sugar -- friendly spellings of the wire keys
             # hoisted above, translated here so the resolver/emitter only ever
             # see the canonical shape. Each guards against colliding with the
@@ -458,7 +519,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                     args["do_until"] = du
                     # Warn if retry has no until/condition: FSR's editor
                     # (line 34487) drops do_until when condition is empty,
-                    # and the import process does the same — so the retry
+                    # and the import process does the same -- so the retry
                     # config is silently lost. Live-verified on 8.0.0.
                     if "condition" not in du:
                         errors.append(CompileError(
@@ -863,6 +924,10 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 arguments=args,
                 next=s_raw.get("next") if isinstance(s_raw.get("next"), str) else None,
                 branches={str(k): str(v) for k, v in branches.items()},
+                unlabeled_next=(
+                    [str(x) for x in s_raw["unlabeled_next"] if isinstance(x, str)]
+                    if isinstance(s_raw.get("unlabeled_next"), list) else []
+                ),
                 comment=cmt if isinstance(cmt, str) and cmt.strip() else None,
                 description=(s_raw["description"]
                             if isinstance(s_raw.get("description"), str) else ""),
@@ -907,6 +972,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             if s.next:
                 s.next = _resolve_ref(s.next)
             s.branches = {k: _resolve_ref(v) for k, v in s.branches.items()}
+            s.unlabeled_next = [_resolve_ref(v) for v in s.unlabeled_next]
             # Inline `next:` on decision conditions and manual_input options
             # is promoted into step.branches by the resolver -- pre-resolve
             # the string here so the resolver doesn't have to know names.
@@ -1119,5 +1185,6 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
         playbooks=playbooks,
         target_mode=target_mode,
         tags=_parse_pb_tags(doc.get("tags")),
+        exported_tags=_parse_exported_tags(doc.get("exported_tags"), errors),
         uuid=doc.get("uuid") if isinstance(doc.get("uuid"), str) else None,
     ), errors

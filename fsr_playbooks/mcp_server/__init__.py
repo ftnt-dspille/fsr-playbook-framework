@@ -124,7 +124,7 @@ from .tools_emit import (
     emit_playbook_offer,
     emit_verdict,  # Internal only; not exported in __all__
 )
-from .tools_enhancement import verify_enhancement
+from .tools_enhancement import edit_playbook, verify_enhancement
 
 # Execution tools
 from .tools_execution import (

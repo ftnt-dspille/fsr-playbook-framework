@@ -968,3 +968,10 @@ class ConnectorArgsMixin:
                     message=f"branch target {target!r} does not match any step id",
                     path=f"{path}.branches.{option}",
                 ))
+        for i, target in enumerate(step.unlabeled_next):
+            if target not in seen_ids:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_NEXT_STEP,
+                    message=f"unlabeled_next target {target!r} does not match any step id",
+                    path=f"{path}.unlabeled_next[{i}]",
+                ))

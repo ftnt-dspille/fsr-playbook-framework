@@ -68,12 +68,20 @@ def trace_rows() -> list[dict[str, Any]]:
     return rows
 
 
+# Examples that are step-type COVERAGE fixtures, not authoring exemplars. This
+# one parks `approval` and `create_task` steps with no route in (neither is
+# resumable at run time), which `verify_playbook` rightly refuses as
+# `unreachable_step`. Its compile/round-trip coverage lives in
+# test_all_step_types_roundtrip.
+_COVERAGE_FIXTURES = frozenset({"all_step_types_validation.yaml"})
+
+
 def gold_rows() -> list[dict[str, Any]]:
     """Verify every hand-authored connector example -- the human baseline that
     the trace path must match (not regress)."""
     rows: list[dict[str, Any]] = []
     for f in sorted(glob.glob(str(_EXAMPLES_DIR / "*.yaml"))):
-        if ".test." in f:
+        if ".test." in f or Path(f).name in _COVERAGE_FIXTURES:
             continue
         yaml_text = Path(f).read_text()
         if "connector:" not in yaml_text:

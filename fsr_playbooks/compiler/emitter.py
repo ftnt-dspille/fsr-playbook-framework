@@ -509,15 +509,24 @@ def emit(collection: Collection) -> dict[str, Any]:
             "isPrivate": pb.is_private,
         })
 
-    all_tags = sorted(
-        {t for pb in collection.playbooks for t in pb.tags}
-        | set(collection.tags)
-    )
+    # `exported_tags` -- the collection export's top-level tag list. The Data
+    # Ingestion Wizard filters a connector's playbook export by these specific
+    # tags before it offers an ingestion configuration, so an explicit
+    # collection-level `exported_tags:` overrides the auto-derived union of
+    # every playbook/collection tag (which is what a hand-built collection
+    # would otherwise get).
+    if collection.exported_tags is not None:
+        exported_tags = list(collection.exported_tags)
+    else:
+        exported_tags = sorted(
+            {t for pb in collection.playbooks for t in pb.tags}
+            | set(collection.tags)
+        )
 
     return {
         "type": "workflow_collections",
         "macros": [],
-        "exported_tags": all_tags,
+        "exported_tags": exported_tags,
         "data": [{
             "@type": "WorkflowCollection",
             "name": collection.name,

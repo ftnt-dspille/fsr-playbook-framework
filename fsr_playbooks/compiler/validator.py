@@ -494,25 +494,18 @@ def _check_reserved_names(pb: Playbook, pi: int,
             # No re-check here -- the auto-renamer guarantees they're gone.
 
 
-def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
-    """Graph-level lint: cycles, unreachable steps, decision branch
-    coverage. Targeting non-existent step ids is already caught by
-    resolver._check_routing (UNKNOWN_NEXT_STEP)."""
-    path = f"playbooks[{pi}]"
-    if not pb.steps:
-        return
-    by_id: dict[str, object] = {s.id: s for s in pb.steps}
-    trigger_id = pb.trigger_step_id
-    if not trigger_id:
-        # First step whose type starts with 'start' is the canonical fallback.
-        for s in pb.steps:
-            if s.type.startswith("start"):
-                trigger_id = s.id
-                break
-    if trigger_id is None or trigger_id not in by_id:
-        return  # NO_TRIGGER already reported
+def _trigger_id(pb: Playbook) -> str | None:
+    if pb.trigger_step_id:
+        return pb.trigger_step_id
+    # First step whose type starts with 'start' is the canonical fallback.
+    for s in pb.steps:
+        if s.type.startswith("start"):
+            return s.id
+    return None
 
-    # 1. Reachability: BFS from trigger.
+
+def _reachable_step_ids(pb: Playbook, trigger_id: str) -> set[str]:
+    by_id = {s.id: s for s in pb.steps}
     reachable: set[str] = set()
     frontier = [trigger_id]
     while frontier:
@@ -526,10 +519,42 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
         for nxt in _step_outgoing(step):
             if nxt not in reachable and nxt in by_id:
                 frontier.append(nxt)
+    return reachable
+
+
+def unreachable_step_ids(collection: Collection) -> set[tuple[str, str]]:
+    """(playbook name, step id) for every step no route from the trigger
+    reaches. Run it on a RESOLVED IR -- a fresh parse has not yet promoted
+    decision/manual-input options into `branches`, so their targets would all
+    look orphaned."""
+    out: set[tuple[str, str]] = set()
+    for pb in collection.playbooks:
+        trigger_id = _trigger_id(pb)
+        if not pb.steps or trigger_id is None:
+            continue
+        reachable = _reachable_step_ids(pb, trigger_id)
+        out.update((pb.name, s.id) for s in pb.steps if s.id not in reachable)
+    return out
+
+
+def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
+    """Graph-level lint: cycles, unreachable steps, decision branch
+    coverage. Targeting non-existent step ids is already caught by
+    resolver._check_routing (UNKNOWN_NEXT_STEP)."""
+    path = f"playbooks[{pi}]"
+    if not pb.steps:
+        return
+    by_id: dict[str, object] = {s.id: s for s in pb.steps}
+    trigger_id = _trigger_id(pb)
+    if trigger_id is None or trigger_id not in by_id:
+        return  # NO_TRIGGER already reported
+
+    # 1. Reachability: BFS from trigger.
+    reachable = _reachable_step_ids(pb, trigger_id)
     for si, s in enumerate(pb.steps):
         if s.id not in reachable:
             errors.append(CompileError(
-                code=ErrorCode.BAD_VALUE,
+                code=ErrorCode.UNREACHABLE_STEP,
                 message=(f"step {s.id!r} ({s.name or s.type}) is unreachable "
                          f"from the trigger -- no step's next/branches "
                          f"point to it"),

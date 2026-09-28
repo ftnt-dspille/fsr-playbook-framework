@@ -49,8 +49,10 @@ playbooks:
 """
 
 # The edit the live session was trying to make: a manual_input approval gate
-# in front of the containment step.
-AFTER = BEFORE.rstrip("\n") + """
+# in front of the containment step. Start routes INTO the gate -- appended with
+# no route in, the gate is an orphan that never runs, and verify refuses it.
+AFTER = BEFORE.replace("    next: Block IP\n", "    next: Prompt Block IP\n",
+                       1).rstrip("\n") + """
   - type: manual_input
     name: Prompt Block IP
     title: Confirm the block

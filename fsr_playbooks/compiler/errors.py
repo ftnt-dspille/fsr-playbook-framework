@@ -21,6 +21,11 @@ class ErrorCode(str, Enum):
     DUPLICATE_STEP_ID = "duplicate_step_id"
     NO_TRIGGER = "no_trigger"
     BAD_VALUE = "bad_value"
+    # A step no route from the trigger reaches -- it can never run. A warning at
+    # compile (an appliance playbook may carry a parked step and must still
+    # round-trip); `verify_playbook` promotes it to a required fix, because an
+    # AUTHORED playbook with an orphan is a dropped link, not a parked step.
+    UNREACHABLE_STEP = "unreachable_step"
     # Jinja diagnostics -- emitted by the compile-path jinja check (the real
     # jinja2 parser, via jinja_checks.check_jinja). Syntax errors block; an
     # unknown filter/test name is a warning (the catalog is a curated subset).

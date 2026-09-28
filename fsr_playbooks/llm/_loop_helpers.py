@@ -1453,6 +1453,8 @@ def clear_guard_fires() -> None:
 
 
 _ENHANCE_VERIFY_TOOL = "verify_enhancement"
+# Both gate an edit and hand back a verified_id; edit_playbook is the ops form.
+_ENHANCE_VERIFY_TOOLS = frozenset({_ENHANCE_VERIFY_TOOL, "edit_playbook"})
 _ENHANCE_OFFER_TOOL = "emit_enhancement_offer"
 
 
@@ -1495,7 +1497,7 @@ class EnhanceDeliveryGuard:
             if not (isinstance(result, dict) and result.get("ok") is False):
                 self._delivered = True
             return
-        if name != _ENHANCE_VERIFY_TOOL or not isinstance(result, dict):
+        if name not in _ENHANCE_VERIFY_TOOLS or not isinstance(result, dict):
             return
         if result.get("ready_to_push") and result.get("verified_id"):
             self._verified_id = str(result["verified_id"])
@@ -1548,6 +1550,40 @@ _CREATE_VERIFY_TOOL = "verify_playbook"
 _CREATE_OFFER_TOOL = "emit_playbook_offer"
 
 
+# ─────────────── when the next move is the analyst's, not ours ───────────────
+#
+# Live: "I want to create a new playbook." The model looked up step types,
+# verified an empty start/end draft, and closed with "Tell me what it should
+# do". CreateDeliveryGuard then forced a Save-as-Playbook card for a playbook
+# that did nothing. Both guards exist to stop a turn from STALLING; they must
+# not overrule a turn that is correctly waiting on the analyst.
+#
+# The signals are STRUCTURAL, never a parse of anyone's wording: a phrase list
+# over the request misses every phrasing nobody wrote down, and reading the
+# model's prose for a "?" guesses at intent the model can state outright.
+#   - the model asked through a `choice` card (the prompt's way to ask);
+#   - the verified draft has no action steps -- nothing exists to deliver;
+#   - a playbook is open -- the right card is enhancement_offer, not this one.
+
+_ASK_CARD_TYPES = frozenset({"choice"})
+
+
+def _is_ask(name: str, args: Any) -> bool:
+    return name == "emit_choice_card" or (
+        name == "emit_card" and isinstance(args, dict)
+        and args.get("card_type") in _ASK_CARD_TYPES)
+
+
+def _has_action_steps(yaml_text: str) -> bool:
+    from ..mcp_server.tools_emit import _has_action_steps as _impl
+    return _impl(yaml_text)
+
+
+def _playbook_is_open() -> bool:
+    from ..mcp_server._shared import get_grounded_yaml
+    return bool(get_grounded_yaml())
+
+
 class CreateDeliveryGuard:
     """Tracks whether a build turn verified a NEW playbook but never offered it.
 
@@ -1566,9 +1602,13 @@ class CreateDeliveryGuard:
         self._summary_hint: str = ""
         self._delivered = False
         self._forced = False
+        self._asked = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         """Fold one executed tool result into the delivery state."""
+        if _is_ask(name, args):
+            self._asked = True
+            return
         # Handle both old name and new emit_card
         is_offer_delivery = (
             name == _CREATE_OFFER_TOOL or
@@ -1589,7 +1629,8 @@ class CreateDeliveryGuard:
         # The blessed bytes are the ones that went IN to verify -- the result is
         # a punch list, not the document.
         yaml_text = args.get("yaml_text") or args.get("yaml")
-        if isinstance(yaml_text, str) and yaml_text.strip():
+        if (isinstance(yaml_text, str) and yaml_text.strip()
+                and _has_action_steps(yaml_text)):
             self._verified_yaml = yaml_text
             summary = result.get("summary")
             if isinstance(summary, str) and summary:
@@ -1603,6 +1644,11 @@ class CreateDeliveryGuard:
         if _CREATE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
             return None
         if self._forced or self._delivered or not self._verified_yaml:
+            return None
+        # Not a stalled delivery -- see "when the next move is the analyst's".
+        # With a playbook open the right card is an enhancement_offer, which
+        # EnhanceDeliveryGuard owns; a forced playbook_offer would save a copy.
+        if self._asked or _playbook_is_open():
             return None
         return self._verified_yaml
 
@@ -1646,7 +1692,8 @@ _AUTHORING_PROGRESS_TOOLS = frozenset({
     "validate_yaml", "compile_yaml", "verify_playbook",
     "emit_playbook_offer", "build_playbook_from_trace",
     # Enhance authors too -- its own pair means the turn is not stalled.
-    "verify_enhancement", "emit_enhancement_offer", "emit_patch_proposal",
+    "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
+    "emit_patch_proposal",
     # Triage verdicts
     "emit_verdict",
     # The consolidated emit_card when used for offer or verdict types also proves authoring.
@@ -1681,7 +1728,8 @@ _RUN_INTENT_TOOLS = frozenset({
 _DRAFT_CHECK_TOOLS = frozenset({"validate_yaml", "compile_yaml"})
 _DRAFT_CLOSING_TOOLS = frozenset({
     "verify_playbook", "emit_playbook_offer", "build_playbook_from_trace",
-    "verify_enhancement", "emit_enhancement_offer", "emit_patch_proposal",
+    "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
+    "emit_patch_proposal",
 })
 _DRAFT_CLOSING_CARD_TYPES = frozenset({
     "playbook_offer", "enhancement_offer", "patch_proposal",
@@ -1728,9 +1776,12 @@ class BuildProgressGuard:
         self._drafted = False
         self._closed = False
         self._verify_forced = False
+        self._asked = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         self._any_tool = True
+        if _is_ask(name, args):
+            self._asked = True
         if name in _AUTHORING_PROGRESS_TOOLS:
             self._authored = True
         if name in _RUN_INTENT_TOOLS:
@@ -1761,6 +1812,8 @@ class BuildProgressGuard:
             return False
         if self._run_intent or _CREATE_VERIFY_TOOL not in allowed_names:
             return False
+        if self._asked:
+            return False
         return (_CREATE_OFFER_TOOL in allowed_names
                 or "emit_card" in allowed_names)
 
@@ -1769,7 +1822,9 @@ class BuildProgressGuard:
         record_guard_fire("BuildProgressGuard.unverified_draft")
 
     def outstanding(self, allowed_names: set[str]) -> bool:
-        """True when a build turn is ending with research but no authoring."""
+        """True when a build turn is ending with research but no authoring.
+        False when the model asked the analyst (a `choice` card) -- waiting on
+        their answer is the correct move, not a stall."""
         # Check for either old name OR new consolidated emit_card
         if (_CREATE_OFFER_TOOL not in allowed_names and
                 "emit_card" not in allowed_names):
@@ -1783,7 +1838,8 @@ class BuildProgressGuard:
         is_build = (
             "verify_playbook" in allowed_names or
             "push_playbook" in allowed_names or
-            "verify_enhancement" in allowed_names
+            "verify_enhancement" in allowed_names or
+            "edit_playbook" in allowed_names
         )
         if not is_build:
             return False
@@ -1795,7 +1851,9 @@ class BuildProgressGuard:
         # Nor is a triage turn. Live, every turn advertises verify_playbook, so
         # without this a triage turn that pulled the record and searched the
         # SIEM was told to "draft the full playbook YAML now".
-        return self._build_research
+        if not self._build_research:
+            return False
+        return not self._asked
 
     def mark_forced(self) -> None:
         self._forced = True

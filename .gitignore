@@ -140,3 +140,5 @@ scratch/
 # release.sh's clean-tree gate on the next cut.
 build/
 dist/
+*.db.bak-*
+**/*.db.bak-*

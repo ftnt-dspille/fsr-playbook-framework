@@ -20,7 +20,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fsr_playbooks.llm.openai_provider import OpenAIProvider
 from fsr_playbooks.llm.provider import DoneEvent, Message, ToolResultEvent, ToolUseEvent
 
-VERIFIED_YAML = "playbooks:\n  - name: Phishing Alert - Domain Enrichment\n"
+# A real playbook: the guard ignores a draft with no action steps.
+VERIFIED_YAML = ("playbooks:\n  - name: Phishing Alert - Domain Enrichment\n    steps:\n"
+    "      - {name: Start, type: start, next: Note}\n"
+    "      - {name: Note, type: set_variable, vars: {note: ok}}\n")
 
 
 def _delta_chunk(*, content=None, tool_calls=None, finish=None):

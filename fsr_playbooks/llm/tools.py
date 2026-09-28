@@ -47,6 +47,7 @@ SAFE_TOOLS: list[str] = [
     "search_playbooks",
     "verify_playbook",
     "verify_enhancement",
+    "edit_playbook",
     "emit_decision_step",
     "healthcheck_connector",
     # Phase 1 consolidation: installed + reachable in one call. The two
@@ -152,6 +153,8 @@ TOOL_TIERS: dict[str, int] = {
     # Tier 1 -- read-only FSR API.
     "verify_playbook": 1,
     "verify_enhancement": 1,
+    # Applies ops to the grounded open playbook in memory; no FSR write.
+    "edit_playbook": 1,
     # Tier 0 -- pure local YAML render from a structured payload.
     "emit_decision_step": 0,
     "healthcheck_connector": 1,
@@ -560,7 +563,7 @@ _READ_ONLY_TURN: ContextVar[bool] = ContextVar("_read_only_turn", default=False)
 #
 # `push_playbook` is already tier 3 unconditionally; listed for intent.
 WRITE_FRONTIER_TOOLS = frozenset({
-    "verify_enhancement",
+    "verify_enhancement", "edit_playbook",
     "emit_enhancement_offer", "emit_playbook_offer", "emit_patch_proposal",
     "push_playbook",
 })
