@@ -408,48 +408,71 @@ def emit_capability_gap_card(
 
     Returns {ok: True, card:{type:"capability_gap", ...}} on success, else
     {ok: False, code, message}."""
+    # Every problem in ONE refusal, like emit_verdict: reporting the first only
+    # cost 4-5 rounds per card live (bad_payload -> bad_resume -> bad_tips ->
+    # bad_alternatives), each a full LLM round.
+    problems: list[tuple[str, str]] = []
+
+    def bad(code: str, message: str) -> None:
+        problems.append((code, message))
+
     for label, val in (("id", id), ("missing", missing), ("why", why)):
         if not isinstance(val, str) or not val.strip():
-            return _err("missing_field", f"{label} must be a non-empty string")
+            bad("missing_field", f"{label} must be a non-empty string")
     if not isinstance(fix_steps, list) or not fix_steps or not all(
             isinstance(s, str) and s.strip() for s in fix_steps):
-        return _err("bad_fix_steps",
-                    "fix_steps must be a non-empty list of non-empty strings",
-                    suggestions=["give at least one concrete step, e.g. "
-                                 "'Configure the <name> connector'"])
-    if not isinstance(resume, dict):
-        return _err("bad_resume", "resume must be an object {label, value}")
+        bad("bad_fix_steps",
+            "fix_steps must be a non-empty list of non-empty strings, e.g. "
+            "'Configure the <name> connector'")
     seen_values: set[str] = set()
-    for k in ("label", "value"):
-        if not resume.get(k) or not isinstance(resume[k], str):
-            return _err("bad_resume", f"resume missing string field {k!r}")
-    seen_values.add(resume["value"])
+    if not isinstance(resume, dict):
+        bad("bad_resume", "resume must be an object {label, value}")
+    else:
+        for k in ("label", "value"):
+            if not resume.get(k) or not isinstance(resume[k], str):
+                bad("bad_resume", f"resume missing string field {k!r}")
+        if isinstance(resume.get("value"), str):
+            seen_values.add(resume["value"])
 
     if tips is not None:
         if not isinstance(tips, list):
-            return _err("bad_tips", "tips must be a list of {text, hint?}")
-        for i, t in enumerate(tips):
-            if not isinstance(t, dict) or not t.get("text") or not isinstance(
-                    t["text"], str):
-                return _err("bad_tips", f"tips[{i}] needs a string 'text' field")
+            bad("bad_tips", "tips must be a list of {text, hint?}")
+        else:
+            for i, t in enumerate(tips):
+                if not isinstance(t, dict) or not t.get("text") or not isinstance(
+                        t["text"], str):
+                    bad("bad_tips", f"tips[{i}] needs a string 'text' field")
 
     if alternatives is not None:
         if not isinstance(alternatives, list):
-            return _err("bad_alternatives",
-                        "alternatives must be a list of {label, value, hint?}")
-        for i, a in enumerate(alternatives):
-            if not isinstance(a, dict):
-                return _err("bad_alternatives",
-                            f"alternatives[{i}] must be an object")
-            for k in ("label", "value"):
-                if not a.get(k) or not isinstance(a[k], str):
-                    return _err("bad_alternatives",
-                                f"alternatives[{i}] missing string field {k!r}")
-            if a["value"] in seen_values:
-                return _err("duplicate_value",
-                            f"alternatives[{i}].value duplicates resume or an "
-                            f"earlier alternative")
-            seen_values.add(a["value"])
+            bad("bad_alternatives",
+                "alternatives must be a list of {label, value, hint?}")
+        else:
+            for i, a in enumerate(alternatives):
+                if not isinstance(a, dict):
+                    bad("bad_alternatives", f"alternatives[{i}] must be an object")
+                    continue
+                ok = True
+                for k in ("label", "value"):
+                    if not a.get(k) or not isinstance(a[k], str):
+                        bad("bad_alternatives",
+                            f"alternatives[{i}] missing string field {k!r}")
+                        ok = False
+                if ok and a["value"] in seen_values:
+                    bad("duplicate_value",
+                        f"alternatives[{i}].value duplicates resume or an "
+                        f"earlier alternative")
+                if ok:
+                    seen_values.add(a["value"])
+
+    if problems:
+        code, message = problems[0]
+        if len(problems) > 1:
+            message = (f"{len(problems)} problems -- fix all of them in one retry: "
+                       + "; ".join(f"({n}) {m}" for n, (_, m)
+                                   in enumerate(problems, 1)))
+        return _err(code, message,
+                    problems=[{"code": c, "message": m} for c, m in problems])
 
     card: dict[str, Any] = {
         "type": "capability_gap",
