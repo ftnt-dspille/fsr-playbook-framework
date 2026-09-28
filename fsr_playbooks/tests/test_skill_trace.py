@@ -86,6 +86,40 @@ def test_mute_recording_unwinds_on_exception():
     assert len(t) == 1
 
 
+def test_a_sibling_tool_call_mute_does_not_swallow_this_record():
+    """The loop runs read-only tools concurrently (gather over to_thread). One
+    siem_search muted its internal run_op while its sibling recorded -- live,
+    4 successful searches left 2 calls on the trace. A mute is per call."""
+    import asyncio
+    import threading
+
+    t = SkillTrace()
+    skill_trace.set_active_trace(t)
+    muted = threading.Event()
+    recorded = threading.Event()
+
+    def muted_wrapper():
+        with skill_trace.mute_recording():
+            muted.set()
+            assert recorded.wait(5)          # hold the mute while the sibling records
+        record_run_op("fortisiem", "siem_search", {"by": "host"}, {}, step_name="siem_search")
+
+    def sibling():
+        assert muted.wait(5)
+        record_run_op("fortisiem", "siem_search", {"by": "ip"}, {}, step_name="siem_search")
+        recorded.set()
+
+    async def turn():
+        await asyncio.gather(asyncio.to_thread(muted_wrapper), asyncio.to_thread(sibling))
+
+    try:
+        asyncio.run(turn())
+    finally:
+        skill_trace.clear_active_trace()
+    assert sorted(c.resolved_inputs["by"] for c in t.calls) == ["host", "ip"]
+    assert len({c.step_name for c in t.calls}) == 2
+
+
 def test_no_step_name_falls_back_to_titleized_op():
     t = SkillTrace()
     call = t.record_run_op("virustotal", "generic_rest_api_call", {}, {"x": 1})

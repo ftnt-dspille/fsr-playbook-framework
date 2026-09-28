@@ -34,6 +34,41 @@ def test_bad_json_is_handled():
     assert out["code"] == "bad_trace_json"
 
 
+def _with_recorded_session_trace(fn):
+    """Run fn with the session recorder holding the _trace_json() calls."""
+    from fsr_playbooks.agent import skill_trace
+    skill_trace.set_active_trace(SkillTrace.from_json(_trace_json()))
+    try:
+        return fn()
+    finally:
+        skill_trace.clear_active_trace()
+
+
+def test_model_authored_trace_json_falls_back_to_the_recorded_trace():
+    """Live: the model passed its own {"steps": [...]} summary as trace_json.
+    It parses to zero calls, and the tool answered empty_trace while the
+    session's recorder held the real calls. The recorded trace must win."""
+    authored = json.dumps({"steps": [
+        {"tool": "siem_search", "args": {"by": "host", "value": "smithDesktop"}}]})
+    out = _with_recorded_session_trace(lambda: build_playbook_from_trace(authored))
+    assert out["ok"] is True, out
+    assert "Isolate Host" in [s["name"] for s in yaml.safe_load(out["yaml"])["playbooks"][0]["steps"]]
+
+
+def test_unparseable_trace_json_falls_back_to_the_recorded_trace():
+    out = _with_recorded_session_trace(lambda: build_playbook_from_trace("{not json"))
+    assert out["ok"] is True, out
+
+
+def test_a_real_supplied_trace_still_beats_the_recorder():
+    other = SkillTrace()
+    other.record_run_op("virustotal", "get_domain_report", {"domain": "example.com"},
+                        {"attributes": {}}, ref_prefix="data")
+    out = _with_recorded_session_trace(lambda: build_playbook_from_trace(other.to_json()))
+    names = [s["name"] for s in yaml.safe_load(out["yaml"])["playbooks"][0]["steps"]]
+    assert "Isolate Host" not in names
+
+
 def test_builds_yaml_with_value_matched_wire():
     out = build_playbook_from_trace(_trace_json(), name="Enrich And Block")
     assert out["ok"] is True

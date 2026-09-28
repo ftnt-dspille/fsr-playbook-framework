@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -299,7 +301,15 @@ _active: SkillTrace | None = None
 # wrapper brackets its internal run_op fan-out in `mute_recording()` so the
 # trace stays at the named-op granularity. A counter (not a bool) keeps nesting
 # safe.
-_mute_depth: int = 0
+#
+# Per-context, not process-global: the agent loop runs read-only tool calls
+# concurrently (asyncio.gather over asyncio.to_thread, each in a copy of the
+# caller's context). A global counter let one siem_search's internal mute
+# swallow its sibling's record -- live, 4 successful SIEM searches left 2
+# calls on the trace. The recorder itself stays shared, so its writes are
+# serialized under _record_lock.
+_mute_depth: ContextVar[int] = ContextVar("skill_trace_mute_depth", default=0)
+_record_lock = threading.Lock()
 
 
 def set_active_trace(trace: SkillTrace | None) -> None:
@@ -355,12 +365,11 @@ def mute_recording():
     submit/poll/fetch HTTP calls behind a single named investigation step)
     should NOT each become a separate trace step. Nests safely (depth counter)
     and always restores the prior depth, even on exception."""
-    global _mute_depth
-    _mute_depth += 1
+    token = _mute_depth.set(_mute_depth.get() + 1)
     try:
         yield
     finally:
-        _mute_depth -= 1
+        _mute_depth.reset(token)
 
 
 def record_run_op(
@@ -379,12 +388,13 @@ def record_run_op(
 
     No-ops while recording is muted (see `mute_recording`) so a wrapper's
     internal `execute_api_request` fan-out doesn't pollute the trace."""
-    if _active is None or _mute_depth > 0:
+    if _active is None or _mute_depth.get() > 0:
         return None
-    return _active.record_run_op(
-        connector, op, params, observed_output, step_name, ref_prefix,
-        config, agent,
-    )
+    with _record_lock:
+        return _active.record_run_op(
+            connector, op, params, observed_output, step_name, ref_prefix,
+            config, agent,
+        )
 
 
 def record_staged_action(
@@ -400,6 +410,7 @@ def record_staged_action(
     calls -- so studio/tests (no active trace) stay untouched."""
     if _active is None:
         return None
-    return _active.record_staged_action(
-        connector, op, params, step_name, config, agent,
-    )
+    with _record_lock:
+        return _active.record_staged_action(
+            connector, op, params, step_name, config, agent,
+        )

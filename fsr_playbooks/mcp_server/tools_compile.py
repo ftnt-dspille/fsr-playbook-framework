@@ -391,20 +391,29 @@ def build_playbook_from_trace(
     from fsr_playbooks.compiler import skill_compiler as sc
     from fsr_playbooks.compiler import skill_verify as sv
 
+    # Normal agent path: the session's active recorder, installed by the
+    # connector's per-turn trace scope.
+    recorded = _skill_trace.get_active_trace() or SkillTrace()
     if trace_json:
+        # A model cannot author a SkillTrace. Live, one passed its own summary
+        # of the investigation ({"steps": [...]}) -- which parses to zero calls
+        # -- and the tool answered empty_trace over a session trace holding the
+        # real SIEM calls. A supplied trace wins only when it has calls.
         try:
-            trace = SkillTrace.from_json(trace_json)
+            supplied = SkillTrace.from_json(trace_json)
         except Exception as exc:  # noqa: BLE001
-            return _err("bad_trace_json", f"could not parse trace_json: {exc}")
+            if not len(recorded):
+                return _err("bad_trace_json", f"could not parse trace_json: {exc}")
+            supplied = SkillTrace()
+        trace = supplied if len(supplied) else recorded
     else:
-        # Normal agent path: use the session's active recorder, installed by
-        # the connector's per-turn trace scope.
-        trace = _skill_trace.get_active_trace() or SkillTrace()
+        trace = recorded
     if len(trace) == 0:
         return _err(
             "empty_trace",
             "no recorded actions in the trace -- nothing to compile",
-            suggestions=["fall back to the hand-author build path"],
+            suggestions=["call with no trace_json to use this session's recorded trace",
+                         "fall back to the hand-author build path"],
         )
 
     try:
