@@ -153,6 +153,9 @@ def _serialize_compiler_error(e: Any) -> dict[str, Any]:
         "message": e.message,
         "suggestion": sug,
         "suggestions": [sug] if sug else [],
+        # Readers (session health, the agent) need to tell an advisory from a
+        # blocker; dropping this made every advisory read as an error.
+        "severity": getattr(e, "severity", "error") or "error",
     }
 
 

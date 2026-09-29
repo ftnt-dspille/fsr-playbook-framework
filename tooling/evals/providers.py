@@ -16,7 +16,13 @@ import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from fsr_playbooks.llm._loop_helpers import MAX_TOOL_TURNS
+from fsr_playbooks.llm._loop_helpers import _ENHANCE_VERIFY_TOOLS, MAX_TOOL_TURNS
+
+# Pre-submit gates whose envelope (ready_to_push / fixes / warnings) the scorer
+# reads. ONE source with the loop guards: edit_playbook verifies too, and a
+# second hand-kept list here is what made it score as "never verified".
+_VERIFY_TOOL_NAMES = frozenset({"verify_playbook"}) | _ENHANCE_VERIFY_TOOLS
+
 
 ProviderFn = Callable[[str, str], str]
 
@@ -318,7 +324,7 @@ def _agentic_anthropic_provider() -> Callable:
                 # enhance path -- capture it too, or every enhance turn reads
                 # as "never reached ready_to_push" for having used the correct
                 # gate.
-                if name in ("verify_playbook", "verify_enhancement") \
+                if name in _VERIFY_TOOL_NAMES \
                         and isinstance(result, dict):
                     entry["verify"] = {
                         "ready_to_push": bool(result.get("ready_to_push")),
@@ -466,7 +472,7 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                 # enhance path -- capture it too, or every enhance turn reads
                 # as "never reached ready_to_push" for having used the correct
                 # gate.
-                if name in ("verify_playbook", "verify_enhancement") \
+                if name in _VERIFY_TOOL_NAMES \
                         and isinstance(result, dict):
                     entry["verify"] = {
                         "ready_to_push": bool(result.get("ready_to_push")),

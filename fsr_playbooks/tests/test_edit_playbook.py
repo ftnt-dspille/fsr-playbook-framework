@@ -287,3 +287,104 @@ def test_a_position_the_model_gave_is_kept():
                                    "vars": {"d": "1"}, "top": "900", "left": "900"}}])
     d = _steps(res["after_yaml"])["Note D"]
     assert (str(d["top"]), str(d["left"])) == ("900", "900")
+
+
+# ── Live friction (sess on an EMPTY playbook: 5 of 7 calls refused) ─────────
+
+_EMPTY = "collection: C\nplaybooks:\n  - name: P\n    steps: []\n"
+
+
+def _grounded_as(yaml_text):
+    tok = set_grounded_yaml(yaml_text)
+    return tok
+
+
+def test_an_empty_playbook_says_how_to_start():
+    tok = _grounded_as(_EMPTY)
+    try:
+        res = edit_playbook([{"op": "add_step", "after": "Start",
+                              "step": {"name": "Ask", "type": "set_variable", "vars": {"a": "1"}}}])
+        assert res["code"] == "bad_operation"
+        assert "no steps yet" in res["message"] and "start" in res["message"]
+    finally:
+        reset_grounded_yaml(tok)
+
+
+def test_an_empty_playbook_builds_from_a_start_step():
+    tok = _grounded_as(_EMPTY)
+    try:
+        res = edit_playbook([
+            {"op": "add_step", "step": {"name": "Start", "type": "start", "module": "alerts"}},
+            {"op": "add_step", "after": "Start",
+             "step": {"name": "Note", "type": "set_variable", "vars": {"a": "1"}}},
+        ], user_message="build it")
+        assert res["ready_to_push"], (res.get("code"), res.get("message"), res.get("required_fixes"))
+        assert _steps(res["after_yaml"])["Start"]["next"] == "Note"
+    finally:
+        reset_grounded_yaml(tok)
+
+
+_GATED = """collection: C
+playbooks:
+  - name: P
+    steps:
+      - {name: Start, type: start, module: alerts, next: Ask}
+      - name: Ask
+        type: manual_input
+        title: Enter IP
+        inputs: [{name: ip, kind: ipv4, label: IP, required: true}]
+        options:
+          - {display: Continue, primary: true, next: Done}
+      - {name: Done, type: set_variable, vars: {d: "1"}}
+"""
+
+
+def test_add_after_a_single_branch_step_splices_into_that_branch():
+    """Live: `after` a manual_input with one Continue button was refused."""
+    tok = _grounded_as(compile_and_decompile(_GATED))
+    try:
+        res = edit_playbook([{"op": "add_step", "after": "Ask",
+                              "step": {"name": "Note", "type": "set_variable", "vars": {"n": "1"}}}])
+        assert res["ready_to_push"], (res.get("message"), res.get("required_fixes"))
+        after = _steps(res["after_yaml"])
+        assert after["Ask"]["options"][0]["next"] == "Note"
+        assert after["Note"]["next"] in ("done", "Done")
+    finally:
+        reset_grounded_yaml(tok)
+
+
+def test_add_after_a_multi_branch_step_needs_the_option(open_yaml):
+    res = edit_playbook([{"op": "add_step", "after": "Check",
+                          "step": {"name": "X", "type": "set_variable", "vars": {"x": "1"}}}])
+    assert res["code"] == "bad_operation" and "option=" in res["message"]
+    res = edit_playbook([{"op": "add_step", "after": "Check", "option": "Else",
+                          "step": {"name": "X", "type": "set_variable", "vars": {"x": "1"}}}])
+    assert res["ready_to_push"], (res.get("message"), res.get("required_fixes"))
+    assert _steps(res["after_yaml"])["Check"]["conditions"][1]["next"] == "X"
+
+
+def test_a_route_to_a_step_added_later_in_the_list_applies():
+    """Live: set_route to "Create ServiceNow incident" came before the add_step
+    that creates it, and the whole list was refused."""
+    tok = _grounded_as(compile_and_decompile(_GATED))
+    try:
+        res = edit_playbook([
+            {"op": "set_route", "from": "Ask", "option": "Continue", "to": "Ticket"},
+            {"op": "add_step", "step": {"name": "Ticket", "type": "set_variable",
+                                        "vars": {"t": "1"}, "next": "Done"}},
+        ])
+        assert res["ready_to_push"], (res.get("message"), res.get("required_fixes"))
+        assert _steps(res["after_yaml"])["Ask"]["options"][0]["next"] == "Ticket"
+    finally:
+        reset_grounded_yaml(tok)
+
+
+def test_a_reference_to_a_step_nobody_adds_is_still_refused(open_yaml):
+    res = edit_playbook([{"op": "set_route", "from": "Note A", "to": "Ghost"}])
+    assert res["code"] == "bad_operation" and res["operation_index"] == 0
+
+
+def compile_and_decompile(authored: str) -> str:
+    res = compile_yaml(authored, DB_PATH)
+    assert res.ok, [e.to_dict() for e in res.errors]
+    return decompile_to_yaml(res.fsr_json, DB_PATH)

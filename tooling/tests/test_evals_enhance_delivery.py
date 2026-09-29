@@ -157,3 +157,61 @@ def test_the_read_only_scenario_expects_no_delivery():
     ro = by_name["e4_explain_only_no_edit.json"]
     assert ro["expect"]["delivery"] == "none"
     assert ro["expect"]["no_yaml_fence"] is True
+
+
+def _edit(vid: str | None = VID, ready: bool = True) -> dict:
+    return {"name": "edit_playbook",
+            "args": {"operations": [{"op": "add_step", "after": "Start",
+                                     "step": {"name": "Gate", "type": "manual_input"}}]},
+            "result": {"ready_to_push": ready, "verified_id": vid if ready else None,
+                       "after_yaml": "playbooks:\n- name: PB\n"}}
+
+
+def test_an_edit_playbook_delivery_passes():
+    """The prompt routes every designer edit through edit_playbook, which runs
+    verify_enhancement and issues the verified_id. Scoring only
+    verify_enhancement graded that correct path `no_verify`."""
+    r = score_enhance_delivery([_edit(), _offer()], "Added the approval gate.")
+    assert r["passed"] and not r["skipped"], r
+
+
+def test_an_edit_playbook_turn_that_prints_yaml_still_fails():
+    r = score_enhance_delivery([_edit()], FULL_PB)
+    assert not r["passed"] and r["code"] == "printed_instead_of_applied"
+
+
+def test_verify_gates_share_one_source_with_the_loop_guards():
+    from fsr_playbooks.llm._loop_helpers import _ENHANCE_VERIFY_TOOLS
+    from tooling.evals import providers, scoring
+    assert set(_ENHANCE_VERIFY_TOOLS) <= set(scoring._VERIFY_TOOLS)
+    assert set(_ENHANCE_VERIFY_TOOLS) <= providers._VERIFY_TOOL_NAMES
+
+
+def test_delivered_yaml_reads_edit_playbook_result():
+    from tooling.evals.scoring import delivered_yaml
+    assert delivered_yaml("done", [_edit()]) == "playbooks:\n- name: PB\n"
+
+
+def test_a_consolidated_emit_card_delivery_counts():
+    """Live 09-28: enhance-live graded 9/10 `verified_not_applied` because the
+    delivery arrived as emit_card(card_type='enhancement_offer') and the live
+    runner scored the raw trace."""
+    card = {"name": "emit_card",
+            "args": {"card_type": "enhancement_offer",
+                     "payload": {"id": "e1", "summary": "s", "verified_id": VID}},
+            "result": {"ok": True}}
+    r = score_enhance_delivery([_edit(), card], "Added the approval gate.")
+    assert r["passed"] and not r["skipped"], r
+
+
+def test_a_refused_offer_then_a_good_one_is_one_delivery():
+    refused = {"name": "emit_card",
+               "args": {"card_type": "enhancement_offer",
+                        "payload": {"id": "e1", "verified_id": "bogus"}},
+               "result": {"ok": False, "code": "unknown_verified_id"}}
+    good = {"name": "emit_card",
+            "args": {"card_type": "enhancement_offer",
+                     "payload": {"id": "e1", "summary": "s", "verified_id": VID}},
+            "result": {"ok": True}}
+    r = score_enhance_delivery([_edit(), refused, good], "done")
+    assert r["passed"], r

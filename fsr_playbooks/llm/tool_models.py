@@ -159,6 +159,10 @@ class EmitChoiceCardArgs(BaseModel):
     multi: bool | None = None
     min_select: int | None = None
     max_select: int | None = None
+    # A free-text box under the chips (single-pick only): the analyst answers
+    # in their own words. Missing here silently DISABLED arg validation for
+    # the whole tool (the registry refuses a model that lacks a real param).
+    allow_text: bool | None = None
 
 
 class ValidateYamlArgs(BaseModel):

@@ -169,7 +169,12 @@ lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 # (Do NOT use `uv run --extra test` in the connector: it builds an isolated env
 #  without fsr_playbooks, so its whole suite errors on ModuleNotFound.)
 VENV_PY  := $(CURDIR)/.venv/bin/python
-CONNECTOR_DIR := ../ConnectorsV2/fsr-playbook-builder
+# conn_main is THE connector checkout (release-ship, make loop, the box all run
+# it). This used to name ../ConnectorsV2/fsr-playbook-builder, a separate clone
+# that stopped moving at the rename -- every screen-lane eval then scored the
+# current framework against a days-old connector (triage prompt, tool arg
+# models) and nothing said so.
+CONNECTOR_DIR ?= ../ConnectorsV2/conn_main
 
 # The eval harness registers the connector's triage tools (get_record,
 # search_module_records) only when it can find the checkout, and without them

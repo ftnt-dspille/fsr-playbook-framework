@@ -270,6 +270,15 @@ def run_matrix(
     # framework+connector rows is comparing environments, not agents.
     substrate = register_triage_tools_if_available()
     print(f"  tools: {substrate}", file=sys.stderr, flush=True)
+    # WHICH connector checkout, so a stale clone is visible in every run log
+    # (the Makefile once pointed at one for weeks). Not part of the substrate
+    # key -- that stays comparable with archived baselines.
+    try:
+        import fsr_soc_triage  # type: ignore[import-not-found]
+        print(f"  connector: {Path(fsr_soc_triage.__file__).resolve().parents[1]}",
+              file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        pass
 
     gold_lookup = _gold_lookup_for(tasks)
     system_prompt = load_system_prompt()

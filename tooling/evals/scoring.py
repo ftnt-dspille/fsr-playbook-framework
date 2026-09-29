@@ -178,6 +178,13 @@ def delivered_yaml(final_text: str, trace: list[dict[str, Any]] | None) -> str:
                     v = args.get(k)
                     if isinstance(v, str) and v.strip():
                         return v
+        # edit_playbook names only the change; the edited document it verified
+        # comes back as `after_yaml` in its result (when the harness threads it).
+        for call in reversed(trace):
+            res = call.get("result")
+            if call.get("name") == "edit_playbook" and isinstance(res, dict) \
+                    and isinstance(res.get("after_yaml"), str) and res["after_yaml"].strip():
+                return res["after_yaml"]
         m = _YAML_FENCED_RE.search(final_text or "")
         return m.group(1).strip() if m else ""
     from evals.providers import extract_yaml  # noqa: PLC0415 -- cycle
@@ -879,7 +886,11 @@ def _score_investigation_quality(
 #: scoring only `verify_playbook` marked those turns "agent never called
 #: verify" for doing exactly the right thing, and a grader that punishes the
 #: correct behavior is worse than no grader.
-_VERIFY_TOOLS = ("verify_playbook", "verify_enhancement")
+# `edit_playbook` is an enhance gate too (it runs verify_enhancement and issues
+# the verified_id); take the set from the loop guards so the two never drift.
+from fsr_playbooks.llm._loop_helpers import _ENHANCE_VERIFY_TOOLS  # noqa: E402
+
+_VERIFY_TOOLS = ("verify_playbook", *sorted(_ENHANCE_VERIFY_TOOLS))
 
 #: Bump this whenever a change alters what a given trace SCORES. It is stamped
 #: into every saved matrix and forms part of the comparability key, so a diff
@@ -893,7 +904,9 @@ _VERIFY_TOOLS = ("verify_playbook", "verify_enhancement")
 #:   1 -- terminal_tool_reached only (pre-#127; no run carries this stamp)
 #:   2 -- #127 composite: + offer_timing, appropriate_approval_requests,
 #:        no_spiral
-SCORER_VERSION = 2
+#:   3 -- edit_playbook counts as the enhance verify gate (it was scored
+#:        "never verified" for using the tool the prompt tells it to use)
+SCORER_VERSION = 3
 
 #: The composite authoring score for `mode="tool_selection"`: the gates that
 #: count alongside `terminal_tool_reached`. Each measures a behaviour we
@@ -932,7 +945,7 @@ def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
                 f"{len(verifies)} call(s): "
                 + ", ".join(sorted({str(v.get("name")) for v in verifies}))
                 if called else
-                "agent never called verify_playbook / verify_enhancement"),
+                "agent never called verify_playbook / verify_enhancement / edit_playbook"),
         },
         "verify_iterations_until_ready": {
             "passed": called, "skipped": False,
@@ -1283,8 +1296,18 @@ def score_enhance_delivery(trace: list[dict[str, Any]],
 
     Read-only turns have neither call and skip.
     """
-    verifies = [c for c in trace if c.get("name") == "verify_enhancement"]
-    offers = [c for c in trace if c.get("name") == "emit_enhancement_offer"]
+    # Canonicalize here, not only in the matrix harness: the live runner
+    # (enhance_live.py) scored raw traces, so every delivery through the
+    # consolidated `emit_card(card_type='enhancement_offer')` was invisible and
+    # graded `verified_not_applied` (live 09-28: 1/10 "delivered", 9 false
+    # fails). Idempotent on an already-canonical trace.
+    trace = canonicalize_trace(trace) or []
+    verifies = [c for c in trace if c.get("name") in _ENHANCE_VERIFY_TOOLS]
+    # A REFUSED offer (result ok: false) delivered nothing -- counting it made
+    # "refused, fixed, delivered" read as `offered_twice`.
+    offers = [c for c in trace if c.get("name") == "emit_enhancement_offer"
+              and not (isinstance(c.get("result"), dict)
+                       and c["result"].get("ok") is False)]
     has_fence = "```yaml" in (assistant_text or "").lower()
 
     if not verifies and not offers:

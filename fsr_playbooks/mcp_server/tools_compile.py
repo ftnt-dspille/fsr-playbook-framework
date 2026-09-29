@@ -106,12 +106,25 @@ def validate_yaml(yaml_text: str) -> dict[str, Any]:
                 **corrected,
             }
         return {"ok": True, **corrected}
-    errs = [_serialize_compiler_error(e) for e in result.errors]
+    # The resolver files advisories (e.g. `button_label` defaulted) in the same
+    # list as real errors, tagged severity="warning". Live: a failed validate
+    # reported "2 compiler error(s)" with the advisory FIRST, so `next_fix`
+    # could point the model at a non-problem while the real one (a bad enum)
+    # sat second. Only severity=error blocks; the rest are warnings, as
+    # verify_playbook already reports them.
+    hard = [e for e in result.errors if getattr(e, "severity", "error") == "error"]
+    soft = [e for e in result.errors if getattr(e, "severity", "error") != "error"]
+    soft += list(result.warnings or [])
+    errs = [_serialize_compiler_error(e) for e in hard]
+    extra: dict[str, Any] = {}
+    if soft:
+        extra["warnings"] = [_serialize_compiler_error(e) for e in soft]
     return _err(
         "validation_failed",
-        f"{len(result.errors)} compiler error(s); see `errors` for codes "
+        f"{len(hard)} compiler error(s); see `errors` for codes "
         "and suggestions",
         errors=errs,
+        **extra,
         **corrected,
         # Single most-actionable next fix. Picks the first error of the
         # highest-priority code so the agent has a clear next move

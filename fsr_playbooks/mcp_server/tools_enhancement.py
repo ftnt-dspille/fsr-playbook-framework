@@ -732,6 +732,15 @@ class _EditError(Exception):
     pass
 
 
+class _MissingStep(_EditError):
+    """A reference to a step that is not in the playbook (yet) -- kept apart so
+    an op naming a step a LATER op adds can wait for it (see edit_playbook)."""
+
+    def __init__(self, ref: str, message: str):
+        super().__init__(message)
+        self.ref = ref
+
+
 def _rt_yaml():
     from ruamel.yaml import YAML
     y = YAML(typ="rt")
@@ -777,8 +786,15 @@ def _find(steps, ref: Any):
     for i, s in enumerate(steps):
         if ref in _refs(s):
             return i, s
+    if not steps:
+        # Live: every op anchored on "Start" in a playbook with no steps at all.
+        raise _MissingStep(ref, (
+            f"no step named {ref!r} -- the open playbook has no steps yet. Add "
+            f"the start step first with no `after` "
+            f"({{op: add_step, step: {{name: Start, type: start, ...}}}}), then "
+            f"add each step `after` the one before it"))
     names = ", ".join(repr(str(s.get("name"))) for s in steps)
-    raise _EditError(f"no step named {ref!r} -- steps are: {names}")
+    raise _MissingStep(ref, f"no step named {ref!r} -- steps are: {names}")
 
 
 def _branch_entry(step, option: str):
@@ -884,9 +900,30 @@ def _apply_op(steps, op: dict) -> str:
             return f"added {new['name']!r} (unrouted -- route to it with set_route)"
         i, prev = _find(steps, after)
         if any(k in prev for k in ("conditions", "options")) and "next" not in prev:
-            raise _EditError(
-                f"{prev.get('name')!r} branches; insert with add_step (no "
-                f"`after`) and wire it with set_route(from, to, option)")
+            # A branching step (decision / manual_input): splice into ONE branch.
+            # Live: `after` a manual_input with a single "Continue" button was
+            # refused five times; with one branch there is nothing to choose.
+            entries = [e for lk in ("conditions", "options")
+                       for e in (prev.get(lk) or []) if isinstance(e, dict)]
+            option = op.get("option")
+            if option is not None:
+                entry = _branch_entry(prev, str(option))
+            elif len(entries) == 1:
+                entry = entries[0]
+            else:
+                labels = [str(e.get("display") or e.get("option") or e.get("label")
+                              or ("default" if e.get("default") else "?"))
+                          for e in entries]
+                raise _EditError(
+                    f"{prev.get('name')!r} branches {labels}; name the branch to "
+                    f"insert into with option=<label>")
+            if entry.get("next") and "next" not in new:
+                new["next"] = entry["next"]
+            entry["next"] = str(new["name"])
+            _place_after(steps, prev, new)
+            steps.insert(i + 1, new)
+            label = entry.get("display") or entry.get("option") or entry.get("label")
+            return f"added {new['name']!r} after {prev.get('name')!r} [{label}]"
         # Splice into the chain: prev -> new -> whatever prev pointed at.
         if prev.get("next") and "next" not in new:
             new["next"] = prev["next"]
@@ -990,10 +1027,13 @@ def edit_playbook(
     verify fix the operations and send the WHOLE list again.
 
     `operations` is applied in order, all or nothing. Steps are named by their
-    `name:`. Each is an object with an `op`:
-      - {op: add_step, step: {name, type, ...step keys}, after: <step>}
+    `name:`. An op may name a step a later op in the list adds. Each is an object with an `op`:
+      - {op: add_step, step: {name, type, ...step keys}, after: <step>, option: <branch>}
           inserts after <step> and splices it into that step's `next` chain;
-          omit `after` to add it unrouted (then use set_route).
+          after a decision / manual_input, `option` names the branch to splice
+          into (not needed when it has one). Omit `after` to add it unrouted
+          (then use set_route) -- the way to add the start step to an empty
+          playbook.
       - {op: update_step, name: <step>, set: {key: value}, unset: [key]}
           changes step-level keys (params, vars, next, conditions, ...).
       - {op: rename_step, name: <step>, to: <new name>}  -- routes follow.
@@ -1049,19 +1089,44 @@ def edit_playbook(
     if not isinstance(steps, list):
         return _err("open_playbook_unreadable", "the open playbook has no steps: list")
 
+    def _added_name(o: Any) -> str | None:
+        if not isinstance(o, dict):
+            return None
+        n = _normalize_op(o)
+        st = n.get("step") if n.get("op") == "add_step" else None
+        return str(st["name"]) if isinstance(st, dict) and st.get("name") else None
+
+    def _refused(i: int, op: Any, exc: Exception) -> dict[str, Any]:
+        return _err("bad_operation",
+                    f"operations[{i}] ({_normalize_op(op).get('op')}): {exc}",
+                    operation_index=i,
+                    suggestions=["nothing was applied -- fix this operation "
+                                 "and send the whole list again"])
+
+    # An op may name a step a LATER op in the same list adds (live: set_route to
+    # "Create ServiceNow incident" listed before the add_step that creates it).
+    # Such an op waits until the rest has run, then applies in order.
     applied: list[str] = []
+    deferred: list[tuple[int, dict]] = []
     for i, op in enumerate(operations):
         if not isinstance(op, dict):
             return _err("bad_operation", f"operations[{i}] is not an object",
                         operation_index=i)
         try:
             applied.append(_apply_op(steps, op))
+        except _MissingStep as exc:
+            later = {_added_name(o) for o in operations[i + 1:]}
+            if exc.ref in later or _slug(exc.ref) in {_slug(n) for n in later if n}:
+                deferred.append((i, op))
+                continue
+            return _refused(i, op, exc)
         except _EditError as exc:
-            return _err("bad_operation",
-                        f"operations[{i}] ({_normalize_op(op).get('op')}): {exc}",
-                        operation_index=i,
-                        suggestions=["nothing was applied -- fix this operation "
-                                     "and send the whole list again"])
+            return _refused(i, op, exc)
+    for i, op in deferred:
+        try:
+            applied.append(_apply_op(steps, op))
+        except _EditError as exc:
+            return _refused(i, op, exc)
 
     buf = io.StringIO()
     y.dump(doc, buf)
