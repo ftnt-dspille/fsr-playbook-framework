@@ -64,6 +64,7 @@ from ._loop_helpers import (
     TriageDiscipline,
     _effective_tool_name,
     drain_with_idle_timeout,
+    is_authoring_slice,
     latest_user_text,
     stall_directive,
     unexecuted_tool_calls_note,
@@ -553,17 +554,7 @@ class OpenAIProvider(CapabilityMixin):
             getattr(case_state, "investigation", None)
             if case_state is not None else None
         )
-        # Authoring/build turns are detected by the presence of build-only tools
-        # like verify_playbook or push_playbook -- triage never advertises these.
-        # Old check ("emit_action_card" not in allowed_names) no longer works
-        # since emit_action_card is consolidated into emit_card (both triage and
-        # build have emit_card, but with different card_type affordances).
-        _authoring = (
-            "verify_playbook" in allowed_names or
-            "push_playbook" in allowed_names or
-            "verify_enhancement" in allowed_names or
-            "edit_playbook" in allowed_names
-        )
+        _authoring = is_authoring_slice(allowed_names)
         _discipline = TriageDiscipline(
             state=investigation_state,
             capabilities=(getattr(case_state, "capabilities", None)

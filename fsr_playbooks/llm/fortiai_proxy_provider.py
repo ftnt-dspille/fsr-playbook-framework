@@ -36,6 +36,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     TriageDiscipline,
+    is_authoring_slice,
     latest_user_text,
 )
 from ._loop_helpers import (
@@ -411,7 +412,7 @@ class FortiAIProxyProvider(CapabilityMixin):
             getattr(case_state, "investigation", None)
             if case_state is not None else None
         )
-        _authoring = "emit_action_card" not in allowed_names
+        _authoring = is_authoring_slice(allowed_names)
         _discipline = TriageDiscipline(
             state=investigation_state,
             capabilities=(getattr(case_state, "capabilities", None)

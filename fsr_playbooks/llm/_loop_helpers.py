@@ -668,6 +668,22 @@ def _is_verdict_emit(name: str, args: Any) -> bool:
         and str(args.get("card_type") or "").strip().lower() == "verdict")
 
 
+# Build-only tools whose presence in a turn's advertised slice marks it an
+# authoring turn -- the triage slice subtracts every one (intents.
+# BUILD_ONLY_TOOLS; a test pins the subset). ONE list for every provider and
+# guard: the copies drifted, and the fortiai proxy kept testing
+# `"emit_action_card" not in allowed_names` after that tool folded into
+# `emit_card`, so every proxy turn -- triage included -- counted as authoring.
+AUTHORING_MARKER_TOOLS = frozenset({
+    "verify_playbook", "push_playbook", "verify_enhancement", "edit_playbook",
+})
+
+
+def is_authoring_slice(allowed_names) -> bool:
+    """True when the advertised tools include a build-only authoring tool."""
+    return bool(AUTHORING_MARKER_TOOLS & set(allowed_names or ()))
+
+
 class TriageDiscipline:
     """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
     three discipline rules and, when the call is allowed, records it -- returning
@@ -1877,13 +1893,7 @@ class BuildProgressGuard:
         # verify_enhancement. If none of those are present, this is a triage turn
         # and the guard should not fire (a research-heavy triage turn on a full
         # registry should not be nudged to author YAML it was never asked for).
-        is_build = (
-            "verify_playbook" in allowed_names or
-            "push_playbook" in allowed_names or
-            "verify_enhancement" in allowed_names or
-            "edit_playbook" in allowed_names
-        )
-        if not is_build:
+        if not is_authoring_slice(allowed_names):
             return False
         if self._forced or self._authored or not self._any_tool:
             return False
