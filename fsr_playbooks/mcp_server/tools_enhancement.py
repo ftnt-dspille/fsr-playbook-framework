@@ -18,6 +18,7 @@ tell us where to loosen.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import _verified_yaml
@@ -601,6 +602,8 @@ def verify_enhancement(
     out = dict(after_result)
     out["regressions"] = regressions
     out["diff_summary"] = diff_summary
+    out["warnings"] = _scope_warnings(out.get("warnings"), after_coll,
+                                      diff_summary)
 
     # ready_to_push downgrades only on error-severity regressions.
     if any(r.get("severity") == "error" for r in regressions):
@@ -615,6 +618,95 @@ def verify_enhancement(
         out["next_actions"] = next_actions[:5]
 
     return _issue_verified_id(out, after_yaml, before_yaml)
+
+
+# ---------------------------------------------------------------------------
+# Warnings, scoped to the edit.
+#
+# verify_playbook lints the WHOLE after-document, so an edit that adds one step
+# came back with every lint the analyst's playbook already had: live, ~20
+# warnings on the offer card, nearly all about steps the edit never touched,
+# worded for the compiler ("... resolves through unknown shape",
+# `playbooks[0].steps[1].arguments.resource.content`). Each warning now names
+# the step it is about (`step_name`), says whether this edit touched that step
+# (`in_change`), and carries a sentence an analyst can read (`plain`). The card
+# leads with the edit's own warnings and folds the rest into a count.
+# ---------------------------------------------------------------------------
+
+_PATH_INDEX = re.compile(r"^playbooks\[(\d+)\]\.steps\[(\d+)\]")
+_NEVER_DEFINED = re.compile(r"Jinja reference (vars\.[\w.]+) in step '[^']*': "
+                            r"'[^']*' is never defined")
+_NOT_IN_OUTPUT = re.compile(r"'([^']+)' (?:is )?not in (?:known shape of '|step ')"
+                            r"([^']+)'")
+_STEP_CLAUSE = re.compile(r" in step '[^']*'")
+
+
+def _warning_step(w: dict[str, Any], after) -> tuple[str | None, str | None]:
+    """(playbook name, step name) a warning is about, or (None, None).
+    Verifiers point at a step three ways: an index path into the document,
+    `<playbook>.<step slug>`, or a `step` slug field."""
+    pbs = list(getattr(after, "playbooks", None) or [])
+    path = str(w.get("path") or "")
+    m = _PATH_INDEX.match(path)
+    if m:
+        i, j = int(m.group(1)), int(m.group(2))
+        if i < len(pbs) and j < len(pbs[i].steps):
+            return pbs[i].name, pbs[i].steps[j].name or pbs[i].steps[j].id
+    slug = w.get("step") if isinstance(w.get("step"), str) else None
+    pb_name = None
+    if not slug and "." in path:
+        pb_name, slug = path.rsplit(".", 1)
+    for pb in pbs:
+        if pb_name is not None and pb.name != pb_name:
+            continue
+        for s in pb.steps:
+            if slug and slug in (s.id, s.name):
+                return pb.name, s.name or s.id
+    return None, None
+
+
+def _plain_warning(w: dict[str, Any], names: dict[str, str]) -> str:
+    """One sentence for the analyst. Two lint families make up nearly every
+    warning on a real playbook; anything else keeps its message, minus the
+    step slug the card already shows as a heading."""
+    msg = str(w.get("message") or "")
+    m = _NEVER_DEFINED.search(msg)
+    if m:
+        return (f"{m.group(1)} is never set before this step, so it will be "
+                "empty when the playbook runs.")
+    m = _NOT_IN_OUTPUT.search(msg)
+    if m:
+        src = names.get(m.group(2), m.group(2))
+        return f"Reads '{m.group(1)}' from step '{src}', which that step does not return."
+    if w.get("code") == "unknown_shape_downstream_reference" or "unknown shape" in msg:
+        ref = msg.split(" ", 1)[0]
+        return (f"{ref} reads a connector result whose shape is not known "
+                "yet; check it after a test run.")
+    return _STEP_CLAUSE.sub("", msg).split(" Universal output keys")[0].strip()
+
+
+def _scope_warnings(warnings, after, diff_summary: dict[str, Any]
+                    ) -> list[dict[str, Any]]:
+    touched = set(diff_summary.get("steps_added") or []) \
+        | set(diff_summary.get("steps_modified") or [])
+    names = {s.id: (s.name or s.id)
+             for pb in getattr(after, "playbooks", None) or [] for s in pb.steps}
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, str]] = set()
+    for w in warnings or []:
+        if not isinstance(w, dict):
+            w = {"message": str(w)}
+        _pb, step = _warning_step(w, after)
+        plain = _plain_warning(w, names)
+        # Two verifiers often report one reference (bad_value and
+        # bad_var_reference): the analyst should read it once.
+        if (step, plain) in seen:
+            continue
+        seen.add((step, plain))
+        # A warning no step claims (playbook-level) stays in view.
+        out.append(dict(w, step_name=step, plain=plain,
+                        in_change=step is None or step in touched))
+    return out
 
 
 def _grandfather_orphans(result: dict[str, Any],
