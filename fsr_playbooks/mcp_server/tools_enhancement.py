@@ -730,6 +730,8 @@ _EDIT_OPS = ("add_step", "update_step", "rename_step", "remove_step",
 # Step-level keys an update may not change: `name` has its own op because
 # routes point at it; `uuid` ties the step to its live record.
 _UPDATE_FORBIDDEN = frozenset({"name", "uuid"})
+# Ops that reference an existing step by `name`.
+_NAMED_OPS = frozenset({"update_step", "rename_step", "remove_step"})
 
 
 class _EditError(Exception):
@@ -873,7 +875,7 @@ def _place_below_all(steps, new) -> None:
 # missed. Mirrors the edit_playbook docstring (the advertised contract).
 _OP_SHAPES = {
     "add_step": "{op: add_step, step: {name, type, ...}, after: <step>, option: <branch>}",
-    "update_step": "{op: update_step, name: <step>, set: {key: value}, unset: [key]}",
+    "update_step": "{op: update_step, name: <step>, set: {key or dotted.key: value}, unset: [key]}",
     "rename_step": "{op: rename_step, name: <current name>, to: <new name>}",
     "remove_step": "{op: remove_step, name: <step>, reconnect: true}",
     "set_route": "{op: set_route, from: <step>, to: <step>, option: <branch>}",
@@ -890,6 +892,12 @@ def _normalize_op(op: dict) -> dict:
         (kind, body), = op.items()
         if kind in _EDIT_OPS and isinstance(body, dict):
             op = {"op": kind, **body}
+    if (op.get("op") in _NAMED_OPS and "name" not in op
+            and isinstance(op.get("step"), str)):
+        # `step: <name>` names the step as plainly as `name:` (live: A5's first
+        # update_step was refused for it). add_step's `step` is the new step's
+        # body, a mapping, so it never matches here.
+        op = {**{k: v for k, v in op.items() if k != "step"}, "name": op["step"]}
     if (op.get("op") == "rename_step" and "name" not in op
             and isinstance(op.get("from"), str)):
         # `{from, to}` reads naturally for a rename and is unambiguous here
@@ -900,6 +908,36 @@ def _normalize_op(op: dict) -> dict:
         op = {"op": "add_step", "step": step,
               **({"after": op["after"]} if "after" in op else {})}
     return op
+
+
+def _set_path(step, key: str, value) -> None:
+    """`params.ip_addresses` sets ONE leaf inside `params`, keeping its
+    siblings. Live (effect probe A5): the key was written literally, as a
+    sibling `params.ip_addresses:` beside the untouched `params`, verify passed
+    it, and the offer would have "applied" with the old IP still in place.
+    No step or param key contains a dot, so the path is unambiguous."""
+    from ruamel.yaml.comments import CommentedMap
+    *parents, leaf = key.split(".")
+    box = step
+    for i, part in enumerate(parents):
+        nxt = box.get(part)
+        if nxt is None:
+            nxt = box[part] = CommentedMap()
+        elif not isinstance(nxt, dict):
+            raise _EditError(f"set {key!r}: {'.'.join(parents[:i + 1])!r} is "
+                             f"{type(nxt).__name__}, not a mapping")
+        box = nxt
+    box[leaf] = value
+
+
+def _unset_path(step, key: str) -> None:
+    *parents, leaf = key.split(".")
+    box = step
+    for part in parents:
+        box = box.get(part) if isinstance(box, dict) else None
+        if not isinstance(box, dict):
+            return
+    box.pop(leaf, None)
 
 
 def _apply_op(steps, op: dict) -> str:
@@ -959,16 +997,17 @@ def _apply_op(steps, op: dict) -> str:
         unset = op.get("unset") or []
         if not isinstance(sets, dict) or not isinstance(unset, list):
             raise _EditError("update_step takes set={key: value} and unset=[key]")
-        bad = sorted(_UPDATE_FORBIDDEN & (set(sets) | set(unset)))
+        bad = sorted(_UPDATE_FORBIDDEN & {str(k).split(".")[0]
+                                          for k in (*sets, *unset)})
         if bad:
             raise _EditError(f"update_step cannot change {bad}; use rename_step "
                              f"to rename")
         if not sets and not unset:
             raise _EditError("update_step with nothing to set or unset")
         for k, v in sets.items():
-            step[k] = v
+            _set_path(step, str(k), v)
         for k in unset:
-            step.pop(k, None)
+            _unset_path(step, str(k))
         return f"updated {step.get('name')!r}: {sorted(set(sets) | set(unset))}"
 
     if kind == "rename_step":
@@ -1056,7 +1095,10 @@ def edit_playbook(
           (then use set_route) -- the way to add the start step to an empty
           playbook.
       - {op: update_step, name: <step>, set: {key: value}, unset: [key]}
-          changes step-level keys (params, vars, next, conditions, ...).
+          changes step keys (params, vars, next, conditions, ...). A dotted
+          key sets one leaf and keeps its siblings:
+          set: {"params.ip_addresses": "1.2.3.4"} changes only that param;
+          set: {params: {...}} REPLACES the whole params mapping.
       - {op: rename_step, name: <step>, to: <new name>}  -- routes follow.
       - {op: remove_step, name: <step>, reconnect: true}
           routes into it are re-pointed at its `next` (reconnect=false drops them).

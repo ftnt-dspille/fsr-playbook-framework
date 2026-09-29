@@ -642,6 +642,15 @@ def emit_playbook_offer(
     return {"ok": True, "card": card}
 
 
+_FENCE_RE = re.compile(r"^\s*```[A-Za-z0-9_-]*[ \t]*\n(.*?)\n?\s*```\s*$", re.S)
+
+
+def _unfence(text: str) -> str:
+    """A snippet wrapped in a ```yaml fence is still the snippet."""
+    m = _FENCE_RE.match(text)
+    return m.group(1) if m else text
+
+
 @mcp.tool()
 def emit_patch_proposal(
     id: str,
@@ -691,6 +700,15 @@ def emit_patch_proposal(
                        ("before_yaml", before_yaml), ("after_yaml", after_yaml)):
         if not isinstance(val, str) or not val.strip():
             return _err("missing_field", f"{label} must be a non-empty string")
+    # Live (effect probe A5): both sides arrived wrapped in ```yaml fences,
+    # which the card's diff would show as lines and no apply can match.
+    before_yaml, after_yaml = _unfence(before_yaml), _unfence(after_yaml)
+    # `tier` rides inside emit_card's payload, which the arg gate does not
+    # type: "0" / 0.0 are the same tier, so take them (lossless).
+    if isinstance(tier, str) and tier.strip().isdigit():
+        tier = int(tier.strip())
+    elif isinstance(tier, float) and tier.is_integer():
+        tier = int(tier)
     if before_yaml.strip() == after_yaml.strip():
         return _err("noop_patch",
                     "before_yaml and after_yaml are identical -- there is "

@@ -431,3 +431,47 @@ def test_every_instruction_for_the_offer_names_its_required_fields():
            for m in re.finditer(r"enhancement_offer', payload=\{[^)]*\)", t)
            if "summary" not in m.group(0)]
     assert bad == []
+
+
+# --- dotted keys ---------------------------------------------------------------
+# Live (effect probe A5): `set: {"params.ip_addresses": X}` was written as a
+# literal sibling key, verify passed it, and the offer would have "applied"
+# with the old IP still in `params`. A dotted key sets one leaf.
+
+def test_a_dotted_key_sets_one_leaf_and_keeps_its_siblings():
+    res = edit_playbook([{"op": "update_step", "name": "Note C",
+                          "set": {"vars.c": "2", "vars.d": "3"}}])
+    assert res["ready_to_push"], res.get("required_fixes")
+    step = _steps(res["after_yaml"])["Note C"]
+    assert step["vars"] == {"c": "2", "d": "3"}
+    assert not any("." in str(k) for k in step), sorted(step)
+
+
+def test_a_dotted_unset_removes_one_leaf():
+    res = edit_playbook([
+        {"op": "update_step", "name": "Note C", "set": {"vars.d": "3"}},
+        {"op": "update_step", "name": "Note C", "unset": ["vars.d"]},
+    ])
+    assert res["ready_to_push"], res.get("required_fixes")
+    assert _steps(res["after_yaml"])["Note C"]["vars"] == {"c": "1"}
+
+
+def test_a_dotted_key_through_a_scalar_is_refused():
+    res = edit_playbook([{"op": "update_step", "name": "Note C",
+                          "set": {"next.x": "1"}}])
+    assert res["ok"] is False and res["code"] == "bad_operation"
+    assert "not a mapping" in res["message"]
+
+
+def test_a_dotted_key_cannot_reach_a_forbidden_key():
+    res = edit_playbook([{"op": "update_step", "name": "Note C",
+                          "set": {"name.x": "1"}}])
+    assert res["ok"] is False and "rename_step" in res["message"]
+
+
+def test_step_names_the_step_like_name_does():
+    # Live (A5 run 1): `step: "Block IP"` was refused as not a step reference.
+    res = edit_playbook([{"op": "update_step", "step": "Note C",
+                          "set": {"vars.c": "2"}}])
+    assert res["ready_to_push"], res
+    assert _steps(res["after_yaml"])["Note C"]["vars"] == {"c": "2"}
