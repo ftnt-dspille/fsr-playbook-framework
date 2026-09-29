@@ -804,7 +804,7 @@ def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
             "references a connector this box does not have, say so in prose -- "
             "replacing it with a placeholder loses the analyst's real step.",
             suggestions=[
-                "emit_card(card_type='enhancement_offer', payload={verified_id: ...}) to edit the open playbook",
+                "emit_card(card_type='enhancement_offer', payload={verified_id: ..., summary: ...}) to edit the open playbook",
                 "answer in prose if the analyst only asked you to explain",
             ],
         )

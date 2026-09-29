@@ -522,7 +522,7 @@ def verify_enhancement(
 
     When the verdict passes, the result also carries **`verified_id`** -- an
     opaque handle to the exact `after_yaml` bytes that just cleared the gate.
-    Pass it to `emit_card(card_type='enhancement_offer', payload={verified_id: ...})` to apply the edit. That
+    Pass it to `emit_card(card_type='enhancement_offer', payload={verified_id: ..., summary: ...})` to apply the edit. That
     tool takes no YAML, so the document you verified is the document that
     lands; re-typing the playbook into chat instead is the one way to lose the
     edit (see `_verified_yaml` for the live failure this closes).
@@ -698,12 +698,16 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
         warnings=out.get("warnings") or [],
         acknowledged_drops=out["acknowledged_drops"],
     )
+    # The COMPLETE payload, with the real id. This used to read
+    # `payload={verified_id: ...}` -- no summary -- and models copied it
+    # exactly: 4 of 10 refusals in one enhance-live run were `emit_card`
+    # bouncing that very payload for a missing `summary`.
     out["how_to_apply"] = (
-        "Call emit_card(card_type='enhancement_offer', "
-        "payload={verified_id: ...}) to apply this edit. That "
-        "is the ONLY way the edit reaches the analyst's playbook. Do not "
-        "re-type the YAML into your reply -- the offer card carries the exact "
-        "text verified here."
+        "Call emit_card(card_type='enhancement_offer', payload={verified_id: "
+        f"'{out['verified_id']}', summary: '<one or two plain-English lines on "
+        "what this edit changes>'}) to apply this edit. That is the ONLY way "
+        "the edit reaches the analyst's playbook. Do not re-type the YAML into "
+        "your reply -- the offer card carries the exact text verified here."
     )
     return out
 
@@ -865,6 +869,18 @@ def _place_below_all(steps, new) -> None:
         _set_pos(new, max(t for t, _ in placed) + _ROW, min(lf for _, lf in placed))
 
 
+# Each op's shape, quoted in a refusal so the model can see which key it
+# missed. Mirrors the edit_playbook docstring (the advertised contract).
+_OP_SHAPES = {
+    "add_step": "{op: add_step, step: {name, type, ...}, after: <step>, option: <branch>}",
+    "update_step": "{op: update_step, name: <step>, set: {key: value}, unset: [key]}",
+    "rename_step": "{op: rename_step, name: <current name>, to: <new name>}",
+    "remove_step": "{op: remove_step, name: <step>, reconnect: true}",
+    "set_route": "{op: set_route, from: <step>, to: <step>, option: <branch>}",
+    "remove_route": "{op: remove_route, from: <step>, option: <branch>}",
+}
+
+
 def _normalize_op(op: dict) -> dict:
     """Canonical `{op: <kind>, ...}` from the two unambiguous shapes models
     send instead: the op name as the key (`{add_step: {...}}`, seen live), and
@@ -874,6 +890,11 @@ def _normalize_op(op: dict) -> dict:
         (kind, body), = op.items()
         if kind in _EDIT_OPS and isinstance(body, dict):
             op = {"op": kind, **body}
+    if (op.get("op") == "rename_step" and "name" not in op
+            and isinstance(op.get("from"), str)):
+        # `{from, to}` reads naturally for a rename and is unambiguous here
+        # (live: 3 of 10 refusals in one enhance-live run, 2 of them stuck).
+        op = {**{k: v for k, v in op.items() if k != "from"}, "name": op["from"]}
     if op.get("op") == "add_step" and "step" not in op and op.get("name"):
         step = {k: v for k, v in op.items() if k not in ("op", "after")}
         op = {"op": "add_step", "step": step,
@@ -1021,7 +1042,7 @@ def edit_playbook(
     Name only the change; this applies it to the open playbook (read from
     FortiSOAR), verifies the result like `verify_enhancement`, and on a pass
     returns a `verified_id`. Deliver it with
-    `emit_card(card_type='enhancement_offer', payload={verified_id: ...})`.
+    `emit_card(card_type='enhancement_offer', payload={verified_id: ..., summary: ...})`.
     You never re-type the playbook, so no step or link you did not name can go
     missing. Each call applies to the open playbook as it is, so on a failed
     verify fix the operations and send the WHOLE list again.
@@ -1097,8 +1118,12 @@ def edit_playbook(
         return str(st["name"]) if isinstance(st, dict) and st.get("name") else None
 
     def _refused(i: int, op: Any, exc: Exception) -> dict[str, Any]:
+        kind = _normalize_op(op).get("op")
+        shape = _OP_SHAPES.get(kind)
+        sent = sorted(k for k in op if k != "op") if isinstance(op, dict) else []
         return _err("bad_operation",
-                    f"operations[{i}] ({_normalize_op(op).get('op')}): {exc}",
+                    f"operations[{i}] ({kind}): {exc}"
+                    + (f" -- expected {shape}; got keys {sent}" if shape else ""),
                     operation_index=i,
                     suggestions=["nothing was applied -- fix this operation "
                                  "and send the whole list again"])

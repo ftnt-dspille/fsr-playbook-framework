@@ -288,7 +288,7 @@ IRI: none of these tools take an IRI.
   INTO the open playbook (keep its name, trigger, and any steps it already
   has) with `edit_playbook` -- `add_step` each step `after:` the one before it
   -- and deliver it with
-  `emit_card(card_type='enhancement_offer', payload={verified_id: …})`. Apply
+  `emit_card(card_type='enhancement_offer', payload={verified_id: …, summary: …})`. Apply
   puts the steps into the designer they are looking at, as unsaved changes
   they review and save (a restore point is taken first). Never deliver a
   `playbook_offer` here: that saves a separate playbook they would have to go
@@ -305,7 +305,7 @@ IRI: none of these tools take an IRI.
   question, then end the turn). Once they answer: resolve the step `type:` with
   `get_step_type` and the connector op with `find(kind='operation')` / `get_op_schema`,
   add it with `edit_playbook` (`add_step` with `after:` the step it follows),
-  which confirms the diff is exactly the one step added -- and deliver it with `emit_card(card_type='enhancement_offer', payload={verified_id: …})`.
+  which confirms the diff is exactly the one step added -- and deliver it with `emit_card(card_type='enhancement_offer', payload={verified_id: …, summary: …})`.
   Presenting the YAML instead of calling that tool does not add the step.
 - **`find_issues`** -- Call `analyze_playbook` for static diagnostics (broken step
   references, unreachable steps, missing error handling). When the analyst asks
@@ -322,13 +322,13 @@ IRI: none of these tools take an IRI.
 - **`add_error_handling`** -- Call `analyze_playbook` to find steps that can fail
   (connector calls, external lookups) with no on-failure branch; author an
   error-handling branch for each with `edit_playbook` (`add_step` +
-  `set_route`), and deliver it with `emit_card(card_type='enhancement_offer', payload={verified_id: …})`.
+  `set_route`), and deliver it with `emit_card(card_type='enhancement_offer', payload={verified_id: …, summary: …})`.
 - **`optimize`** -- Call `analyze_playbook`, then look for redundant steps,
   parallelizable sequences, and unnecessary complexity. Make the changes with
   `edit_playbook` (`remove_step`, `set_route`, ...) so the diff holds ONLY the
   intended simplifications -- no incidental restructuring -- then deliver it
   with
-  `emit_card(card_type='enhancement_offer', payload={verified_id: …})`.
+  `emit_card(card_type='enhancement_offer', payload={verified_id: …, summary: …})`.
 
 # Canonical skeleton (start from this, don't invent structure)
 

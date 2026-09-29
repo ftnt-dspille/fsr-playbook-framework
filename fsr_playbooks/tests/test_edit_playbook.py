@@ -388,3 +388,46 @@ def compile_and_decompile(authored: str) -> str:
     res = compile_yaml(authored, DB_PATH)
     assert res.ok, [e.to_dict() for e in res.errors]
     return decompile_to_yaml(res.fsr_json, DB_PATH)
+
+
+def test_rename_accepts_from_to():
+    """Live: `{op: rename_step, from, to}` was refused 3 times in one run and
+    stuck twice -- the refusal never said the op wants `name`."""
+    from fsr_playbooks.mcp_server.tools_enhancement import _normalize_op
+    assert _normalize_op({"op": "rename_step", "from": "A", "to": "B"}) == \
+        {"op": "rename_step", "name": "A", "to": "B"}
+
+
+def test_a_refusal_quotes_the_ops_expected_shape():
+    from fsr_playbooks.mcp_server import tools_enhancement as TE
+    assert "rename_step" in TE._OP_SHAPES
+    assert set(TE._OP_SHAPES) == set(TE._EDIT_OPS)
+
+
+def test_a_rename_without_its_step_quotes_the_shape():
+    out = edit_playbook(operations=[{"op": "rename_step", "to": "B"}])
+    assert out["code"] == "bad_operation"
+    assert "expected {op: rename_step, name: <current name>, to: <new name>}" in out["message"]
+    assert "got keys ['to']" in out["message"]
+
+
+def test_every_instruction_for_the_offer_names_its_required_fields():
+    """Models copy our example payload verbatim. It said
+    `payload={verified_id: ...}` in 8 places, and emit_card refused exactly that
+    payload for a missing `summary` -- 4 of 10 refusals in one live run."""
+    import inspect
+    import re
+    from pathlib import Path
+
+    import fsr_playbooks.mcp_server.tools_emit as TEm
+    import fsr_playbooks.mcp_server.tools_enhancement as TEn
+    texts = {
+        "system_prompt_build.md": (Path(TEn.__file__).parents[1] / "agent"
+                                   / "system_prompt_build.md").read_text(),
+        "tools_emit.py": inspect.getsource(TEm),
+        "tools_enhancement.py": inspect.getsource(TEn),
+    }
+    bad = [(f, m.group(0)) for f, t in texts.items()
+           for m in re.finditer(r"enhancement_offer', payload=\{[^)]*\)", t)
+           if "summary" not in m.group(0)]
+    assert bad == []
