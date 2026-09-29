@@ -744,81 +744,47 @@ def test_declared_intent_reaches_the_sink_without_typeerror():
     assert sig.parameters["requested_by"].default is None
 
 
-# --- #60, second pass: the exemption keyed off the analyst's own message ------
-# The declared `requested_by` path above is unit-proven but INERT live -- the
-# box model set it on 0 of 4 containment calls across 2 runs. These pin the
-# path that actually fires.
+# --- #60, third pass: the order is DECLARED, and the floor asks for it --------
+# The second pass read the analyst's message with a phrase regex (English-only,
+# against the no-phrase-matching rule). The declared field had been inert only
+# because nothing asked for it where it mattered: now the floor's deferral
+# offers it, so the model states intent as an argument (hygiene plan W3/C3).
 
-from fsr_playbooks.llm._loop_helpers import (  # noqa: E402
-    _detect_analyst_order,
-    latest_user_text,
-)
-
-ORDERS = [
-    "Block 10.100.88.102 on the firewall now.",
-    "block that IP",
-    "Isolate the host.",
-    "Please quarantine the endpoint",
-    "isolate DESKTOP-4471 immediately",
-    "I want you to disable that user account",
-    "Go ahead and block it",
-    "Contain this, then write it up.",
-    "Take the host offline.",
-    "you should block the source IP",
-    "Let's isolate that machine.",
-    "Look at alert 12, then block the source IP.",
-    # a descriptive sentence must not veto an order in another clause
-    "The IP was blocked yesterday. Block it on the edge firewall too.",
-]
-
-NOT_ORDERS = [
-    "",
-    "   ",
-    "Should we block this IP?",
-    "Can you tell me if the host was isolated?",
-    "The IP was blocked by the firewall.",
-    "Why was the endpoint quarantined?",
-    "If we block the IP, what breaks?",
-    "This user has already been disabled.",
-    "Summarize alert 12.",
-    "What is the reputation of 8.8.8.8?",
-    "Investigate the excessive mail egress alert.",
-]
+from fsr_playbooks.llm._loop_helpers import latest_user_text  # noqa: E402
 
 
-@pytest.mark.parametrize("text", ORDERS)
-def test_detect_analyst_order_fires_on_an_order(text):
-    assert _detect_analyst_order(text) is True, text
+def test_the_deferral_offers_the_declaration():
+    blocked = _fresh().evaluate("find_containment_actions", {"target_type": "ip"})
+    assert blocked is not None and blocked.get("hunt_floor_guard")
+    assert blocked["declare_order_with"] == {"requested_by": "analyst"}
+    assert "requested_by='analyst'" in blocked["directive"]
+    assert "analyst's own message" in blocked["directive"]
 
 
-@pytest.mark.parametrize("text", NOT_ORDERS)
-def test_detect_analyst_order_stands_down_otherwise(text):
-    assert _detect_analyst_order(text) is False, text
-
-
-def test_the_live_TO_prompt_now_stages_with_no_declared_field():
-    """The exact live row that failed -- and NOT one `requested_by` anywhere.
-
-    This is the whole point: on the shipped path the model never sets the
-    field, so the exemption has to come from the message.
-    """
-    d = _fresh(user_text="Block 10.100.88.102 on the firewall now.")
-    assert d.invest_attempts == 0
-    assert d.evaluate("find_containment_actions", {"target_type": "ip"}) is None
+def test_the_live_TO_flow_stages_after_one_declared_retry():
+    """"Block 10.100.88.102 on the firewall now." -> deferred -> the model
+    re-sends with the declaration -> discovery and the card both go through,
+    with the rest of the turn covered."""
+    d = _fresh()
+    assert d.evaluate("find_containment_actions", {"target_type": "ip"}) is not None
+    assert d.evaluate("find_containment_actions",
+                      {"target_type": "ip", "requested_by": "analyst"}) is None
     assert d.evaluate("emit_action_card", dict(_CARD)) is None
 
 
-def test_an_investigation_request_still_hits_the_floor():
-    """Non-vacuity: same calls, same absent field, ordinary triage phrasing."""
-    d = _fresh(user_text="Investigate alert 12 and tell me what you find.")
-    blocked = d.evaluate("find_containment_actions", {"target_type": "ip"})
-    assert blocked is not None and blocked.get("hunt_floor_guard")
-
-
-def test_no_user_text_is_the_pre_60_behavior():
+def test_without_the_declaration_the_floor_holds():
     d = _fresh()
-    blocked = d.evaluate("find_containment_actions", {"target_type": "ip"})
-    assert blocked is not None and blocked.get("hunt_floor_guard")
+    assert d.evaluate("find_containment_actions", {"target_type": "ip"}) is not None
+    assert d.evaluate("emit_action_card", dict(_CARD)) is not None
+
+
+def test_the_discipline_no_longer_reads_the_analyst_s_wording():
+    import inspect
+
+    from fsr_playbooks.llm import _loop_helpers as lh
+    from fsr_playbooks.llm._loop_helpers import TriageDiscipline
+    assert "user_text" not in inspect.signature(TriageDiscipline).parameters
+    assert not hasattr(lh, "_detect_analyst_order")
 
 
 def test_latest_user_text_reads_the_last_user_message():
@@ -838,25 +804,6 @@ def test_latest_user_text_reads_the_last_user_message():
     assert latest_user_text([]) == ""
     assert latest_user_text(None) == ""
     assert latest_user_text([M("assistant", "no user turn here")]) == ""
-
-
-def test_every_provider_seeds_the_discipline_from_the_user_message():
-    """Drift guard. Three providers each build their own TriageDiscipline; a
-    new one (or a refactor of an old one) that forgets `user_text` silently
-    reverts #60 to the inert declared-field path with no test going red.
-    """
-    import pathlib
-    import re as _re
-    llm = pathlib.Path(__file__).resolve().parents[1] / "llm"
-    builders = [p for p in llm.glob("*.py")
-                if "TriageDiscipline(" in p.read_text()]
-    assert len(builders) >= 3, f"expected every provider, found {builders}"
-    for p in builders:
-        src = p.read_text()
-        for call in _re.findall(r"TriageDiscipline\((.*?)\n\s*\)", src, _re.S):
-            assert "user_text=" in call, (
-                f"{p.name} builds TriageDiscipline without user_text= -- the "
-                "analyst-order exemption is inert there")
 
 
 # ───────────────── #128 dispatch levers: correlation + enrichment budget ────
