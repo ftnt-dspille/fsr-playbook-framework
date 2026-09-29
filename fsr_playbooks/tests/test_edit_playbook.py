@@ -475,3 +475,22 @@ def test_step_names_the_step_like_name_does():
                           "set": {"vars.c": "2"}}])
     assert res["ready_to_push"], res
     assert _steps(res["after_yaml"])["Note C"]["vars"] == {"c": "2"}
+
+
+def test_action_names_the_op_like_op_does():
+    # Live (A5): `action: update_step` was refused as "unknown op None".
+    res = edit_playbook([{"action": "update_step", "name": "Note C",
+                          "set": {"vars.c": "2"}}])
+    assert res["ready_to_push"], res
+    assert _steps(res["after_yaml"])["Note C"]["vars"] == {"c": "2"}
+
+
+def test_replacing_a_mapping_says_what_it_dropped():
+    # Live (A5): set={params: {...}} dropped `method`; the turn was never told.
+    res = edit_playbook([
+        {"op": "update_step", "name": "Note C", "set": {"vars.d": "3"}},
+        {"op": "update_step", "name": "Note C", "set": {"vars": {"d": "4"}}},
+    ])
+    line = res["applied"][1]
+    assert "REPLACED" in line and "vars.c" in line, line
+    assert 'set: {"vars.<key>": value}' in line, line

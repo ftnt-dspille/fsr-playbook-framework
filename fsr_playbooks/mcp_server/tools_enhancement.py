@@ -888,6 +888,9 @@ def _normalize_op(op: dict) -> dict:
     send instead: the op name as the key (`{add_step: {...}}`, seen live), and
     add_step with the step's keys inline beside `after` rather than under
     `step`. Anything else passes through for `_apply_op` to refuse."""
+    if "op" not in op and op.get("action") in _EDIT_OPS:
+        # `action: update_step` (live: A5, refused as "unknown op None").
+        op = {"op": op["action"], **{k: v for k, v in op.items() if k != "action"}}
     if "op" not in op and len(op) == 1:
         (kind, body), = op.items()
         if kind in _EDIT_OPS and isinstance(body, dict):
@@ -1004,11 +1007,23 @@ def _apply_op(steps, op: dict) -> str:
                              f"to rename")
         if not sets and not unset:
             raise _EditError("update_step with nothing to set or unset")
+        dropped: list[str] = []
         for k, v in sets.items():
+            was = step.get(k) if "." not in str(k) else None
+            if isinstance(was, dict) and isinstance(v, dict):
+                dropped += [f"{k}.{x}" for x in was if x not in v]
             _set_path(step, str(k), v)
         for k in unset:
             _unset_path(step, str(k))
-        return f"updated {step.get('name')!r}: {sorted(set(sets) | set(unset))}"
+        msg = f"updated {step.get('name')!r}: {sorted(set(sets) | set(unset))}"
+        if dropped:
+            # Live (A5): set={params: {ip_addresses: X}} replaced params and
+            # dropped `method`; verify refused it and the turn gave up, never
+            # told the replace was the cause.
+            msg += (f" -- REPLACED the whole mapping, dropping {dropped}; to change "
+                    f"one value keep its siblings with a dotted key, e.g. "
+                    f"set: {{\"{dropped[0].rsplit('.', 1)[0]}.<key>\": value}}")
+        return msg
 
     if kind == "rename_step":
         _, step = _find(steps, op.get("name"))
