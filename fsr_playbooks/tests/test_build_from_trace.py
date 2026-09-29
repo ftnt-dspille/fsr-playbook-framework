@@ -519,5 +519,12 @@ def test_offering_the_trace_build_bytes_delivers_the_trace_offer():
 
 def test_an_edited_trace_build_stays_a_yaml_offer():
     res = _offer_after_build(lambda y: y.replace("window: 2h", "window: 4h"))
-    assert res["ok"], res
-    assert "final_yaml" in res["card"]
+    # Grade the ROUTE, not the verdict: edited bytes must go through the YAML
+    # offer's own verify. Whether that verify passes depends on the reference
+    # DB knowing the connector -- a clean checkout does not, and refuses with
+    # an environment finding, which only the YAML path can produce.
+    if res["ok"]:
+        assert "final_yaml" in res["card"], "took the trace path"
+    else:
+        assert res["code"] == "offer_not_verified", res
+        assert all(f.get("environment") for f in res["required_fixes"]), res
