@@ -85,10 +85,6 @@ SAFE_TOOLS: list[str] = [
     # and the model falls back to printing YAML at the analyst -- which is how
     # edits silently failed to land in live sessions.
     "emit_enhancement_offer",
-    # Value-level fix card: a before→after patch to one step/field of the OPEN
-    # playbook, accepted/rejected inline. Build-only (the widget renders it via
-    # its patch_proposal card; the connector applies it on accept via reply_tool).
-    "emit_patch_proposal",
     # Phase 1.1 -- HTTP fallback authoring helper.
     "propose_http_fallback",
     # Phase 1.2 -- live triage (read-only FSR).
@@ -181,9 +177,6 @@ TOOL_TIERS: dict[str, int] = {
     # the analyst's accept, in the connector, through update_playbook's
     # snapshot-then-PUT -- a human gate, not an agent one.
     "emit_enhancement_offer": 0,
-    # Emitting the card is tier 0 (pure local shaping); the card's own `tier`
-    # field is what gates the Apply button client-side, mirroring action_card.
-    "emit_patch_proposal": 0,
     "propose_http_fallback": 0,
     # Phase 1.2 -- read-only FSR API.
     # Tier-dynamic. Resolved per call.
@@ -564,8 +557,7 @@ _READ_ONLY_TURN: ContextVar[bool] = ContextVar("_read_only_turn", default=False)
 # `push_playbook` is already tier 3 unconditionally; listed for intent.
 WRITE_FRONTIER_TOOLS = frozenset({
     "verify_enhancement", "edit_playbook",
-    "emit_enhancement_offer", "emit_playbook_offer", "emit_patch_proposal",
-    "push_playbook",
+    "emit_enhancement_offer", "emit_playbook_offer", "push_playbook",
 })
 
 # The subset of the frontier whose TIER the change-affordance gate may raise.
@@ -611,7 +603,7 @@ CHANGE_GATED_TOOLS: frozenset[str] = frozenset()
 # indirection deeper. These are the card_types whose constituents are in
 # WRITE_FRONTIER_TOOLS.
 _FRONTIER_CARD_TYPES = frozenset({
-    "enhancement_offer", "playbook_offer", "patch_proposal",
+    "enhancement_offer", "playbook_offer",
 })
 
 
@@ -1124,8 +1116,7 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
             "card_type": {
                 "type": "string",
                 "enum": ["choice", "action", "manual_input", "capability_gap",
-                         "playbook_offer", "patch_proposal",
-                         "enhancement_offer", "verdict"],
+                         "playbook_offer", "enhancement_offer", "verdict"],
                 "description": "Which card to render; see the tool "
                                "description for when each applies.",
             },
@@ -1263,34 +1254,6 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                     "first. Do not claim `analyst` to bypass the floor."
                 ),
             },
-        },
-    },
-    "emit_patch_proposal": {
-        "type": "object",
-        "required": ["id", "title", "before_yaml", "after_yaml"],
-        "additionalProperties": False,
-        "properties": {
-            "id": {"type": "string", "minLength": 1,
-                   "description": "Stable card id; echoed on resume."},
-            "title": {"type": "string", "minLength": 1,
-                      "description": "One-line summary of the fix."},
-            "before_yaml": {"type": "string", "minLength": 1,
-                            "description": "Current snippet being replaced "
-                                           "(minimal -- just the changing lines)."},
-            "after_yaml": {"type": "string", "minLength": 1,
-                           "description": "Proposed replacement snippet."},
-            "rationale": {"type": "string",
-                          "description": "Optional one line on why."},
-            "target_step": {"type": "string",
-                            "description": "Optional step name the patch targets."},
-            "target_path": {"type": "string",
-                            "description": "Optional dotted path within the step "
-                                           "(e.g. arguments.ip)."},
-            "tier": {"type": "integer", "minimum": 0,
-                     "description": "Approval tier; >=3 gates Apply behind step-up."},
-            "reply_tool": {"type": "string",
-                           "description": "Tool the connector calls on accept "
-                                          "(default apply_patch)."},
         },
     },
     "emit_manual_input": {
@@ -1660,7 +1623,6 @@ RETIRED_TO_UNION: dict[str, str] = {
     "emit_choice_card": "emit_card", "emit_action_card": "emit_card",
     "emit_manual_input": "emit_card", "emit_capability_gap_card": "emit_card",
     "emit_playbook_offer": "emit_card", "emit_enhancement_offer": "emit_card",
-    "emit_patch_proposal": "emit_card",
     # B3a (2026-09). Every name below was called 0-2 times in 287 live
     # sessions on .159 while its schema rode on every turn (41 tools, ~40k
     # chars, identical for triage and build).

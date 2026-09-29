@@ -119,10 +119,9 @@ def test_budget_note_progression():
 def test_gate_refuses_open_playbook_frontier_without_playbook():
     plan = plan_turn("build", context=TurnContext(has_open_playbook=False))
     for call in (
-        ("emit_patch_proposal", {}),
         ("emit_enhancement_offer", {}),
         ("verify_enhancement", {}),
-        ("emit_card", {"card_type": "patch_proposal"}),
+        ("edit_playbook", {}),
         ("emit_card", {"card_type": "enhancement_offer"}),
     ):
         r = plan.gate_refusal(*call)
@@ -132,8 +131,8 @@ def test_gate_refuses_open_playbook_frontier_without_playbook():
 
 def test_gate_affords_with_open_playbook_and_other_tools():
     plan = plan_turn("build", context=TurnContext(has_open_playbook=True))
-    assert plan.gate_refusal("emit_patch_proposal", {}) is None
-    assert plan.gate_refusal("emit_card", {"card_type": "patch_proposal"}) is None
+    assert plan.gate_refusal("emit_enhancement_offer", {}) is None
+    assert plan.gate_refusal("emit_card", {"card_type": "enhancement_offer"}) is None
     no_pb = plan_turn("triage")
     assert no_pb.gate_refusal("run_op", {}) is None
     assert no_pb.gate_refusal("emit_card", {"card_type": "capability_gap"}) is None
@@ -142,19 +141,19 @@ def test_gate_affords_with_open_playbook_and_other_tools():
 
 def test_dispatch_consults_installed_plan_and_only_then():
     # No plan installed: gate inert -- validation error, not not_afforded.
-    out = dispatch("emit_card", {"card_type": "patch_proposal"})
+    out = dispatch("emit_card", {"card_type": "enhancement_offer"})
     assert (out or {}).get("code") != "not_afforded"
 
     plan = plan_turn("build")  # has_open_playbook defaults False
     token = set_turn_plan(plan)
     try:
         assert active_turn_plan() is plan
-        gated = dispatch("emit_card", {"card_type": "patch_proposal"})
+        gated = dispatch("emit_card", {"card_type": "enhancement_offer"})
         assert gated["code"] == "not_afforded"
         # resume path (_internal) bypasses the affordance gate like other
         # turn-scoped gates -- an approved action must never re-refuse.
         resumed = dispatch(
-            "emit_card", {"card_type": "patch_proposal"}, _internal=True)
+            "emit_card", {"card_type": "enhancement_offer"}, _internal=True)
         assert (resumed or {}).get("code") != "not_afforded"
     finally:
         reset_turn_plan(token)

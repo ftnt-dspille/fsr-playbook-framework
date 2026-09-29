@@ -92,12 +92,11 @@ class TurnBudget:
 # Card types whose accept-path writes to the OPEN playbook. With no playbook
 # open there is nothing to patch/enhance, so the affordance gate refuses them
 # at dispatch (still advertised -- the refusal teaches, removal never did).
-_OPEN_PLAYBOOK_CARD_TYPES = frozenset({"patch_proposal", "enhancement_offer"})
+_OPEN_PLAYBOOK_CARD_TYPES = frozenset({"enhancement_offer"})
 # Direct (pre-union) emitters for the same frontier, kept in lockstep with
-# intents.ENHANCE_ONLY_TOOLS + emit_patch_proposal.
+# intents.ENHANCE_ONLY_TOOLS.
 _OPEN_PLAYBOOK_TOOLS = frozenset({
-    "emit_patch_proposal", "emit_enhancement_offer", "verify_enhancement",
-    "edit_playbook",
+    "emit_enhancement_offer", "verify_enhancement", "edit_playbook",
 })
 
 

@@ -55,7 +55,7 @@ class TestEffectiveNameMapping:
 
         old_names = [
             "emit_playbook_offer", "emit_enhancement_offer",
-            "emit_patch_proposal", "emit_action_card",
+            "emit_action_card",
             "emit_choice_card", "emit_manual_input",
             "emit_capability_gap_card",
         ]

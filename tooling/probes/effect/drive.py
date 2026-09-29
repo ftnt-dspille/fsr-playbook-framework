@@ -1,21 +1,17 @@
 """Drive the connector the way the WIDGET drives it.
 
 Harness rule paid for in blood: mirror the widget's payload exactly. Sending
-`decision:"accept"` where the widget sends `"approve"` routes a patch_proposal
-into the playbook_offer branch and comes back "no recorded actions in the
-trace" -- which reads exactly like a product bug and is not one.
+`decision:"accept"` where the widget sends `"approve"` once routed a card into
+the playbook_offer branch and came back "no recorded actions in the trace" --
+which reads exactly like a product bug and is not one.
 
-The payload shapes below are transcribed from
+The payload shape below is transcribed from
 `fortiaiAgenticAssistant/widget/view.controller.js`:
 
-  acceptPatchProposal   -> _runResumeAction(cardId, 'approve', null, null,
-                             {reply_tool, workflow_iri})
-                           => {session_id, decision, card_id, args,
-                               reply_tool, workflow_iri, mode}
   acceptEnhancementOffer-> _runResumeOffer(offerId, 'accept', null, null, iri)
                            => {session_id, decision, offer_id, workflow_iri, mode}
 
-If either handler changes, this file is wrong and the probes start lying.
+If that handler changes, this file is wrong and the probes start lying.
 """
 from __future__ import annotations
 
@@ -89,18 +85,6 @@ def resume(payload: dict, *, config: str = CONFIG, version: str = VERSION) -> di
     if not isinstance(res, dict):
         raise RuntimeError(f"chat_resume returned non-dict: {res!r:.300}")
     return res
-
-
-def accept_patch_proposal(session: str, card: dict, workflow_iri: str) -> dict:
-    """acceptPatchProposal, verbatim."""
-    return resume({
-        "session_id": session,
-        "decision": "approve",
-        "card_id": card.get("card_id") or card.get("id") or card.get("proposal_id"),
-        "args": None,
-        "reply_tool": card.get("reply_tool"),
-        "workflow_iri": workflow_iri,
-    })
 
 
 def accept_enhancement_offer(session: str, card: dict, workflow_iri: str) -> dict:

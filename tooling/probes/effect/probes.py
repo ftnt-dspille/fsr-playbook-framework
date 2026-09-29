@@ -9,8 +9,8 @@ Verdicts:
   FAIL      the affordance fired and the box did not change (or changed wrong)
   BLOCKED   the turn never produced the card under test -- the write path was
             never reached, so this run says nothing about the write. Named
-            separately from FAIL because the cause is upstream (usually #132,
-            the model narrating instead of calling emit_patch_proposal).
+            separately from FAIL because the cause is upstream (the model
+            narrating the edit instead of carding it).
   ENV-SKIP  the box/connector is unreachable -- not a product signal
 """
 from __future__ import annotations
@@ -106,68 +106,11 @@ def _seed(slug: str):
     return seeded, entity, coll
 
 
-# ── A5 -- the snippet-splice apply path ───────────────────────────────
+# A5 (the patch_proposal snippet-splice apply) was retired with the card in
+# 2026-09: the model had stopped choosing it (BLOCKED every run), and A6 grades
+# the same one-value edit through the path that replaced it.
 
 NEW_IP = "203.0.113.99"
-
-
-def probe_a5_snippet_apply() -> Result:
-    """A value-level edit applied through `patch_proposal` -> `apply_patch`.
-
-    The documented NORMAL case: the card's `after_yaml` is a minimal SNIPPET,
-    spliced into the stored playbook by `_splice_patch_snippet`. Only
-    `apply_mode: whole_doc` was ever live-validated, so this branch has shipped
-    with zero live coverage over a normal write path -- the reason it is first.
-    """
-    rid, title = "A5", "snippet-splice apply writes the edited arg"
-    seeded, entity, coll = _seed("a5")
-    try:
-        before = scratch.step_arg(seeded["workflow"], "Block IP", "ip_addresses")
-        if before is None:
-            return Result(rid, title, "BLOCKED",
-                          "seed read-back has no ip_addresses arg on 'Block IP' -- "
-                          "the probe cannot tell a write from a miss", str(before))
-
-        session = drive.new_session("a5")
-        # Name the affordance: this probe tests apply_patch's snippet splice,
-        # not the model's card routing (that is #132's territory). Left to its
-        # own preference the model may stage the same edit as an
-        # enhancement_offer -- equally legitimate, but it resumes through
-        # update_playbook and never reaches the splice under test.
-        res = drive.turn(
-            f"In the step 'Block IP', change ip_addresses to {NEW_IP}. "
-            "Change nothing else. Stage it as a one-click patch proposal "
-            "(patch_proposal card) so I can review the exact diff.",
-            session=session, entity=entity)
-        tools = drive.tool_names(res)
-        card = drive.first_card(res, "patch_proposal")
-        if not card:
-            other = ("enhancement_offer" if drive.first_card(res, "enhancement_offer")
-                     else "none")
-            return Result(rid, title, "BLOCKED",
-                          f"no patch_proposal card (other card: {other}); the "
-                          "splice path was never reached -- see #132",
-                          str(before), "", tools)
-
-        reply = _reply(drive.accept_patch_proposal(session, card, seeded["iri"]))
-        after_wf = scratch.read_workflow(seeded["iri"])
-        after = scratch.step_arg(after_wf, "Block IP", "ip_addresses")
-        names_before = scratch.step_names(seeded["workflow"])
-        names_after = scratch.step_names(after_wf)
-
-        if after is None or NEW_IP not in str(after):
-            return Result(rid, title, "FAIL",
-                          "Apply returned, the box still holds the OLD value",
-                          str(before), str(after), tools, reply)
-        if names_after != names_before:
-            return Result(rid, title, "FAIL",
-                          "the value landed but the step set changed: "
-                          f"{names_before} -> {names_after}",
-                          str(before), str(after), tools, reply)
-        return Result(rid, title, "PASS", "edited arg is on the box, steps intact",
-                      str(before), str(after), tools, reply)
-    finally:
-        scratch.purge(coll)
 
 
 # ── A2 -- the enhancement_offer accept path ───────────────────────────
@@ -175,8 +118,7 @@ def probe_a5_snippet_apply() -> Result:
 def probe_a2_enhancement_offer() -> Result:
     """An accepted `enhancement_offer` must reach the workflow record.
 
-    The enhance twin of the apply_patch bug: a different resume branch
-    (`_resume_enhancement_offer_accept`) over the same pre-write guard.
+    Resumes through `_resume_enhancement_offer_accept` and the pre-write guard.
     """
     rid, title = "A2", "accepted enhancement_offer writes the new step"
     seeded, entity, coll = _seed("a2")
@@ -190,11 +132,9 @@ def probe_a2_enhancement_offer() -> Result:
         tools = drive.tool_names(res)
         card = drive.first_card(res, "enhancement_offer")
         if not card:
-            other = ("patch_proposal" if drive.first_card(res, "patch_proposal")
-                     else "none")
             return Result(rid, title, "BLOCKED",
-                          f"no enhancement_offer card (other card: {other}) -- "
-                          "delivery never happened, so the write path is untested",
+                          "no enhancement_offer card -- delivery never "
+                          "happened, so the write path is untested",
                           str(before), "", tools)
 
         reply = _reply(drive.accept_enhancement_offer(session, card, seeded["iri"]))
@@ -239,19 +179,14 @@ def probe_a3_delete_step() -> Result:
             "'End'. Change nothing else.",
             session=session, entity=entity)
         tools = drive.tool_names(res)
-        card = (drive.first_card(res, "patch_proposal")
-                or drive.first_card(res, "enhancement_offer"))
+        card = drive.first_card(res, "enhancement_offer")
         if not card:
             return Result(rid, title, "BLOCKED",
-                          "no patch_proposal or enhancement_offer card -- the "
-                          "deletion was never offered, so the guard is untested",
+                          "no enhancement_offer card -- the deletion was never "
+                          "offered, so the guard is untested",
                           str(before), "", tools)
 
-        if card.get("type") == "patch_proposal":
-            reply = _reply(drive.accept_patch_proposal(session, card, seeded["iri"]))
-        else:
-            reply = _reply(drive.accept_enhancement_offer(session, card, seeded["iri"]))
-        reply = f"via {card.get('type')}; {reply}"
+        reply = _reply(drive.accept_enhancement_offer(session, card, seeded["iri"]))
         after_wf = scratch.read_workflow(seeded["iri"])
         after = scratch.step_names(after_wf)
 
@@ -281,8 +216,7 @@ def _block_ip_args(wf: dict | None) -> dict:
 def probe_a6_value_edit_lands_exactly() -> Result:
     """"Change one value" must change that value and nothing else, on the box.
 
-    A5 pins the patch_proposal splice; this one leaves the card to the model
-    (live it now always picks edit_playbook -> enhancement_offer) and grades
+    The model's path is edit_playbook -> enhancement_offer; the probe grades
     only the effect. It exists because of a bug that path shipped: update_step
     with set={"params.ip_addresses": X} wrote a literal sibling key, verify
     passed it, and Accept would have "saved" with the old IP still in params.
@@ -303,16 +237,11 @@ def probe_a6_value_edit_lands_exactly() -> Result:
             f"In the step 'Block IP', change ip_addresses to {NEW_IP}. "
             "Change nothing else.", session=session, entity=entity)
         tools = drive.tool_names(res)
-        card = (drive.first_card(res, "enhancement_offer")
-                or drive.first_card(res, "patch_proposal"))
+        card = drive.first_card(res, "enhancement_offer")
         if not card:
-            return Result(rid, title, "BLOCKED",
-                          "no enhancement_offer or patch_proposal card",
+            return Result(rid, title, "BLOCKED", "no enhancement_offer card",
                           str(was_params), "", tools, _reply(res))
-        if card.get("type") == "patch_proposal":
-            reply = _reply(drive.accept_patch_proposal(session, card, seeded["iri"]))
-        else:
-            reply = _reply(drive.accept_enhancement_offer(session, card, seeded["iri"]))
+        reply = _reply(drive.accept_enhancement_offer(session, card, seeded["iri"]))
         after_wf = scratch.read_workflow(seeded["iri"])
         now = _block_ip_args(after_wf)
         now_params = dict(now.get("params") or {})
@@ -332,14 +261,13 @@ def probe_a6_value_edit_lands_exactly() -> Result:
             return Result(rid, title, "FAIL", "the value landed but the step set changed",
                           str(was_params), str(now_params), tools, reply)
         return Result(rid, title, "PASS",
-                      f"only ip_addresses changed (via {card.get('type')}); no junk keys",
+                      "only ip_addresses changed; no junk keys",
                       str(was_params), str(now_params), tools, reply)
     finally:
         scratch.purge(coll)
 
 
 ALL = {
-    "A5": probe_a5_snippet_apply,
     "A2": probe_a2_enhancement_offer,
     "A3": probe_a3_delete_step,
     "A6": probe_a6_value_edit_lands_exactly,

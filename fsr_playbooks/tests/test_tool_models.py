@@ -19,7 +19,6 @@ from pydantic import ValidationError
 from fsr_playbooks.llm.tool_models import (
     EmitActionCardArgs,
     EmitChoiceCardArgs,
-    EmitPatchProposalArgs,
     GetRecordArgs,
 )
 from fsr_playbooks.mcp_server import tools_emit
@@ -111,58 +110,19 @@ def test_emit_choice_card_rejects_missing_required():
     assert "title" not in msg
 
 
-# --- emit_patch_proposal ---------------------------------------------------
+# --- retired: patch_proposal ----------------------------------------------
 
 
-def test_emit_patch_proposal_accepts_real_signature():
-    EmitPatchProposalArgs(
-        id="fix-ip-jinja",
-        title="Fix the source-IP jinja in 'Block source'",
-        before_yaml="ip: {{ vars.records[0].ip }}",
-        after_yaml="ip: {{ vars.input.records[0].ip }}",
-        rationale="records[0] is empty on a record-action trigger",
-        target_step="Block source",
-        target_path="arguments.ip",
-        tier=0,
-        reply_tool="apply_patch",
-    )
-
-
-def test_emit_patch_proposal_rejects_missing_required():
-    with pytest.raises(ValidationError) as exc:
-        EmitPatchProposalArgs(id="p", title="t")  # missing before/after
-    msg = str(exc.value)
-    assert "before_yaml" in msg and "after_yaml" in msg
-
-
-def test_emit_patch_proposal_tool_builds_card_with_defaults():
-    out = tools_emit.emit_patch_proposal(
-        id="p1", title="Fix ip", before_yaml="ip: a", after_yaml="ip: b")
-    assert out["ok"] is True
-    card = out["card"]
-    assert card["type"] == "patch_proposal"
-    assert card["proposal_id"] == "p1"
-    assert card["reply_tool"] == "apply_patch"  # default
-    assert card["tier"] == 0                     # default
-    assert "target" not in card                  # no step/path given
-
-
-def test_emit_patch_proposal_tool_rejects_noop():
-    out = tools_emit.emit_patch_proposal(
-        id="p2", title="t", before_yaml="ip: a", after_yaml="  ip: a  ")
-    assert out["ok"] is False
-    assert out["code"] == "noop_patch"
-
-
-def test_emit_patch_proposal_dispatches_and_halts_via_registry():
+def test_the_retired_patch_proposal_is_refused_toward_its_replacement():
+    """patch_proposal was retired 2026-09: the model had stopped choosing it,
+    and its snippet-match apply was fragile. A call that still asks for it is
+    refused at the arg gate, which names enhancement_offer."""
     from fsr_playbooks.llm import tools
-    assert "emit_patch_proposal" in tools.REGISTRY
-    assert tools.REGISTRY["emit_patch_proposal"].tier == 0
-    r = tools.dispatch("emit_patch_proposal", dict(
-        id="p3", title="Fix", before_yaml="a: 1", after_yaml="a: 2",
-        target_step="S", target_path="arguments.a"))
-    assert r["ok"] and r["card"]["type"] == "patch_proposal"
-    assert r["card"]["target"] == {"step": "S", "path": "arguments.a"}
+    assert "emit_patch_proposal" not in tools.REGISTRY
+    r = tools.dispatch("emit_card", {"card_type": "patch_proposal",
+                                     "payload": {"title": "Fix ip"}})
+    assert r["ok"] is False and r["code"] == "invalid_tool_args"
+    assert "enhancement_offer" in r["error"]
 
 
 # --- signature-sync guard --------------------------------------------------
@@ -176,7 +136,6 @@ def test_emit_patch_proposal_dispatches_and_halts_via_registry():
 REAL_FNS = {
     "emit_action_card": tools_emit.emit_action_card,
     "emit_choice_card": tools_emit.emit_choice_card,
-    "emit_patch_proposal": tools_emit.emit_patch_proposal,
 }
 
 

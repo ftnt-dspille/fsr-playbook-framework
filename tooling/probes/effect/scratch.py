@@ -111,7 +111,7 @@ def step_by_name(wf: dict | None, name: str) -> dict | None:
 
 
 def step_arg(wf: dict | None, step: str, key: str) -> Any:
-    """One rendered argument off a named step -- A5's terminal effect.
+    """One rendered argument off a named step.
 
     Connector-step args nest under `arguments.params`; native steps put them
     at `arguments` top level. Look in both rather than assuming, because a

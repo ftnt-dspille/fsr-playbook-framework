@@ -663,92 +663,6 @@ def _unfence(text: str) -> str:
     return m.group(1) if m else text
 
 
-@mcp.tool()
-def emit_patch_proposal(
-    id: str,
-    title: str,
-    before_yaml: str,
-    after_yaml: str,
-    rationale: str | None = None,
-    target_step: str | None = None,
-    target_path: str | None = None,
-    tier: int | None = None,
-    reply_tool: str | None = None,
-) -> dict[str, Any]:
-    """Emit a `patch_proposal` card: a value-level fix the agent proposes for
-    ONE step/field of the open playbook, shown in chat as a before→after diff
-    the analyst accepts or rejects inline. Use this -- not a prose "you could
-    change X to Y" -- whenever you want to offer a concrete, one-click edit to
-    the playbook the user has open (e.g. correct a jinja expression, fix a
-    wrong arg value, tighten a condition). The turn HALTS on the card; on accept
-    the widget resumes and the connector applies the fix via `reply_tool`.
-
-    Distinct from the YAML pane's whole-document "Check & fix" panel (driven by
-    validate_yaml's `corrected_yaml`): this is a targeted, agent-initiated CHAT
-    card scoped to one step/field.
-
-    Args:
-      id: stable card id; echoed on resume.
-      title: one-line plain-English summary of the fix (e.g. "Fix the IP jinja
-        in step 'Block source'").
-      before_yaml: the current snippet being replaced (the step/field as it is
-        now). Shown as the "before" side of the diff. Keep it minimal -- just the
-        lines that change -- so the diff is readable.
-      after_yaml: the proposed replacement snippet. Shown as "after".
-      rationale: optional one line on WHY (e.g. "records[0] is empty on a
-        record-action trigger; use vars.input.records[0]").
-      target_step: optional step display name the patch targets (for the card's
-        header).
-      target_path: optional dotted path within the step (e.g.
-        "arguments.ip") for precise attribution.
-      tier: optional approval tier; >=3 gates the Apply button behind step-up,
-        mirroring action_card. Defaults to 0 (no step-up).
-      reply_tool: the tool the connector invokes on accept. Defaults to
-        "apply_patch".
-
-    Returns {ok: True, card:{type:"patch_proposal", ...}} on success, else
-    {ok: False, code, message}."""
-    for label, val in (("id", id), ("title", title),
-                       ("before_yaml", before_yaml), ("after_yaml", after_yaml)):
-        if not isinstance(val, str) or not val.strip():
-            return _err("missing_field", f"{label} must be a non-empty string")
-    # Live (effect probe A5): both sides arrived wrapped in ```yaml fences,
-    # which the card's diff would show as lines and no apply can match.
-    before_yaml, after_yaml = _unfence(before_yaml), _unfence(after_yaml)
-    # `tier` rides inside emit_card's payload, which the arg gate does not
-    # type: "0" / 0.0 are the same tier, so take them (lossless).
-    if isinstance(tier, str) and tier.strip().isdigit():
-        tier = int(tier.strip())
-    elif isinstance(tier, float) and tier.is_integer():
-        tier = int(tier)
-    if before_yaml.strip() == after_yaml.strip():
-        return _err("noop_patch",
-                    "before_yaml and after_yaml are identical -- there is "
-                    "nothing to change. Only propose a patch that alters the "
-                    "playbook.")
-    if tier is not None and (not isinstance(tier, int) or tier < 0):
-        return _err("bad_tier", "tier must be a non-negative integer")
-    card: dict[str, Any] = {
-        "type": "patch_proposal",
-        "proposal_id": id,
-        "title": title.strip(),
-        "before_yaml": before_yaml,
-        "after_yaml": after_yaml,
-        "tier": tier if isinstance(tier, int) else 0,
-        "reply_tool": (reply_tool or "apply_patch"),
-    }
-    if isinstance(rationale, str) and rationale.strip():
-        card["rationale"] = rationale.strip()
-    target: dict[str, str] = {}
-    if isinstance(target_step, str) and target_step.strip():
-        target["step"] = target_step.strip()
-    if isinstance(target_path, str) and target_path.strip():
-        target["path"] = target_path.strip()
-    if target:
-        card["target"] = target
-    return {"ok": True, "card": card}
-
-
 _NON_ACTION_STEP_TYPES = frozenset({"end", "stop"})
 
 
@@ -1347,10 +1261,10 @@ CARD_TYPES: dict[str, str] = {
     "manual_input": "emit_manual_input",
     "capability_gap": "emit_capability_gap_card",
     "playbook_offer": "emit_playbook_offer",
-    "patch_proposal": "emit_patch_proposal",
     "enhancement_offer": "emit_enhancement_offer",
     "verdict": "emit_verdict",
 }
+
 
 
 @mcp.tool()
@@ -1366,8 +1280,7 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     in prose. `playbook_offer` = deliver a NEW playbook (the mandatory
     terminal action of a build turn). `enhancement_offer` = apply a verified
     edit to the OPEN playbook (terminal action of an enhance turn; needs
-    `verified_id` from edit_playbook). `patch_proposal` = one-click
-    before/after fix to one step or field of the open playbook. `verdict` =
+    `verified_id` from edit_playbook). `verdict` =
     structured investigation conclusion with disposition, severity, confidence,
     and cited findings (evidence tied to tool_call_ids).
     """

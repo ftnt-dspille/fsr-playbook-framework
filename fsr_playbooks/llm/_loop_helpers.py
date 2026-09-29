@@ -1147,10 +1147,9 @@ def extract_yaml_block(text: str) -> str | None:
 # added, keep this one a subset of it and add a test that says so.
 _DELIVERY_CARRIERS: dict[str, tuple[str, ...]] = {
     "emit_playbook_offer": ("yaml",),
-    "emit_patch_proposal": ("after_yaml",),
     "push_playbook": ("yaml_text",),
-    # The consolidated emit_card also carries deliverables when a playbook_offer,
-    # patch_proposal, or verdict card_type is used. The payload field holds the YAML
+    # The consolidated emit_card also carries deliverables when a playbook_offer
+    # or verdict card_type is used. The payload field holds the YAML
     # or verdict data.
     "emit_card": ("payload",),
 }
@@ -1225,14 +1224,11 @@ def _carries_delivery(name: Any, args: Any) -> bool:
         payload = args.get("payload", {})
         if not isinstance(payload, dict):
             return False
-        # emit_card carries delivery for playbook_offer, patch_proposal, or verdict
-        if card_type in ("playbook_offer", "patch_proposal"):
+        # emit_card carries delivery for playbook_offer or verdict
+        if card_type == "playbook_offer":
             # Check if payload has substantive YAML
             yaml_val = payload.get("yaml")
             if isinstance(yaml_val, str) and len(yaml_val.strip()) > 40:
-                return True
-            after_yaml = payload.get("after_yaml")
-            if isinstance(after_yaml, str) and len(after_yaml.strip()) > 40:
                 return True
         elif card_type == "verdict":
             # Verdict is delivery if it has a disposition (all verdicts do)
@@ -1267,7 +1263,6 @@ def effective_emit_card_name(old_name: str) -> str | None:
     _CARD_TYPE_MAP = {
         "emit_playbook_offer": "playbook_offer",
         "emit_enhancement_offer": "enhancement_offer",
-        "emit_patch_proposal": "patch_proposal",
         "emit_action_card": "action",
         "emit_choice_card": "choice",
         "emit_manual_input": "manual_input",
@@ -1744,14 +1739,13 @@ class CreateDeliveryGuard:
 # backstopping the delivery end. Fires at most once per turn.
 
 # Tools that prove a turn actually entered the authoring half of the loop.
-# Note: emit_card with playbook_offer, enhancement_offer, patch_proposal, or
+# Note: emit_card with playbook_offer, enhancement_offer, or
 # verdict card_type also proves authoring intent (handled in BuildProgressGuard.note_result).
 _AUTHORING_PROGRESS_TOOLS = frozenset({
     "validate_yaml", "compile_yaml", "verify_playbook",
     "emit_playbook_offer", "build_playbook_from_trace",
     # Enhance authors too -- its own pair means the turn is not stalled.
     "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
-    "emit_patch_proposal",
     # Triage verdicts
     "emit_verdict",
     # The consolidated emit_card when used for offer or verdict types also proves authoring.
@@ -1787,10 +1781,9 @@ _DRAFT_CHECK_TOOLS = frozenset({"validate_yaml", "compile_yaml"})
 _DRAFT_CLOSING_TOOLS = frozenset({
     "verify_playbook", "emit_playbook_offer", "build_playbook_from_trace",
     "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
-    "emit_patch_proposal",
 })
 _DRAFT_CLOSING_CARD_TYPES = frozenset({
-    "playbook_offer", "enhancement_offer", "patch_proposal",
+    "playbook_offer", "enhancement_offer",
 })
 
 UNVERIFIED_DRAFT_DIRECTIVE = (

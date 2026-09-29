@@ -120,7 +120,6 @@ from .tools_emit import (
     emit_decision_step,
     emit_enhancement_offer,
     emit_manual_input,
-    emit_patch_proposal,
     emit_playbook_offer,
     emit_verdict,  # Internal only; not exported in __all__
 )
@@ -258,7 +257,6 @@ __all__ = [
     "emit_action_card",
     "emit_capability_gap_card",
     "emit_playbook_offer",
-    "emit_patch_proposal",
     "emit_enhancement_offer",
     "emit_manual_input",
     "emit_decision_step",

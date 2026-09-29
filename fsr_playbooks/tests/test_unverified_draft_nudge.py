@@ -149,7 +149,7 @@ def test_no_nudge_on_a_run_request():
 def test_no_nudge_after_an_enhance_offer():
     guard = BuildProgressGuard()
     guard.note_result("compile_yaml", {}, {"ok": True})
-    guard.note_result("emit_card", {"card_type": "patch_proposal"}, {"ok": True})
+    guard.note_result("emit_card", {"card_type": "enhancement_offer"}, {"ok": True})
     assert not guard.unverified_draft(set(_NAMES))
 
 

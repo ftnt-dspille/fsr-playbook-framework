@@ -71,7 +71,6 @@ _CARD_TYPE_TO_TOOL = {
     "manual_input": "emit_manual_input",
     "capability_gap": "emit_capability_gap_card",
     "playbook_offer": "emit_playbook_offer",
-    "patch_proposal": "emit_patch_proposal",
     "enhancement_offer": "emit_enhancement_offer",
     "verdict": "emit_verdict",
 }

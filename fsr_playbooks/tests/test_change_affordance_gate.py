@@ -91,7 +91,7 @@ def test_the_gate_can_still_be_armed_for_a_tool_that_really_writes(
     assert "didn't ask me to change anything" in env["summary"]
     # …and the tool NEXT to it in the frontier is still ungated, so arming one
     # name cannot quietly re-arm the whole frontier.
-    assert T._resolve_tier("emit_patch_proposal", {}) < 3
+    assert T._resolve_tier("emit_enhancement_offer", {}) < 3
 
 
 @pytest.mark.parametrize("tool", sorted(T.WRITE_FRONTIER_TOOLS))
@@ -153,31 +153,24 @@ def test_reset_with_a_stale_token_fails_open():
     assert T._change_affordance_present() is True
 
 
-def test_an_unrequested_proposal_reaches_its_own_card_instead():
+def test_an_unrequested_change_card_reaches_its_own_card_instead():
     """The behaviour the double-approval hid.
 
     Live, a free-typed "propose a fix for one field" against an open playbook
-    stopped on "Approval required: emit_patch_proposal -- want me to draft the
-    edit?", and only AFTER approving did the patch card with its own
-    Apply/Dismiss appear. The emit is pure, so the first card gated nothing;
-    now the proposal goes straight to the card that can actually be accepted
-    or dismissed.
+    stopped on "Approval required: ... want me to draft the edit?", and only
+    AFTER approving did the change card with its own Apply/Dismiss appear. The
+    emit is pure, so the first card gated nothing; the change card the analyst
+    can actually accept or dismiss is the gate.
     """
     token = T.set_change_affordance(False)
     try:
-        env = T.dispatch("emit_patch_proposal", {
-            "id": "p1", "title": "Tighten the timeout",
-            "before_yaml": "timeout: 30\n", "after_yaml": "timeout: 300\n",
-        })
+        env = T.dispatch("emit_card", {"card_type": "enhancement_offer",
+                                       "payload": {"id": "e1", "summary": "s",
+                                                   "verified_id": "nope"}})
     finally:
         T.reset_change_affordance(token)
     assert env.get("pending_approval") is not True, \
         "the emit must not stage an approval of its own"
-    card = (env.get("card") or {}) if isinstance(env, dict) else {}
-    assert card.get("type") == "patch_proposal"
-    # The card carries BOTH sides, which is what makes Apply an informed
-    # decision -- the gate that actually protects the playbook.
-    assert card.get("before_yaml") and card.get("after_yaml")
 
 
 def test_ordinary_tier_3_card_is_unaffected():

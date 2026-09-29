@@ -122,28 +122,6 @@ class EmitActionCardArgs(BaseModel):
     requested_by: str | None = None
 
 
-class EmitPatchProposalArgs(BaseModel):
-    """Arguments for the emit_patch_proposal tool.
-
-    Mirrors the registered signature: emit_patch_proposal(id, title,
-    before_yaml, after_yaml, rationale?, target_step?, target_path?, tier?,
-    reply_tool?). The runtime check in tools_emit.emit_patch_proposal is the
-    belt-and-suspenders for callers that bypass the LLM (eval harness, tests);
-    this model is the wire-arg gate on the dispatch path.
-    """
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    title: str
-    before_yaml: str
-    after_yaml: str
-    rationale: str | None = None
-    target_step: str | None = None
-    target_path: str | None = None
-    tier: int | None = None
-    reply_tool: str | None = None
-
-
 class EmitChoiceCardArgs(BaseModel):
     """Arguments for the emit_choice_card tool.
 
@@ -207,7 +185,6 @@ TOOL_MODELS = {
     "search_module_records": SearchModuleRecordsArgs,
     "run_op": RunOpArgs,
     "emit_action_card": EmitActionCardArgs,
-    "emit_patch_proposal": EmitPatchProposalArgs,
     "emit_choice_card": EmitChoiceCardArgs,
     "validate_yaml": ValidateYamlArgs,
     "compile_yaml": CompileYamlArgs,

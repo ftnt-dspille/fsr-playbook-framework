@@ -47,11 +47,7 @@ BUILD_ONLY_TOOLS = frozenset({
     # It was previously listed here AND added to TRIAGE_ONLY_TOOLS by the
     # connector's register_triage_tools(), so BOTH slices subtracted it and no
     # model could call it in any intent.
-    # Value-level fix card for the OPEN playbook -- meaningless in triage (there
-    # is no playbook open to patch), so keep it out of the triage slice.
-    "emit_patch_proposal",
-    # Enhance mode's write path -- same reasoning: triage has no open playbook
-    # to update.
+    # Enhance mode's write path -- triage has no open playbook to update.
     "emit_enhancement_offer",
 })
 

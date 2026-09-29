@@ -1,7 +1,7 @@
 """`make test-effect-probes` -- run the write-through probes and report.
 
     python tooling/probes/effect/runner.py              # every probe
-    python tooling/probes/effect/runner.py --only A5    # one
+    python tooling/probes/effect/runner.py --only A6    # one
     python tooling/probes/effect/runner.py --runs 2     # a defect twice is a defect
 
 Exit 0 iff every probe that actually ran came back PASS. A BLOCKED run is a
@@ -49,7 +49,7 @@ def _run(pid: str, fn, runs: int) -> list[Result]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default="", help="comma-separated probe ids (A5,A2,A3)")
+    ap.add_argument("--only", default="", help="comma-separated probe ids (A2,A3,A6)")
     ap.add_argument("--dump", default="",
                     help="directory for raw turn/resume payloads (re-grade offline)")
     ap.add_argument("--runs", type=int, default=1,

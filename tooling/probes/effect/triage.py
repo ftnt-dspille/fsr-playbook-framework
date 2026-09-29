@@ -1,6 +1,6 @@
 """Phase 2 group T (triage write-through) -- #135.
 
-Phase 1 proved the BUILD/ENHANCE writes (A2/A3/A5: does an accepted card
+Phase 1 proved the BUILD/ENHANCE writes (A2/A3/A6: does an accepted card
 change the playbook?). These prove the TRIAGE writes: an approved containment
 must land on the enforcement point, and an approved record-write must land on
 the record. Both are the #130 arc, formalized from a hand-driven proof into a

@@ -293,10 +293,10 @@ tool-gate: ## which tool does the agent reach for? Run after ANY tool-descriptio
 	  $(if $(REPEAT),--repeat $(REPEAT),) \
 	  $(if $(BASELINE)$(TOOL_GATE_BASELINE),--baseline $(if $(BASELINE),$(BASELINE),$(TOOL_GATE_BASELINE)),)
 
-test-effect-probes: ## LIVE: does the affordance actually WRITE? Seeds a scratch playbook, drives the widget's exact payload, re-reads the box. ONLY=A5,A2,A3 RUNS=2 DUMP=dir
+test-effect-probes: ## LIVE: does the affordance actually WRITE? Seeds a scratch playbook, drives the widget's exact payload, re-reads the box. ONLY=A2,A3,A6 RUNS=2 DUMP=dir
 	@echo "▶ effect probes -- every verdict is a box read, never a card or an ok flag."
 	@echo "  BLOCKED = the card under test never appeared, so the write path was"
-	@echo "  not exercised (usually #132). That exits non-zero on purpose."
+	@echo "  not exercised. That exits non-zero on purpose."
 	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/effect/runner.py \
 	  $(if $(ONLY),--only $(ONLY),) $(if $(RUNS),--runs $(RUNS),) \
 	  $(if $(DUMP),--dump $(DUMP),)
