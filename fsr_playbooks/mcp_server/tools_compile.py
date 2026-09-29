@@ -468,6 +468,9 @@ def build_playbook_from_trace(
     trigger_module = module or getattr(trace, "module", None) or None
     doc = sc.assemble_playbook(compiled, name=name, module=trigger_module)
     yaml_text = sc.to_yaml(doc)
+    # Remembered on the trace (not serialized): an offer of these exact bytes
+    # is delivered as the trace offer -- see tools_emit._is_the_trace_build.
+    trace.last_build_yaml = yaml_text
 
     # Confirm the trace-built playbook imports clean (draft tier).
     try:

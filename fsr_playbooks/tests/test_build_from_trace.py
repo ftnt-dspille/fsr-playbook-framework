@@ -484,3 +484,40 @@ def test_a_value_outside_the_declared_options_is_still_a_gap():
     """Catalog-backed, not a plain-word heuristic: an undeclared value stays."""
     out = build_playbook_from_trace(_vt_trace(["smithDesktop"]).to_json(), name="VT")
     assert "relationships" in (out.get("gaps") or {}).get("VT", [])
+
+
+# --- the trace build, offered as yaml, is still the trace offer -----------------
+# Live (sweep row 5): after build_playbook_from_trace the model re-verified the
+# result and offered the byte-identical YAML as `yaml`. The card then took the
+# hand-authored path and lost every step's verified-wiring flag.
+
+def _offer_after_build(edit=None):
+    from fsr_playbooks.agent import skill_trace as st
+    from fsr_playbooks.mcp_server.tools_emit import emit_playbook_offer
+    t = SkillTrace(module="alerts", record_fields={"destinationIp": "198.51.100.77"})
+    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+                    {"tool": "siem_search",
+                     "args": {"by": "ip", "value": "198.51.100.77", "window": "2h"}},
+                    {"results": []}, step_name="siem_search")
+    st.set_active_trace(t)
+    try:
+        built = build_playbook_from_trace("", name="Hunt")
+        offered = built["yaml"] if edit is None else edit(built["yaml"])
+        return emit_playbook_offer(id="o1", summary="hunts the alert IP",
+                                   yaml="```yaml\n" + offered + "```")
+    finally:
+        st.set_active_trace(None)
+
+
+def test_offering_the_trace_build_bytes_delivers_the_trace_offer():
+    res = _offer_after_build()
+    assert res["ok"], res
+    card = res["card"]
+    assert "final_yaml" not in card, "took the hand-authored path"
+    assert any(o.get("verified") for o in card["ops_summary"]), card["ops_summary"]
+
+
+def test_an_edited_trace_build_stays_a_yaml_offer():
+    res = _offer_after_build(lambda y: y.replace("window: 2h", "window: 4h"))
+    assert res["ok"], res
+    assert "final_yaml" in res["card"]

@@ -561,12 +561,15 @@ def emit_playbook_offer(
         if not isinstance(val, str) or not val.strip():
             return _err("missing_field", f"{label} must be a non-empty string")
 
-    if yaml is not None:
+    from fsr_playbooks.agent import skill_trace as _skill_trace
+
+    if yaml is not None and not _is_the_trace_build(
+            yaml, _skill_trace.get_active_trace()):
         return _offer_from_yaml(id, summary, yaml,
                                 title_suggestion=title_suggestion,
                                 editable_title=editable_title)
-
-    from fsr_playbooks.agent import skill_trace as _skill_trace
+    # Otherwise: no yaml, or yaml that IS this session's trace build -- same
+    # playbook, and the trace offer carries its per-step verified wiring.
     from fsr_playbooks.agent.skill_trace import SkillTrace
     from fsr_playbooks.compiler import skill_compiler as _sc
     from fsr_playbooks.compiler import skill_verify as _sv
@@ -640,6 +643,15 @@ def emit_playbook_offer(
     if draft.get("draft_steps"):
         card["draft_steps"] = draft["draft_steps"]
     return {"ok": True, "card": card}
+
+
+def _is_the_trace_build(yaml_text: str, trace: Any) -> bool:
+    """True when `yaml_text` is, byte for byte, what build_playbook_from_trace
+    last returned for this trace. Live (sweep row 5): the model re-verified the
+    trace build and offered the identical bytes as `yaml`; the card then lost
+    every step's verified-wiring flag, though nothing had been hand-written."""
+    last = getattr(trace, "last_build_yaml", None)
+    return bool(last) and _unfence(yaml_text).strip() == last.strip()
 
 
 _FENCE_RE = re.compile(r"^\s*```[A-Za-z0-9_-]*[ \t]*\n(.*?)\n?\s*```\s*$", re.S)
@@ -875,6 +887,9 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
     """
     if not isinstance(yaml_text, str) or not yaml_text.strip():
         return _err("missing_field", "yaml must be a non-empty string")
+    # A ```yaml fence around the document is not part of it; verify would
+    # refuse the fenced text for a reason that has nothing to do with the YAML.
+    yaml_text = _unfence(yaml_text)
 
     guard = _guard_against_open_playbook(yaml_text)
     if guard is not None:
