@@ -21,7 +21,7 @@ _CARD_OK = {"ok": True, "card": {"type": "action_card"}}
 
 
 def _staged() -> TriageDiscipline:
-    d = TriageDiscipline(authoring=False)
+    d = TriageDiscipline(authoring=False, user_text="block 1.2.3.4")
     d.note_result("emit_action_card", {}, _CARD_OK)
     return d
 
@@ -49,22 +49,22 @@ def test_a_second_card_is_refused_too() -> None:
 
 
 def test_nothing_is_gagged_before_a_card_is_staged() -> None:
-    d = TriageDiscipline(authoring=False)
+    d = TriageDiscipline(authoring=False, user_text="block 1.2.3.4")
     assert d.evaluate("search_module_records", {"module": "alerts"}) is None
 
 
 def test_a_failed_card_does_not_end_the_turn() -> None:
     """The whole point of a bounce is that the model gets to try again."""
-    d = TriageDiscipline(authoring=False)
+    d = TriageDiscipline(authoring=False, user_text="block 1.2.3.4")
     d.note_result("emit_action_card", {},
                   {"ok": False, "code": "editable_fields_not_in_args"})
-    assert d.evaluate("emit_action_card", {"requested_by": "analyst"}) is None
+    assert d.evaluate("emit_action_card", {}) is None
 
 
 def test_the_flag_is_turn_scoped() -> None:
     """A card staged last turn was already answered; a fresh guard is clean."""
     _staged()
-    fresh = TriageDiscipline(authoring=False)
+    fresh = TriageDiscipline(authoring=False, user_text="now isolate the host")
     assert fresh.evaluate("run_op", {"connector": "x", "op": "y"}) is None
 
 
@@ -82,7 +82,7 @@ def test_the_verdict_card_is_not_gagged_after_a_card_is_staged() -> None:
 
 def test_the_consolidated_action_card_stages_too() -> None:
     """`emit_card(card_type='action')` is the only name the model is offered."""
-    d = TriageDiscipline(authoring=False)
+    d = TriageDiscipline(authoring=False, user_text="block 1.2.3.4")
     d.note_result("emit_card", {"card_type": "action"}, _CARD_OK)
     assert d.evaluate("run_op", {"connector": "x", "op": "y"}) is not None
     assert d.evaluate("emit_card", {"card_type": "action"}) is not None

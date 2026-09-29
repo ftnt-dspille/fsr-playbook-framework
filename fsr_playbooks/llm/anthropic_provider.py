@@ -41,6 +41,7 @@ from ._loop_helpers import (
     TriageDiscipline,
     VerdictDeliveryGuard,
     drain_with_idle_timeout,
+    latest_user_text,
     stall_directive,
     unexecuted_tool_calls_note,
     verdict_directive,
@@ -733,6 +734,9 @@ class AnthropicProvider(CapabilityMixin):
             capabilities=(getattr(case_state, "capabilities", None)
                           if case_state is not None else None),
             authoring=_authoring,
+            # The analyst's own words are the only reliable carrier of an
+            # explicit containment order -- see `_detect_analyst_order`.
+            user_text=latest_user_text(messages),
         )
 
         def _call_signature(nm: str, ar: dict[str, Any]) -> str:

@@ -464,14 +464,13 @@ def _is_analyst_ordered(name: str, args: Any) -> bool:
     it did, because the guard sees only `(name, args)`: the analyst's "isolate
     that host" lives in the message text one layer up and is invisible here.
 
-    This is the ONLY path. It used to be backed by `_detect_analyst_order`, a
-    regex over the analyst's message, because the model set `requested_by` on 0
-    of 4 live calls -- it was mentioned only in docstrings, so nothing ever
-    asked for it at the moment it mattered. The floor's deferral now offers it
-    ("if the analyst's own message ordered this, call again with
-    requested_by='analyst'"), so the model states intent as an argument exactly
-    when the floor would otherwise refuse, and no phrase list reads anyone's
-    wording (W3/C3 of the hygiene plan).
+    NOTE: this is the SECONDARY path. It is kept because it costs nothing and
+    an explicit declaration should be honored, but nothing may depend on it --
+    the box model set `requested_by` on 0 of 4 live containment calls across 2
+    runs. It does not lie about intent; it ignores an optional parameter. The
+    path that actually fires is `_detect_analyst_order` over the user's own
+    message -- see its docstring for why the original objection to reading the
+    phrasing no longer holds.
 
     This exempts STAGING, not execution. The card still goes to a human, and
     the tier/approval gate is untouched -- that gate is what actually stops a
@@ -490,6 +489,37 @@ def _is_analyst_ordered(name: str, args: Any) -> bool:
     if name not in _CONTAINMENT_STAGING_TOOLS:
         return False
     return str((args or {}).get("requested_by") or "").strip().lower() == "analyst"
+
+
+# An imperative containment verb. Deliberately not every synonym in
+# `_CONTAINMENT_VERBS` -- this reads human phrasing, not op names.
+_ORDER_VERBS = (
+    r"block|isolate|quarantine|contain|disable|suspend|revoke|ban|deactivate|"
+    r"blacklist|block\s?list|kill|terminate|shut\s?down|"
+    r"take\s+(?:\S+\s+){1,3}offline|"
+    r"remediate|lock\s+out"
+)
+# Directive framing: the verb opens the clause, or follows a lead-in that makes
+# it a request rather than a question about one.
+_ORDER_RE = re.compile(
+    r"(?:^|[.;!?\n]\s*|,\s*(?:then|and)\s+|\b(?:please|now|go\s+ahead\s+and|"
+    r"i\s+want\s+you\s+to|i\s+need\s+you\s+to|you\s+(?:should|must|need\s+to)|"
+    r"let'?s)\s+)"
+    r"(?:please\s+|just\s+|immediately\s+)?"
+    rf"(?:{_ORDER_VERBS})\b",
+    re.IGNORECASE,
+)
+# Phrasings that use a containment verb WITHOUT ordering one: a question about
+# whether to act, a hypothetical, or a description of something already done.
+_NOT_AN_ORDER_RE = re.compile(
+    r"\b(?:was|were|is|are|been|got|already)\s+(?:\w+\s+){0,2}"
+    rf"(?:{_ORDER_VERBS})(?:ed|d)?\b"
+    rf"|\b(?:should|shall|would|could|can|may|might|do|did|does)\s+(?:i|we|you|it|they)\b"
+    rf"|\bif\s+(?:i|we|you|they)\s+(?:{_ORDER_VERBS})\b"
+    rf"|\bwhy\s+(?:was|were|is|are)\b"
+    rf"|\b(?:{_ORDER_VERBS})(?:ed|d)\s+by\b",
+    re.IGNORECASE,
+)
 
 
 def latest_user_text(messages: Any) -> str:
@@ -520,6 +550,47 @@ def latest_user_text(messages: Any) -> str:
                 return joined
     return ""
 
+
+def _detect_analyst_order(user_text: str) -> bool:
+    """True when the analyst's own message is an explicit order to contain.
+
+    This is the path the exemption actually runs on. The original design put
+    the declaration on the tool call instead, reasoning that "a regex over the
+    user's wording would put a phrasing-dependent branch in a security gate,
+    where a miss is another silent refusal." Live evidence inverts that:
+
+      * The declared field misses 100% of the time (0 of 4 calls, 2 runs), so
+        it *is* the silent-refusal path the objection warned about. A detector
+        with imperfect recall is strictly better than one with zero.
+      * A miss here costs exactly what today costs -- the floor holds and the
+        agent is told to investigate first. It is the status quo, not a new
+        failure mode.
+      * A false positive costs a card staged early. It does NOT act: this
+        exempts staging only, and the tier/approval gate still routes the card
+        to a human. The gate that stops a bad action is untouched.
+
+    Asymmetric costs, so this leans toward recall: it fires on an imperative
+    containment verb in directive position, and stands down on the phrasings
+    that use the same verbs without ordering anything -- a question about
+    whether to act ("should we block it?"), a hypothetical ("if we block the
+    IP..."), or a report of something already done ("the IP was blocked by the
+    firewall"). Empty/None text is not an order.
+    """
+    text = (user_text or "").strip()
+    if not text:
+        return False
+
+    # Evaluate clause-by-clause so one descriptive sentence in a long message
+    # can't veto an order in another ("The IP was blocked yesterday. Block it
+    # on the edge firewall too.").
+    for clause in re.split(r"(?<=[.;!?\n])\s+", text):
+        if not clause.strip():
+            continue
+        if _NOT_AN_ORDER_RE.search(clause):
+            continue
+        if _ORDER_RE.search(clause):
+            return True
+    return False
 
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
@@ -636,6 +707,7 @@ class TriageDiscipline:
         state: Any = None,  # Investigation | None
         capabilities: Any = None,  # Capabilities | None
         authoring: bool = False,
+        user_text: str = "",
     ):
         import threading
         self.floor = floor
@@ -660,10 +732,12 @@ class TriageDiscipline:
             self._called.update(state.called_once_sigs)
         # Hunt floor is permanently satisfied if state says so
         self._hunt_floor_met = state is not None and getattr(state, "hunt_floor_met", False)
-        # Set by a staging call that declares `requested_by='analyst'` -- which
-        # the floor's own deferral offers. Turn-scoped: this instance is rebuilt
-        # per turn, so an order never outlives the message that gave it.
-        self._analyst_ordered = False
+        # Seeded from the analyst's OWN message, which is the path that fires;
+        # `_is_analyst_ordered` can still set it later from a declared
+        # `requested_by`, but nothing depends on the model doing so (it never
+        # has -- 0 of 4 live calls). Turn-scoped: this instance is rebuilt per
+        # turn, so an order never outlives the message that gave it.
+        self._analyst_ordered = _detect_analyst_order(user_text)
         # Correlation searches already made this turn: {module\x00query} sigs,
         # for the duplicate-search guard. Turn-scoped like _analyst_ordered --
         # a later turn may legitimately re-search after the world changed.
@@ -920,19 +994,15 @@ class TriageDiscipline:
                 "resume_call": name,
                 "directive": (
                     f"Deferred, not cancelled: `{name}` was NOT executed yet. "
-                    f"If the analyst's own message told you to take this action, "
-                    f"call `{name}` again NOW with the same arguments plus "
-                    f"requested_by='analyst' -- it stages the card for their "
-                    f"approval straight away. Otherwise: you've run "
-                    f"{self.invest_attempts} of {self.floor} required "
+                    f"You've run {self.invest_attempts} of {self.floor} required "
                     f"investigation steps, and staging containment now would act "
                     f"on an alert you haven't scoped. Your NEXT call must be: "
                     f"{next_step}. Then, after ~{remaining} more evidence "
                     f"call(s), CALL `{name}` AGAIN with the same arguments -- "
-                    f"that retry will succeed."
+                    f"that retry is required and will succeed. Do not call "
+                    f"`{name}` again before those evidence calls, and do not end "
+                    f"your turn without staging the card the analyst asked for."
                 ),
-                # The structural escape, as data as well as prose.
-                "declare_order_with": {"requested_by": "analyst"},
             }
         return None
 
