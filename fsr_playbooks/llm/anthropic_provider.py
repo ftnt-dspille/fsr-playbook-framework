@@ -105,14 +105,6 @@ _BUILD_PROGRESS_DIRECTIVE = (
     "deliver it with `emit_card(card_type='playbook_offer', ...)`. Do not end the turn with a plan."
 )
 
-_CREATE_DELIVERY_DIRECTIVE = (
-    "You drafted a playbook and `verify_playbook` cleared it, but you have not "
-    "delivered it. Call `emit_card(card_type='playbook_offer', ...)` now -- describing the playbook in "
-    "prose is NOT a substitute for the call, and the analyst has no way to save "
-    "it without the card. Write the `summary` (in the payload) as one or two plain-English lines "
-    "describing what the playbook does."
-)
-
 _DELIVERY_DIRECTIVE = (
     "You verified an edit to the open playbook and it is ready to apply, but "
     "you have not delivered it. Call `emit_card(card_type='enhancement_offer', ...)` now with "
@@ -1176,7 +1168,7 @@ class AnthropicProvider(CapabilityMixin):
                     if offer_schema is not None:
                         turn_idx += 1
                         history.append(Message(
-                            role="user", content=_CREATE_DELIVERY_DIRECTIVE))
+                            role="user", content=_create_delivery.directive))
                         try:
                             resp = await self._client.messages.create(
                                 model=self.model, max_tokens=512,
@@ -1198,7 +1190,7 @@ class AnthropicProvider(CapabilityMixin):
                             if not isinstance(oargs.get("payload"), dict):
                                 oargs["payload"] = {}
                             payload = oargs["payload"]
-                            payload["yaml"] = _vyaml
+                            _create_delivery.apply_bytes(payload)
                             if not str(payload.get("id") or "").strip():
                                 payload["id"] = f"offer-{_uuid.uuid4().hex[:8]}"
                             if not str(payload.get("summary") or "").strip():

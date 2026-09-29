@@ -1548,6 +1548,7 @@ class EnhanceDeliveryGuard:
 
 _CREATE_VERIFY_TOOL = "verify_playbook"
 _CREATE_OFFER_TOOL = "emit_playbook_offer"
+_TRACE_BUILD_TOOL = "build_playbook_from_trace"
 
 
 # ─────────────── when the next move is the analyst's, not ours ───────────────
@@ -1599,6 +1600,9 @@ class CreateDeliveryGuard:
         # commonly verifies, repairs, and re-verifies, and only the last blessed
         # YAML is what the analyst should be offered.
         self._verified_yaml: str | None = None
+        # A trace build that compiled clean: deliverable as a TRACE offer (no
+        # `yaml` -- accept recompiles the recorded trace), not as bytes.
+        self._trace_ready = False
         self._summary_hint: str = ""
         self._delivered = False
         self._forced = False
@@ -1622,6 +1626,18 @@ class CreateDeliveryGuard:
             if not (isinstance(result, dict) and result.get("ok") is False):
                 self._delivered = True
             return
+        if name == _TRACE_BUILD_TOOL:
+            # Live (.159 sweep row 5, twice): "save that as a playbook" ran
+            # build_playbook_from_trace, got a clean compile, and ended in
+            # prose -- the build is a PREVIEW, nothing the analyst can Accept.
+            # It counts as draft-closing for the other guards, so without this
+            # nothing forced the offer. Latest wins, as with verify below.
+            if (isinstance(result, dict) and result.get("ok")
+                    and (result.get("compile_summary") or {}).get("ok")
+                    and _has_action_steps(str(result.get("yaml") or ""))):
+                self._trace_ready = True
+                self._verified_yaml = None
+            return
         if name != _CREATE_VERIFY_TOOL or not isinstance(result, dict):
             return
         if not result.get("ready_to_push"):
@@ -1632,6 +1648,7 @@ class CreateDeliveryGuard:
         if (isinstance(yaml_text, str) and yaml_text.strip()
                 and _has_action_steps(yaml_text)):
             self._verified_yaml = yaml_text
+            self._trace_ready = False
             summary = result.get("summary")
             if isinstance(summary, str) and summary:
                 self._summary_hint = summary
@@ -1643,14 +1660,39 @@ class CreateDeliveryGuard:
         # the consolidated emit_card (or old name if transitioning).
         if _CREATE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
             return None
-        if self._forced or self._delivered or not self._verified_yaml:
+        if self._forced or self._delivered or not (
+                self._verified_yaml or self._trace_ready):
             return None
         # Not a stalled delivery -- see "when the next move is the analyst's".
         # With a playbook open the right card is an enhancement_offer, which
         # EnhanceDeliveryGuard owns; a forced playbook_offer would save a copy.
         if self._asked or _playbook_is_open():
             return None
-        return self._verified_yaml
+        # "" = a trace offer is owed (see `apply_bytes`).
+        return self._verified_yaml or ""
+
+    def apply_bytes(self, payload: dict[str, Any]) -> None:
+        """Put the deliverable on a forced offer's payload. Never trust the
+        forced round's own `yaml`: verified bytes when a verify blessed some,
+        otherwise none at all, so the emitter builds the card from the
+        recorded trace (and accept recompiles it)."""
+        if self._verified_yaml:
+            payload["yaml"] = self._verified_yaml
+        else:
+            payload.pop("yaml", None)
+
+    @property
+    def directive(self) -> str:
+        how = ("`verify_playbook` cleared it" if self._verified_yaml else
+               "`build_playbook_from_trace` compiled it from this investigation")
+        return (
+            f"You drafted a playbook and {how}, but you have not delivered it. "
+            "Call `emit_card(card_type='playbook_offer', ...)` now -- describing "
+            "the playbook in prose is NOT a substitute for the call, and the "
+            "analyst has no way to save it without the card. Write the "
+            "`summary` (in the payload) as one or two plain-English lines "
+            "describing what the playbook does."
+        )
 
     @property
     def summary_hint(self) -> str:

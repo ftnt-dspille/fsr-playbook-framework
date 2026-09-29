@@ -122,3 +122,71 @@ def test_fires_at_most_once():
     assert g.outstanding(BUILD_SLICE) == YAML_A
     g.mark_forced()
     assert g.outstanding(BUILD_SLICE) is None
+
+
+# --- trace builds ------------------------------------------------------------
+# Live (.159 sweep row 5, twice): "save that as a playbook" after a triage ran
+# build_playbook_from_trace, got a clean compile, and ended in prose. The build
+# is a preview; only an offer card gives the analyst something to Accept.
+
+_TRACE_BUILD = "build_playbook_from_trace"
+
+
+def _trace_built(yaml_text=YAML_A, compiled=True):
+    return {"ok": True, "yaml": yaml_text,
+            "compile_summary": {"ok": compiled, "workflows": 1, "steps": 2},
+            "verified": {}, "gaps": {"siem_search": ["args"]}}
+
+
+def test_clean_trace_build_owes_a_trace_offer():
+    g = CreateDeliveryGuard()
+    g.note_result(_TRACE_BUILD, {"name": "x"}, _trace_built())
+    # "" = owed, but as a TRACE offer: no bytes ride on it.
+    assert g.outstanding(BUILD_SLICE) == ""
+    payload = {"yaml": "playbooks:\n  - name: HALLUCINATED\n"}
+    g.apply_bytes(payload)
+    assert "yaml" not in payload
+    assert "build_playbook_from_trace" in g.directive
+
+
+def test_trace_build_then_offer_is_delivered():
+    g = CreateDeliveryGuard()
+    g.note_result(_TRACE_BUILD, {}, _trace_built())
+    g.note_result("emit_card", {"card_type": "playbook_offer", "payload": {}},
+                  {"ok": True, "card": {}})
+    assert g.outstanding(BUILD_SLICE) is None
+
+
+def test_trace_build_that_did_not_compile_owes_nothing():
+    g = CreateDeliveryGuard()
+    g.note_result(_TRACE_BUILD, {}, _trace_built(compiled=False))
+    assert g.outstanding(BUILD_SLICE) is None
+    g.note_result(_TRACE_BUILD, {}, {"ok": False, "code": "empty_trace"})
+    assert g.outstanding(BUILD_SLICE) is None
+
+
+def test_trace_build_with_no_action_steps_owes_nothing():
+    g = CreateDeliveryGuard()
+    g.note_result(_TRACE_BUILD, {}, _trace_built(
+        yaml_text="playbooks:\n  - name: E\n    steps:\n"
+                  "      - {name: Start, type: start}\n"))
+    assert g.outstanding(BUILD_SLICE) is None
+
+
+def test_verify_after_trace_build_offers_the_verified_bytes():
+    # The model filled the gaps by hand and verified: those bytes win.
+    g = CreateDeliveryGuard()
+    g.note_result(_TRACE_BUILD, {}, _trace_built())
+    g.note_result(_CREATE_VERIFY_TOOL, {"yaml_text": YAML_B}, _passing_verify())
+    assert g.outstanding(BUILD_SLICE) == YAML_B
+    payload = {}
+    g.apply_bytes(payload)
+    assert payload["yaml"] == YAML_B
+    assert "verify_playbook" in g.directive
+
+
+def test_trace_build_after_verify_supersedes_it():
+    g = CreateDeliveryGuard()
+    g.note_result(_CREATE_VERIFY_TOOL, {"yaml_text": YAML_A}, _passing_verify())
+    g.note_result(_TRACE_BUILD, {}, _trace_built())
+    assert g.outstanding(BUILD_SLICE) == ""

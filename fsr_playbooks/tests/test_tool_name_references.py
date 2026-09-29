@@ -244,15 +244,25 @@ class TestToolNameReferencesInCode:
     def test_directives_use_emit_card(self):
         """Directives should tell model to call emit_card, not old names."""
         from fsr_playbooks.llm import anthropic_provider, openai_provider
+        from fsr_playbooks.llm._loop_helpers import (
+            _CREATE_VERIFY_TOOL,
+            CreateDeliveryGuard,
+        )
+
+        # The create-delivery directive lives on the guard (one copy for both
+        # providers); cover both of its forms -- verified bytes and trace build.
+        verified = CreateDeliveryGuard()
+        verified.note_result(_CREATE_VERIFY_TOOL, {"yaml_text": "x"}, {"ready_to_push": True})
+        create_directives = [verified.directive, CreateDeliveryGuard().directive]
+        for d in create_directives:
+            assert "emit_card(" in d
 
         # Check anthropic directives
         assert "emit_card(" in anthropic_provider._BUILD_PROGRESS_DIRECTIVE
-        assert "emit_card(" in anthropic_provider._CREATE_DELIVERY_DIRECTIVE
         assert "emit_card(" in anthropic_provider._DELIVERY_DIRECTIVE
 
         # Check openai directives
         assert "emit_card(" in openai_provider._BUILD_PROGRESS_DIRECTIVE
-        assert "emit_card(" in openai_provider._CREATE_DELIVERY_DIRECTIVE
         assert "emit_card(" in openai_provider._DELIVERY_DIRECTIVE
 
         # Old names should NOT be in directives
@@ -261,10 +271,9 @@ class TestToolNameReferencesInCode:
         ]
         for directive in [
             anthropic_provider._BUILD_PROGRESS_DIRECTIVE,
-            anthropic_provider._CREATE_DELIVERY_DIRECTIVE,
             anthropic_provider._DELIVERY_DIRECTIVE,
             openai_provider._BUILD_PROGRESS_DIRECTIVE,
-            openai_provider._CREATE_DELIVERY_DIRECTIVE,
+            *create_directives,
             openai_provider._DELIVERY_DIRECTIVE,
         ]:
             for old_name in old_names:

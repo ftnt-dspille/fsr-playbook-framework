@@ -204,3 +204,47 @@ def test_offer_already_delivered_is_not_forced():
     assert len(offer_uses) == 1, "guard forced a duplicate offer"
     # No forced round: exactly the three modelled turns.
     assert create.await_count == 3
+
+
+def test_trace_build_then_prose_is_forced_into_a_trace_offer():
+    # Live (.159 sweep row 5): "Save that as a playbook." ran
+    # build_playbook_from_trace (clean compile), then described the draft in
+    # prose and ended -- no card, nothing to Accept.
+    tools = _BUILD_TOOLS + [{"type": "function", "function": {
+        "name": "build_playbook_from_trace", "description": "compile the trace",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string"}}}}}]
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(
+            index=0, id="c1", name="build_playbook_from_trace",
+            args=json.dumps({"name": "C2 triage"}))]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    turn2 = [
+        _delta_chunk(content="I've bottled the investigation into a playbook draft."),
+        _delta_chunk(finish="stop"), _usage_chunk(),
+    ]
+    create = AsyncMock(side_effect=[
+        _FakeStream(turn1), _FakeStream(turn2), _forced_response()])
+
+    def dispatch(name, args):
+        if name == "build_playbook_from_trace":
+            return {"ok": True, "yaml": VERIFIED_YAML,
+                    "compile_summary": {"ok": True, "workflows": 1, "steps": 2},
+                    "verified": {}, "gaps": {}}
+        return _fake_dispatch(name, args)
+
+    disp = MagicMock(side_effect=dispatch)
+    with patch("fsr_playbooks.llm.openai_provider.dispatch", disp), \
+         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+        events = asyncio.run(_drain(_provider(create).stream(
+            system="s", messages=[Message(role="user", content="Save that as a playbook.")],
+            tools=tools, tags={})))
+
+    offer = [c for c in disp.call_args_list if c[0][0] == "emit_card"]
+    assert len(offer) == 1, "guard did not force the offer after a trace build"
+    assert offer[0][0][1]["card_type"] == "playbook_offer"
+    # A TRACE offer: the model's hallucinated YAML is stripped, so the emitter
+    # builds the card from the recorded trace and accept recompiles it.
+    assert "yaml" not in offer[0][0][1]["payload"]
+    assert isinstance(events[-1], DoneEvent)
