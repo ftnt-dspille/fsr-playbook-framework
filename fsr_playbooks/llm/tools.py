@@ -1094,6 +1094,9 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
             "multi": {"type": "boolean", "default": False},
             "min_select": {"type": "integer", "minimum": 0, "default": 1},
             "max_select": {"type": ["integer", "null"], "default": None},
+            "allow_text": {"type": "boolean", "default": False,
+                           "description": "Also accept a typed free-text "
+                                          "answer besides the options."},
             "options": {
                 "type": "array",
                 "minItems": 2,
@@ -1443,12 +1446,24 @@ def _resolved_hints(fn: Callable[..., Any]) -> dict[str, Any]:
         return {}
 
 
+# Plumbing the model must not set: `db_path` repoints a tool at another store;
+# `trace_json` is for tests/batch tooling -- a model cannot author a SkillTrace
+# (live: 2 of 18 build_playbook_from_trace calls sent their own summary, which
+# parses to zero calls). Direct Python callers still pass them.
+_INTERNAL_PARAMS = frozenset({"db_path", "trace_json"})
+
+
 def _build_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     sig = inspect.signature(fn)
     hints = _resolved_hints(fn)
     props: dict[str, Any] = {}
     required: list[str] = []
     for name, p in sig.parameters.items():
+        # Plumbing, not a model argument: a model that sends db_path points
+        # the tool at a different reference store. Not advertised, and the arg
+        # gate refuses anything the schema does not advertise.
+        if name in _INTERNAL_PARAMS:
+            continue
         schema = _py_type_to_json(hints.get(name, p.annotation))
         if p.default is inspect.Parameter.empty:
             required.append(name)
@@ -1683,6 +1698,41 @@ _AUTHORING_YAML_TOOLS = frozenset({
 })
 
 
+_INVOKE_FAILURE = "_invoke_failure"
+
+
+def _invoke(spec: ToolSpec, name: str, raw_args: dict[str, Any]) -> Any:
+    """Call the tool, telling a bad CALL apart from a failing TOOL.
+
+    The old `except TypeError: "bad arguments for X"` also caught TypeErrors
+    raised deep inside a tool body, so a tool bug reached the model as "your
+    arguments are wrong" and it went off rewriting correct arguments. Bind the
+    signature first: a bind failure is the caller's; anything raised after is
+    the tool's own (`tool_error`), and surfaces as a tool result, not a 500.
+    """
+    from . import arg_gate
+    bad = arg_gate.bind_error(name, spec.fn, raw_args)
+    if bad is not None:
+        bad[_INVOKE_FAILURE] = True
+        return bad
+    try:
+        return spec.fn(**raw_args)
+    except Exception as e:  # noqa: BLE001 -- surface to the LLM, not a 500
+        logging.getLogger(__name__).exception("tool %s raised", name)
+        return {"ok": False, "code": "tool_error", "tool": name,
+                "error": f"{name} failed internally ({type(e).__name__}: {e}). "
+                         "This is a tool fault, not your arguments -- do not "
+                         "retry the same call; work around it or tell the "
+                         "analyst.",
+                _INVOKE_FAILURE: True}
+
+
+def _is_invoke_failure(result: Any) -> bool:
+    if isinstance(result, dict) and result.pop(_INVOKE_FAILURE, False):
+        return True
+    return False
+
+
 def dispatch(
     name: str, arguments: dict[str, Any], *, _internal: bool = False,
     session_id: str | None = None
@@ -1883,20 +1933,40 @@ def dispatch(
         # values that will actually execute -- coercing later would let a
         # human approve `probe="False"` and a tool then run with probe=True.
         raw_args = coerce_scalar_args(getattr(spec, "input_schema", None), raw_args)
-        if name in TOOL_MODELS:
-            try:
-                TOOL_MODELS[name](**raw_args)
-            except Exception as e:
-                from pydantic import ValidationError
-                if isinstance(e, ValidationError):
-                    errors = "; ".join(
-                        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
-                        for err in e.errors()
-                    )
-                    return {"error": f"invalid arguments for {name}: {errors}"}
-                raise
     except ImportError:
-        pass  # tool_models not available; skip validation
+        pass  # tool_models not available; skip coercion
+
+    # One argument gate for EVERY tool (see `arg_gate`): unknown keys against
+    # the real signature, required keys, and types/enums/nested shape against
+    # the tool's own input_schema. Runs after the lossless coercions above and
+    # before tier resolution, so an approval card is never raised for a call
+    # that cannot run. `null` for an optional arg means "not given".
+    from . import arg_gate
+    raw_args = arg_gate.normalize_nulls(spec.input_schema, spec.fn, raw_args)
+    _refusal = arg_gate.check(name, spec.input_schema, spec.fn, raw_args)
+    if _refusal is not None:
+        return _refusal
+
+    # The pydantic models add what a JSON schema can't say (cross-field
+    # rules, custom validators) for the tools that have one.
+    try:
+        from .tool_models import TOOL_MODELS
+    except ImportError:
+        TOOL_MODELS = {}
+    if name in TOOL_MODELS:
+        from pydantic import ValidationError
+        try:
+            TOOL_MODELS[name](**raw_args)
+        except ValidationError as e:
+            problems = [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
+                        for err in e.errors()]
+            return {
+                "ok": False, "code": arg_gate.CODE, "tool": name,
+                "error": (f"invalid arguments for {name} -- the call was NOT "
+                          f"run. {'; '.join(problems)}"),
+                "problems": problems,
+                "suggestions": [f"resend {name} with the arguments fixed"],
+            }
 
     # Build-persona verify grounds connector-op output shapes from a real
     # execution so `vars.steps.<step>.data.<field>` is validated against the
@@ -1924,12 +1994,9 @@ def dispatch(
         if session_id and _consume_grant(session_id, name, op_key):
             # Grant exists (and 'once' grants are consumed). Execute with the
             # grant decision, bypassing the approval envelope.
-            try:
-                result = spec.fn(**raw_args)
-            except TypeError as e:
-                return {"error": f"bad arguments for {name}: {e}"}
-            except Exception as e:
-                return {"error": f"{type(e).__name__}: {e}"}
+            result = _invoke(spec, name, raw_args)
+            if _is_invoke_failure(result):
+                return result
             _record_audit(name, raw_args, tier, "auto_allow_grant")
             return _finalize_tool_output(name, result)
 
@@ -1939,12 +2006,9 @@ def dispatch(
         policy = _active_eval_policy()
         policy_decision = _apply_eval_policy(policy, tier) if policy else "suspend"
         if policy_decision == "approve":
-            try:
-                result = spec.fn(**raw_args)
-            except TypeError as e:
-                return {"error": f"bad arguments for {name}: {e}"}
-            except Exception as e:
-                return {"error": f"{type(e).__name__}: {e}"}
+            result = _invoke(spec, name, raw_args)
+            if _is_invoke_failure(result):
+                return result
             _record_audit(name, raw_args, tier, "approved")
             return _finalize_tool_output(name, result)
         if policy_decision == "deny":
@@ -2005,12 +2069,9 @@ def dispatch(
         _record_audit(name, raw_args, tier, "pending", result_preview=envelope)
         return envelope
 
-    try:
-        result = spec.fn(**raw_args)
-    except TypeError as e:
-        return {"error": f"bad arguments for {name}: {e}"}
-    except Exception as e:  # surface to LLM as a tool result, not a 500
-        return {"error": f"{type(e).__name__}: {e}"}
+    result = _invoke(spec, name, raw_args)
+    if _is_invoke_failure(result):
+        return result
 
     decision = "approved" if approved else ("auto_allow" if tier <= 2 else "approved")
     _record_audit(name, raw_args, tier, decision)

@@ -585,6 +585,26 @@ def _validate_op_params(connector: str, op: str,
                            + (f"; did you mean {close}?" if close else "")),
             })
 
+    # 1b. Known params on a branch the call did NOT select. Live: 16 sessions
+    # sent FortiGate block_ip_new `ip` with method="Quarantine Based", whose
+    # branch takes `ip_addresses`. `ip` is a real parameter -- of the OTHER
+    # branch -- so step 1 passed it, it was silently ignored, and the refusal
+    # named only the missing param, never the one the model thought it sent.
+    branch_of = {
+        name: [f"{r['parent_param_name']}={r['condition_value']!r}"
+               for r in rs if _clean(r["parent_param_name"])]
+        for name, rs in rows_by_name.items()
+    }
+    for key in params:
+        if key in known_names and key not in active and branch_of.get(key):
+            issues.append({
+                "param": key,
+                "problem": "inactive_branch",
+                "detail": (f"'{key}' only applies when "
+                           f"{' or '.join(branch_of[key])}; this call's "
+                           f"choices ignore it"),
+            })
+
     # 2. Missing required params on the active conditional branch only.
     for name, r in active.items():
         if not r["required"]:
@@ -597,6 +617,26 @@ def _validate_op_params(connector: str, op: str,
                 "detail": f"required parameter '{name}' "
                           f"({r['title'] or name}) is missing",
             })
+
+    # One misplaced key + one missing required param is a rename, whatever
+    # the spelling (`ip` → `ip_addresses`): say it outright.
+    # With several strays, the one whose name the missing param starts with
+    # (`ip` / `ip_addresses`).
+    stray = [i["param"] for i in issues if i["problem"] in ("unknown", "inactive_branch")]
+    missing = [i for i in issues if i["problem"] == "missing_required"]
+    if not missing:
+        # An off-branch param only EXPLAINS a missing one. On a complete call
+        # it is harmless -- real payloads carry every branch's fields, blank
+        # (`ip_type`, `ip_group_name`, ...) -- and must not block it.
+        issues = [i for i in issues if i["problem"] != "inactive_branch"]
+    if len(missing) == 1 and stray:
+        want = missing[0]["param"]
+        pick = stray if len(stray) == 1 else [
+            s for s in stray if want.startswith(s) or s.startswith(want)]
+        if len(pick) == 1:
+            missing[0]["detail"] += (f" -- send your '{pick[0]}' value as "
+                                     f"'{want}'")
+            missing[0]["rename_from"] = pick[0]
 
     # 3. Select-option membership + loose type checks.
     for name, candidates in rows_by_name.items():

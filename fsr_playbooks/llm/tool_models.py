@@ -363,6 +363,15 @@ def coerce_scalar_args(schema: dict[str, Any] | None,
                     decoded = None
                 if isinstance(decoded, want):
                     coerced = decoded
+            elif (jtype == "array" and text and "," not in text
+                  and (declared.get("items") or {}).get("type") == "string"):
+                # One bare value where a list of strings is declared
+                # (`only="email"`). Wrapping it is lossless. Passing it through
+                # was not: `set[str]`/`list[str]` bodies iterate or `in`-test
+                # the string, i.e. match SUBSTRINGS, and returned plausible
+                # output. A comma list is left for the arg gate to reject --
+                # splitting it would be a guess.
+                coerced = [text]
 
         if coerced is _MISSING:
             continue
