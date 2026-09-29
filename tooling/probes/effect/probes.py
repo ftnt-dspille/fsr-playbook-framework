@@ -270,10 +270,79 @@ def probe_a3_delete_step() -> Result:
         scratch.purge(coll)
 
 
+# ── A6 -- a value edit lands EXACTLY, whichever card carries it ─────────
+
+def _block_ip_args(wf: dict | None) -> dict:
+    st = scratch.step_by_name(wf, "Block IP")
+    args = st.get("arguments") if isinstance(st, dict) else None
+    return args if isinstance(args, dict) else {}
+
+
+def probe_a6_value_edit_lands_exactly() -> Result:
+    """"Change one value" must change that value and nothing else, on the box.
+
+    A5 pins the patch_proposal splice; this one leaves the card to the model
+    (live it now always picks edit_playbook -> enhancement_offer) and grades
+    only the effect. It exists because of a bug that path shipped: update_step
+    with set={"params.ip_addresses": X} wrote a literal sibling key, verify
+    passed it, and Accept would have "saved" with the old IP still in params.
+    So besides the new value it checks the sibling params and that no junk
+    key rode along.
+    """
+    rid, title = "A6", "a one-value edit lands exactly (any change card)"
+    seeded, entity, coll = _seed("a6")
+    try:
+        was = _block_ip_args(seeded["workflow"])
+        was_params = dict(was.get("params") or {})
+        if "ip_addresses" not in was_params:
+            return Result(rid, title, "BLOCKED",
+                          "seed read-back has no params.ip_addresses on 'Block IP'",
+                          str(was_params))
+        session = drive.new_session("a6")
+        res = drive.turn(
+            f"In the step 'Block IP', change ip_addresses to {NEW_IP}. "
+            "Change nothing else.", session=session, entity=entity)
+        tools = drive.tool_names(res)
+        card = (drive.first_card(res, "enhancement_offer")
+                or drive.first_card(res, "patch_proposal"))
+        if not card:
+            return Result(rid, title, "BLOCKED",
+                          "no enhancement_offer or patch_proposal card",
+                          str(was_params), "", tools, _reply(res))
+        if card.get("type") == "patch_proposal":
+            reply = _reply(drive.accept_patch_proposal(session, card, seeded["iri"]))
+        else:
+            reply = _reply(drive.accept_enhancement_offer(session, card, seeded["iri"]))
+        after_wf = scratch.read_workflow(seeded["iri"])
+        now = _block_ip_args(after_wf)
+        now_params = dict(now.get("params") or {})
+        want = {**was_params, "ip_addresses": NEW_IP}
+        junk = sorted(k for k in now if "." in str(k))
+        if str(now_params.get("ip_addresses")) != NEW_IP:
+            return Result(rid, title, "FAIL",
+                          f"Accept returned, ip_addresses is not {NEW_IP}"
+                          + (f" (junk keys on the step: {junk})" if junk else ""),
+                          str(was_params), str(now_params), tools, reply)
+        if junk or now_params != want:
+            return Result(rid, title, "FAIL",
+                          f"the value landed but more changed: params "
+                          f"{now_params} vs {want}; junk keys {junk}",
+                          str(was_params), str(now_params), tools, reply)
+        if scratch.step_names(after_wf) != scratch.step_names(seeded["workflow"]):
+            return Result(rid, title, "FAIL", "the value landed but the step set changed",
+                          str(was_params), str(now_params), tools, reply)
+        return Result(rid, title, "PASS",
+                      f"only ip_addresses changed (via {card.get('type')}); no junk keys",
+                      str(was_params), str(now_params), tools, reply)
+    finally:
+        scratch.purge(coll)
+
+
 ALL = {
     "A5": probe_a5_snippet_apply,
     "A2": probe_a2_enhancement_offer,
     "A3": probe_a3_delete_step,
+    "A6": probe_a6_value_edit_lands_exactly,
 }
 
 # Phase 2 group T (triage write-through, #135) lives in triage.py; imported

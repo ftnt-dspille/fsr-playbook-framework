@@ -10,6 +10,8 @@ decompile back to YAML (slug routes, uuids, layout keys and all).
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
@@ -494,3 +496,26 @@ def test_replacing_a_mapping_says_what_it_dropped():
     line = res["applied"][1]
     assert "REPLACED" in line and "vars.c" in line, line
     assert 'set: {"vars.<key>": value}' in line, line
+
+
+# --- the advertised item shape (A4) -------------------------------------------
+# Live (A5/A6): with `operations: list[object]` the model spelled the op key
+# `action` and `type`. The item shape is now advertised; keep it in step with
+# what `_apply_op` accepts.
+
+def test_the_advertised_op_enum_is_the_tool_s_op_list():
+    from fsr_playbooks.llm.tools import TOOL_SCHEMA_OVERRIDES
+    from fsr_playbooks.mcp_server.tools_enhancement import _EDIT_OPS, _OP_SHAPES
+    item = TOOL_SCHEMA_OVERRIDES["edit_playbook"]["properties"]["operations"]["items"]
+    assert set(item["properties"]["op"]["enum"]) == set(_EDIT_OPS) == set(_OP_SHAPES)
+    shape_keys = {k.strip() for shape in _OP_SHAPES.values()
+                  for k in re.findall(r"[{,]\s*([a-z_]+):", shape)}
+    assert shape_keys <= set(item["properties"]), shape_keys - set(item["properties"])
+
+
+def test_a_misnamed_op_key_is_refused_at_the_gate_by_name():
+    from fsr_playbooks.llm.tools import dispatch
+    res = dispatch("edit_playbook", {"operations": [
+        {"type": "update_step", "name": "Note C", "set": {"vars.c": "2"}}]})
+    assert res["ok"] is False and res["code"] == "invalid_tool_args"
+    assert "operations[0]: 'op' is a required property" in res["error"]

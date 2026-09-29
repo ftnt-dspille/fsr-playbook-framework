@@ -1024,6 +1024,60 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
 # sync with the runtime checks inside the tool itself -- the override is
 # the wire contract; the runtime check covers non-LLM callers.
 TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
+    # Item shape advertised so the FIRST call is right. Live (effect probes
+    # A5/A6): with `operations: list[object]` models spelled the op key
+    # `action` and `type` (3 of 5 first calls refused as "unknown op None").
+    # Mirrors tools_enhancement._OP_SHAPES / the edit_playbook docstring.
+    "edit_playbook": {
+        "type": "object",
+        "required": ["operations"],
+        "properties": {
+            "operations": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Applied in order, all or nothing.",
+                "items": {
+                    "type": "object",
+                    "required": ["op"],
+                    "properties": {
+                        "op": {"type": "string",
+                               "enum": ["add_step", "update_step", "rename_step",
+                                        "remove_step", "set_route", "remove_route"]},
+                        "name": {"type": "string",
+                                 "description": "The step this op acts on "
+                                                "(update/rename/remove)."},
+                        "step": {"type": ["object", "string"],
+                                 "description": "add_step: the new step "
+                                                "{name, type, ...step keys}. "
+                                                "Elsewhere a string is read "
+                                                "as `name`."},
+                        "after": {"type": "string",
+                                  "description": "add_step: insert after this step."},
+                        "option": {"type": "string",
+                                   "description": "Branch label of a decision / "
+                                                  "manual_input."},
+                        "set": {"type": "object",
+                                "description": "update_step: keys to set. A dotted "
+                                               "key (\"params.ip_addresses\") sets "
+                                               "one value and keeps its siblings; "
+                                               "a plain key replaces the whole value."},
+                        "unset": {"type": "array", "items": {"type": "string"}},
+                        "to": {"type": "string",
+                               "description": "rename_step: the new name; "
+                                              "set_route: the target step."},
+                        "from": {"type": "string",
+                                 "description": "set_route / remove_route: the "
+                                                "source step."},
+                        "reconnect": {"type": "boolean"},
+                    },
+                },
+            },
+            "playbook": {"type": "string",
+                         "description": "Which playbook, when the open "
+                                        "collection holds several."},
+            "user_message": {"type": "string"},
+        },
+    },
     # The consolidated discovery tool: the wire enforces the kind vocabulary
     # so a guessed kind fails at the schema, not as a burned turn.
     "find": {
