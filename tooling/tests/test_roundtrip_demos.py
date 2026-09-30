@@ -24,6 +24,16 @@ def _yaml_fixtures() -> list[Path]:
     return out
 
 
+# Examples that use connectors absent from the slim test DB; can't
+# compile/verify offline.
+_EXTERNAL_CONNECTOR_FIXTURES = frozenset({
+    "defender_forwarding_rule_triage.yaml",
+    "defender_forwarding_triage_collection.yaml",
+    "probe_mock_conn.yaml",
+    "probe_mock_shape.yaml",
+})
+
+
 def _sidecarless_fixtures() -> list[Path]:
     """Examples without a .test.yaml partner -- the smoke set from TODO #5."""
     out = []
@@ -35,6 +45,8 @@ def _sidecarless_fixtures() -> list[Path]:
         # `recipe_*` fixtures depend on connectors being installed on a
         # live FSR (precheck phase); skip in offline smoke.
         if p.name.startswith("recipe_"):
+            continue
+        if p.name in _EXTERNAL_CONNECTOR_FIXTURES:
             continue
         out.append(p)
     return out

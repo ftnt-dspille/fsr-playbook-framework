@@ -73,7 +73,15 @@ def trace_rows() -> list[dict[str, Any]]:
 # resumable at run time), which `verify_playbook` rightly refuses as
 # `unreachable_step`. Its compile/round-trip coverage lives in
 # test_all_step_types_roundtrip.
-_COVERAGE_FIXTURES = frozenset({"all_step_types_validation.yaml"})
+_COVERAGE_FIXTURES = frozenset({
+    "all_step_types_validation.yaml",
+    # Examples that use connectors not in the slim test DB (microsoft-graph,
+    # microsoft-management-activity-api) -- can't verify offline.
+    "defender_forwarding_rule_triage.yaml",
+    "defender_forwarding_triage_collection.yaml",
+    "probe_mock_conn.yaml",
+    "probe_mock_shape.yaml",
+})
 
 
 def gold_rows() -> list[dict[str, Any]]:
