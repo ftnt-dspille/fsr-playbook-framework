@@ -65,6 +65,10 @@ class ApprovalRequestEvent:
     args_hash: str
     summary: str | None = None
     requires_step_up: bool = False
+    # Further gated calls from the same turn that this one decision also
+    # covers (`approvals.BatchedCall.card()` dicts), in run order. Empty for
+    # a single-call approval.
+    batch: list[dict[str, Any]] = field(default_factory=list)
     kind: Literal["approval_request"] = "approval_request"
 
 

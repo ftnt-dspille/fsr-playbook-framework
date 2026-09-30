@@ -323,6 +323,13 @@ class FortiAIProxyProvider(CapabilityMixin):
             synthetic=True,
         )
         yield ToolResultEvent(call_id=suspended.tool_use_id, result=resolved)
+        # The rest of the card: the same decision, in order.
+        batch_results = await asyncio.to_thread(
+            _approvals.resolve_batch, suspended, decision)
+        for b, res in batch_results:
+            yield ToolUseEvent(name=b.name, arguments=dict(b.args),
+                               call_id=b.call_id, tier=b.tier, synthetic=True)
+            yield ToolResultEvent(call_id=b.call_id, result=res)
 
         result_str = _stringify(resolved)
 
@@ -339,6 +346,11 @@ class FortiAIProxyProvider(CapabilityMixin):
             {"role": "user",
              "content": f"Tool result: {suspended.tool} = {result_str}"}
         )
+        for b, res in batch_results:
+            carried.append({"role": "assistant",
+                            "content": f"[called {b.name}({json.dumps(b.args, default=str)})]"})
+            carried.append({"role": "user",
+                            "content": f"Tool result: {b.name} = {_stringify(res)}"})
         # Remaining (superseded) tool calls also get flat-text placeholders
         for skipped in suspended.remaining_tool_calls:
             carried.append({
@@ -697,13 +709,17 @@ class FortiAIProxyProvider(CapabilityMixin):
                         # suspension; leaving it empty (as it was when only one
                         # call per turn was believed possible) would drop every
                         # sibling call the moment one of them needed approval.
-                        remaining = [
-                            _approvals.SkippedToolCall(
-                                call_id=f"{call_id}_skipped_{_si}",
-                                name=_sname, args=_sargs
-                                if isinstance(_sargs, dict) else {},
-                            )
+                        _rest = [
+                            (f"{call_id}_skipped_{_si}", _sname,
+                             _sargs if isinstance(_sargs, dict) else {})
                             for _si, (_sname, _sargs) in enumerate(calls[_ci + 1:])
+                        ]
+                        # Gated calls right behind this one share its card.
+                        batch, _rest = _approvals.collect_batch(
+                            _rest, _guarded_dispatch, _tier_for)
+                        remaining = [
+                            _approvals.SkippedToolCall(call_id=_c, name=_n, args=_a)
+                            for _c, _n, _a in _rest
                         ]
                         # Capture the current turn evidence so citations survive resume.
                         from ..mcp_server._citation_validator import get_turn_evidence
@@ -734,6 +750,7 @@ class FortiAIProxyProvider(CapabilityMixin):
                             # the advertised slice -- resume re-enters with it
                             tools=list(tools or []),
                             turn_evidence_state=evidence_state,
+                            batch=batch,
                         )
                         _approvals.bind(suspended_session)
                         if self._approval_gateway is not None:
@@ -749,6 +766,7 @@ class FortiAIProxyProvider(CapabilityMixin):
                             args_hash=result.get("args_hash", ""),
                             summary=result.get("summary"),
                             requires_step_up=bool(result.get("requires_step_up")),
+                            batch=[b.card() for b in batch],
                         )
                         yield pending
                         yield _emit_usage("pending_approval")

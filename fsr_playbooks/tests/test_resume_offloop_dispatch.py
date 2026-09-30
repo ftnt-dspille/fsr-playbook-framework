@@ -128,3 +128,34 @@ def test_resume_tolerates_prefield_pickled_session(mk, _registered):
     _, result, captured = _resume_prefix(mk(), suspended=s)
     assert result.result == {"ok": True, "code": "ran"}
     assert captured.get("tools") == []
+
+
+def _resume_all(provider, suspended, decision="approve"):
+    async def _noop_stream(**kw):
+        return
+        yield  # pragma: no cover
+    provider.stream = _noop_stream
+
+    async def _go():
+        return [ev async for ev in provider.resume(suspended=suspended,
+                                                   decision=decision)]
+    return asyncio.run(_go())
+
+
+@pytest.mark.parametrize("mk", _PROVIDERS)
+@pytest.mark.parametrize("decision", ["approve", "deny"])
+def test_resume_resolves_the_whole_batch(mk, decision, _registered):
+    """Batched approval: every provider runs (or denies) the calls that
+    shared the card, each with a named tool_use, in order."""
+    s = _session(batch=[A.BatchedCall(call_id=f"tu-b{i}", name=_TOOL, args={})
+                        for i in range(2)])
+    events = _resume_all(mk(), s, decision)
+    uses = [e.call_id for e in events if isinstance(e, ToolUseEvent)]
+    results = {e.call_id: e.result for e in events if isinstance(e, ToolResultEvent)}
+    assert uses == ["tu-loop", "tu-b0", "tu-b1"]
+    want = {"ok": True, "code": "ran"} if decision == "approve" else None
+    for cid in ("tu-loop", "tu-b0", "tu-b1"):
+        if want:
+            assert results[cid] == want, (cid, results)
+        else:
+            assert results[cid]["code"] == "user_denied"

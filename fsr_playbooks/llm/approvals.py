@@ -163,18 +163,34 @@ def _canonical_args_hash(tool: str, args: dict[str, Any] | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _batch_hash(batch: list[Any] | None) -> str:
+    """The batched calls, in order, as one digest. Empty for a single-call
+    approval, so a token minted before batches existed still verifies."""
+    if not batch:
+        return ""
+    payload = json.dumps([[b.name, b.args] for b in batch],
+                         sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _bind_token(approval_id: str, tool: str,
-                args: dict[str, Any] | None, created_at: float) -> str:
-    msg = "|".join((
-        approval_id, tool, _canonical_args_hash(tool, args), repr(created_at),
-    )).encode("utf-8")
+                args: dict[str, Any] | None, created_at: float,
+                batch: list[Any] | None = None) -> str:
+    parts = [approval_id, tool, _canonical_args_hash(tool, args), repr(created_at)]
+    bh = _batch_hash(batch)
+    if bh:
+        # The analyst approves every call the card lists, so every one of
+        # them is bound: a batch member edited in the store fails closed.
+        parts.append(bh)
+    msg = "|".join(parts).encode("utf-8")
     return hmac.new(_secret(), msg, hashlib.sha256).hexdigest()
 
 
 def bind(s: SuspendedSession) -> None:
     """Compute and attach the HMAC token. Call once, after construction,
     before stashing."""
-    s.token = _bind_token(s.approval_id, s.tool, s.args, s.created_at)
+    s.token = _bind_token(s.approval_id, s.tool, s.args, s.created_at,
+                          getattr(s, "batch", None))
 
 
 def verify(s: SuspendedSession) -> bool:
@@ -182,8 +198,105 @@ def verify(s: SuspendedSession) -> bool:
     current fields. A missing token fails closed."""
     if not s.token:
         return False
-    expected = _bind_token(s.approval_id, s.tool, s.args, s.created_at)
+    expected = _bind_token(s.approval_id, s.tool, s.args, s.created_at,
+                           getattr(s, "batch", None))
     return hmac.compare_digest(s.token, expected)
+
+
+# --------------------------------------------------------------------------
+# Batched approval: one card for N gated calls from one assistant turn
+# --------------------------------------------------------------------------
+# A model building something emits its writes together -- seven step creates
+# for a seven-step profile. Only the first used to card; the rest were
+# dropped, and even once the drop was reported honestly the analyst faced
+# seven cards in a row for one request. Instead, the gated calls that follow
+# the first one in the same turn join its card, and one decision covers the
+# lot: approve runs them all in order, deny runs none.
+#
+# What joins: the contiguous run of calls after the gated one whose own
+# dispatch ALSO returns a pending approval -- probed through the real gate, so
+# a pre-card refusal (out of scope, unknown record) stops the batch rather
+# than riding along under someone else's approval. The first call that would
+# not card ends the batch; it and everything after it are dropped exactly as
+# before (SUPERSEDED_RESULT), so no ungated call runs out of order.
+BATCH_LIMIT = 25
+
+
+@dataclass
+class BatchedCall:
+    """A gated call that shares the pending call's approval card."""
+    call_id: str
+    name: str
+    args: dict[str, Any]
+    tier: int = 3
+    summary: str | None = None
+    preview: dict[str, Any] = field(default_factory=dict)
+
+    def card(self) -> dict[str, Any]:
+        """The wire form an approval card lists."""
+        return {"tool_use_id": self.call_id, "tool": self.name,
+                "args": self.args, "tier": self.tier,
+                "summary": self.summary, "preview": self.preview}
+
+
+def collect_batch(remaining: list[tuple[str, str, dict[str, Any]]],
+                  dispatch_fn: Any, tier_fn: Any,
+                  ) -> tuple[list[BatchedCall], list[tuple[str, str, dict[str, Any]]]]:
+    """Split the calls after a gated one into (batch, still-remaining).
+
+    ``dispatch_fn(name, args)`` is the provider's guarded dispatch; it is only
+    called for a call whose tier already says it gates, so it can only return
+    an approval envelope or a refusal -- never run the tool.
+    """
+    batch: list[BatchedCall] = []
+    for cid, name, args in remaining:
+        if len(batch) >= BATCH_LIMIT:
+            break
+        try:
+            gated = int(tier_fn(name, args)) >= 3
+        except Exception:  # noqa: BLE001 -- an unknown tier never batches
+            gated = False
+        if not gated:
+            break
+        try:
+            env = dispatch_fn(name, args)
+        except Exception:  # noqa: BLE001
+            break
+        if not (isinstance(env, dict) and env.get("pending_approval")):
+            break
+        batch.append(BatchedCall(
+            call_id=cid, name=name, args=args,
+            tier=int(env.get("tier", 3)), summary=env.get("summary"),
+            preview=env.get("preview") or {}))
+    # The batch is a contiguous prefix, so what is left is the rest in order.
+    return batch, list(remaining[len(batch):])
+
+
+def _approved_dispatch(name: str, args: dict[str, Any]) -> Any:
+    """Re-dispatch an approved call past the gate -- exactly how every
+    provider re-dispatches the pending call itself."""
+    from .tools import dispatch  # local: tools imports this module
+    return dispatch(name, {**(args or {}), "_approved": True}, _internal=True)
+
+
+def resolve_batch(s: "SuspendedSession", decision: str,
+                  dispatch_fn: Any = None,
+                  ) -> list[tuple[BatchedCall, dict[str, Any]]]:
+    """Each batched call's result for ``decision``: run in order on approve,
+    denied on anything else. Blocking -- providers run it off-loop."""
+    dispatch_fn = dispatch_fn or _approved_dispatch
+    out: list[tuple[BatchedCall, dict[str, Any]]] = []
+    for b in getattr(s, "batch", None) or []:
+        if decision == "approve":
+            try:
+                res = dispatch_fn(b.name, b.args)
+            except Exception as exc:  # noqa: BLE001 -- one failure, not the batch
+                res = {"ok": False, "code": "dispatch_error", "message": str(exc)}
+        else:
+            res = {"ok": False, "code": "user_denied",
+                   "reason": "User denied the action."}
+        out.append((b, res if isinstance(res, dict) else {"ok": True, "result": res}))
+    return out
 
 
 @dataclass
@@ -219,6 +332,10 @@ class SuspendedSession:
     # Not HMAC-bound (same trust level as history_snapshot/system): dispatch
     # re-checks tiers on every call, so advertisement is not authorization.
     tools: list[Any] = field(default_factory=list)
+    # Gated calls from the same turn that share this card (see
+    # `collect_batch`). HMAC-bound with the pending call. Old pickled
+    # sessions lack the attr: read via getattr.
+    batch: list[BatchedCall] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     # Serialized turn evidence (tool_use_id -> {name, ok}) so citations survive
     # suspension and resume on a different thread. TurnEvidence.to_dict() serializes

@@ -521,6 +521,13 @@ class AnthropicProvider(CapabilityMixin):
             call_id=suspended.tool_use_id,
             result=decision_event_result,
         )
+        # The rest of the card: the same decision, in order.
+        batch_results = await asyncio.to_thread(
+            _approvals.resolve_batch, suspended, decision)
+        for b, res in batch_results:
+            yield ToolUseEvent(name=b.name, arguments=dict(b.args),
+                               call_id=b.call_id, tier=b.tier, synthetic=True)
+            yield ToolResultEvent(call_id=b.call_id, result=res)
 
         resumed_blocks: list[dict[str, Any]] = list(
             suspended.prior_tool_result_blocks
@@ -531,6 +538,11 @@ class AnthropicProvider(CapabilityMixin):
             "content": _stringify(resolved),
             "is_error": _is_error_result(resolved),
         })
+        for b, res in batch_results:
+            resumed_blocks.append({
+                "type": "tool_result", "tool_use_id": b.call_id,
+                "content": _stringify(res), "is_error": _is_error_result(res),
+            })
         for skipped in suspended.remaining_tool_calls:
             resumed_blocks.append({
                 "type": "tool_result",
@@ -1408,7 +1420,9 @@ class AnthropicProvider(CapabilityMixin):
                     # calls that resolved in this same turn, plus the
                     # tool_use_ids for calls we DIDN'T get to so resume
                     # can fill them with placeholder denials.
-                    pending_remaining = list(tool_calls[i + 1:])
+                    # Gated calls right behind this one share its card.
+                    batch, pending_remaining = _approvals.collect_batch(
+                        list(tool_calls[i + 1:]), _guarded_dispatch, _tier_for)
                     approval_id = result["approval_id"]
                     # Capture the current turn evidence so citations survive resume.
                     from ..mcp_server._citation_validator import get_turn_evidence
@@ -1444,6 +1458,7 @@ class AnthropicProvider(CapabilityMixin):
                         # the advertised slice -- resume re-enters with it
                         tools=list(tools or []),
                         turn_evidence_state=evidence_state,
+                        batch=batch,
                     )
                     # Phase 3.1: HMAC-bind the session to its args before
                     # stashing, so store tampering is detected on resume.
@@ -1461,6 +1476,7 @@ class AnthropicProvider(CapabilityMixin):
                         args_hash=result.get("args_hash", ""),
                         summary=result.get("summary"),
                         requires_step_up=bool(result.get("requires_step_up")),
+                        batch=[b.card() for b in batch],
                     )
                     break
 

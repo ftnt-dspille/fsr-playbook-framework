@@ -392,6 +392,13 @@ class OpenAIProvider(CapabilityMixin):
         )
         # Surface the resolved result inline with the approval card.
         yield ToolResultEvent(call_id=suspended.tool_use_id, result=resolved)
+        # The rest of the card: the same decision, in order.
+        batch_results = await asyncio.to_thread(
+            _approvals.resolve_batch, suspended, decision)
+        for b, res in batch_results:
+            yield ToolUseEvent(name=b.name, arguments=dict(b.args),
+                               call_id=b.call_id, tier=b.tier, synthetic=True)
+            yield ToolResultEvent(call_id=b.call_id, result=res)
 
         # prior_tool_result_blocks are already OpenAI `role:tool` dicts.
         tool_messages: list[dict[str, Any]] = list(
@@ -402,6 +409,11 @@ class OpenAIProvider(CapabilityMixin):
             "tool_call_id": suspended.tool_use_id,
             "content": _stringify(resolved),
         })
+        for b, res in batch_results:
+            tool_messages.append({
+                "role": "tool", "tool_call_id": b.call_id,
+                "content": _stringify(res),
+            })
         for skipped in suspended.remaining_tool_calls:
             tool_messages.append({
                 "role": "tool",
@@ -1131,7 +1143,9 @@ class OpenAIProvider(CapabilityMixin):
                 result = _guarded_dispatch(name, args)
                 dur_ms = int((time.perf_counter() - _t0) * 1000)
                 if isinstance(result, dict) and result.get("pending_approval"):
-                    remaining = list(tool_calls[i + 1:])
+                    # Gated calls right behind this one share its card.
+                    batch, remaining = _approvals.collect_batch(
+                        list(tool_calls[i + 1:]), _guarded_dispatch, _tier_for)
                     approval_id = result["approval_id"]
                     # history (incl. the assistant tool_calls turn) is the
                     # snapshot, minus the leading system message -- stream()
@@ -1170,6 +1184,7 @@ class OpenAIProvider(CapabilityMixin):
                         # the advertised slice -- resume re-enters with it
                         tools=list(tools or []),
                         turn_evidence_state=evidence_state,
+                        batch=batch,
                     )
                     _approvals.bind(suspended_session)
                     if self._approval_gateway is not None:
@@ -1185,6 +1200,7 @@ class OpenAIProvider(CapabilityMixin):
                         args_hash=result.get("args_hash", ""),
                         summary=result.get("summary"),
                         requires_step_up=bool(result.get("requires_step_up")),
+                        batch=[b.card() for b in batch],
                     )
                     break
 
