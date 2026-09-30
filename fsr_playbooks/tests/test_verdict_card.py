@@ -526,3 +526,52 @@ class TestEvidenceSurvivesSuspension:
         )
         assert r["ok"] is True
         assert r["card"]["type"] == "verdict_card"
+
+
+class TestVerdictRefusalNamesTheFix:
+    """Session health: every recorded bad_disposition retry repaired the same
+    shapes. The refusal names each fix, and rewrites none of them -- which
+    verdict to give stays the model's call."""
+
+    def _refuse(self, **over):
+        clear_tool_registry()
+        register_tool_result("call_1", "get_record", True)
+        kw = dict(disposition="true_positive", severity="high", confidence=0.9,
+                  summary="s", findings=[{"claim": "c", "evidence": ["call_1"]}])
+        kw.update(over)
+        r = emit_verdict(**kw)
+        assert r["ok"] is False, r
+        return r["message"]
+
+    def test_the_recorded_live_payload_gets_one_complete_repair(self):
+        """The recorded payload: hedged disposition, word confidence, finding
+        text under 'title', evidence as objects."""
+        m = self._refuse(
+            disposition="likely_false_positive", confidence="low",
+            findings=[{"title": "No SIEM rows for the host",
+                       "evidence": [{"tool_use_id": "call_1"}]}])
+        assert "use 'false_positive' and put the doubt in confidence" in m
+        assert "for 'low' send e.g. 0.35" in m
+        assert "you sent 'title': put the finding's sentence in 'claim'" in m
+        assert "cite the id itself, 'call_1'" in m
+
+    def test_hedged_malicious_offers_both_calls(self):
+        m = self._refuse(disposition="likely_malicious")
+        assert "use 'true_positive'" in m and "'needs_more_info'" in m
+
+    def test_inconclusive_maps_without_the_hedge_clause(self):
+        m = self._refuse(disposition="Inconclusive")
+        assert "use 'needs_more_info'" in m
+        assert "doubt" not in m
+
+    def test_an_unmappable_word_gets_the_list_only(self):
+        m = self._refuse(disposition="spicy")
+        assert "(got 'spicy')" in m and "use '" not in m
+
+    def test_numeric_strings_say_send_the_number(self):
+        assert "send 0.85, not a string" in self._refuse(confidence="85%")
+        assert "send 0.7, not a string" in self._refuse(confidence="0.7")
+
+    def test_a_single_evidence_string_says_wrap_it(self):
+        m = self._refuse(findings=[{"claim": "c", "evidence": "call_1"}])
+        assert "wrap it, ['call_1']" in m

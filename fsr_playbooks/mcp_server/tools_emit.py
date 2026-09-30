@@ -1012,6 +1012,78 @@ def emit_manual_input(
 #: (`_loop_helpers.verdict_directive`) both read these, so the model is told the
 #: exact set it will be checked against. `needs_more_info` is the "could not
 #: conclude" value -- a model left to guess writes `inconclusive` and is refused.
+# Refusal hints for the verdict card. Session health showed the same repairs
+# every time: a hedged disposition ('likely_malicious'), confidence as a word,
+# a finding's text under 'title'/'details', evidence as objects. Each hint says
+# the fix. None of them rewrites the value: which verdict to give, and how
+# sure to be, stay the model's call -- a coerced verdict is one the analyst
+# reads as the agent's and it was not.
+_HEDGES = ("likely_", "probably_", "probable_", "possible_", "possibly_")
+_DISPOSITION_NEAR = {
+    "malicious": "true_positive", "true_positive": "true_positive",
+    "tp": "true_positive", "fp": "false_positive",
+    "not_malicious": "benign", "clean": "benign",
+    "inconclusive": "needs_more_info", "unknown": "needs_more_info",
+    "undetermined": "needs_more_info", "unclear": "needs_more_info",
+}
+_CONFIDENCE_WORDS = {"very_low": 0.2, "low": 0.35, "medium": 0.6,
+                     "moderate": 0.6, "high": 0.85, "very_high": 0.95}
+_CLAIM_ALIASES = ("title", "details", "detail", "description", "text",
+                  "statement", "finding", "summary")
+
+
+def _norm_word(v: str) -> str:
+    return v.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _disposition_hint(v: Any) -> str:
+    if not isinstance(v, str) or not v.strip():
+        return ""
+    key = _norm_word(v)
+    hedged = key.startswith(_HEDGES)
+    if hedged:
+        key = key.split("_", 1)[1]
+    target = key if key in VERDICT_DISPOSITIONS else _DISPOSITION_NEAR.get(key)
+    if not target:
+        return ""
+    if hedged:
+        return (f": use {target!r} and put the doubt in confidence, or "
+                "'needs_more_info' if the evidence does not support a call")
+    return f": use {target!r}"
+
+
+def _confidence_hint(v: Any) -> str:
+    if isinstance(v, str):
+        word = _CONFIDENCE_WORDS.get(_norm_word(v))
+        if word is not None:
+            return f" between 0.0 and 1.0: for {v!r} send e.g. {word}"
+        t = v.strip().rstrip("%")
+        try:
+            n = float(t)
+        except ValueError:
+            return " between 0.0 and 1.0"
+        n = n / 100 if v.strip().endswith("%") or n > 1 else n
+        return f" between 0.0 and 1.0: send {round(n, 2)}, not a string"
+    return " between 0.0 and 1.0"
+
+
+def _claim_hint(f: dict) -> str:
+    sent = [k for k in _CLAIM_ALIASES if isinstance(f.get(k), str) and f[k].strip()]
+    if not sent:
+        return ""
+    return (f" (you sent {', '.join(repr(k) for k in sent)}: put the finding's "
+            "sentence in 'claim')")
+
+
+def _evidence_hint(eid: Any) -> str:
+    if isinstance(eid, dict):
+        for k in ("tool_use_id", "tool_call_id", "call_id", "id"):
+            if isinstance(eid.get(k), str) and eid[k].strip():
+                return f": cite the id itself, {eid[k].strip()!r}, not an object"
+        return ": cite the tool call's id string, not an object"
+    return ""
+
+
 VERDICT_DISPOSITIONS = ("true_positive", "false_positive", "benign", "suspicious",
                         "needs_more_info")
 VERDICT_SEVERITIES = ("critical", "high", "medium", "low", "info")
@@ -1072,14 +1144,15 @@ def emit_verdict(
     if not isinstance(disposition, str) or disposition not in VERDICT_DISPOSITIONS:
         bad("bad_disposition",
             f"disposition must be one of: {', '.join(VERDICT_DISPOSITIONS)} "
-            f"(got {disposition!r})")
+            f"(got {disposition!r}){_disposition_hint(disposition)}")
     if not isinstance(severity, str) or severity not in VERDICT_SEVERITIES:
         bad("bad_severity",
             f"severity must be one of: {', '.join(VERDICT_SEVERITIES)} "
             f"(got {severity!r})")
     numeric = isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
     if not numeric:
-        bad("bad_confidence", "confidence must be a number")
+        bad("bad_confidence",
+            f"confidence must be a number{_confidence_hint(confidence)}")
     elif not (0.0 <= confidence <= 1.0):
         bad("bad_confidence", "confidence must be between 0.0 and 1.0")
     if not isinstance(summary, str) or not summary.strip():
@@ -1094,19 +1167,26 @@ def emit_verdict(
             bad("bad_finding", f"findings[{i}] must be an object")
             continue
         if not f.get("claim") or not isinstance(f["claim"], str):
-            bad("bad_finding", f"findings[{i}] must have a non-empty string 'claim'")
+            bad("bad_finding",
+                f"findings[{i}] must have a non-empty string 'claim'"
+                f"{_claim_hint(f)}")
         if not f.get("evidence"):
             bad("bad_finding_evidence",
                 f"findings[{i}].evidence must be a non-empty list of "
                 f"tool_call_ids (strings)")
         elif not isinstance(f["evidence"], list):
-            bad("bad_finding_evidence", f"findings[{i}].evidence must be a list")
+            ev = f["evidence"]
+            hint = (f": wrap it, [{ev.strip()!r}]" if isinstance(ev, str)
+                    else _evidence_hint(ev).replace(", not an object",
+                                                    " inside a list"))
+            bad("bad_finding_evidence",
+                f"findings[{i}].evidence must be a list{hint}")
         else:
             for j, eid in enumerate(f["evidence"]):
                 if not isinstance(eid, str) or not eid.strip():
                     bad("bad_evidence_id",
                         f"findings[{i}].evidence[{j}] must be a non-empty "
-                        f"string (a tool_use_id)")
+                        f"string (a tool_use_id){_evidence_hint(eid)}")
     # Check unknowns and confidence consistency
     unknowns_list: list[str] = []
     if unknowns is not None:
