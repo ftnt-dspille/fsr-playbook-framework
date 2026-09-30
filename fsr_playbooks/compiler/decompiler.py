@@ -358,7 +358,15 @@ def _decompile_step(s, pb_name: str | None = None,
                         "agent", "agentId", "pickFromTenant", "step_variables",
                         "mock_result", "module", "modules"):
             if env_key in args:
-                out[env_key] = args.pop(env_key)
+                val = args.pop(env_key)
+                # mock_result is stored as a JSON string on the wire; parse
+                # it back to a structured value so the YAML reads naturally.
+                if env_key == "mock_result" and isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (ValueError, TypeError):
+                        pass
+                out[env_key] = val
 
         # Data Ingestion Wizard: the Fetch playbook's Start step carries the
         # configuration-form schema as a JSON *string* under

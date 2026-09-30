@@ -34,7 +34,9 @@ playbooks:
         s for s in fsr["data"][0]["workflows"][0]["steps"]
         if s["name"] == "f"
     )
-    assert step["arguments"]["mock_result"] == {"status": "ok"}
+    import json
+    mr = step["arguments"]["mock_result"]
+    assert json.loads(mr) == {"status": "ok"}
 
 
 def test_step_level_set_hoists_to_step_variables(db_path):

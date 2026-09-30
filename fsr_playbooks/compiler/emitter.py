@@ -567,6 +567,14 @@ def _clean_step_arguments(args: dict[str, Any]) -> None:
         args.pop("when", None)
     if _is_blank(args.get("mock_result")):
         args.pop("mock_result", None)
+    else:
+        # FSR's wire format stores mock_result as a JSON **string**, not a
+        # raw object. The FortiSOAR editor serializes it on save; if we emit
+        # a raw dict/list, the runtime JavaScript does toString() and gets
+        # "[object Object]" (live-verified on 8.0.0-6034).
+        mr = args.get("mock_result")
+        if not isinstance(mr, str):
+            args["mock_result"] = json.dumps(mr, indent=2)
     du = args.get("do_until")
     if isinstance(du, dict) and _is_blank(du.get("condition")):
         args.pop("do_until", None)
