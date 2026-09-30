@@ -74,20 +74,57 @@ def check_no_stale_egg_info() -> Check:
     importlib.metadata scans sys.path, and '' (cwd) is on sys.path, so a
     leftover `<name>.egg-info` in a repo root answers version queries for any
     process launched from there -- and nothing at all from elsewhere.
+
+    `fsrpb.egg-info` is not exempt by name. The editable install writes it,
+    but so does every later build (`uv build`, a release) -- which bumps its
+    version while the installed dist-info in site-packages stays put. So it
+    is harmless only while it agrees with what the installed metadata says
+    from outside this directory; that agreement is what's checked.
     """
+    import sys
+    from importlib.metadata import distributions
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
-    stale = sorted(p.name for p in root.glob("*.egg-info")
-                   if p.name != "fsrpb.egg-info")
+
+    def _is_root(entry: str) -> bool:
+        try:
+            return Path(entry or ".").resolve() == root
+        except OSError:
+            return False
+
+    # What a process launched from anywhere else would resolve.
+    elsewhere = [p for p in sys.path if not _is_root(p)]
+    stale: list[str] = []
+    for egg in sorted(root.glob("*.egg-info")):
+        name = egg.name[: -len(".egg-info")]
+        here = _egg_version(egg)
+        there = next(
+            (d.version for d in distributions(name=name, path=elsewhere)), None)
+        if there is None or here != there:
+            stale.append(f"{egg.name} ({here} here, {there or 'absent'} "
+                         f"elsewhere)")
     if stale:
         return Check(
             "no version-shadowing egg-info", False,
             f"stale build metadata in {root}: {', '.join(stale)}. "
             f"These answer importlib.metadata queries only when a process is "
             f"launched from this directory, so versions differ by cwd. "
-            f"Fix: delete them.",
+            f"Fix: `uv pip install -e .` (refreshes both), or delete an "
+            f"egg-info no install owns.",
         )
     return Check("no version-shadowing egg-info", True, f"none in {root}")
+
+
+def _egg_version(egg) -> str | None:
+    """`Version:` from an egg-info's PKG-INFO, without importing it."""
+    try:
+        text = (egg / "PKG-INFO").read_text(errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("Version:"):
+            return line.split(":", 1)[1].strip()
+    return None
 
 
 def check_pyfsr() -> Check:
