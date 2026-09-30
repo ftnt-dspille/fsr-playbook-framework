@@ -874,7 +874,23 @@ def cmd_push(args: argparse.Namespace) -> int:
         # Explicit clean-slate hard-purge. Use only when `safe` won't do
         # -- typically recovery from corrupted orphan rows. Children are
         # deterministic uuid5 so this only deletes uuids THIS YAML emits.
-        if not _purge_soft_deleted():
+        #
+        # Scope the purge to the uuids the box actually holds (live or
+        # recycled). An unscoped purge on a first-time import hard-deletes
+        # a collection that does not exist, and FSR answers that with
+        # HTTP 500 NotFoundHttpException -- so replace could never create
+        # a collection, only re-create one.
+        try:
+            inv = _pre.inventory_from_collection(coll_entity)
+            cls = _pre.classify(client, inv)
+        except Exception as e:  # noqa: BLE001
+            print(f"purge preflight failed: {e}", file=sys.stderr)
+            return 3
+        present = {
+            entity: [u for u, row in rows.items() if row.status != "fresh"]
+            for entity, rows in cls.items()
+        }
+        if not _purge_soft_deleted(scope=present):
             print(
                 "push aborted: hard-purge refused; not POSTing. "
                 "Re-run with --mode safe (default) for normal pushes, or "
