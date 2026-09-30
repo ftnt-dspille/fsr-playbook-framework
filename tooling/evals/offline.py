@@ -35,10 +35,9 @@ substrates are not comparable, and nothing else in the row would say so.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
-import sys
-import types
 from typing import Any
 
 #: env vars that could carry a live target into the run.
@@ -57,12 +56,10 @@ def enabled() -> bool:
 def install() -> dict[str, Any]:
     """Point every live seam at the simulated client and seal the env.
 
-    Idempotent: safe to call once per run, or per test. Returns the modules it
-    displaced, for `uninstall()`.
+    Idempotent: safe to call once per run, or per test. Returns the state
+    `uninstall()` needs to undo it.
     """
-    from fsr_playbooks.mcp_server import _shared
     from fsr_playbooks.mcp_server import _sim_client as sc
-    from fsr_playbooks.mcp_server import tools_execution as te
 
     for key in _SEALED:
         os.environ.pop(key, None)
@@ -81,33 +78,14 @@ def install() -> dict[str, Any]:
         os.environ["FSRPB_CACHE_DB"] = str(
             pathlib.Path(tempfile.gettempdir()) / "fsrpb_eval_runtime_cache.db")
 
-    env_mod = types.ModuleType("probes._env")
-    # Carry the real module's other attributes across. A bare stub would break
-    # any caller reaching for `_load_dotenv` / `EnvConfig` -- offline mode
-    # should remove the box, not the module.
-    try:
-        import probes._env as _real
-        for attr in dir(_real):
-            if not attr.startswith("__"):
-                setattr(env_mod, attr, getattr(_real, attr))
-    except Exception:  # noqa: BLE001 - probes may not be importable at all
-        pass
-    env_mod.get_client = sc.get_client      # type: ignore[attr-defined]
-    env_mod.get_config = sc.get_config      # type: ignore[attr-defined]
-    probes_mod = types.ModuleType("probes")
-    probes_mod._env = env_mod               # type: ignore[attr-defined]
-    saved = {"probes": sys.modules.get("probes"),
-             "probes._env": sys.modules.get("probes._env")}
-    sys.modules["probes"] = probes_mod
-    sys.modules["probes._env"] = env_mod
-
-    # A client cached from an earlier live call would outlive the swap -- the
-    # exact shape of "the flag was set and nothing happened".
-    _shared._LIVE_CLIENT_CACHE.pop("client", None)
-    te._CONFIGURED_CACHE["rows"] = None
-    te._CONFIGURED_CACHE["ts"] = 0.0
-
-    saved["_cache_db_was_unset"] = cache_db_was_unset
+    # The swap itself lives in `_sim_client.probes_bridge` -- one copy, which
+    # also clears the client caches a box cached before the swap would
+    # otherwise outlive it through. Held open on an ExitStack so `uninstall()`
+    # can close it; a run never does, the process exits.
+    bridge = contextlib.ExitStack()
+    bridge.enter_context(sc.probes_bridge())
+    saved: dict[str, Any] = {"_bridge": bridge,
+                             "_cache_db_was_unset": cache_db_was_unset}
 
     bind_bundle()
     return saved
@@ -161,13 +139,8 @@ def uninstall(saved: dict[str, Any]) -> None:
     # tests' fixture), leaking one run's cached ops into unrelated tests.
     if saved.pop("_cache_db_was_unset", False):
         os.environ.pop("FSRPB_CACHE_DB", None)
-    for name, mod in saved.items():
-        if mod is None:
-            sys.modules.pop(name, None)
-        else:
-            sys.modules[name] = mod
-    from fsr_playbooks.mcp_server import _shared, _sim_client
-    _shared._LIVE_CLIENT_CACHE.pop("client", None)
+    saved.pop("_bridge").close()
+    from fsr_playbooks.mcp_server import _sim_client
     # A box bound by one test would otherwise answer the next one's reads.
     _sim_client.unbind_box()
 

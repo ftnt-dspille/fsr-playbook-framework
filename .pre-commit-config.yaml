@@ -84,7 +84,10 @@ repos:
         # points at a sibling checkout, so it collected the wrong repo's tests
         # and errored. The venv has fsr_playbooks installed editable (resolves to
         # THIS repo), so no PYTHONPATH is needed. Run `make sync` to create it.
-        entry: .venv/bin/python -m pytest -m "not slow and not live" -q
+        # Two processes, one per suite: tooling/tests points $FSRPB_DB at its
+        # fixture catalog at import, so a combined run measured fsr_playbooks
+        # against it. The root conftest now refuses the combined run.
+        entry: bash -c '.venv/bin/python -m pytest fsr_playbooks/tests -m "not slow and not live" -q && .venv/bin/python -m pytest tooling/tests -m "not slow and not live" -q'
         language: system
         pass_filenames: false
         # Only re-run when something the suite covers actually changed.

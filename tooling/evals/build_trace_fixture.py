@@ -28,7 +28,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import types
 from pathlib import Path
 from typing import Any
 
@@ -38,25 +37,6 @@ from fsr_playbooks.mcp_server._sim_fixtures import _C2_IP, _HOST_IP
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FIXTURE_DIR = _REPO_ROOT / "data" / "trace_fixtures"
-
-
-def _install_sim_bridge() -> None:
-    """Point the ``probes._env`` seam at the simulated client, mirroring the
-    connector's ``simulation_mode`` bridge, and clear preflight caches so each
-    build is independent. Same wiring as test_sim_run_op_integration's fixture,
-    minus pytest."""
-    from fsr_playbooks.mcp_server import _sim_client as sc
-    from fsr_playbooks.mcp_server import tools_execution as te
-
-    env_mod = types.ModuleType("probes._env")
-    env_mod.get_client = sc.get_client          # type: ignore[attr-defined]
-    env_mod.get_config = sc.get_config          # type: ignore[attr-defined]
-    probes_mod = types.ModuleType("probes")
-    probes_mod._env = env_mod                    # type: ignore[attr-defined]
-    sys.modules["probes"] = probes_mod
-    sys.modules["probes._env"] = env_mod
-    te._CONFIGURED_CACHE["rows"] = None
-    te._CONFIGURED_CACHE["ts"] = 0.0
 
 
 # Each scenario is an ordered list of (connector, op, params, confirm) -- exactly
@@ -166,23 +146,27 @@ def verify_wiring(trace_json: str) -> dict[str, Any]:
 def build_all(write: bool = True) -> dict[str, dict[str, Any]]:
     """Build, gate, and wiring-verify every scenario. Returns a per-scenario
     summary; writes the JSON fixtures when ``write`` is True."""
-    _install_sim_bridge()
-    if write:
-        _FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
-    results: dict[str, dict[str, Any]] = {}
-    for scenario in _SCENARIOS:
-        trace_json = build_trace(scenario)
-        assert_cross_step_coincidence(trace_json)
-        wiring = verify_wiring(trace_json)
+    from fsr_playbooks.mcp_server._sim_client import probes_bridge
+
+    # Scoped, never left installed: an in-process caller (the test suite)
+    # would otherwise keep the sim box for every test after it.
+    with probes_bridge():
         if write:
-            (_FIXTURE_DIR / f"{scenario}.json").write_text(trace_json)
-        results[scenario] = {
-            "calls": len(json.loads(trace_json).get("calls", [])),
-            "wiring_passed": wiring.get("passed"),
-            "unresolved_wires": wiring.get("unresolved_wires"),
-            "static_errors": wiring.get("static_errors"),
-        }
-    return results
+            _FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
+        results: dict[str, dict[str, Any]] = {}
+        for scenario in _SCENARIOS:
+            trace_json = build_trace(scenario)
+            assert_cross_step_coincidence(trace_json)
+            wiring = verify_wiring(trace_json)
+            if write:
+                (_FIXTURE_DIR / f"{scenario}.json").write_text(trace_json)
+            results[scenario] = {
+                "calls": len(json.loads(trace_json).get("calls", [])),
+                "wiring_passed": wiring.get("passed"),
+                "unresolved_wires": wiring.get("unresolved_wires"),
+                "static_errors": wiring.get("static_errors"),
+            }
+        return results
 
 
 def main(argv: list[str] | None = None) -> int:

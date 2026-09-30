@@ -106,3 +106,29 @@ def _no_appliance_unless_marked_live(request, monkeypatch):
     finally:
         if _shared is not None:
             _shared._LIVE_CLIENT_CACHE.clear()
+
+
+_SUITES = ("tooling/tests", "fsr_playbooks/tests")
+
+
+def pytest_collection_modifyitems(session, config, items):
+    """Refuse to run both suites in one process.
+
+    `tooling/tests/conftest.py` points `$FSRPB_DB` at its small fixture catalog
+    at import time, because `cli.DEFAULT_DB` and friends bind the path while
+    their modules are imported during collection. Collected alongside it,
+    `fsr_playbooks/tests` then measures against that 3 MB fixture instead of the
+    real catalog, and fails for reasons that have nothing to do with the code
+    (`test_the_warmed_reference_catalog_can_answer`). No per-test fixture can
+    undo a path bound at import, so the suites run as separate processes --
+    which is what `make tests` / `make verify` / `make tests-random` already do.
+    """
+    root = session.config.rootpath
+    hit = {s for s in _SUITES for it in items
+           if (root / s) in it.path.parents}
+    if len(hit) > 1:
+        pytest.exit(
+            "tooling/tests and fsr_playbooks/tests must run in separate pytest "
+            "processes (they resolve different reference DBs). Run one path, "
+            "e.g. `pytest fsr_playbooks/tests`, or `make verify` / "
+            "`make tests-random`.", returncode=4)

@@ -8,23 +8,20 @@ can't be resolved."""
 from __future__ import annotations
 
 import sys
-import types
 from types import SimpleNamespace
 
 from fsr_playbooks.mcp_server import tools_connector_discovery as tcd
 from fsr_playbooks.mcp_server import tools_execution as te
+from fsr_playbooks.mcp_server._sim_client import bridge_modules
 
 
 def _install_env(monkeypatch, client):
     """Bind a fake client onto probes._env.get_client/get_config (the seam the
     connector bridge uses), mirroring test_sim_run_op_integration's fixture."""
-    env_mod = types.ModuleType("probes._env")
-    env_mod.get_client = lambda: client
-    env_mod.get_config = lambda: SimpleNamespace(is_live=lambda: True)
-    probes_mod = types.ModuleType("probes")
-    probes_mod._env = env_mod
-    monkeypatch.setitem(sys.modules, "probes", probes_mod)
-    monkeypatch.setitem(sys.modules, "probes._env", env_mod)
+    mods = bridge_modules(lambda: client,
+                          lambda: SimpleNamespace(is_live=lambda: True))
+    for key, mod in mods.items():
+        monkeypatch.setitem(sys.modules, key, mod)
 
 
 class _PyfsrClient:

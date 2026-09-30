@@ -30,6 +30,7 @@ swap is invisible to the ~50 tool call-sites.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any
 
 from . import _sim_fixtures
@@ -216,3 +217,74 @@ def get_client() -> SimulatedFSRClient | None:
 
 def get_config() -> SimConfig:
     return SimConfig()
+
+
+# ---------------------------------------------------------------------------
+# The `probes._env` seam
+# ---------------------------------------------------------------------------
+# Every live-touching tool resolves its client through `probes._env`, so
+# pointing that one module at a fake box is the whole of "offline mode". This
+# is the ONE place the swap is built. It used to be hand-rolled in four files,
+# and only one of them restored what it displaced: a copy that forgot left the
+# fake box installed for the rest of the process, and an unrelated test then
+# saw a box with only the sim connectors configured -- red or green depending
+# on test order.
+
+def bridge_modules(client_factory: Any = None,
+                   config_factory: Any = None) -> dict[str, Any]:
+    """Build the stand-in `probes` / `probes._env` modules, keyed for sys.modules.
+
+    Defaults to this module's simulated client. The real `probes._env`'s other
+    attributes (`EnvConfig`, `_load_dotenv`, ...) are carried across when it is
+    importable: offline should remove the box, not the module.
+    """
+    import types
+
+    env_mod = types.ModuleType("probes._env")
+    try:
+        import probes._env as real  # tooling/ may not be on sys.path
+        for attr in dir(real):
+            if not attr.startswith("__"):
+                setattr(env_mod, attr, getattr(real, attr))
+    except Exception:  # noqa: BLE001
+        pass
+    env_mod.get_client = client_factory or get_client  # type: ignore[attr-defined]
+    env_mod.get_config = config_factory or get_config  # type: ignore[attr-defined]
+    probes_mod = types.ModuleType("probes")
+    probes_mod._env = env_mod  # type: ignore[attr-defined]
+    return {"probes": probes_mod, "probes._env": env_mod}
+
+
+def _reset_client_caches() -> None:
+    """Drop every cache that would let one box's answers outlive the swap."""
+    from . import _shared
+    from . import tools_execution as te
+
+    _shared._LIVE_CLIENT_CACHE.pop("client", None)
+    te._CONFIGURED_CACHE["rows"] = None
+    te._CONFIGURED_CACHE["ts"] = 0.0
+
+
+
+@contextmanager
+def probes_bridge(client_factory: Any = None, config_factory: Any = None):
+    """Serve `probes._env` from a fake box for the duration of the block.
+
+    Restores the displaced modules and clears the client caches on exit, so
+    nothing about the fake box survives the caller.
+    """
+    import sys
+
+    mods = bridge_modules(client_factory, config_factory)
+    saved = {k: sys.modules.get(k) for k in mods}
+    sys.modules.update(mods)
+    _reset_client_caches()
+    try:
+        yield
+    finally:
+        for key, mod in saved.items():
+            if mod is None:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = mod
+        _reset_client_caches()

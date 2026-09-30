@@ -14,7 +14,17 @@ from __future__ import annotations
 
 import importlib
 
+import pytest
+
 bt = importlib.import_module("evals.build_trace_fixture")
+
+
+@pytest.fixture
+def sim_bridge():
+    """The sim box for one test, restored after it -- never left installed."""
+    from fsr_playbooks.mcp_server._sim_client import probes_bridge
+    with probes_bridge():
+        yield
 
 
 def test_all_scenarios_build_and_fully_wire():
@@ -27,8 +37,7 @@ def test_all_scenarios_build_and_fully_wire():
         assert r["static_errors"] == [], (scenario, r)
 
 
-def test_replayed_fixture_feeds_score_wiring_resolution():
-    bt._install_sim_bridge()
+def test_replayed_fixture_feeds_score_wiring_resolution(sim_bridge):
     trace_json = bt.build_trace("c2_containment")
     # the coincidence gate must hold (raises otherwise)
     bt.assert_cross_step_coincidence(trace_json)
@@ -37,19 +46,17 @@ def test_replayed_fixture_feeds_score_wiring_resolution():
     assert lv["skipped"] is False
 
 
-def test_enrich_then_block_has_block_after_enrich():
-    bt._install_sim_bridge()
+def test_enrich_then_block_has_block_after_enrich(sim_bridge):
     import json
     calls = json.loads(bt.build_trace("enrich_then_block"))["calls"]
     ops = [c["resolved_inputs"]["operation"] for c in calls]
     assert ops == ["query_ip", "block_ip_new"], ops
 
 
-def test_b4_triage_build_enriches_every_ti_then_contains():
+def test_b4_triage_build_enriches_every_ti_then_contains(sim_bridge):
     """B4 build_fidelity, offline: triage → enrich across every configured TI
     connector → stage containment. Asserts the staged containment is captured
     (action_coverage) and its IP came from a prior enrichment (grounding)."""
-    bt._install_sim_bridge()
     import json
     trace_json = bt.build_trace("b4_triage_build")
     calls = json.loads(trace_json)["calls"]

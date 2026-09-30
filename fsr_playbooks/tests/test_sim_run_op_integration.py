@@ -8,9 +8,6 @@ substrate, with NO live FortiSOAR and NO Anthropic.
 """
 from __future__ import annotations
 
-import sys
-import types
-
 import pytest
 
 from fsr_playbooks.mcp_server import _sim_client as sc
@@ -18,21 +15,11 @@ from fsr_playbooks.mcp_server import tools_execution as te
 
 
 @pytest.fixture
-def sim_bridge(monkeypatch):
-    """Install probes._env -> sim client, mirroring the connector bridge.
-    Also reset the in-process preflight caches so each test is independent."""
-    env_mod = types.ModuleType("probes._env")
-    env_mod.get_client = sc.get_client
-    env_mod.get_config = sc.get_config
-    probes_mod = types.ModuleType("probes")
-    probes_mod._env = env_mod
-    monkeypatch.setitem(sys.modules, "probes", probes_mod)
-    monkeypatch.setitem(sys.modules, "probes._env", env_mod)
-    # run_op closes over a module-level `get_client` import inside the func,
-    # so the sys.modules swap is enough. Clear preflight caches.
-    te._CONFIGURED_CACHE["rows"] = None
-    te._CONFIGURED_CACHE["ts"] = 0.0
-    yield
+def sim_bridge():
+    """Install probes._env -> sim client, mirroring the connector bridge, with
+    the preflight caches reset so each test is independent."""
+    with sc.probes_bridge():
+        yield
 
 
 def _has_connector(name: str) -> bool:

@@ -16,6 +16,7 @@ cache) when you deliberately want broader coverage.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import sys
@@ -41,7 +42,13 @@ def _resolve_db() -> Path:
         return Path(os.environ["FSRPB_DB"])
     if not FIXTURE_DB.exists():
         return FIXTURE_DB  # db_path fixture will skip with a clear message
-    tmp = Path(tempfile.gettempdir()) / "fsrpb_tooling_fixture.db"
+    # One copy per session, not one shared path: two concurrent runs (a
+    # commit hook beside a manual run) each re-copied the same file, and the
+    # reader of a half-written copy failed with "database disk image is
+    # malformed". Removed at exit so runs don't pile up in $TMPDIR.
+    tmpdir = Path(tempfile.mkdtemp(prefix="fsrpb-tooling-"))
+    atexit.register(shutil.rmtree, tmpdir, ignore_errors=True)
+    tmp = tmpdir / "fsrpb_tooling_fixture.db"
     shutil.copyfile(FIXTURE_DB, tmp)
     return tmp
 
@@ -75,3 +82,18 @@ def corpus_path() -> Path:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return REPO
+
+
+# Set by git while it runs a hook. `git commit -- <paths>` points GIT_INDEX_FILE
+# at a temporary index, and every `git` a test runs inherits it: the scratch
+# repos in test_release_guards could not commit, and test_hook_liveness's
+# `git add -A` in a scratch dir wrote INTO the commit's index, so the next
+# real-repo check read a gutted index. Tests must see git as a shell does.
+_GIT_HOOK_ENV = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+
+
+@pytest.fixture(autouse=True)
+def _no_git_hook_env(monkeypatch):
+    for var in _GIT_HOOK_ENV:
+        monkeypatch.delenv(var, raising=False)
