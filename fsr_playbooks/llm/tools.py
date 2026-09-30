@@ -1436,6 +1436,70 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
 }
 
 
+
+def _field_brief(name: str, prop: dict[str, Any], required: bool) -> str:
+    """One payload field, as the model needs it: name, required mark, and the
+    shape it keeps getting wrong (enum values, number range, list items)."""
+    star = "*" if required else ""
+    if prop.get("enum"):
+        return f"{name}{star} ({'|'.join(str(v) for v in prop['enum'])})"
+    t = prop.get("type")
+    if t == "number" or t == "integer":
+        lo, hi = prop.get("minimum"), prop.get("maximum")
+        rng = f" {lo}-{hi}" if lo is not None and hi is not None else ""
+        return f"{name}{star} ({t}{rng})"
+    if t == "array":
+        items = prop.get("items") or {}
+        if items.get("type") == "object" and items.get("properties"):
+            req = set(items.get("required") or [])
+            inner = ", ".join(
+                _field_brief(k, v, k in req)
+                for k, v in items["properties"].items())
+            return f"{name}{star} [{{{inner}}}]"
+        it = items.get("type")
+        return f"{name}{star} [{it}]" if it else f"{name}{star} [..]"
+    return f"{name}{star}"
+
+
+def _card_payload_brief() -> str:
+    """The `emit_card.payload` description, generated from each card's own
+    schema in this dict -- the payload IS the constituent emitter's arguments.
+
+    The payload used to be described as "identical to the matching
+    emit_<card_type> tool's arguments", but those tools are not advertised,
+    so the model guessed: session health showed verdicts sent with
+    `title`/`details` for `claim`, confidence as "low", evidence as objects,
+    `likely_malicious` for a disposition -- each costing a refused round
+    trip. Advertising only: the emitters keep their own every-problem
+    refusals (validating here too was tried and reverted, W2).
+    """
+    routes = getattr(getattr(mcp_server, "tools_emit", None), "CARD_TYPES", {})
+    lines = []
+    for card, tool in routes.items():
+        sch = TOOL_SCHEMA_OVERRIDES.get(tool) or {}
+        props = sch.get("properties") or {}
+        req = set(sch.get("required") or [])
+        if props:
+            fields = ", ".join(_field_brief(k, v, k in req)
+                               for k, v in props.items())
+        else:
+            # No hand-written schema: the emitter's signature is the contract.
+            fn = getattr(mcp_server, tool, None)
+            if fn is None:
+                continue
+            params = inspect.signature(fn).parameters.values()
+            fields = ", ".join(
+                p.name + ("*" if p.default is inspect.Parameter.empty else "")
+                for p in params if p.kind is not p.VAR_KEYWORD)
+        lines.append(f"{card}: {fields}")
+    return ("The chosen card's fields (* = required):\n" + "\n".join(lines)
+            if lines else "The chosen card's fields.")
+
+
+TOOL_SCHEMA_OVERRIDES["emit_card"]["properties"]["payload"]["description"] = (
+    _card_payload_brief())
+
+
 def _resolved_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     """Real type objects for `fn`'s parameters, defeating PEP 563.
 
