@@ -38,6 +38,16 @@ def _digest(p: Path) -> str:
     return h.hexdigest()
 
 
+def _has_op_defs_table() -> bool:
+    conn = sqlite3.connect(f"file:{STORE}?mode=ro", uri=True)
+    try:
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='connector_op_defs'").fetchone() is not None
+    finally:
+        conn.close()
+
+
 @pytest.fixture
 def _clean_env(monkeypatch):
     monkeypatch.delenv("FSRPB_CACHE_DB", raising=False)
@@ -66,11 +76,19 @@ def test_caching_op_defs_does_not_touch_the_reference_store(_clean_env):
     Exercises the read path too: `_op_defs_table` is DDL that runs on a cache
     LOOKUP, so a miss wrote to the store just as surely as a store did.
 
-    Asserts the TABLE is absent rather than only that the digest held. The
+    Asserts on the ROW this test writes, not only that the digest held. The
     digest alone is a weak gate here and was observed passing while the fix was
     disabled: the store is WAL-mode, so a write lands in `-wal` and the `.db`
-    file's bytes do not move until a checkpoint. Presence of the table is
-    deterministic; the digest check rides along as a second opinion.
+    file's bytes do not move until a checkpoint. A SELECT does see the `-wal`,
+    so the row check is deterministic; the digest rides along as a second
+    opinion.
+
+    Not on the table's absence: outside an eval run a source checkout caches
+    into the store BY DESIGN, so any dev store the Studio has ever served
+    already holds `connector_op_defs`. Asserting absence made this test fail
+    forever on such a store while the diversion was working. The table is
+    still required to stay absent when it was absent to begin with -- that is
+    what catches the lookup-path DDL.
     """
     from evals import offline
 
@@ -78,6 +96,7 @@ def test_caching_op_defs_does_not_touch_the_reference_store(_clean_env):
     try:
         from fsr_playbooks.mcp_server import tools_execution as te
 
+        had_table = _has_op_defs_table()
         before = _digest(STORE)
         te._cached_op_defs("acme-widgets", "1.0.0")          # read path
         te._store_op_defs("acme-widgets", "1.0.0",
@@ -85,17 +104,23 @@ def test_caching_op_defs_does_not_touch_the_reference_store(_clean_env):
         assert te._cached_op_defs("acme-widgets", "1.0.0"), \
             "cache round-trip did not come back -- the diversion broke it"
 
-        conn = sqlite3.connect(f"file:{STORE}?mode=ro", uri=True)
-        try:
-            landed = conn.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name='connector_op_defs'").fetchone()
-        finally:
-            conn.close()
-        assert landed is None, (
-            "`connector_op_defs` was created in the reference store: the "
-            "runtime cache is still writing to the substrate evals are "
-            "measured against")
+        if not had_table:
+            assert not _has_op_defs_table(), (
+                "`connector_op_defs` was created in the reference store: the "
+                "runtime cache is still writing to the substrate evals are "
+                "measured against")
+        else:
+            conn = sqlite3.connect(f"file:{STORE}?mode=ro", uri=True)
+            try:
+                landed = conn.execute(
+                    "SELECT 1 FROM connector_op_defs "
+                    "WHERE connector='acme-widgets'").fetchone()
+            finally:
+                conn.close()
+            assert landed is None, (
+                "the op-def cache wrote its row into the reference store: the "
+                "runtime cache is still writing to the substrate evals are "
+                "measured against")
         assert _digest(STORE) == before, (
             "the reference store changed while the op-def cache was used")
     finally:
