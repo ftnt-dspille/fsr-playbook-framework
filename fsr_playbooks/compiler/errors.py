@@ -42,6 +42,13 @@ class ErrorCode(str, Enum):
     JINJA_UNDEFINED_VARIABLE = "jinja_undefined_variable"
     INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR
     STALE_CATALOG = "stale_catalog"          # catalog is behind the live SOAR
+    # Connector-config existence (verify-path, live-probe only). Demotable via
+    # ``lax_codes={"connector_config_missing"}`` / ``skip=["connector_config_missing"]``
+    # (or the ``"connector"`` group) so a playbook authored for a different box
+    # still compiles/verifies.
+    CONNECTOR_CONFIG_MISSING = "connector_config_missing"
+    CONNECTOR_CONFIG_NO_DEFAULT = "connector_config_no_default"
+    UNKNOWN_CONNECTOR_CONFIG = "unknown_connector_config"
     INTERNAL = "internal"                    # tooling/install fault, not the YAML
 
 

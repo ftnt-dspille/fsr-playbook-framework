@@ -141,8 +141,8 @@ playbooks:
 
 def test_connector_flat_args_lift_into_params(db_path):
     """Top-level keys matching known op params get hoisted into
-    arguments.params:, with a warning, so the agent's most common
-    connector-step mistake still produces a usable playbook."""
+    arguments.params: silently, so the agent's most common connector-step
+    mistake still produces a usable playbook."""
     text = """
 collection: T
 playbooks:
@@ -167,8 +167,6 @@ playbooks:
     step = r.ir.playbooks[0].steps[1]
     params = step.arguments.get("params") or {}
     assert "method" in params and "ip_addresses" in params and "time_to_live" in params
-    msgs = " | ".join(w.message for w in r.warnings)
-    assert "lifted into" in msgs
 
 
 # ---- Conditional-visibility checker (Issue 4) --------------------

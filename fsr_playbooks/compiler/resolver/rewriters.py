@@ -367,6 +367,11 @@ class RewriterMixin:
                         # normalizer downstream.
                         if old == "message" and isinstance(args[old], dict):
                             continue
+                        # `ignore_errors` as a bool is a step-level
+                        # property (suppress failure propagation), not a
+                        # user variable -- do not rename it.
+                        if old == "ignore_errors" and isinstance(args[old], bool):
+                            continue
                         new = self._safe_rename(old, _RESERVED_VARS_KEYS)
                         args[new] = args.pop(old)
                         renames[old] = new

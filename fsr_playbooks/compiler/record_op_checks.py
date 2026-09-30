@@ -299,7 +299,8 @@ def check_connector_config(
                 "message": msg,
                 "step": step_id,
                 "path": f"{path}.arguments.config" if path else "",
-                "suggestion": sug,
+                "suggestion": (sug or
+                    "skip: lax_codes={'unknown_connector_config'}"),
                 "near": near,
                 "severity": "error",
             }]
@@ -315,7 +316,8 @@ def check_connector_config(
             "step": step_id,
             "path": f"{path}.arguments.config" if path else "",
             "suggestion": (f"configure {connector!r} on the target, or pin an "
-                           f"existing config name/IRI in arguments.config"),
+                           f"existing config name/IRI in arguments.config "
+                           f"(skip: lax_codes={{'connector_config_missing'}})"),
             "severity": "error",
         }]
     if not has_default:
@@ -326,7 +328,8 @@ def check_connector_config(
             "step": step_id,
             "path": f"{path}.arguments.config" if path else "",
             "suggestion": (f"pin one of [{', '.join(repr(n) for n in names[:5])}] "
-                           f"in arguments.config, or mark one default"),
+                           f"in arguments.config, or mark one default "
+                           f"(skip: lax_codes={{'connector_config_no_default'}})"),
             "severity": "warning",
         }]
     return []

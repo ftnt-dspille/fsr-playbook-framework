@@ -647,8 +647,11 @@ def verify_playbook(
       - op_param_unknown
       - required_record_field_missing   (create_record missing a required field)
       - unknown_module                  (record write into a non-existent module)
-      - connector_config_missing        (live_probe only -- no config on target)
-      - unknown_connector_config        (live_probe only -- config: name unknown)
+      - connector_config_missing        (live_probe only -- no config on target;
+                                         skip: lax_codes={'connector_config_missing'}
+                                         or disable_checks=['connector'])
+      - unknown_connector_config        (live_probe only -- config: name unknown;
+                                         skip: lax_codes={'unknown_connector_config'})
       - branch_target_missing
       - workflow_reference_unresolvable (error severity only)
       - jinja_syntax_error              (un-parseable Jinja template; emitted

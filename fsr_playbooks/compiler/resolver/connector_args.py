@@ -374,7 +374,6 @@ class ConnectorArgsMixin:
             "condition",
         }
         if valid_params:
-            lifted: list[str] = []
             existing_params = a.get("params") if isinstance(a.get("params"), dict) else None
             for k in list(a.keys()):
                 if k in _CONNECTOR_RESERVED:
@@ -384,18 +383,6 @@ class ConnectorArgsMixin:
                         existing_params = {}
                         a["params"] = existing_params
                     existing_params.setdefault(k, a.pop(k))
-                    lifted.append(k)
-            if lifted:
-                errors.append(CompileError(
-                    code=ErrorCode.BAD_VALUE,
-                    message=(
-                        f"connector params {', '.join(repr(k) for k in lifted)} "
-                        f"were at `arguments:` top level -- lifted into "
-                        f"`arguments.params:` (write them there directly)"
-                    ),
-                    path=f"{path}.arguments",
-                    severity="warning",
-                ))
         provided = a.get("params") or {}
         if not isinstance(provided, dict):
             errors.append(CompileError(
