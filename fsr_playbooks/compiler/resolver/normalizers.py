@@ -1078,9 +1078,9 @@ class NormalizerMixin:
             validator.validate_filters(q["filters"], module, base, errors)
         named: list[tuple[str, str]] = []
         for i, so in enumerate(q.get("sort") or []):
-            if isinstance(so, dict):
-                named.append((so.get("field"),
-                              f"{path}.arguments.sort[{i}].field"))
+            field = so.get("field") if isinstance(so, dict) else None
+            if isinstance(field, str):
+                named.append((field, f"{path}.arguments.sort[{i}].field"))
         for i, f in enumerate(q.get("__selectFields") or []):
             named.append((f, f"{path}.arguments.select[{i}]"))
         validator.validate_field_names(named, module, errors)

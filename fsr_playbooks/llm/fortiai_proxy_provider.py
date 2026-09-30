@@ -511,7 +511,7 @@ class FortiAIProxyProvider(CapabilityMixin):
             a text turn. usage is a dict of token counts.
             On error, raises RuntimeError.
             """
-            body = {
+            body: dict[str, Any] = {
                 "connector": "fortinet-fortiai-proxy",
                 "operation": "agent_chat_completions",
                 "params": {
@@ -817,7 +817,7 @@ class FortiAIProxyProvider(CapabilityMixin):
                     ),
                 })
                 try:
-                    wrap_content, _, _, _ = await _call_proxy(
+                    wrap_content, _, _ = await _call_proxy(
                         history=history, tool_defs=[]
                     )
                     if wrap_content:

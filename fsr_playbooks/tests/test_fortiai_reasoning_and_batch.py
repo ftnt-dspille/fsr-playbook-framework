@@ -193,3 +193,23 @@ def test_one_unreadable_call_does_not_void_its_siblings() -> None:
            and isinstance(e.result, dict)
            and e.result.get("code") == "bad_tool_arguments"]
     assert len(bad) == 1
+
+
+# -- 4. the forced assessment reaches the analyst ---------------------------
+
+
+def test_forced_assessment_text_is_delivered() -> None:
+    """Tools ran, then an empty reply: the wrap-up round's text must be yielded.
+
+    The wrap-up unpacked `_call_proxy`'s 3-tuple into four names. The
+    ValueError was swallowed by the round's `except Exception`, so the analyst
+    got silence exactly when the round exists to prevent it.
+    """
+    from fsr_playbooks.llm.provider import TextEvent
+    events, _disp, _sent = _run([
+        _payload(tool_name="run_op", tool_args={"op": "lookup"}),
+        _payload(content=""),
+        _payload(content="Benign; close it."),
+    ])
+    texts = [e.text for e in events if isinstance(e, TextEvent)]
+    assert "Benign; close it." in texts, texts

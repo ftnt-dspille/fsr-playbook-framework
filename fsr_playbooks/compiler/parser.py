@@ -470,7 +470,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                             path=f"{sp}.configuration_schema",
                         ))
                     else:
-                        sv = {"input": {"params": []}}
+                        sv: dict[str, Any] = {"input": {"params": []}}
                         sv["_configuration_schema"] = json.dumps(cs)
                         args["step_variables"] = sv
 

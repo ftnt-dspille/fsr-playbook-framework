@@ -132,6 +132,10 @@ class SkillTrace:
         # step instead of baking the literal in -- making the playbook
         # re-runnable on any record of `module`. None → IOCs stay literal.
         self.record_fields: dict[str, Any] | None = record_fields
+        # The YAML build_playbook_from_trace last returned for this trace. Not
+        # serialized: it only lets an offer of those exact bytes be recognised
+        # as the trace build (tools_emit._is_the_trace_build).
+        self.last_build_yaml: str | None = None
         # Tracks how many times each base step name has been used so
         # repeated ops get stable, unique names (`Get Record`, `Get Record 2`).
         self._name_counts: dict[str, int] = {}

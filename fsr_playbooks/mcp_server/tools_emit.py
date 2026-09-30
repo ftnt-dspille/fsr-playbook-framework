@@ -651,7 +651,9 @@ def _is_the_trace_build(yaml_text: str, trace: Any) -> bool:
     trace build and offered the identical bytes as `yaml`; the card then lost
     every step's verified-wiring flag, though nothing had been hand-written."""
     last = getattr(trace, "last_build_yaml", None)
-    return bool(last) and _unfence(yaml_text).strip() == last.strip()
+    if not last:
+        return False
+    return bool(_unfence(yaml_text).strip() == last.strip())
 
 
 _FENCE_RE = re.compile(r"^\s*```[A-Za-z0-9_-]*[ \t]*\n(.*?)\n?\s*```\s*$", re.S)
