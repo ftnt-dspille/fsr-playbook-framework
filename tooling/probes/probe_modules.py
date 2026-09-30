@@ -43,8 +43,30 @@ PICKLISTS_URL = (
     "/api/3/picklist_names"
     "?$export=false&$limit=2147483647&$orderby=name&$relationships=true"
 )
-TAGS_URL = "/api/3/tags?$limit=2147483647&$orderby=name"
+# No `$orderby`: on 8.0 the collection is plain strings with no `name` column,
+# and ordering by it is a server-side QueryException (HTTP 400).
+TAGS_URL = "/api/3/tags?$limit=2147483647"
 TEAMS_URL = "/api/3/teams?$limit=2147483647&$orderby=name"
+
+
+def _tag_rows(members: list) -> list[tuple[str, str]]:
+    """(name, iri) rows from a `/api/3/tags` collection.
+
+    8.0 serves each tag as a bare string; older boxes as an object. Skipping
+    the strings wiped the table and left tag validation silently off. A bare
+    tag's IRI is the slug form the compiler already emits for an unknown tag.
+    """
+    rows: list[tuple[str, str]] = []
+    for m in members:
+        if isinstance(m, str):
+            if m:
+                rows.append((m, f"/api/3/tags/{m}"))
+        elif isinstance(m, dict):
+            name = m.get("itemValue") or m.get("name")
+            iri = m.get("@id")
+            if name and iri:
+                rows.append((str(name), str(iri)))
+    return rows
 
 
 def _scalarize(v: Any) -> Any:
@@ -278,14 +300,7 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         tags_resp.raise_for_status()
         rt = tags_resp.json()
         tags_etag = tags_resp.headers.get("ETag")
-        tag_rows: list[tuple[str, str]] = []
-        for m in rt.get("hydra:member") or []:
-            if not isinstance(m, dict):
-                continue
-            name = m.get("itemValue") or m.get("name")
-            iri = m.get("@id")
-            if name and iri:
-                tag_rows.append((str(name), str(iri)))
+        tag_rows = _tag_rows(rt.get("hydra:member") or [])
         conn.execute("DELETE FROM tags")
         conn.executemany(
             "INSERT OR REPLACE INTO tags (name, iri) VALUES (?, ?)",

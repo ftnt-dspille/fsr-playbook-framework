@@ -264,7 +264,8 @@ CREATE TABLE IF NOT EXISTS modules (
     name        TEXT PRIMARY KEY,             -- 'threat_intel_feeds'
     label       TEXT,
     plural      TEXT,
-    description TEXT
+    description TEXT,
+    unique_constraint TEXT                    -- JSON list of the upsert natural-key column(s), e.g. '["sourceId"]'; NULL when unknown
 );
 
 CREATE TABLE IF NOT EXISTS module_fields (
