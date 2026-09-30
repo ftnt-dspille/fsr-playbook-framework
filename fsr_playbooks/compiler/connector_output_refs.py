@@ -115,18 +115,27 @@ def _data_subkeys(db_path: Path, conn: sqlite3.Connection | None,
 
 
 def _connector_steps(coll: Collection) -> dict[str, dict[str, tuple[str, str]]]:
-    """Per playbook: jinja-key → (connector, op) for every connector step."""
+    """Per playbook: jinja-key → (connector, op) for every connector step.
+
+    Also includes code_snippet steps as ``("__code_snippet__", "code_output")``
+    so the same rewrite pass adds the ``.data`` envelope segment to
+    ``vars.steps.<snippet>.code_output`` references -- code_snippet results are
+    wrapped in ``{data: {code_output: …}}`` at runtime (even under --mock),
+    so ``.code_output`` without ``.data`` renders empty.
+    """
     out: dict[str, dict[str, tuple[str, str]]] = {}
     for pb in coll.playbooks:
         m: dict[str, tuple[str, str]] = {}
         for s in pb.steps:
-            if (s.type or "").lower() != "connector":
-                continue
+            stype = (s.type or "").lower()
             args = s.arguments if isinstance(s.arguments, dict) else {}
-            conn = args.get("connector")
-            op = args.get("operation")
-            if isinstance(conn, str) and isinstance(op, str) and conn and op:
-                m[_jinja_key(s.name, s.id)] = (conn, op)
+            if stype == "connector":
+                conn = args.get("connector")
+                op = args.get("operation")
+                if isinstance(conn, str) and isinstance(op, str) and conn and op:
+                    m[_jinja_key(s.name, s.id)] = (conn, op)
+            elif stype == "code_snippet":
+                m[_jinja_key(s.name, s.id)] = ("__code_snippet__", "code_output")
         if m:
             out[pb.name] = m
     return out
@@ -190,7 +199,10 @@ def _rewrite_in_node(node: Any, step, steps_map, cache, db_path, conn, fixes) ->
 def _subkeys(cache, db_path, conn, connector, op) -> set[str] | None:
     key = (connector, op)
     if key not in cache:
-        cache[key] = _data_subkeys(db_path, conn, connector, op)
+        if connector == "__code_snippet__":
+            cache[key] = {"code_output"}
+        else:
+            cache[key] = _data_subkeys(db_path, conn, connector, op)
     return cache[key]
 
 
@@ -254,12 +266,15 @@ def _rewrite_string(text, step, steps_map, cache, db_path, conn, fixes) -> str:
                 return mobj.group(0)  # already correct
             subkeys = _subkeys(cache, db_path, conn, connector, op)
             if subkeys and first in subkeys:
+                src = ("code_snippet result is wrapped in "
+                       "`{data: {code_output: ...}}`"
+                       if connector == "__code_snippet__" else
+                       "connector result is an envelope, "
+                       "op output fields are under `.data`")
                 fixes.append(CompileError(
                     code=ErrorCode.BAD_VALUE, severity="warning",
                     message=(f"rewrote `vars.steps.{sname}.{first}` → "
-                             f"`vars.steps.{sname}.data.{first}`: a connector "
-                             f"result is an envelope, op output fields are "
-                             f"under `.data`"),
+                             f"`vars.steps.{sname}.data.{first}`: {src}"),
                     path=f"{step.id}",
                 ))
                 return f"vars.steps.{sname}.data.{first}"
