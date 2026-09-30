@@ -160,7 +160,7 @@ def compile_yaml(
         # Even on parse failure we attempt the raw-text linter so the
         # caller sees the foot-gun cause when the parser bails out on
         # a derived symptom (e.g. branches mapping that became {True:}).
-        lint_errs = lint(text, coll)
+        lint_errs = lint(text, coll, db_path=db_path)
         return CompileResult(errors=errs + lint_errs, ir=coll)
 
     all_warnings: list[CompileError] = [e for e in errs if e.severity == "warning"]
@@ -170,7 +170,7 @@ def compile_yaml(
         enrich_diagnostics(coll, errs)
         return CompileResult(errors=errs, ir=coll)
 
-    lint_errs = _demote(lint(text, coll))
+    lint_errs = _demote(lint(text, coll, db_path=db_path))
     if any(e.severity != "warning" for e in lint_errs):
         return _blocked(lint_errs)
     all_warnings.extend(lint_errs)

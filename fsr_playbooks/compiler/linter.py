@@ -32,6 +32,8 @@ Severity policy:
 from __future__ import annotations
 
 import re
+import sqlite3
+from pathlib import Path
 
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Step
@@ -241,11 +243,19 @@ def _snippet_allow_imports(s: Step) -> bool | None:
     return None
 
 
-def _check_code_snippet(s: Step, pi: int, si: int) -> list[CompileError]:
+def _check_code_snippet(
+    s: Step, pi: int, si: int, *, default_allow_imports: bool | None = None
+) -> list[CompileError]:
     """B1 (syntax) + B2 (sandbox bans) for a code_snippet step.
 
     Delegates the actual analysis to ``snippet_checks.check_snippet`` and maps
     its findings onto ``CompileError`` rows pointed at the snippet body.
+
+    ``default_allow_imports`` is the connector's default config import setting,
+    resolved from the warmed catalog's ``connector_configs`` table.  When the
+    step doesn't set ``allow_imports`` inline, this value is used instead --
+    so a box whose default code-snippet config already allows imports
+    suppresses the import warning without an inline ``allow_imports: true``.
     """
     body = _snippet_body(s)
     if body is None:
@@ -254,10 +264,12 @@ def _check_code_snippet(s: Step, pi: int, si: int) -> list[CompileError]:
     version = args.get("version")
     if not isinstance(version, str):
         version = None
+    inline = _snippet_allow_imports(s)
+    allow_imports = inline if inline is not None else default_allow_imports
     findings = check_snippet(
         body,
         version=version,
-        allow_imports=_snippet_allow_imports(s),
+        allow_imports=allow_imports,
     )
     out: list[CompileError] = []
     for f in findings:
@@ -322,11 +334,11 @@ def _check_find_record_mock_shape(s: Step, pi: int, si: int) -> CompileError | N
     Live-verified on FSR 8.0.0-6034: find_record's REAL output (no mock)
     is a raw list of records, NOT the ``{data, status, message, operation}``
     envelope. But authors commonly write ``mock_result: {data: [...],
-    status: "Success"}`` — which makes mock runs work with ``.data`` refs
+    status: "Success"}`` -- which makes mock runs work with ``.data`` refs
     that break in production (the real list has no ``.data`` key).
 
     The correct mock_result for find_record is a bare list:
-    ``mock_result: [{name: test}]`` — matching the real output shape.
+    ``mock_result: [{name: test}]`` -- matching the real output shape.
     """
     if s.type != "find_record":
         return None
@@ -351,8 +363,323 @@ def _check_find_record_mock_shape(s: Step, pi: int, si: int) -> CompileError | N
     return None
 
 
-def lint(text: str, coll: Collection | None) -> list[CompileError]:
-    """Run every linter rule. Pure - no DB, no live FSR."""
+def _check_message_record(s: Step, pi: int, si: int) -> CompileError | None:
+    """Warn when a ``message:`` block (comment) has no explicit ``record:``.
+
+    FSR's ``message:`` block posts a collaboration comment to a record after
+    the step runs.  When ``record:`` / ``records:`` is omitted, FSR defaults to
+    the **trigger record** (``vars.input.records[0]``).  This is correct for
+    record-triggered playbooks but fails with "No record found for posting
+    the given message" in:
+
+    - ``--mock`` runs (which use ``notrigger`` mode -- no trigger record)
+    - Manual / API-triggered runs without a record
+
+    Authors who intend the comment to attach to the trigger record can make
+    this explicit with ``record: "{{ vars.input.records[0]['@id'] }}"``.
+    For mock-friendly output that doesn't need a record, use ``vars:`` instead
+    of ``message:``.
+    """
+    args = s.arguments or {}
+    msg = args.get("message")
+    if not isinstance(msg, dict):
+        return None
+    rec = msg.get("record") or msg.get("records")
+    if rec:
+        return None
+    name = s.name or s.id or "?"
+    return CompileError(
+        code=ErrorCode.BAD_VALUE,
+        severity="warning",
+        message=(
+            f"step {name!r} has a `message:` block (comment) without an "
+            f"explicit `record:` / `records:`. FSR defaults to the trigger "
+            f"record (vars.input.records[0]), which is correct for "
+            f"record-triggered playbooks but fails with 'No record found' "
+            f"in --mock runs and manual/API-triggered runs without a record."
+        ),
+        path=f"playbooks[{pi}].steps[{si}].arguments.message",
+        suggestion='add record: "{{ vars.input.records[0][\'@id\'] }}" to be '
+                   'explicit, or use vars: instead of message: for mock-friendly output',
+    )
+
+
+# Step types whose REAL output is the `{data, status, message, operation}`
+# envelope but whose MOCK output (mock_result) is the raw payload with NO
+# envelope. A `.data` reference therefore renders EMPTY in a `--mock` run and
+# only a direct reference works there -- the mirror image of production.
+# Connector and code_snippet steps with mock_result return it verbatim (no
+# envelope) under --mock.  BUT if the mock_result itself has a top-level
+# `data` key, the author has shaped it to include the envelope and `.data`
+# refs are fine -- the per-step check below skips those.
+_MOCK_ENVELOPE_STEP_TYPES = {"connector", "code_snippet"}
+
+# Regex matching `vars.steps.<key>.data.<field>` (and the bare `steps.` form
+# the connector-output-rewriter also repairs). Anchored so it only fires on the
+# `.data` segment, not `.data` appearing elsewhere.
+_MOCK_DATA_REF_RE = re.compile(
+    r"\b(?:vars\.)?steps\.([A-Za-z0-9_]+)\.data\.([A-Za-z0-9_]+)"
+)
+
+
+def _step_jinja_key(s: Step) -> str:
+    """Jinja key FSR builds for a step output (display name, spaces -> _)."""
+    base = (s.name or s.id or "").strip()
+    return base.replace(" ", "_")
+
+
+def _walk_strings(node, out: list[tuple[str, str, int]] | None = None,
+                  where: str = "") -> list[tuple[str, str, int]]:
+    """Yield (parent_step_jinja_key, jinja_string, nesting_depth) for every
+    string leaf containing a Jinja expression, walking nested args/lists."""
+    if out is None:
+        out = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _walk_strings(v, out, where=f"{where}.{k}" if where else k)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            _walk_strings(v, out, where=f"{where}[{i}]")
+    elif isinstance(node, str) and "{{" in node:
+        out.append((where, node, 0))
+    return out
+
+
+def _check_mock_step_data_refs(pb, pi: int) -> list[CompileError]:
+    """Warn when a downstream reference reads `.data` off a connector or
+    code_snippet step that carries a ``mock_result``.
+
+    Live-verified on FSR 8.0 (2026-09-30): under ``--mock`` the runtime returns
+    ``mock_result`` VERBATIM -- connector output lands at
+    ``vars.steps.<step>.<field>`` and code_snippet output at
+    ``vars.steps.<step>.code_output``, with NO ``{data, status, message,
+    operation}`` envelope. A reference written as
+    ``vars.steps.<step>.data.<field>`` -- which the connector-output rewriter
+    actively endorses and which is CORRECT in production -- silently evaluates
+    to an empty string in mock mode. That empties ``set_variable`` values and
+    breaks ``for_each`` with the cryptic ``CS-WF-3: Invalid format of value for
+    for_each loop ''``.
+
+    This is a known-not-working-issue: the author is testing in mock mode (that
+    is the point of ``mock_result``) and the reference they are told is correct
+    will blank out exactly the values they are trying to verify. Emit a warning
+    so the failure is visible at authoring time instead of as a runtime 500.
+    """
+    errs: list[CompileError] = []
+    if not pb.steps:
+        return errs
+
+    # Steps whose output this playbook MIGHT read via `.data`: connector
+    # steps that carry a mock_result.  (Code_snippets are excluded -- their
+    # results are always wrapped in {data: {code_output: …}} even in mock.)
+    mock_steps: dict[str, Step] = {}
+    for s in pb.steps:
+        if (s.type or "").lower() not in _MOCK_ENVELOPE_STEP_TYPES:
+            continue
+        args = s.arguments or {}
+        if "mock_result" not in args and "mockResult" not in args:
+            continue
+        # If the mock_result itself has a top-level `data` key, the author
+        # has shaped it to include the envelope -- `.data` refs WILL work
+        # in mock mode, so skip the warning for this step.
+        mr = args.get("mock_result") or args.get("mockResult") or {}
+        if isinstance(mr, dict) and "data" in mr:
+            continue
+        mock_steps[_step_jinja_key(s)] = s
+
+    if not mock_steps:
+        return errs
+
+    for s in pb.steps:
+        if (s.type or "").lower() in _MOCK_ENVELOPE_STEP_TYPES:
+            continue
+        for _where, text, _depth in _walk_strings(s.arguments):
+            for m in _MOCK_DATA_REF_RE.finditer(text):
+                key = m.group(1)
+                target = mock_steps.get(key)
+                if target is None:
+                    continue
+                field = m.group(2)
+                # Correct mock-mode path is the reference with the `.data`
+                # envelope segment dropped -- the payload sits directly at
+                # `vars.steps.<key>.<field>` (for a connector, `<field>` is the
+                # op field; for a code_snippet, it is `code_output`).
+                correct = f"vars.steps.{key}.{field}"
+                errs.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message=(
+                        f"step {s.name or s.id!r} reads "
+                        f"`vars.steps.{key}.data.{field}` off a connector/"
+                        f"code_snippet step ({key!r}) that carries a "
+                        f"mock_result. Under --mock the output is returned "
+                        f"verbatim with NO `.data` envelope, so this reference "
+                        f"evaluates EMPTY in a mock run (and breaks for_each "
+                        f"with CS-WF-3). Use `{correct}` for mock runs; "
+                        f"`.data` is only correct in production."
+                    ),
+                    path=f"playbooks[{pi}].steps",
+                    suggestion=correct,
+                ))
+    return errs
+
+
+def _resolve_allow_imports(
+    db_path: str | Path | None,
+    config_name: str | None,
+) -> bool | None:
+    """Read a code-snippet config's ``allow_imports`` from the warmed catalog.
+
+    ``config_name`` selects a specific named config; ``None`` picks the default
+    (the ``__default__`` row, then the ``is_default`` row, then any single
+    config).  Returns ``True``/``False`` when the config has the setting,
+    ``None`` when the catalog is unwarmed, the table/column is absent, or no
+    matching config exists.
+    """
+    if not db_path:
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            if config_name:
+                row = conn.execute(
+                    "SELECT allow_imports FROM connector_configs "
+                    "WHERE connector = 'code-snippet' AND config_name = ?",
+                    (config_name,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT allow_imports FROM connector_configs "
+                    "WHERE connector = 'code-snippet' "
+                    "ORDER BY (config_name = '__default__') DESC, "
+                    "is_default DESC LIMIT 1"
+                ).fetchone()
+        finally:
+            conn.close()
+    except (sqlite3.OperationalError, OSError):
+        return None
+    if row is None or row[0] is None:
+        return None
+    return bool(row[0])
+
+
+def _step_config_name(s: Step) -> str | None:
+    """The config name a code_snippet step pins, or ``None`` for the default.
+
+    At lint time (pre-resolution) ``arguments.config`` holds the author's
+    raw value -- a config name string, a UUID/IRI, or absent.  We only return
+    a name when it's a plain string that doesn't look like a UUID/IRI (those
+    can't be looked up by name in the catalog).
+    """
+    args = s.arguments or {}
+    val = args.get("config")
+    if isinstance(val, str) and val.strip() and not _looks_like_uuid(val):
+        return val.strip()
+    return None
+
+
+def _looks_like_uuid(s: str) -> bool:
+    """True when ``s`` looks like a UUID or an IRI (not a friendly config name)."""
+    if s.startswith("/"):
+        return True
+    parts = s.split("-")
+    if len(parts) == 5 and all(len(p) in (8, 4, 4, 4, 12) for p in parts):
+        return True
+    return False
+
+
+# Regex matching `| tojson` applied to a whole step result or .data (which
+# may contain booleans like `debug: true` that the sandbox bans as `true`).
+_TOJSON_ON_STEP_RE = re.compile(
+    r"\|\s*tojson\b"
+)
+# Patterns where tojson is SAFE: applied to specific string fields extracted
+# via map(attribute=...) | list, or to individual leaf values.
+_SAFE_TOJSON_RE = re.compile(
+    r"(?:map\s*\(\s*attribute\s*=\s*['\"][^'\"]+['\"]\s*\)\s*\|\s*list"
+    r"|vars\.steps\.[A-Za-z0-9_]+\.[A-Za-z0-9_.]+\s*\|\s*tojson"
+    r"|vars\.[A-Za-z_][A-Za-z0-9_]*\s*\|\s*tojson"
+    r"|['\"][^'\"]*['\"]\s*\|\s*tojson)"
+)
+
+
+def _check_tojson_booleans(s: Step, pi: int, si: int) -> CompileError | None:
+    """Warn when ``| tojson`` in a code_snippet may inject booleans.
+
+    FSR's ``tojson`` filter renders Python booleans as ``true``/``false``
+    (lowercase), which the code-snippet sandbox bans as name references
+    (``true`` is not a Python keyword, so it's parsed as ``ast.Name`` and
+    rejected). The most common trap is applying ``tojson`` to a whole step
+    result (``vars.steps.X | tojson``) or the full data envelope
+    (``vars.steps.X.data | tojson``), which includes system metadata like
+    ``debug: true``.
+
+    Safe patterns: ``map(attribute='field') | list | tojson`` extracts only
+    string values; deeper field references (``vars.steps.X.data.field | tojson``)
+    are typically safe because they extract specific values.
+    """
+    if (s.type or "").lower() != "code_snippet":
+        return None
+    args = s.arguments or {}
+    code = args.get("code") or args.get("python_function") or ""
+    if not isinstance(code, str) or "| tojson" not in code and "|tojson" not in code:
+        return None
+    # Dangerous patterns: tojson on a whole step result or data envelope.
+    # These almost always contain `debug: true` or other booleans.
+    _DANGEROUS = [
+        # vars.steps.X | tojson  (whole step result -- has debug, task_id, ...)
+        re.compile(r"vars\.steps\.[A-Za-z0-9_]+\s*\|\s*tojson"),
+        # vars.steps.X.data | tojson  (full data envelope)
+        re.compile(r"vars\.steps\.[A-Za-z0-9_]+\.data\s*\|\s*tojson"),
+        # vars.input.params.X | tojson  (whole input object)
+        re.compile(r"vars\.input\.params\.[A-Za-z0-9_.]+\s*\|\s*tojson"),
+    ]
+    for m in re.finditer(r"\{\{(.+?)\}\}", code, re.DOTALL):
+        expr = m.group(1).strip()
+        if "| tojson" not in expr and "|tojson" not in expr:
+            continue
+        # Skip if map(attribute=...) is present (extracts specific fields)
+        if "map(" in expr and "attribute" in expr:
+            continue
+        for pat in _DANGEROUS:
+            if pat.search(expr):
+                return CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message=(
+                        f"code_snippet step {s.name or s.id!r} uses `| tojson` "
+                        f"on `{expr[:80]}` which may contain booleans (e.g. "
+                        f"`debug: true`). FSR's tojson renders booleans as "
+                        f"`true`/`false` (lowercase), and the sandbox bans "
+                        f"`true` as a name reference. Use "
+                        f"`map(attribute='field') | list | tojson` to extract "
+                        f"only string values."
+                    ),
+                    path=f"playbooks[{pi}].steps[{si}].arguments.code",
+                    suggestion=(
+                        "extract only the fields you need: "
+                        "`{{ vars.steps.X|map(attribute='field')|list|tojson }}`"
+                    ),
+                )
+    return None
+
+
+def lint(
+    text: str,
+    coll: Collection | None,
+    *,
+    db_path: str | Path | None = None,
+) -> list[CompileError]:
+    """Run every linter rule.
+
+    ``db_path`` optionally points at the warmed reference catalog so the
+    snippet checker can read the config's ``allow_imports`` setting and
+    suppress the import warning when the box already allows imports.  The
+    lookup is per-step: a step that pins ``config: my-config`` reads that
+    config's setting; a step without ``config:`` reads the default.  Without
+    a catalog (or an unwarmed one), the behavior is unchanged -- imports
+    produce a warning.
+    """
     errs: list[CompileError] = []
     errs.extend(_scan_norway(text))
     if coll is not None:
@@ -373,5 +700,145 @@ def lint(text: str, coll: Collection | None) -> list[CompileError]:
                 e = _check_find_record_mock_shape(s, pi, si)
                 if e:
                     errs.append(e)
-                errs.extend(_check_code_snippet(s, pi, si))
+                e = _check_message_record(s, pi, si)
+                if e:
+                    errs.append(e)
+                # Resolve the step's config's allow_imports from the catalog.
+                # Per-step: a pinned config name reads that config; no pin reads
+                # the default.  An inline allow_imports on the step always wins.
+                cfg_name = _step_config_name(s)
+                catalog_ai = _resolve_allow_imports(db_path, cfg_name)
+                errs.extend(
+                    _check_code_snippet(s, pi, si, default_allow_imports=catalog_ai)
+                )
+                # Warn when |tojson in a code_snippet may inject booleans
+                e = _check_tojson_booleans(s, pi, si)
+                if e:
+                    errs.append(e)
+            # Whole-playbook check: mock connector/code_snippet steps referenced
+            # via `.data` render empty in --mock runs.
+            errs.extend(_check_mock_step_data_refs(pb, pi))
+            # Whole-playbook check: workflow_reference children that end with
+            # `end`/`stop` return {data:null} -- the parent gets no data.
+            errs.extend(_check_workflow_ref_child_terminal(coll, pb, pi))
+    return errs
+
+
+def _child_terminal_steps(pb) -> list:
+    """Steps with no outgoing edge (next/branches/unlabeled_next)."""
+    terminals: list = []
+    for s in pb.steps:
+        has_next = bool(getattr(s, "next", None))
+        has_branches = bool(getattr(s, "branches", None))
+        has_unlabeled = bool(getattr(s, "unlabeled_next", None))
+        if not (has_next or has_branches or has_unlabeled):
+            terminals.append(s)
+    return terminals
+
+
+def _set_variable_var_names(s) -> set[str]:
+    """Names of variables a set_variable step exports."""
+    args = s.arguments if isinstance(s.arguments, dict) else {}
+    names: set[str] = set()
+    if isinstance(args.get("arg_list"), list):
+        for it in args["arg_list"]:
+            if isinstance(it, dict) and "name" in it:
+                names.add(it["name"])
+    elif isinstance(args.get("variables"), list):
+        for it in args["variables"]:
+            if isinstance(it, dict) and "name" in it:
+                names.add(it["name"])
+    elif isinstance(args.get("step_variables"), dict):
+        names.update(args["step_variables"].keys())
+    return names
+
+
+def _check_workflow_ref_child_terminal(coll, pb, pi: int) -> list:
+    """Warn when a workflow_reference targets a child whose terminal steps
+    are `end`/`stop` (return {data:null}) -- the parent gets no data.
+
+    Also warn when the parent reads ``vars.steps.<wf_ref>.<field>`` and the
+    child's terminal set_variable steps don't export that field.
+    """
+    errs: list[CompileError] = []
+    # Build name → playbook map for child lookup.
+    by_name: dict[str, object] = {}
+    for cp in coll.playbooks:
+        by_name[cp.name] = cp
+
+    for s in pb.steps:
+        if (s.type or "").lower() != "workflow_reference":
+            continue
+        args = s.arguments if isinstance(s.arguments, dict) else {}
+        target = args.get("target") or ""
+        child = by_name.get(target)
+        if child is None:
+            continue  # resolver/linter will catch missing target separately
+
+        terminals = _child_terminal_steps(child)
+        if not terminals:
+            continue
+
+        # Check if any terminal step is a set_variable (exports data).
+        exported: set[str] = set()
+        for ts in terminals:
+            if (ts.type or "").lower() == "set_variable":
+                exported.update(_set_variable_var_names(ts))
+
+        has_end = any((ts.type or "").lower() in ("end", "stop") for ts in terminals)
+
+        if not exported and has_end:
+            errs.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                severity="warning",
+                message=(
+                    f"workflow_reference step {s.name or s.id!r} targets "
+                    f"{target!r} whose terminal step is `end`/`stop`. FSR "
+                    f"returns only the LAST executed step's output to the "
+                    f"parent -- `end` returns {{data: null}}, so the parent "
+                    f"gets no data. Add a `set_variable` step as the child's "
+                    f"last data step (before `end`) to export variables."
+                ),
+                path=f"playbooks[{pi}].steps",
+                suggestion=(
+                    f"add a `set_variable` step before `end` in {target!r} "
+                    f"that exports the fields the parent needs"
+                ),
+            ))
+
+        # If we know what the child exports, check parent refs against it.
+        if exported:
+            jkey = _step_jinja_key(s)
+            for ds in pb.steps:
+                if ds is s:
+                    continue
+                for _where, text, _depth in _walk_strings(ds.arguments):
+                    for m in re.finditer(
+                        rf"\bvars\.steps\.{re.escape(jkey)}\.([A-Za-z_][A-Za-z0-9_]*)",
+                        text,
+                    ):
+                        field = m.group(1)
+                        if field in ("data", "status", "message", "operation",
+                                     "id", "name", "uuid", "@id", "@type"):
+                            continue
+                        if field not in exported:
+                            errs.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                severity="warning",
+                                message=(
+                                    f"step {ds.name or ds.id!r} reads "
+                                    f"`vars.steps.{jkey}.{field}` from "
+                                    f"workflow_reference {s.name or s.id!r}, "
+                                    f"but child {target!r}'s terminal "
+                                    f"set_variable exports only "
+                                    f"{sorted(exported)!r}. Field {field!r} "
+                                    f"will evaluate empty."
+                                ),
+                                path=f"playbooks[{pi}].steps",
+                                suggestion=(
+                                    f"add `{field}` to the set_variable "
+                                    f"step in {target!r}, or reference a "
+                                    f"field the child actually exports"
+                                ),
+                            ))
     return errs

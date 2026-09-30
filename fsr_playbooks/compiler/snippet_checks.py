@@ -82,6 +82,18 @@ _DEFAULT_CONSTRAINTS = {
         # `try/except AttributeError` (e.g. probe `.keys` to tell a mapping
         # from a list); for `enumerate`, a manual index counter.
         "isinstance", "hasattr", "enumerate",
+        # FSR injects `vars` as a Jinja context object, but the sandbox
+        # blocks it from Python code -- accessing `vars.steps.X` or
+        # `vars.input.params.X` in a code_snippet fails with
+        # "Uses of ['vars'] is restricted in the code snippet".
+        # Authors must use Jinja templates ({{ vars.steps.X.field }})
+        # so the value is resolved before Python runs.
+        "vars",
+        # BUILTINS NOT BOUND IN THE SANDBOX. The FSR code-snippet sandbox
+        # does not bind `set` (and likely other builtins) -- calling
+        # `set()` fails with "Uses of ['set'] is restricted". Use a list
+        # or dict for dedup instead: `seen = {}` / `seen[k] = True`.
+        "set",
     }),
     "imports_allowed_by_default": False,
 }
@@ -93,6 +105,20 @@ SANDBOX_CONSTRAINTS: dict[str, dict] = {
 
 def _constraints_for(version: str | None) -> dict:
     return SANDBOX_CONSTRAINTS.get(version or "", _DEFAULT_CONSTRAINTS)
+
+
+def _banned_suggestion(name: str) -> str:
+    """Context-specific fix hint for a banned name."""
+    if name == "vars":
+        return ("use Jinja templates to inject values before Python runs, "
+                "e.g. x = {{ vars.steps.Step.field | tojson }}")
+    if name == "set":
+        return ("use a dict for dedup instead: seen = {}; seen[k] = True")
+    if name in ("isinstance", "hasattr"):
+        return ("use attribute access in try/except AttributeError instead")
+    if name == "enumerate":
+        return "use a manual index counter instead"
+    return f"remove the use of {name!r}; the sandbox has no filesystem/process access"
 
 
 def check_snippet(
@@ -116,6 +142,15 @@ def check_snippet(
     """
     if not code or not isinstance(code, str) or not code.strip():
         return []
+
+    # Strip Jinja templates before parsing so the AST walk doesn't flag
+    # `vars`/`steps`/`input` inside templates as Python identifiers.
+    #   {{ expr }}  → None   (expression substitution)
+    #   {% stmt %}  → pass   (control-flow / set / macro)
+    # Both are resolved by the FSR template engine before Python runs.
+    import re
+    code = re.sub(r"\{\{.*?\}\}", "None", code, flags=re.DOTALL)
+    code = re.sub(r"\{%.*?%\}", "pass", code, flags=re.DOTALL)
 
     # --- B1: syntax. ---
     # `compile(..., "exec")` runs the symbol-table pass too, so it catches
@@ -164,8 +199,7 @@ def check_snippet(
                 message=(f"code-snippet uses {node.id!r}, which the FortiSOAR "
                          f"sandbox restricts -- runtime fails with "
                          f"\"Uses of ['{node.id}'] is restricted\""),
-                suggestion=(f"remove the use of {node.id!r}; the sandbox has no "
-                            "filesystem/process access"),
+                suggestion=_banned_suggestion(node.id),
                 lineno=getattr(node, "lineno", 1),
             ))
         # import os / import subprocess as sp / from os import path
