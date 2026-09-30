@@ -560,7 +560,7 @@ def verify_enhancement(
                     "For a targeted edit use edit_playbook(operations=[...]).")
 
     # 1. Shape check on the after YAML.
-    after_result = _grandfather_orphans(
+    after_result = _grandfather_preexisting(
         verify_playbook(after_yaml, live_probe=live_probe), before_yaml)
 
     # 2. Parse both for the diff.
@@ -703,45 +703,49 @@ def _scope_warnings(warnings, after, diff_summary: dict[str, Any]
         if (step, plain) in seen:
             continue
         seen.add((step, plain))
-        # A warning no step claims (playbook-level) stays in view.
-        out.append(dict(w, step_name=step, plain=plain,
-                        in_change=step is None or step in touched))
+        # A warning no step claims (playbook-level) stays in view. One the
+        # playbook already had is never the edit's, even on a step the edit
+        # re-linked.
+        in_change = not w.get("pre_existing") and (step is None or step in touched)
+        out.append(dict(w, step_name=step, plain=plain, in_change=in_change))
     return out
 
 
-def _grandfather_orphans(result: dict[str, Any],
-                         before_yaml: str) -> dict[str, Any]:
-    """An orphan step the analyst's playbook ALREADY had is theirs, not the
-    edit's: keep it visible as a warning instead of blocking an unrelated
-    change. Only orphans the edit introduced stay required fixes -- that is the
-    dropped-link failure `unreachable_step` exists to catch."""
-    orphans = [f for f in result.get("required_fixes") or []
-               if f.get("code") == "unreachable_step"]
-    if not orphans:
-        return result
-    from fsr_playbooks.compiler import compile_yaml
+def _grandfather_preexisting(result: dict[str, Any],
+                             before_yaml: str) -> dict[str, Any]:
+    """A problem the analyst's playbook ALREADY had is theirs, not the edit's:
+    keep it visible as a warning instead of blocking an unrelated change. Only
+    required fixes the edit introduced stay blocking.
 
-    from ._shared import DB_PATH
+    This began as orphan steps only (`unreachable_step`, the dropped-link
+    failure it exists to catch). Live on 8.0 the same trap held for every other
+    fix: a playbook that already referenced an undeclared
+    `vars.input.params.rec` could not take a one-step addition -- edit_playbook
+    refused four times and the turn ended with no offer, because the edit
+    faithfully carried the old error forward. The baseline is the same verifier
+    run on the before-playbook, matched on (code, message)."""
+    fixes = result.get("required_fixes") or []
+    if not fixes:
+        return result
     try:
-        before = compile_yaml(before_yaml, DB_PATH)
+        before = verify_playbook(before_yaml)
     except Exception:  # noqa: BLE001 -- no baseline means nothing to excuse
         return result
-    already = {e.message for e in before.errors
-               if e.code.value == "unreachable_step"}
-    keep = [f for f in result["required_fixes"]
-            if f.get("code") != "unreachable_step" or f.get("message") not in already]
-    if len(keep) == len(result["required_fixes"]):
+    already = {(f.get("code"), f.get("message"))
+               for f in before.get("required_fixes") or []}
+    keep = [f for f in fixes if (f.get("code"), f.get("message")) not in already]
+    if len(keep) == len(fixes):
         return result
     moved = [dict(f, severity="warning", pre_existing=True)
-             for f in result["required_fixes"] if f not in keep]
+             for f in fixes if f not in keep]
+    kept_codes = {f.get("code") for f in keep}
+    moved_codes = {f.get("code") for f in moved} - kept_codes
     out = dict(result)
     out["required_fixes"] = keep
     out["warnings"] = list(result.get("warnings") or []) + moved
     out["ok"] = out["ready_to_push"] = not keep
     out["next_actions"] = [a for a in result.get("next_actions") or []
-                           if not (a.startswith("unreachable_step:")
-                                   and not any(f.get("code") == "unreachable_step"
-                                               for f in keep))]
+                           if not any(a.startswith(f"{c}:") for c in moved_codes)]
     return out
 
 
@@ -1268,7 +1272,7 @@ def edit_playbook(
 
     def _refused(i: int, op: Any, exc: Exception) -> dict[str, Any]:
         kind = _normalize_op(op).get("op")
-        shape = _OP_SHAPES.get(kind)
+        shape = _OP_SHAPES.get(kind) if isinstance(kind, str) else None
         sent = sorted(k for k in op if k != "op") if isinstance(op, dict) else []
         return _err("bad_operation",
                     f"operations[{i}] ({kind}): {exc}"
