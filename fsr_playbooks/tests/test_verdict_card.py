@@ -241,6 +241,29 @@ class TestCitationValidation:
         assert r["ok"] is False
         assert "call_1" in r["suggestions"][0] or "call_2" in r["suggestions"][0]
 
+    def test_a_cited_tool_name_is_pointed_at_its_calls(self):
+        """Live: models cited `functions.get_record` and
+        `multi_tool_use.parallel#1` -- wrapper names, not call ids -- and
+        needed a retry to find the ids. The refusal names the calls, and every
+        valid id carries its tool."""
+        clear_tool_registry()
+        register_tool_result("call_a", "get_record", True)
+        register_tool_result("call_b", "siem_search", True)
+        register_tool_result("call_c", "emit_card", True)
+        r = emit_verdict(
+            disposition="true_positive",
+            severity="high",
+            confidence=0.8,
+            summary="Test",
+            findings=[{"claim": "x", "evidence": ["functions.get_record"]}],
+        )
+        assert r["ok"] is False
+        assert ("'functions.get_record' names the tool get_record, not a call: "
+                "cite one of its call ids ['call_a'].") in r["message"]
+        assert "call_a (get_record)" in r["suggestions"][0]
+        assert "call_b (siem_search)" in r["suggestions"][0]
+        assert "call_c" not in r["suggestions"][0]  # an emit is not evidence
+
 
 class TestVerdictViaEmitCard:
     """Verdict card via emit_card routing."""

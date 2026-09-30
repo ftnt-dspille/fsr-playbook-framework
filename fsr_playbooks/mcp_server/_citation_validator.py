@@ -138,6 +138,16 @@ def validate_evidence_ids(evidence_ids: list[str]) -> dict[str, Any] | None:
         parts.append(
             f"Unknown tool_use_ids: {unknown_ids}. These are not valid ids from "
             f"this turn.")
+        # Live (session health 2026-09-30): models cite the TOOL, not the call
+        # -- `functions.get_record`, `multi_tool_use.parallel#1` -- and needed a
+        # retry to find the ids. Name the calls that tool made.
+        for uid in unknown_ids:
+            tool = str(uid or "").split("#")[0].rsplit(".", 1)[-1]
+            calls = [eid for eid, info in registry.items()
+                     if info.get("name") == tool and info.get("ok") is True]
+            if calls:
+                parts.append(f"'{uid}' names the tool {tool}, not a call: cite "
+                             f"one of its call ids {calls[:5]}.")
     if failed_ids:
         parts.append(
             f"Failed tool calls: {failed_ids}. Evidence must come from successful "
@@ -155,9 +165,11 @@ def validate_evidence_ids(evidence_ids: list[str]) -> dict[str, Any] | None:
     suggestions = []
     if unknown_ids or failed_ids:
         # List valid tool_use_ids that succeeded.
+        # Each id with the tool it called, so a claim can be matched to the
+        # call that supports it.
         valid_ids = [
-            eid for eid, info in registry.items()
-            if info.get("ok") is True
+            f"{eid} ({info.get('name') or '?'})" for eid, info in registry.items()
+            if info.get("ok") is True and (info.get("name") or "") not in _EMIT_TOOLS
         ]
         if valid_ids:
             suggestions.append(

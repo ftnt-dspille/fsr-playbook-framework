@@ -119,6 +119,19 @@ def test_unknown_handle_is_a_typed_refusal_not_a_fallback():
     assert any("verify_enhancement" in s for s in out.get("suggestions") or [])
 
 
+def test_a_placeholder_handle_points_at_the_call_that_mints_one():
+    """Live: after edit_playbook was refused, the model emitted the offer with
+    verified_id 'pending'. The refusal pointed only at verify_enhancement
+    (with a stale signature); a targeted edit's handle comes from
+    edit_playbook, and only once its refusal is fixed."""
+    out = emit_enhancement_offer(id="e1", summary="s", verified_id="pending")
+    assert out["code"] == "unknown_verified_id"
+    assert "not a placeholder" in out["message"]
+    tips = " ".join(out.get("suggestions") or [])
+    assert "edit_playbook(operations=[...])" in tips
+    assert "required_fixes" in tips
+
+
 def test_a_retyped_document_cannot_be_delivered():
     """The live regression, expressed as a test.
 

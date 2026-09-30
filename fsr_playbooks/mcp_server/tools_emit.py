@@ -920,10 +920,15 @@ def emit_enhancement_offer(
         return _err(
             "unknown_verified_id",
             f"no verified enhancement is registered under {verified_id!r}. A "
-            "verified_id is only valid within the turn that produced it.",
+            "verified_id is not a placeholder: it is returned by a SUCCESSFUL "
+            "edit_playbook or verify_enhancement call, and is only valid within "
+            "the turn that produced it.",
             suggestions=[
-                "call verify_enhancement(before_yaml, after_yaml, user_message) "
-                "again and pass the verified_id it returns",
+                "for a targeted edit call edit_playbook(operations=[...]); for a "
+                "whole rewrite call verify_enhancement(after_yaml=...). Pass the "
+                "verified_id its result returns",
+                "if that call was refused, fix what its required_fixes name and "
+                "call it again -- the offer cannot be emitted before it passes",
                 "do NOT fall back to pasting the YAML into your reply -- the "
                 "analyst's playbook is only updated through this card",
             ],
