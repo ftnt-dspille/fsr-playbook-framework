@@ -917,17 +917,33 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             # above, so the unknown-key warning is no longer needed. Typed-args
             # validation downstream catches genuinely unknown keys per step type.
 
+            # `next:` accepts a string (linear flow) or a list (fanout to
+            # multiple steps concurrently). A list is sugar for
+            # `unlabeled_next:` -- FSR runs all targets, and variables from
+            # all paths are available at any merge point (live-verified
+            # 2026-09-30 on 8.0.0-6034).
+            raw_next = s_raw.get("next")
+            step_next: str | None = None
+            step_unlabeled: list[str] = list(
+                [str(x) for x in s_raw["unlabeled_next"] if isinstance(x, str)]
+                if isinstance(s_raw.get("unlabeled_next"), list) else []
+            )
+            if isinstance(raw_next, str):
+                step_next = raw_next
+            elif isinstance(raw_next, list):
+                # Fanout: `next: [A, B]` → unlabeled_next
+                step_unlabeled = [
+                    str(x) for x in raw_next if isinstance(x, str)
+                ] + step_unlabeled  # explicit unlabeled_next wins for dedup
+
             steps.append(Step(
                 id=sid,
                 type=stype,
                 name=sname or sid,
                 arguments=args,
-                next=s_raw.get("next") if isinstance(s_raw.get("next"), str) else None,
+                next=step_next,
                 branches={str(k): str(v) for k, v in branches.items()},
-                unlabeled_next=(
-                    [str(x) for x in s_raw["unlabeled_next"] if isinstance(x, str)]
-                    if isinstance(s_raw.get("unlabeled_next"), list) else []
-                ),
+                unlabeled_next=step_unlabeled,
                 comment=cmt if isinstance(cmt, str) and cmt.strip() else None,
                 description=(s_raw["description"]
                             if isinstance(s_raw.get("description"), str) else ""),

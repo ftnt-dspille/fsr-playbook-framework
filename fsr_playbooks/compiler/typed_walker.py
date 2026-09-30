@@ -883,6 +883,67 @@ def _resolve_path(env_key: str, attr_chain: str,
     return cur, ""
 
 
+def _collect_fanout_vars(
+    start_id: str, by_id: dict[str, Step], on_branch: set[str],
+    out: dict[str, Shape], conn: sqlite3.Connection | None = None,
+) -> None:
+    """Collect set_variable vars from a sibling fanout path.
+
+    Walks from ``start_id`` following next/branches/unlabeled_next until
+    hitting a step that IS on the current branch (the merge point) or
+    exhausting the path. Vars from set_variable steps along the way are
+    added to ``out``.
+    """
+    visited: set[str] = set()
+    queue: list[str] = [start_id]
+    while queue:
+        sid = queue.pop(0)
+        if sid in visited or sid in on_branch:
+            continue
+        visited.add(sid)
+        s = by_id.get(sid)
+        if s is None:
+            continue
+        if s.type == "set_variable":
+            for vn, vv in _set_variable_value_map(s).items():
+                out[vn] = _infer_literal_shape(vv, conn)
+        if s.next:
+            queue.append(s.next)
+        for _label, target in s.branches.items():
+            queue.append(target)
+        for target in s.unlabeled_next:
+            queue.append(target)
+
+
+def _collect_fanout_visible(
+    start_id: str, by_id: dict[str, Step], on_branch: set[str],
+    out: set[str],
+) -> None:
+    """Collect jinja keys from sibling fanout path steps.
+
+    Same walk as ``_collect_fanout_vars`` but collects step jinja keys
+    (for ``vars.steps.<key>`` reference resolution) instead of set_variable
+    vars.
+    """
+    visited: set[str] = set()
+    queue: list[str] = [start_id]
+    while queue:
+        sid = queue.pop(0)
+        if sid in visited or sid in on_branch:
+            continue
+        visited.add(sid)
+        s = by_id.get(sid)
+        if s is None:
+            continue
+        out.add(_jinja_key(s))
+        if s.next:
+            queue.append(s.next)
+        for _label, target in s.branches.items():
+            queue.append(target)
+        for target in s.unlabeled_next:
+            queue.append(target)
+
+
 def _validate_branch_jinja(
     pb: Playbook, ids: list[str], typed_env: dict[str, Shape],
     branch_name: str, param_type_fn: ParamTypeFn | None = None,
@@ -916,10 +977,42 @@ def _validate_branch_jinja(
     ids_set = set(ids)
     pos = {sid: i for i, sid in enumerate(ids)}
 
+    # FSR `unlabeled_next` fanout runs ALL targets concurrently, and
+    # variables from ALL paths are available at any merge point (live-
+    # verified 2026-09-30 on 8.0.0-6034). Collect set_variable vars from
+    # sibling fanout paths and inject them into var_env at the fork
+    # point's position so they're visible to all downstream steps on
+    # this branch. This suppresses false `var_defined_other_branch`
+    # warnings for the fanout/merge pattern (unlike `decision` branches
+    # where only ONE path runs and vars are truly isolated).
+    _fanout_sibling_vars: dict[str, Shape] = {}
+    _fanout_sibling_visible: set[str] = set()
     for sid in ids:
         s = by_id.get(sid)
         if s is None:
             continue
+        if not s.unlabeled_next:
+            continue
+        # This step forks via unlabeled_next. Collect set_variable vars
+        # and jinja keys from ALL sibling targets (not just the one on
+        # this branch) -- FSR runs all fanout paths and variables/steps
+        # from all paths are accessible at merge points.
+        for tgt_id in s.unlabeled_next:
+            if tgt_id not in ids_set:
+                _collect_fanout_vars(
+                    tgt_id, by_id, ids_set, _fanout_sibling_vars, conn)
+                _collect_fanout_visible(
+                    tgt_id, by_id, ids_set, _fanout_sibling_visible)
+
+    for sid in ids:
+        s = by_id.get(sid)
+        if s is None:
+            continue
+        # When we reach a fanout fork point, inject sibling path vars and
+        # visible step keys so they're visible to all downstream steps.
+        if s.unlabeled_next:
+            var_env.update(_fanout_sibling_vars)
+            visible.update(_fanout_sibling_visible)
         # A set_variable's own vars are readable within its own step (intra-
         # step chaining is permitted), so seed them before validating refs.
         if s.type == "set_variable":
