@@ -69,6 +69,30 @@ def _short(v: Any, n: int = 60) -> str:
     return s if len(s) <= n else s[: n - 3] + "..."
 
 
+def _nested_rename(err: Any) -> str:
+    """For a missing required key inside a nested object: the sibling the
+    model put it under. Live: edit_playbook operations sent the op kind as
+    `type: update_step` / `action: update_step` and read only "'op' is a
+    required property", a round trip per slip. The value is the proof: a
+    sibling holding one of the missing key's enum values is that key misnamed;
+    otherwise an undeclared sibling spelled close to it."""
+    inst, schema = err.instance, err.schema
+    if not isinstance(inst, dict) or not isinstance(schema, dict):
+        return ""
+    props = schema.get("properties") or {}
+    missing = [r for r in err.validator_value or [] if r not in inst]
+    extra = [k for k in inst if k not in props]
+    for r in missing:
+        enum = (props.get(r) or {}).get("enum") or []
+        for k, val in inst.items():
+            if k != r and isinstance(val, str) and val in enum:
+                return f"you sent it as '{k}': use {r}: {val!r}"
+        close = difflib.get_close_matches(r, extra, n=1, cutoff=0.6)
+        if close:
+            return f"rename '{close[0]}' to '{r}'"
+    return ""
+
+
 def _describe(err: Any) -> str:
     """One line per schema violation, phrased as what to send instead."""
     where = _path(err.absolute_path)
@@ -84,7 +108,8 @@ def _describe(err: Any) -> str:
         return (f"{where}: expected {want}, got "
                 f"{type(err.instance).__name__} {_short(err.instance)}")
     if v == "required":
-        return f"{where}: {err.message}"
+        hint = _nested_rename(err)
+        return f"{where}: {err.message}" + (f" -- {hint}" if hint else "")
     if v == "additionalProperties":
         return f"{where}: {err.message}"
     return f"{where}: {err.message}"

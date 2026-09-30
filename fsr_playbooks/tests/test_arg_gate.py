@@ -201,3 +201,29 @@ def test_a_model_cannot_supply_a_skill_trace():
     out = T.dispatch("build_playbook_from_trace",
                      {"trace_json": '{"steps": []}'}, _internal=True)
     assert out.get("code") == arg_gate.CODE
+
+
+def _edit_problems(op):
+    spec = T.REGISTRY["edit_playbook"]
+    out = arg_gate.check("edit_playbook", spec.input_schema, spec.fn,
+                         {"operations": [op]})
+    return out["problems"]
+
+
+@pytest.mark.parametrize("key", ["type", "action"])
+def test_a_missing_nested_key_names_the_sibling_it_was_sent_as(key):
+    """Session health: `type: update_step` was 8 of 9 edit_playbook
+    refusals, and the refusal only said "'op' is a required property"."""
+    problems = _edit_problems({key: "update_step", "name": "A", "set": {"x": 1}})
+    assert problems == [f"operations[0]: 'op' is a required property -- "
+                        f"you sent it as '{key}': use op: 'update_step'"]
+
+
+def test_a_misspelled_nested_key_gets_a_rename_hint():
+    problems = _edit_problems({"opp": "nonsense", "name": "A"})
+    assert problems == ["operations[0]: 'op' is a required property -- "
+                        "rename 'opp' to 'op'"]
+
+
+def test_no_hint_when_nothing_points_at_the_missing_key():
+    assert _edit_problems({"name": "A"}) == ["operations[0]: 'op' is a required property"]
