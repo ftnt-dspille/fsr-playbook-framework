@@ -349,7 +349,7 @@ class FortiAIProxyProvider(CapabilityMixin):
                 "role": "user",
                 "content": (
                     f"Tool result: {skipped.name} = "
-                    f'{{"ok": false, "code": "superseded_by_approval"}}'
+                    + _approvals.superseded_result_json()
                 ),
             })
 

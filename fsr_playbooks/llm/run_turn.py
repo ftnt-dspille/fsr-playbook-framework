@@ -41,6 +41,7 @@ from ._loop_helpers import (
 from ._loop_helpers import (
     snapshot_guard_fires as _snapshot_guard_fires,
 )
+from . import approvals as _approvals
 from .approvals import SuspendedSession
 from .provider import (
     DoneEvent,
@@ -550,7 +551,7 @@ async def resume_agent_turn(
         )
         res_ev = ToolResultEvent(
             call_id=skipped.call_id,
-            result={"ok": False, "code": "superseded_by_approval"},
+            result=dict(_approvals.SUPERSEDED_RESULT),
             synthetic=True,
         )
         for ev in (use_ev, res_ev):
@@ -566,9 +567,7 @@ async def resume_agent_turn(
             history_sink.record_chat_message(
                 result.session_id, turn_for_history, seq_in_turn,
                 kind=KIND_TOOL_RESULT, name=skipped.call_id,
-                content=json.dumps(
-                    {"ok": False, "code": "superseded_by_approval"}, default=str,
-                ),
+                content=json.dumps(_approvals.SUPERSEDED_RESULT, default=str),
             )
             seq_in_turn += 1
 

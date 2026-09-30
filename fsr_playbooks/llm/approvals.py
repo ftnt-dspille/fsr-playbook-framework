@@ -28,6 +28,34 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+# The result a skipped call gets. One definition, used by run_turn and every
+# provider's resume. It used to be the bare `{"ok": false, "code":
+# "superseded_by_approval"}`, which a model read as "queued for approval": in
+# an offline profile build it batched seven step creates, the first carded,
+# and after the approval it told the analyst "the remaining six were routed
+# through the approval flow" and presented all seven as built -- one existed.
+# So the result says what happened in words: it did NOT run, nothing holds it,
+# and the way forward is to call it again.
+SUPERSEDED_RESULT: dict[str, Any] = {
+    "ok": False,
+    "code": "superseded_by_approval",
+    "executed": False,
+    "message": (
+        "NOT RUN. This call was in the same batch as a call that needed the "
+        "analyst's approval, so it was dropped: it did not execute, and "
+        "nothing is queued or held for it. If it is still needed, call it "
+        "again now -- a gated call gets its own approval card. Do not report "
+        "it as done."
+    ),
+}
+
+
+def superseded_result_json() -> str:
+    """`SUPERSEDED_RESULT` as the JSON text a provider puts in a tool message."""
+    import json
+    return json.dumps(SUPERSEDED_RESULT)
+
+
 @dataclass
 class SkippedToolCall:
     """A tool call from the same assistant turn that was not dispatched

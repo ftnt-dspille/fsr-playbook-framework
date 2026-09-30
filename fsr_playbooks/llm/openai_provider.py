@@ -406,7 +406,7 @@ class OpenAIProvider(CapabilityMixin):
             tool_messages.append({
                 "role": "tool",
                 "tool_call_id": skipped.call_id,
-                "content": "{\"ok\": false, \"code\": \"superseded_by_approval\"}",
+                "content": _approvals.superseded_result_json(),
             })
 
         # history_snapshot is the OpenAI history WITHOUT the system message
