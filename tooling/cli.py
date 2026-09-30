@@ -448,6 +448,54 @@ def _cmd_push_per_playbook(args, coll_entity: dict, client) -> int:
     return 0 if not failures else 4
 
 
+def _collect_connectors(ir) -> list[str]:
+    """Extract unique connector names from the compiled IR."""
+    names: set[str] = set()
+    if ir is None:
+        return []
+    for pb in ir.playbooks:
+        for s in pb.steps:
+            if (s.type or "").lower() == "connector":
+                conn = (s.arguments or {}).get("connector")
+                if isinstance(conn, str) and conn.strip():
+                    names.add(conn.strip())
+    return sorted(names)
+
+
+def _connector_preflight(ir, client) -> None:
+    """Warn about connectors used by the playbook that aren't installed.
+
+    Queries the live box via ``check_connector_installed`` for each unique
+    connector name extracted from the IR. Missing connectors produce a
+    warning (push proceeds) so the user can install them after pushing.
+    """
+    from recipes.prechecks import check_connector_installed  # type: ignore
+
+    connectors = _collect_connectors(ir)
+    if not connectors:
+        return
+    missing: list[tuple[str, list[str]]] = []
+    for name in connectors:
+        result = check_connector_installed(client, name)
+        if not result.ok and result.code == "connector_not_installed":
+            missing.append((name, result.suggestions))
+    if missing:
+        print(
+            f"⚠  {len(missing)} connector(s) not installed on this FSR:",
+            file=sys.stderr,
+        )
+        for name, suggestions in missing:
+            msg = f"   • {name}"
+            if suggestions:
+                msg += f"  (did you mean: {', '.join(suggestions[:3])}?)"
+            print(msg, file=sys.stderr)
+        print(
+            "   Install via Content Hub or `fsrpb install-connector <name>`. "
+            "Push proceeds; the playbook will fail at runtime until installed.",
+            file=sys.stderr,
+        )
+
+
 def cmd_push(args: argparse.Namespace) -> int:
     """Compile YAML and POST/PUT the unwrapped collection to /api/3/workflow_collections.
 
@@ -514,6 +562,12 @@ def cmd_push(args: argparse.Namespace) -> int:
     coll_name = coll_entity["name"]
 
     client = _env.get_client()
+
+    # Connector installation preflight: verify every connector used by the
+    # playbook is installed on the target box. Skips mock-only connectors
+    # (none in practice) and is bypassed with --skip-connector-check.
+    if not getattr(args, "skip_connector_check", False):
+        _connector_preflight(result.ir, client)
 
     # Dispatch to per-playbook mode if the YAML used `into_collection:`
     # (or inherited the studio default). This path NEVER hard-deletes
@@ -1802,20 +1856,87 @@ def cmd_env(args: argparse.Namespace) -> int:
             steps_map[name.replace(" ", "_")] = s.get("result") or {}
     values = {"vars": dict(env_obj, steps=steps_map)}
     if args.summary:
-        print(_ansi(f"\nrun {data.get('name')!r} status={data.get('status')}", "1"),
-              file=sys.stderr)
-        print(_ansi("  vars (top-level):", "2"), file=sys.stderr)
-        for k in sorted(values["vars"]):
-            if k == "steps": continue
-            print(f"    {k}", file=sys.stderr)
-        print(_ansi("  vars.steps:", "2"), file=sys.stderr)
-        for k in sorted(steps_map):
-            kind = type(steps_map[k]).__name__
-            preview = json.dumps(steps_map[k], default=str)[:80]
-            print(f"    {k:<32} ({kind})  {preview}", file=sys.stderr)
+        _print_env_summary(data, env_obj, steps_arr, steps_map)
     else:
         print(json.dumps(values, indent=2, default=str))
     return 0
+
+
+# FSR injects these into every Jinja context; they are not authored data
+# and only clutter the summary.
+_SYSTEM_ENV_VARS = frozenset({
+    "__schedule", "audit_info", "auth_info", "currentUser", "debug",
+    "func_name", "globalMock", "last_run_at", "mockPlaybookId",
+    "request", "resources", "result", "task_id", "useMockOutput",
+})
+
+# ANSI color codes for step status.
+_STATUS_COLORS = {
+    "finished": "32",   # green
+    "failed": "31",     # red
+    "terminated": "31", # red
+    "skipped": "33",    # yellow
+    "incipient": "90",  # gray (not yet run)
+}
+
+
+def _print_env_summary(data, env_obj, steps_arr, steps_map) -> None:
+    """Human-friendly one-line-per-step view of a past run's Jinja context.
+
+    Hides FSR system vars, shows playbook input params, and lists steps in
+    execution order with status + value preview.
+    """
+    pb_name = data.get("name") or "?"
+    pb_status = data.get("status") or "?"
+    color = _STATUS_COLORS.get(pb_status, "1")
+    print(_ansi(f"\nrun {pb_name!r} status=", "1") + _ansi(pb_status, color),
+          file=sys.stderr)
+
+    # --- input params (the useful part of vars top-level) ---
+    inp = env_obj.get("input") or {}
+    params = inp.get("params") or {}
+    records = inp.get("records") or []
+    if params:
+        print(_ansi("  input.params:", "2"), file=sys.stderr)
+        for k in sorted(params):
+            v = params[k]
+            preview = json.dumps(v, default=str)
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+            print(f"    {k}: {preview}", file=sys.stderr)
+    if records:
+        print(_ansi(f"  input.records: ({len(records)} record(s))", "2"),
+              file=sys.stderr)
+
+    # --- author-set top-level vars (non-system) ---
+    user_vars = {k: v for k, v in env_obj.items()
+                 if k not in _SYSTEM_ENV_VARS and k != "input"}
+    if user_vars:
+        print(_ansi("  vars:", "2"), file=sys.stderr)
+        for k in sorted(user_vars):
+            preview = json.dumps(user_vars[k], default=str)
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+            print(f"    {k}: {preview}", file=sys.stderr)
+
+    # --- steps in execution order ---
+    print(_ansi("  steps:", "2"), file=sys.stderr)
+    # Sort by creation timestamp (execution order); fall back to name.
+    ordered = sorted(steps_arr, key=lambda s: s.get("created") or "")
+    for s in ordered:
+        name = (s.get("name") or "?").replace(" ", "_")
+        status = s.get("status") or "incipient"
+        result = s.get("result")
+        sc = _STATUS_COLORS.get(status, "90")
+        if result == {} or result is None:
+            preview = ""
+        else:
+            preview = json.dumps(result, default=str)
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+        label = _ansi(f"{name:<32}", "0")
+        st = _ansi(f"{status:<10}", sc)
+        print(f"    {label} {st} {preview}", file=sys.stderr)
 
 
 def cmd_health(args: argparse.Namespace) -> int:
@@ -2173,7 +2294,8 @@ def _follow_task(client, task_id: str, timeout_s: int, interval_s: int) -> int:
                 if pk_url:
                     try:
                         fr = client.session.get(
-                            client.base_url + "/api" + pk_url,
+                            client.base_url + "/api" + pk_url
+                            + "?step_detail=true",
                             verify=client.verify_ssl,
                         )
                         if fr.status_code == 200:
@@ -2201,6 +2323,33 @@ def _follow_task(client, task_id: str, timeout_s: int, interval_s: int) -> int:
                         err = (res.get("Error message") or res.get("error")
                                or res.get("message") or json.dumps(res)[:300])
                         print(_ansi(f"    → {err}", "31"), file=sys.stderr)
+                        # Show step input -- the Jinja-resolved arguments that
+                        # were actually sent to the connector/sandbox.  This is
+                        # the most valuable debugging data: for code_snippet
+                        # steps it contains the resolved python code; for
+                        # connector steps it has the operation + params.
+                        inp = s.get("input")
+                        if isinstance(inp, dict) and inp:
+                            params = inp.get("params") or {}
+                            connector = inp.get("connector")
+                            operation = inp.get("operation")
+                            if connector or operation:
+                                print(_ansi(f"    connector: {connector} "
+                                            f"operation: {operation}", "33"),
+                                      file=sys.stderr)
+                                if isinstance(params, dict) and params:
+                                    pstr = json.dumps(params, default=str)
+                                    if len(pstr) > 500:
+                                        pstr = pstr[:500] + " …"
+                                    print(_ansi(f"    params: {pstr}", "33"),
+                                          file=sys.stderr)
+                            if isinstance(params, dict) and "python_function" in params:
+                                code = params["python_function"]
+                                print(_ansi("    resolved code:", "33"),
+                                      file=sys.stderr)
+                                for line in code.splitlines():
+                                    print(_ansi(f"      {line}", "33"),
+                                          file=sys.stderr)
                 print(file=sys.stderr)
                 print(json.dumps({"task_id": task_id, "status": status,
                                   "uuid": rec.get("uuid")}, indent=2))
@@ -4742,6 +4891,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "via the FSR UI after your last pull). Without this "
                          "flag, replace mode refuses to purge when drift is "
                          "detected, preventing a silent clobber of UI edits.")
+    sp.add_argument("--skip-connector-check", action="store_true",
+                    help="skip the live connector-installation preflight "
+                         "(warnings only by default). Use when pushing to a "
+                         "box that will have connectors installed later.")
     sp.set_defaults(func=cmd_push)
 
     sp = sub.add_parser("validate", help="validate YAML against the store")
