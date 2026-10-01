@@ -2,7 +2,7 @@
 # UpdateRecord). Setup inserts a tagged test alert; this playbook
 # finds it by uuid, then updates its description field.
 #
-# FSR canonical shapes (verified live 2026-05-03):
+# FSR canonical shapes (verified live on 8.0.0):
 #   find_record arguments:
 #     module:    'alerts'    -- the module name. Suffix `?$limit=N`
 #                              optional but the API Platform respects it.

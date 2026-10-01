@@ -15,7 +15,7 @@ playbooks:
       - name: Stub lookup
         type: set_variable
         vars:
-          ip: "10.0.0.1  # would be {{vars.input.params.hostname}} resolved via {{vars.input.params.dns_server}}"
+          ip: "192.0.2.1  # would be {{vars.input.params.hostname}} resolved via {{vars.input.params.dns_server}}"
   - name: Add Host And Resolve
     description: Parent -- calls Resolve Hostname with input args.
     steps:
