@@ -685,14 +685,19 @@ def is_authoring_slice(allowed_names) -> bool:
 
 
 def _paused_on_form(result: Any) -> bool:
-    """A tool result for a playbook run that paused on a manual-input form with
-    fields to fill (``code: awaiting_input`` + ``awaiting.fields``). A pause on
-    bare buttons is not one: the model may answer those itself."""
+    """A tool result for a playbook run that paused on a manual-input form the
+    analyst answers (``code: awaiting_input``): fields to fill, or a choice of
+    two or more buttons ("Ok" / "Save Example"). A single-button pause is an
+    acknowledgement the model may give itself. Mirrors the connector's
+    ``is_analyst_form``, which decides what gets a card."""
     if not isinstance(result, dict) or result.get("code") != "awaiting_input":
         return False
     form = result.get("awaiting")
-    return isinstance(form, dict) and any(
-        isinstance(f, dict) for f in (form.get("fields") or []))
+    if not isinstance(form, dict):
+        return False
+    if any(isinstance(f, dict) for f in (form.get("fields") or [])):
+        return True
+    return sum(isinstance(o, dict) for o in (form.get("options") or [])) >= 2
 
 
 class TriageDiscipline:
@@ -811,7 +816,7 @@ class TriageDiscipline:
                 ),
             }
         # 0b. A playbook run is paused on a form the analyst now has in front of
-        # them. Live (.81, gpt-5.4-mini): the model read the pause result's
+        # them. Live (gpt-5.4-mini): the model read the pause result's
         # "resume it with resume_playbook(...)", resumed the run itself four
         # seconds later with no inputs, and the run failed on the empty device
         # pick -- while the transcript, cut at the form card, showed nothing.

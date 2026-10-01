@@ -39,9 +39,18 @@ def test_nothing_else_runs_either_and_it_is_a_deferral() -> None:
     assert "do not resume" in guard["directive"].lower()
 
 
-def test_a_buttons_only_pause_does_not_stop_the_agent() -> None:
-    """A pause with nothing to fill is the model's to answer."""
+def test_a_single_button_pause_does_not_stop_the_agent() -> None:
+    """A lone "Ok" is an acknowledgement; the model may give it."""
     assert _paused(_BUTTONS_ONLY).evaluate("resume_playbook", {"run": "80926"}) is None
+
+
+def test_a_choice_of_buttons_is_the_analysts() -> None:
+    """Live: "Data Collected" offered Ok / Save Example. Which one is the
+    analyst's call; the card shows both."""
+    choice = {**_BUTTONS_ONLY, "awaiting": {**_BUTTONS_ONLY["awaiting"], "options": [
+        {"option": "Ok", "primary": True}, {"option": "Save Example", "primary": False}]}}
+    guard = _paused(choice).evaluate("resume_playbook", {"run": "80926", "decision": "approve"})
+    assert guard is not None and guard["form_pending"] is True
 
 
 def test_a_run_that_did_not_pause_does_not_stop_the_agent() -> None:
