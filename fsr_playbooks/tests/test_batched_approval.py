@@ -21,10 +21,17 @@ from unittest.mock import patch
 from fsr_playbooks.llm import approvals as A
 from fsr_playbooks.llm.approvals import InMemoryApprovalGateway
 from fsr_playbooks.llm.provider import (
-    ApprovalRequestEvent, Message, ToolResultEvent, ToolUseEvent,
+    ApprovalRequestEvent,
+    Message,
+    ToolResultEvent,
+    ToolUseEvent,
 )
 from fsr_playbooks.tests.test_openai_provider import (
-    _BLOCK_IP_TOOLS, _delta_chunk, _drain, _provider, _tool_call_delta,
+    _BLOCK_IP_TOOLS,
+    _delta_chunk,
+    _drain,
+    _provider,
+    _tool_call_delta,
     _usage_chunk,
 )
 

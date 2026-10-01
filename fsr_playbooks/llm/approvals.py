@@ -27,7 +27,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # The result a skipped call gets. One definition, used by run_turn and every
 # provider's resume. It used to be the bare `{"ok": false, "code":
 # "superseded_by_approval"}`, which a model read as "queued for approval": in
@@ -279,7 +278,7 @@ def _approved_dispatch(name: str, args: dict[str, Any]) -> Any:
     return dispatch(name, {**(args or {}), "_approved": True}, _internal=True)
 
 
-def resolve_batch(s: "SuspendedSession", decision: str,
+def resolve_batch(s: SuspendedSession, decision: str,
                   dispatch_fn: Any = None,
                   ) -> list[tuple[BatchedCall, dict[str, Any]]]:
     """Each batched call's result for ``decision``: run in order on approve,

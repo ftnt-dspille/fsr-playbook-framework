@@ -30,6 +30,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import approvals as _approvals
 from ._loop_helpers import (
     MAX_TOOL_TURNS,
     extract_yaml_block,
@@ -41,7 +42,6 @@ from ._loop_helpers import (
 from ._loop_helpers import (
     snapshot_guard_fires as _snapshot_guard_fires,
 )
-from . import approvals as _approvals
 from .approvals import SuspendedSession
 from .provider import (
     DoneEvent,
