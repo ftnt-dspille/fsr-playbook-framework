@@ -127,7 +127,7 @@ These keys can be added to any step:
 | `apply_async:` | Boolean. Fire-and-forget execution. |
 | `on_remote:` | Route execution to a remote/tenant agent. `pick_from_record` or an agent name. |
 | `for_each:` | Loop the step over a list. See [Looping](#looping-a-step-over-a-list-for_each). |
-| `mock_result:` | The payload `--mock` runs return for this step. |
+| `mock_result:` | The payload `--mock` runs return for this step. Returned verbatim -- connector/code_snippet steps with `mock_result` skip the `{data, status, message}` envelope, so downstream `.data` refs render empty in mock mode. Shape `mock_result` to match the real output (or include a top-level `data:` key if you want `.data` refs to work in mock). |
 | `set:` | Inline vars stamped after the step runs. Read as `vars.<name>` downstream. |
 | `with:` | Jinja path binding -- alias a long `vars.steps.X.data.Y` path for the step's scope. See [with: binding](#with-jinja-path-binding). |
 | `post_comment:` | Post a collaboration comment to the record. Sugar for `message: {content: "…"}`. |
@@ -172,6 +172,14 @@ Works on any step type except `delay` and `set_api_keys`:
   params: {ip: "{{ vars.src_ip }}"}
 ```
 
+**`record:` is required for `--mock` and API-triggered runs.** When
+omitted, FSR defaults to the trigger record
+(`vars.input.records[0]`). This is correct for record-triggered
+playbooks but fails with "No record found" in `--mock` runs (which use
+`notrigger` mode) and manual/API-triggered runs without a record.
+Always set `record:` explicitly, or use `set:`/`vars:` instead of
+`message:` for mock-friendly output.
+
 ## Variables and Jinja
 
 | Expression | What it gives you |
@@ -211,8 +219,8 @@ converted to underscores (case preserved):
 | `find_record` | `vars.steps.<name>.records[]` (each is a full module record) |
 | `set_variable` | variables go directly to `vars.<var_name>` (not under `vars.steps`) |
 | `manual_input` | `vars.steps.<name>.input.<field>` (after the operator submits) |
-| `code_snippet` | whatever the snippet `return`s, at `vars.steps.<name>` |
-| `workflow_reference` | child output at `vars.steps.<name>.<key>` |
+| `code_snippet` | `return` value, at `vars.steps.<name>.data.code_output` |
+| `workflow_reference` | child's **last step** result at `vars.steps.<name>.<key>` |
 
 ### Setting variables
 
@@ -268,6 +276,30 @@ converted to underscores (case preserved):
       next: Log Only
   default: Log Only           # optional implicit else
 ```
+
+**Fanout** -- run multiple steps concurrently with a list `next:`:
+
+```yaml
+- name: Split
+  type: set_variable
+  next: [Path A, Path B]      # both run; no condition needed
+- name: Path A
+  type: set_variable
+  vars: {path_a_value: from_a}
+  next: Merge
+- name: Path B
+  type: set_variable
+  vars: {path_b_value: from_b}
+  next: Merge
+- name: Merge
+  type: code_snippet          # sees BOTH vars.path_a_value and vars.path_b_value
+```
+
+`next: [A, B]` is sugar for `unlabeled_next:`. FSR runs all targets
+concurrently, and variables from **all** paths are available at the merge
+point and even mid-path on sibling chains (live-verified on 8.0.0). This
+is unlike `decision`/`manual_input` branches, where only one path runs
+and the other's variables are empty.
 
 **Manual input branching** -- each option routes to a different step:
 
@@ -631,9 +663,47 @@ After the operator submits, form fields are read at
 - name: Run Script
   type: code_snippet
   code: |
-    result = {"ip": vars.input.params.ip, "blocked": True}
+    result = {"ip": "{{ vars.input.params.ip }}", "blocked": True}
     return result
   config: "python-runner"    # optional
+```
+
+**Sandbox restrictions.** The FSR code-snippet sandbox bans certain
+Python names -- accessing them fails at runtime with "Uses of [...] is
+restricted". The most common traps:
+
+| Banned name | Why | Fix |
+|---|---|---|
+| `vars` | FSR injects `vars` as a Jinja context object, not a Python variable | use Jinja templates: `x = {{ vars.steps.X.field }}` |
+| `set` | `set()` is not bound in the sandbox | use a dict: `seen = {}; seen[k] = True` |
+| `isinstance`, `hasattr`, `enumerate` | not bound | use `try/except AttributeError` or a manual index counter |
+| `open`, `os`, `sys`, `subprocess` | no filesystem/process access | do I/O via connector steps instead |
+
+**Reading step outputs inside code.** Use Jinja templates to inject
+values before Python runs -- the sandbox blocks `vars` as a name, so
+`vars.steps.X.field` in Python code fails, but `{{ vars.steps.X.field }}`
+is resolved by the template engine first:
+
+```yaml
+- name: Parse Result
+  type: code_snippet
+  code: |
+    score = {{ vars.steps.Lookup.data.score | tojson }}
+    return {"risk": "high"} if score > 70 else {"risk": "low"}
+```
+
+**`| tojson` boolean pitfall.** Applying `| tojson` to a whole step
+result (or the `data` envelope, or `vars.input`) produces lowercase
+`true`/`false` for boolean fields. The sandbox treats lowercase `true`
+as a Python name reference and bans it. Safe patterns:
+
+```yaml
+# SAFE -- extract string fields only, then tojson
+addresses: "{{ vars.steps.Classify_Results | map(attribute='address') | list | tojson }}"
+# SAFE -- reference a specific leaf field
+score: "{{ vars.steps.Lookup.data.score | tojson }}"
+# DANGEROUS -- whole step result has debug, task_id, and lowercase booleans
+data: "{{ vars.steps.Lookup | tojson }}"
 ```
 
 ### `send_email`
@@ -685,6 +755,27 @@ For cross-collection references, use the IRI directly:
   workflowReference: /api/3/workflows/<uuid>
   arguments: {hostname: "fsr-1"}
 ```
+
+**Output = the child's last step result.** The parent reads the
+**terminal step's** result at `vars.steps.<parent_step_name>.<key>`. If
+the child ends with `end` or `stop`, the result is `{data: null}` -- no
+data flows back. To export data, make the child's last step a
+`set_variable`:
+
+```yaml
+# child playbook -- last step exports data
+- name: Export Result
+  type: set_variable
+  vars:
+    address: "{{ vars.steps.Lookup.data.address }}"
+    priority: "{{ vars.steps.Classify.data.priority }}"
+```
+
+The parent then reads `vars.steps.Call_Child.address`,
+`vars.steps.Call_Child.priority`, etc. A `workflow_reference` with
+`for_each` does NOT accumulate child results into a list -- read
+`vars.steps.<step>` directly (it is already a list of child results)
+and extract fields with `map(attribute='field') | list | tojson`.
 
 #### Looping a child playbook (when `do_until` isn't enough)
 
@@ -835,3 +926,4 @@ All under `examples/` and validated by tests on every commit:
 | `find_and_update.yaml` | start → find_record → update_record |
 | `manual_input_then_act.yaml` | start → manual_input → decision → branched action |
 | `parent_calls_child.yaml` | two playbooks; parent invokes child via `target:` with input params |
+| `defender_forwarding_triage_collection.yaml` | full collection: parent calls child via `workflow_reference`, grandchild exports data via `set_variable`, parent extracts with `map(attribute=...)` |
