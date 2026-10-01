@@ -684,6 +684,17 @@ def is_authoring_slice(allowed_names) -> bool:
     return bool(AUTHORING_MARKER_TOOLS & set(allowed_names or ()))
 
 
+def _paused_on_form(result: Any) -> bool:
+    """A tool result for a playbook run that paused on a manual-input form with
+    fields to fill (``code: awaiting_input`` + ``awaiting.fields``). A pause on
+    bare buttons is not one: the model may answer those itself."""
+    if not isinstance(result, dict) or result.get("code") != "awaiting_input":
+        return False
+    form = result.get("awaiting")
+    return isinstance(form, dict) and any(
+        isinstance(f, dict) for f in (form.get("fields") or []))
+
+
 class TriageDiscipline:
     """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
     three discipline rules and, when the call is allowed, records it -- returning
@@ -765,6 +776,9 @@ class TriageDiscipline:
         # Turn-scoped like the rest of this object: a card staged on an earlier
         # turn was already answered (or expired) and must not gag the next one.
         self._action_card_staged = False
+        # Set by note_result when a playbook run paused on a fillable form: the
+        # form is the analyst's to fill, so the agent's half of the turn is over.
+        self._form_pending = False
         # How many distinct evidence tools remain before the floor lifts --
         # surfaced in the block message so the model knows it's making progress.
         self._lock = threading.Lock()
@@ -794,6 +808,26 @@ class TriageDiscipline:
                     f"cancel it before anything else runs -- you cannot act "
                     f"further on this turn. Do not call another tool. Close out "
                     f"with a short verdict describing what you staged and why."
+                ),
+            }
+        # 0b. A playbook run is paused on a form the analyst now has in front of
+        # them. Live (.81, gpt-5.4-mini): the model read the pause result's
+        # "resume it with resume_playbook(...)", resumed the run itself four
+        # seconds later with no inputs, and the run failed on the empty device
+        # pick -- while the transcript, cut at the form card, showed nothing.
+        # The analyst's submit then found the form gone. Their answer is the
+        # only valid one, so nothing else runs this turn.
+        if self._form_pending and not _is_verdict_emit(name, args):
+            return {
+                "ok": True,
+                "kind": "guard_defer",
+                "form_pending": True,
+                "directive": (
+                    f"NOT RUN: `{name}` was skipped because the playbook is paused "
+                    f"on a form that is now in front of the analyst. They fill it "
+                    f"in and submit it, and the run resumes with their answer. Do "
+                    f"not resume it yourself and do not call another tool. Close "
+                    f"with one short line saying what the form asks for."
                 ),
             }
         # 0. Capability guard (§E) -- this session already learned the connector
@@ -1091,6 +1125,9 @@ class TriageDiscipline:
                 and result.get("ok") is True):
             with self._lock:
                 self._action_card_staged = True
+        if _paused_on_form(result):
+            with self._lock:
+                self._form_pending = True
         caps = self._capabilities
         if caps is None or not isinstance(result, dict):
             return
