@@ -34,6 +34,11 @@ from typing import Any
 # lower limit can drop it without a release.
 DEFAULT_MAX_OUTPUT_TOKENS = 16384
 
+#: Shown when a forced wrap-up round still produced no text. Plain and honest:
+#: the analyst gets a reply that says what happened instead of an empty one.
+EMPTY_WRAPUP_TEXT = ("I looked this up but did not manage to write an answer. "
+                     "Ask me again and I will summarize what I found.")
+
 
 def unexecuted_tool_calls_note(stop_reason: str | None, names: list[str]) -> str:
     """Assistant-turn text standing in for tool calls that will not run.

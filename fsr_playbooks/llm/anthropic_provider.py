@@ -28,6 +28,7 @@ except ImportError:
 from . import approvals as _approvals
 from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
+    EMPTY_WRAPUP_TEXT,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
@@ -610,7 +611,7 @@ class AnthropicProvider(CapabilityMixin):
         tags: dict[str, Any],
         self_repair_turns: int,
         stop_reason_label: str,
-        max_tokens: int = 512,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[Event]:
         """One forced no-tools model round that yields its text + a UsageEvent.
 
@@ -630,16 +631,20 @@ class AnthropicProvider(CapabilityMixin):
         try:
             async with self._client.messages.stream(
                 model=self.model,
-                max_tokens=max_tokens,
+                max_tokens=max_tokens or self.max_output_tokens,
                 system=cached_system,
                 messages=_with_history_breakpoint(_to_anthropic_messages(history)),
             ) as stream:
+                said = False
                 async for event in stream:
                     if event.type == "content_block_delta" and getattr(
                         event.delta, "type", None
                     ) == "text_delta":
+                        said = said or bool((event.delta.text or "").strip())
                         yield TextEvent(text=event.delta.text)
                 final = await stream.get_final_message()
+            if not said:
+                yield TextEvent(text=EMPTY_WRAPUP_TEXT)
             usage = getattr(final, "usage", None)
             yield UsageEvent(
                 session_id=session_id, turn=turn_idx, model=self.model,
@@ -1112,7 +1117,7 @@ class AnthropicProvider(CapabilityMixin):
                             content=_DELIVERY_DIRECTIVE.format(vid=_vid)))
                         try:
                             resp = await self._client.messages.create(
-                                model=self.model, max_tokens=512,
+                                model=self.model, max_tokens=self.max_output_tokens,
                                 system=cached_system,
                                 messages=_with_history_breakpoint(
                                     _to_anthropic_messages(history)),
@@ -1173,7 +1178,7 @@ class AnthropicProvider(CapabilityMixin):
                             role="user", content=_create_delivery.directive))
                         try:
                             resp = await self._client.messages.create(
-                                model=self.model, max_tokens=512,
+                                model=self.model, max_tokens=self.max_output_tokens,
                                 system=cached_system,
                                 messages=_with_history_breakpoint(
                                     _to_anthropic_messages(history)),
@@ -1248,7 +1253,7 @@ class AnthropicProvider(CapabilityMixin):
                             history.append(Message(role="user", content=directive))
                             try:
                                 resp = await self._client.messages.create(
-                                    model=self.model, max_tokens=2048,
+                                    model=self.model, max_tokens=self.max_output_tokens,
                                     system=cached_system,
                                     messages=_with_history_breakpoint(
                                         _to_anthropic_messages(history)),

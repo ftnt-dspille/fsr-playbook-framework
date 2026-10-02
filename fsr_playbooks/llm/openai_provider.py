@@ -51,6 +51,7 @@ from openai import (
 from . import approvals as _approvals
 from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
+    EMPTY_WRAPUP_TEXT,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
@@ -449,7 +450,7 @@ class OpenAIProvider(CapabilityMixin):
         tags: dict[str, Any],
         self_repair_turns: int,
         stop_reason_label: str,
-        max_tokens: int = 512,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[Event]:
         """One forced no-tools model round yielding its text + a UsageEvent.
 
@@ -468,9 +469,13 @@ class OpenAIProvider(CapabilityMixin):
                 model=self.model,
                 messages=history,
                 stream=True,
-                **_max_tokens_param(self.model, max_tokens),
+                # The normal ceiling, not a small one: a reasoning model spends
+                # its reasoning out of this budget, and at 512 a wrap-up came
+                # back with every token spent and no text (Frank sweep).
+                **_max_tokens_param(self.model, max_tokens or self.max_output_tokens),
                 stream_options={"include_usage": True},
             )
+            said = False
             async for chunk in stream:
                 if chunk.usage is not None:
                     input_tok = chunk.usage.prompt_tokens or 0
@@ -480,7 +485,10 @@ class OpenAIProvider(CapabilityMixin):
                     continue
                 delta = chunk.choices[0].delta
                 if delta and delta.content:
+                    said = said or bool(delta.content.strip())
                     yield TextEvent(text=delta.content)
+            if not said:
+                yield TextEvent(text=EMPTY_WRAPUP_TEXT)
             yield UsageEvent(
                 session_id=session_id, turn=turn_idx, model=self.model,
                 input_tokens=input_tok, output_tokens=output_tok,
@@ -863,7 +871,7 @@ class OpenAIProvider(CapabilityMixin):
                                     "type": "function",
                                     "function": {"name": "emit_card"},
                                 },
-                                **_max_tokens_param(self.model, 512),
+                                **_max_tokens_param(self.model, self.max_output_tokens),
                             )
                             msg = resp.choices[0].message
                             raw = (msg.tool_calls[0].function.arguments
@@ -926,7 +934,7 @@ class OpenAIProvider(CapabilityMixin):
                                     "type": "function",
                                     "function": {"name": "emit_card"},
                                 },
-                                **_max_tokens_param(self.model, 512),
+                                **_max_tokens_param(self.model, self.max_output_tokens),
                             )
                             msg = resp.choices[0].message
                             raw = (msg.tool_calls[0].function.arguments
@@ -1006,7 +1014,7 @@ class OpenAIProvider(CapabilityMixin):
                                     # A verdict carries findings with claims and
                                     # evidence ids; 512 could truncate the JSON and
                                     # the citation gate would refuse an empty payload.
-                                    **_max_tokens_param(self.model, 2048),
+                                    **_max_tokens_param(self.model, self.max_output_tokens),
                                 )
                                 msg = resp.choices[0].message
                                 raw = (msg.tool_calls[0].function.arguments
