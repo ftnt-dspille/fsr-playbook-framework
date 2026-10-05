@@ -10,7 +10,12 @@ from __future__ import annotations
 import pytest
 
 from fsr_playbooks.llm import autonomy
-from fsr_playbooks.llm.autonomy import evaluate, parse_policy, set_turn_policy, shadow_decision
+from fsr_playbooks.llm.autonomy import (
+    evaluate,
+    parse_policy,
+    set_turn_policy,
+    shadow_decision,
+)
 from fsr_playbooks.mcp_server import _citation_validator as cv
 
 EXT = "203.0.113.9"          # TEST-NET-3: external by is_internal_ip

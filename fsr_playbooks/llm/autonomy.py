@@ -23,7 +23,8 @@ import contextvars
 import ipaddress
 import re
 import time
-from typing import Any, Callable, Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
