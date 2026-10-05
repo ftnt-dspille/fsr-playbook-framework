@@ -56,6 +56,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    UNATTENDED_CONTAIN_DIRECTIVE,
     UNVERIFIED_DRAFT_DIRECTIVE,
     BuildProgressGuard,
     CreateDeliveryGuard,
@@ -546,6 +547,10 @@ class OpenAIProvider(CapabilityMixin):
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
+        # Unattended triage: a true_positive with nothing staged is asked once
+        # for its containment, in-turn (see ContainmentFollowThrough).
+        from ._loop_helpers import ContainmentFollowThrough
+        _contain = ContainmentFollowThrough(enabled=bool(tags.get("unattended")))
         # Own the wire format: openai_tools() when the caller passed nothing,
         # else coerce whatever shape we were handed (the connector advertises
         # Anthropic-shaped tools for triage) into the OpenAI envelope.
@@ -979,6 +984,14 @@ class OpenAIProvider(CapabilityMixin):
                     yield DoneEvent(stop_reason="end_turn")
                     return
 
+                if _contain.outstanding(allowed_names):
+                    _contain.mark_fired()
+                    yield _emit_usage("containment_follow_through")
+                    turn_idx += 1
+                    history.append({"role": "user",
+                                    "content": UNATTENDED_CONTAIN_DIRECTIVE})
+                    continue
+
                 # Verdict guard: triage turns with evidence tools must emit a verdict
                 if _verdict_guard.outstanding(allowed_names):
                     _verdict_guard.mark_forced()
@@ -999,6 +1012,7 @@ class OpenAIProvider(CapabilityMixin):
                     if card_schema is not None:
                         turn_idx += 1
                         directive = verdict_directive(evidence_ids)
+                        _forced = None
                         # One repair attempt: a refused card is shown back to
                         # the model verbatim (see verdict_repair_directive).
                         for _attempt in range(2):
@@ -1040,14 +1054,34 @@ class OpenAIProvider(CapabilityMixin):
                                 _dur = int((time.perf_counter() - _t0) * 1000)
                                 yield ToolResultEvent(
                                     call_id=call_id, result=oresult, duration_ms=_dur)
+                                _contain.note_result("emit_card", oargs, oresult)
                                 if not (isinstance(oresult, dict)
                                         and oresult.get("ok") is False):
+                                    _forced = (call_id, oargs, oresult)
                                     break
                                 directive = verdict_repair_directive(oresult, oargs)
                             except Exception:
                                 import logging
                                 logging.exception("forced verdict delivery failed")
                                 break
+                        if _forced is not None and _contain.outstanding(allowed_names):
+                            # The forced verdict is real history now, so the
+                            # model stages containment against what it decided.
+                            _cid, _oargs, _ores = _forced
+                            history.append({"role": "assistant", "content": None,
+                                            "tool_calls": [{
+                                                "id": _cid, "type": "function",
+                                                "function": {
+                                                    "name": "emit_card",
+                                                    "arguments": json.dumps(_oargs)}}]})
+                            history.append({"role": "tool", "tool_call_id": _cid,
+                                            "content": json.dumps(_ores, default=str)})
+                            _contain.mark_fired()
+                            yield _emit_usage("containment_follow_through")
+                            turn_idx += 1
+                            history.append({"role": "user",
+                                            "content": UNATTENDED_CONTAIN_DIRECTIVE})
+                            continue
                     yield DoneEvent(stop_reason="end_turn")
                     return
 
@@ -1134,6 +1168,7 @@ class OpenAIProvider(CapabilityMixin):
                     _create_delivery.note_result(name, args, result)
                     _build_progress.note_result(name, args, result)
                     _verdict_guard.note_result(name, args, result)
+                    _contain.note_result(name, args, result)
                     _promise_guard.note_result(name, args, result)
                     _progress.note_result(name, args, result)
                     tool_messages.append({
@@ -1219,6 +1254,7 @@ class OpenAIProvider(CapabilityMixin):
                 _create_delivery.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)
                 _verdict_guard.note_result(name, args, result)
+                _contain.note_result(name, args, result)
                 _promise_guard.note_result(name, args, result)
                 _progress.note_result(name, args, result)
                 tool_messages.append({

@@ -33,8 +33,10 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
+    UNATTENDED_CONTAIN_DIRECTIVE,
     UNVERIFIED_DRAFT_DIRECTIVE,
     BuildProgressGuard,
+    ContainmentFollowThrough,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     ProgressMeter,
@@ -703,6 +705,9 @@ class AnthropicProvider(CapabilityMixin):
         session_id = _uuid.uuid4().hex[:8]
         turn_idx = 0
         tags = tags or {}
+        # Unattended triage: a true_positive with nothing staged is asked once
+        # for its containment, in-turn (see ContainmentFollowThrough).
+        _contain = ContainmentFollowThrough(enabled=bool(tags.get("unattended")))
         # Allow callers to pass tools=None to have the provider supply its
         # own. Keeps the route handler ignorant of which schema shape applies.
         # `is None` (not `not tools`): the budget-ask "deliver" path passes
@@ -1218,6 +1223,23 @@ class AnthropicProvider(CapabilityMixin):
                             logging.exception("forced create delivery failed")
                     yield DoneEvent(stop_reason="end_turn")
                     return
+                if _contain.outstanding(allowed_names):
+                    _contain.mark_fired()
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
+                        history_chars=history_chars,
+                        stop_reason="containment_follow_through",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
+                    )
+                    turn_idx += 1
+                    history.append(Message(
+                        role="user", content=UNATTENDED_CONTAIN_DIRECTIVE))
+                    continue
                 # Verdict guard: a triage turn that gathered evidence and never
                 # concluded gets ONE forced emit_card(verdict) round, citing
                 # this turn's evidence ids (the citation gate checks them).
@@ -1248,6 +1270,7 @@ class AnthropicProvider(CapabilityMixin):
                     if card_schema is not None:
                         turn_idx += 1
                         directive = verdict_directive(evidence_ids)
+                        _forced = None
                         # One repair attempt -- see verdict_repair_directive.
                         for _attempt in range(2):
                             history.append(Message(role="user", content=directive))
@@ -1274,14 +1297,32 @@ class AnthropicProvider(CapabilityMixin):
                                     tier=_tier_for("emit_card", oargs))
                                 oresult = _guarded_dispatch("emit_card", oargs)
                                 yield ToolResultEvent(call_id=call_id, result=oresult)
+                                _contain.note_result("emit_card", oargs, oresult)
                                 if not (isinstance(oresult, dict)
                                         and oresult.get("ok") is False):
+                                    _forced = (call_id, oargs, oresult)
                                     break
                                 directive = verdict_repair_directive(oresult, oargs)
                             except Exception:
                                 import logging
                                 logging.exception("forced verdict delivery failed")
                                 break
+                        if _forced is not None and _contain.outstanding(allowed_names):
+                            # The forced verdict is real history now, so the
+                            # model stages containment against what it decided.
+                            _cid, _oargs, _ores = _forced
+                            history.append(Message(role="assistant", content=[{
+                                "type": "tool_use", "id": _cid,
+                                "name": "emit_card", "input": _oargs}]))
+                            history.append(Message(role="user", content=[{
+                                "type": "tool_result", "tool_use_id": _cid,
+                                "content": _stringify(_ores),
+                                "is_error": _is_error_result(_ores)},
+                                {"type": "text",
+                                 "text": UNATTENDED_CONTAIN_DIRECTIVE}]))
+                            _contain.mark_fired()
+                            turn_idx += 1
+                            continue
                     yield DoneEvent(stop_reason="end_turn")
                     return
                 # P1 -- forced-assessment guarantee. The turn ran tools but
@@ -1347,6 +1388,7 @@ class AnthropicProvider(CapabilityMixin):
                 _delivery.note_result(name, args, result)
                 _create_delivery.note_result(name, args, result)
                 _verdict_guard.note_result(name, args, result)
+                _contain.note_result(name, args, result)
                 _promise_guard.note_result(name, args, result)
                 _progress.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)

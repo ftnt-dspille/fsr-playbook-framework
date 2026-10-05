@@ -2074,6 +2074,60 @@ class VerdictDeliveryGuard:
         record_guard_fire(type(self).__name__)
 
 
+UNATTENDED_CONTAIN_DIRECTIVE = (
+    "Your verdict is true_positive and nothing is staged. No analyst is "
+    "watching this triage, so containment you do not stage now is never "
+    "proposed. Stage the containment this threat calls for now (for example a "
+    "block of the malicious external address), using the evidence you already "
+    "have; do not re-investigate. If no containment applies, say why in one "
+    "sentence.")
+
+
+class ContainmentFollowThrough:
+    """Unattended triage only: a delivered true_positive verdict with nothing
+    staged gets ONE directive to stage the containment it calls for.
+
+    Live on .159 the box model ended 5 of 5 confirmed C2 auto-triage turns on
+    the verdict card, so no block was ever proposed and no autonomy policy had
+    anything to act on. The directive goes into the SAME turn on purpose: the
+    policy judges a staged action against this turn's delivered verdict and
+    cited lookups, which a new turn would not carry. Any staged approval ends
+    the turn before this is consulted, so reaching it means nothing is staged.
+    """
+
+    def __init__(self, enabled: bool = False) -> None:
+        self._enabled = bool(enabled)
+        self._disposition: str | None = None
+        self._fired = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result in: the last DELIVERED verdict wins."""
+        if (_is_verdict_emit(name, args) and isinstance(result, dict)
+                and result.get("ok") is True and _answered(result)):
+            card = result.get("card")
+            if not isinstance(card, dict):
+                card = {}
+            payload = args.get("payload") if isinstance(args, dict) else None
+            if not isinstance(payload, dict):
+                payload = {}
+            self._disposition = str(
+                card.get("disposition")
+                or payload.get("disposition") or "").strip().lower() or None
+
+    def outstanding(self, allowed_names: set[str]) -> bool:
+        """True once: unattended, a true_positive delivered, and a tool that
+        can stage containment is advertised."""
+        if not self._enabled or self._fired:
+            return False
+        if "run_op" not in allowed_names and "emit_card" not in allowed_names:
+            return False
+        return self._disposition == "true_positive"
+
+    def mark_fired(self) -> None:
+        self._fired = True
+        record_guard_fire(type(self).__name__)
+
+
 # --------------------------------------------------------------------------
 # Readable dates in the MODEL's view of a tool result
 # --------------------------------------------------------------------------
