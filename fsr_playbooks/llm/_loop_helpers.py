@@ -2079,8 +2079,11 @@ UNATTENDED_CONTAIN_DIRECTIVE = (
     "watching this triage, so containment you do not stage now is never "
     "proposed. Stage the containment this threat calls for now (for example a "
     "block of the malicious external address), using the evidence you already "
-    "have; do not re-investigate. If no containment applies, say why in one "
-    "sentence.")
+    "have; do not re-investigate. Find the action first with "
+    "find(kind='action', action_type='containment') for the target, then stage "
+    "it with emit_card(card_type='action') using the connector and operation "
+    "that returns; never invent a connector name. If no containment applies, "
+    "say why in one sentence.")
 
 
 class ContainmentFollowThrough:
