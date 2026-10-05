@@ -31,25 +31,56 @@ class TurnEvidence:
 
     def __init__(self) -> None:
         self._registry: dict[str, dict[str, Any]] = {}
+        # Verdict cards delivered this turn, in order. The autonomy policy
+        # (llm/autonomy.py) tests the verdict an action rests on, so it needs
+        # the delivered card, not the model's prose about it.
+        self._verdicts: list[dict[str, Any]] = []
 
-    def register(self, tool_use_id: str, tool_name: str, success: bool) -> None:
-        """Record that a tool call succeeded or failed."""
-        self._registry[tool_use_id] = {"name": tool_name, "ok": success}
+    def register(self, tool_use_id: str, tool_name: str, success: bool,
+                 args: dict[str, Any] | None = None) -> None:
+        """Record that a tool call succeeded or failed. ``args`` is kept so a
+        policy can tell WHAT a cited call looked up (its target), not just
+        which tool ran."""
+        entry: dict[str, Any] = {"name": tool_name, "ok": success}
+        if isinstance(args, dict):
+            entry["args"] = _bounded_args(args)
+        self._registry[tool_use_id] = entry
+
+    def record_verdict(self, card: dict[str, Any]) -> None:
+        """Record a verdict card that was delivered (validated + emitted)."""
+        if isinstance(card, dict):
+            self._verdicts.append(dict(card))
+
+    def verdicts(self) -> list[dict[str, Any]]:
+        return [dict(v) for v in self._verdicts]
 
     def valid_ids(self) -> dict[str, dict[str, Any]]:
-        """Return the registry (id -> {name, ok})."""
+        """Return the registry (id -> {name, ok[, args]})."""
         return dict(self._registry)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for suspended-session storage."""
-        return {"_registry": dict(self._registry)}
+        return {"_registry": dict(self._registry),
+                "_verdicts": list(self._verdicts)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TurnEvidence:
         """Deserialize from suspended-session storage."""
         obj = cls()
         obj._registry = data.get("_registry", {})
+        obj._verdicts = list(data.get("_verdicts") or [])
         return obj
+
+
+def _bounded_args(args: dict[str, Any], limit: int = 2000) -> dict[str, Any]:
+    """The call's args, or a stub when they are too big to keep per call (a
+    whole playbook YAML is not a lookup target)."""
+    import json
+    try:
+        blob = json.dumps(args, default=str)
+    except Exception:  # noqa: BLE001
+        return {}
+    return args if len(blob) <= limit else {"_truncated": blob[:limit]}
 
 
 def set_turn_evidence(evidence: TurnEvidence | None) -> None:
@@ -62,7 +93,8 @@ def get_turn_evidence() -> TurnEvidence | None:
     return _turn_evidence.get()
 
 
-def register_tool_result(tool_use_id: str, tool_name: str, success: bool) -> None:
+def register_tool_result(tool_use_id: str, tool_name: str, success: bool,
+                         args: dict[str, Any] | None = None) -> None:
     """Record that a tool call succeeded or failed.
 
     Called by the provider as tool results arrive. Routes to the contextvar
@@ -70,7 +102,14 @@ def register_tool_result(tool_use_id: str, tool_name: str, success: bool) -> Non
     """
     evidence = get_turn_evidence()
     if evidence is not None:
-        evidence.register(tool_use_id, tool_name, success)
+        evidence.register(tool_use_id, tool_name, success, args)
+
+
+def record_delivered_verdict(card: dict[str, Any]) -> None:
+    """Note a verdict card delivered this turn (called by emit_verdict)."""
+    evidence = get_turn_evidence()
+    if evidence is not None:
+        evidence.record_verdict(card)
 
 
 def clear_tool_registry() -> None:

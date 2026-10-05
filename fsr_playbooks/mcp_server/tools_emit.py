@@ -442,6 +442,15 @@ def emit_action_card(
         card["config"] = chosen
     if len(options) > 1:
         card["config_options"] = options
+    # Autonomy policy, SHADOW only (plans/AUTONOMOUS_TIER1.md phase C): would
+    # an admin policy have run this without a click? Recorded on the card so
+    # the queue can compare it to what the human decides. Never changes the
+    # card's behavior -- it still waits for approval.
+    from ..llm.autonomy import shadow_decision
+    _policy = shadow_decision({"tool": "emit_action_card", "connector": connector,
+                               "op": operation, "args": args or {}})
+    if _policy is not None:
+        card["policy"] = _policy
     # State the branch, don't just imply it. For a discriminated op (fortigate
     # `block_ip_new` takes `ip_addresses` under `method: Quarantine Based` and
     # `ip_block_policy` under `Policy Based`) the validator resolved the active
@@ -1333,6 +1342,8 @@ def emit_verdict(
         card["unknowns"] = unknowns_list
     if recommended_actions:
         card["recommended_actions"] = recommended_actions
+    from ._citation_validator import record_delivered_verdict
+    record_delivered_verdict(card)
     return {"ok": True, "card": card}
 
 

@@ -685,7 +685,7 @@ class FortiAIProxyProvider(CapabilityMixin):
                     dur_ms = int((time.perf_counter() - _t0) * 1000)
                     # Register tool result for citation validation
                     from ..mcp_server._citation_validator import register_tool_result
-                    register_tool_result(call_id, tool_name, not _is_error_result(result))
+                    register_tool_result(call_id, tool_name, not _is_error_result(result), parsed_args)
                     yield ToolResultEvent(
                         call_id=call_id, result=result, duration_ms=dur_ms
                     )

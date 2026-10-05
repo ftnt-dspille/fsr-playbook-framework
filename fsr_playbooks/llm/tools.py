@@ -2155,7 +2155,24 @@ def dispatch(
             # destructive-action approval, and lets a grant scope to it.
             "reason": "unrequested_change" if gated_change else None,
         }
+        # Autonomy policy, SHADOW only: the call still suspends; the decision
+        # rides the envelope and the audit log for the shadow table.
+        from .autonomy import shadow_decision
+        if name == "run_op":
+            _pcall = {"tool": name, "connector": raw_args.get("connector"),
+                      "op": raw_args.get("op"),
+                      "args": raw_args.get("params") or {}}
+        else:
+            _pcall = {"tool": name, "module": raw_args.get("module"),
+                      "args": raw_args}
+        _policy = shadow_decision(_pcall)
+        if _policy is not None:
+            envelope["policy"] = _policy
         _record_audit(name, raw_args, tier, "pending", result_preview=envelope)
+        if _policy is not None:
+            _record_audit(name, raw_args, tier,
+                          f"shadow:{_policy['rule']}:{_policy['outcome']}",
+                          result_preview=_policy)
         return envelope
 
     result = _invoke(spec, name, raw_args)
