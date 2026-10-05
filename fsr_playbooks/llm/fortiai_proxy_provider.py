@@ -767,6 +767,7 @@ class FortiAIProxyProvider(CapabilityMixin):
                             summary=result.get("summary"),
                             requires_step_up=bool(result.get("requires_step_up")),
                             batch=[b.card() for b in batch],
+                            policy=result.get("policy"),
                         )
                         yield pending
                         yield _emit_usage("pending_approval")

@@ -69,6 +69,10 @@ class ApprovalRequestEvent:
     # covers (`approvals.BatchedCall.card()` dicts), in run order. Empty for
     # a single-call approval.
     batch: list[dict[str, Any]] = field(default_factory=list)
+    # The autonomy policy's shadow decision for this call (`autonomy.
+    # shadow_decision`), or None when no rule covers it. Display and audit
+    # only: the call suspends either way.
+    policy: dict[str, Any] | None = None
     kind: Literal["approval_request"] = "approval_request"
 
 

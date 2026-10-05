@@ -156,3 +156,31 @@ def test_every_provider_batches_the_same_way():
         assert "_approvals.collect_batch(" in text, name
         assert "_approvals.resolve_batch" in text, name
         assert "batch=batch" in text and "batch=[b.card() for b in batch]" in text, name
+
+
+def test_the_approval_event_carries_the_shadow_policy_decision():
+    """The envelope's policy decision reached the action card but was dropped
+    building the approval event, so a gated op's card never showed it."""
+    pol = {"rule": "block-external-ip", "outcome": "would_act", "failed": []}
+    _, _, appr = _suspend(["198.51.100.7"], dispatch_side_effect=lambda n, a: {
+        **_envelope(summary=f"Block {a['ip']}"), "policy": pol})
+    assert appr.policy == pol
+
+
+def test_no_policy_decision_means_none_on_the_event():
+    _, _, appr = _suspend(["198.51.100.7"])
+    assert appr.policy is None
+
+
+def test_every_provider_passes_the_policy_decision_to_its_approval_event():
+    """Three providers build the event independently; one that forgets the
+    field drops the decision for every turn on that provider."""
+    import ast
+    llm = Path(__file__).resolve().parent.parent / "llm"
+    seen = 0
+    for path in sorted(llm.glob("*_provider.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "ApprovalRequestEvent":
+                seen += 1
+                assert "policy" in {k.arg for k in node.keywords}, path.name
+    assert seen >= 3
