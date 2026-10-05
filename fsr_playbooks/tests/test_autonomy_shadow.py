@@ -221,3 +221,10 @@ def test_the_action_card_carries_the_shadow_decision(turn, monkeypatch):
     assert out["ok"], out
     assert out["card"]["policy"]["outcome"] == "would_act"
     assert out["card"]["type"] == "action_card"   # still a card to approve
+
+
+def test_one_address_under_two_keys_is_one_target():
+    call = _block()
+    call["args"]["ip"] = EXT
+    d = _eval(call=call)
+    assert d["targets"] == [EXT] and d["outcome"] == "would_act"

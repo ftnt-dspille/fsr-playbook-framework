@@ -160,13 +160,15 @@ def _rule_matches(rule: Rule, call: Call) -> bool:
 
 
 def _ip_targets(args: dict[str, Any]) -> list[str]:
+    """Each distinct target, in order. A model often sends the same address
+    under two keys (`ip` and `ip_addresses`); it is one target."""
     out: list[str] = []
     for k in _IP_ARG_KEYS:
         v = args.get(k)
         vals = v if isinstance(v, list) else str(v or "").replace(";", ",").split(",")
         for x in vals:
             x = str(x).strip()
-            if x:
+            if x and x not in out:
                 out.append(x)
     return out
 
