@@ -187,8 +187,6 @@ class SkillTrace:
         # title is the fallback. EITHER way the base goes through _unique_name so
         # repeats get a stable numeric suffix -- an AI label can't break the
         # one-name-per-step invariant the wiring compiler relies on.
-        base = _sanitize_step_name(step_name) if step_name else _titleize_op(op)
-        name = self._unique_name(base)
         resolved = dict(params or {})
         resolved["connector"] = connector
         resolved["operation"] = op
@@ -196,6 +194,26 @@ class SkillTrace:
             resolved["config"] = config
         if agent:
             resolved["agent"] = agent
+        # The executed call REPLACES a staged one for the same op, in place.
+        # An approved action card is first recorded as staged (so an unapproved
+        # one can still be bottled), then executes; keeping both left the
+        # trace-built playbook running the containment twice (live: one
+        # approved block, two `block_ip_new` steps).
+        for i, c in enumerate(self.calls):
+            ri = c.resolved_inputs or {}
+            if (getattr(c, "staged", False) and ri.get("connector") == connector
+                    and ri.get("operation") == op):
+                executed = SkillCall(
+                    skill_id="run_connector_action",
+                    step_name=c.step_name,
+                    resolved_inputs=resolved,
+                    observed_output=observed_output,
+                    ref_prefix=ref_prefix,
+                )
+                self.calls[i] = executed
+                return executed
+        base = _sanitize_step_name(step_name) if step_name else _titleize_op(op)
+        name = self._unique_name(base)
         return self.record(SkillCall(
             skill_id="run_connector_action",
             step_name=name,

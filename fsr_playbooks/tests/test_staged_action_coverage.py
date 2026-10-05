@@ -170,3 +170,29 @@ def test_branch_annotation_is_absent_for_a_flat_operation():
     from fsr_playbooks.mcp_server._shared import op_branch_for
 
     assert op_branch_for("fortigate-firewall", "no_such_op_at_all", {}) == []
+
+
+def test_an_approved_staged_action_is_one_step_not_two():
+    """Live: one approved block card left two `block_ip_new` calls on the trace
+    (the staged one and the executed one), so the bottled playbook would block
+    twice. The executed call replaces its staged twin, keeping its place and
+    step name, and carries the real output."""
+    t = SkillTrace()
+    t.record_staged_action("fortigate-firewall", "block_ip_new",
+                           {"method": "Quarantine Based", "ip_addresses": "203.0.113.9"})
+    t.record_run_op("fortigate-firewall", "block_ip_new",
+                    {"method": "Quarantine Based", "ip_addresses": "203.0.113.9"},
+                    {"newly_blocked": ["203.0.113.9"]}, config="cfg-1")
+    assert len(t.calls) == 1
+    c = t.calls[0]
+    assert not getattr(c, "staged", False)
+    assert c.observed_output == {"newly_blocked": ["203.0.113.9"]}
+    assert c.resolved_inputs["config"] == "cfg-1"
+
+
+def test_a_second_execution_of_an_op_is_still_its_own_step():
+    """Only a STAGED twin is replaced: two real executions are two steps."""
+    t = SkillTrace()
+    t.record_run_op("virustotal", "query_ip", {"ip": "203.0.113.9"}, {"v": 1})
+    t.record_run_op("virustotal", "query_ip", {"ip": "203.0.113.10"}, {"v": 2})
+    assert len(t.calls) == 2
