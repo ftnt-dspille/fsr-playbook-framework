@@ -22,6 +22,50 @@ from typing import Any
 from agent import load_system_prompt
 
 from evals.providers import ProviderFn, get_provider, resolved_model, set_tool_slice
+
+# One task's wall-clock budget. A Frank baseline hung after task 34/49 and was
+# killed at the 2h tool limit with nothing saved; the HTTP timeout bounds one
+# request, not a task (a tool call can stall, or a model can loop). A task over
+# budget is recorded as TIMEOUT and the run moves on.
+TASK_TIMEOUT_S = float(os.environ.get("EVAL_TASK_TIMEOUT", "900"))
+
+
+class TaskTimeout(Exception):
+    """A provider call exceeded TASK_TIMEOUT_S."""
+
+
+def _call_with_deadline(fn, timeout_s: float = TASK_TIMEOUT_S):
+    """Run `fn()` in a worker thread; raise TaskTimeout past `timeout_s`.
+
+    The thread cannot be killed, so on timeout the task's cancel event is set
+    and the agentic loops stop at their next turn or tool call. Context is
+    copied so the task keeps the caller's contextvars (tool slice, turn plan).
+    """
+    import contextvars
+    import threading
+
+    from evals.providers import TASK_CANCEL
+
+    cancel = threading.Event()
+    ctx = contextvars.copy_context()
+    ctx.run(TASK_CANCEL.set, cancel)
+    box: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            box["value"] = ctx.run(fn)
+        except BaseException as e:  # noqa: BLE001 -- re-raised in the caller
+            box["error"] = e
+
+    th = threading.Thread(target=_run, name="eval-task", daemon=True)
+    th.start()
+    th.join(timeout_s)
+    if th.is_alive():
+        cancel.set()
+        raise TaskTimeout(f"task exceeded {timeout_s:.0f}s (EVAL_TASK_TIMEOUT)")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 from evals.scoring import SCORER_VERSION as _SCORER_VERSION
 from evals.scoring import canonicalize_trace, delivered_yaml, score
 from evals.tasks import Task, load_tasks
@@ -111,7 +155,9 @@ def _progress(model: str, i: int, n: int, task: str, row: dict[str, Any]) -> Non
     # applied. 5/8 is a graded authoring result, not a broken run -- calling
     # it FAIL reads as a regression and invites exactly that misreading.
     # `ERR` is the one genuinely different outcome: the provider call raised.
-    if "error" in row:
+    if row.get("timeout"):
+        mark = f"TIMEOUT (over {TASK_TIMEOUT_S:.0f}s, abandoned)"
+    elif "error" in row:
         mark = "ERR (provider call raised)"
     elif not row.get("max"):
         # max=0 = no gate applied. gold/echo make no terminal tool call, so
@@ -325,13 +371,15 @@ def run_matrix(
             from evals.providers import eval_turn_plan as _etp
             _plan = _etp()
             try:
-                raw = provider(_plan.prompt if _plan is not None
-                               else _prompt_for(t, system_prompt),
-                               _user_message_for(t))
+                _sys = (_plan.prompt if _plan is not None
+                        else _prompt_for(t, system_prompt))
+                _usr = _user_message_for(t)
+                raw = _call_with_deadline(lambda: provider(_sys, _usr))
             except Exception as e:  # noqa: BLE001
                 _err_row = {
                     "model": model_name, "task": t.name,
                     "error": f"provider call: {e!r}",
+                    **({"timeout": True} if isinstance(e, TaskTimeout) else {}),
                     "elapsed_ms": int((time.time() - t0) * 1000),
                     "score": 0, "max": 0, "fraction": 0.0,
                     "levels": {},

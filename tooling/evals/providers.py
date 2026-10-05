@@ -145,6 +145,25 @@ def _lmstudio_provider() -> ProviderFn:
 # it cannot drift again.
 _AGENTIC_MAX_TURNS = MAX_TOOL_TURNS
 
+# Per-task cancel signal. The harness runs each task under a wall-clock
+# deadline (EVAL_TASK_TIMEOUT); when it fires the task's thread cannot be
+# killed, so the agentic loops check this between turns and before each tool
+# call and stop -- otherwise an abandoned task keeps dispatching tools into the
+# NEXT task's audit log. A contextvar, so each task's thread sees only its own.
+import contextvars as _cv
+
+TASK_CANCEL: _cv.ContextVar[Any] = _cv.ContextVar("eval_task_cancel", default=None)
+
+
+class TaskCancelled(Exception):
+    """Raised inside an agentic loop whose task the harness abandoned."""
+
+
+def _check_cancel() -> None:
+    ev = TASK_CANCEL.get()
+    if ev is not None and ev.is_set():
+        raise TaskCancelled()
+
 
 # Per-task tool-slice override, set by the harness around each cell (see
 # `tools_for_intent`). None = advertise the full SAFE_TOOLS registry, which is
@@ -261,6 +280,7 @@ def _agentic_anthropic_provider() -> Callable:
         usage_log: list[dict] = []
         turns = 0
         for _ in range(_AGENTIC_MAX_TURNS):
+            _check_cancel()
             turns += 1
             resp = client.messages.create(
                 model=model, max_tokens=4096, system=system_blocks,
@@ -291,6 +311,7 @@ def _agentic_anthropic_provider() -> Callable:
                 break
             tool_results: list[dict] = []
             for call_id, name, args in tool_uses:
+                _check_cancel()
                 result = dispatch(name, args)
                 content = result if isinstance(result, str) else _json.dumps(
                     result, default=str)
@@ -389,6 +410,7 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
         text_chunks: list[str] = []
         turns = 0
         for _ in range(_AGENTIC_MAX_TURNS):
+            _check_cancel()
             turns += 1
             payload = {"model": model, "messages": history, "tools": tools}
             # Reasoning models (o1/o3/o4, and the gpt-5 reasoning tier) accept
@@ -442,6 +464,7 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                     args = _json.loads(fn.get("arguments") or "{}")
                 except Exception:
                     args = {}
+                _check_cancel()
                 result = dispatch(name, args)
                 content = result if isinstance(result, str) else _json.dumps(
                     result, default=str)
