@@ -208,6 +208,48 @@ def _read_only(entry: dict[str, Any]) -> bool:
         return False
 
 
+# Connector categories (the catalog's `connectors.category`) whose lookups are
+# threat intelligence. Live on .159 a SIEM search that returned NO events for
+# 8.8.8.8 was cited as "a lookup about the target", and the policy blocked
+# Google DNS: traffic logs, record reads and the firewall's own block list say
+# nothing about whether an address is malicious.
+_INTEL_CATEGORIES = frozenset({"threat intelligence", "cti", "information"})
+
+
+def _connector_category(connector: str) -> str | None:
+    import sqlite3
+
+    from .tools import _DB_PATH
+    try:
+        con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            row = con.execute("SELECT category FROM connectors WHERE name=? LIMIT 1",
+                              (connector,)).fetchone()
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001
+        return None
+    return str(row[0]).strip().lower() if row and row[0] else None
+
+
+def _intel_lookup(entry: dict[str, Any]) -> bool:
+    """A cited call that asked a threat-intelligence source: a read-only
+    run_op on a connector the catalog files as threat intel, or one of the
+    known intel connectors. Unknown connectors do not count (fails closed)."""
+    if entry.get("name") != "run_op" or not _read_only(entry):
+        return False
+    connector = str((entry.get("args") or {}).get("connector") or "")
+    if not connector:
+        return False
+    if _connector_category(connector) in _INTEL_CATEGORIES:
+        return True
+    from ..mcp_server.tools_connector_discovery import (
+        _ENRICH_RANK_DEFAULT,
+        _enrich_connector_rank,
+    )
+    return _enrich_connector_rank(connector) < _ENRICH_RANK_DEFAULT
+
+
 def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
              registry: dict[str, dict[str, Any]],
              counter: Counter | None = None) -> dict[str, Any] | None:
@@ -262,15 +304,16 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
         cited = [str(e) for f in verdict.get("findings") or [] if isinstance(f, dict)
                  for e in (f.get("evidence") or []) if isinstance(e, str)]
         lookups = [(eid, registry.get(eid) or {}) for eid in cited]
-        lookups = [(eid, e) for eid, e in lookups if e.get("ok") is True and _read_only(e)]
+        lookups = [(eid, e) for eid, e in lookups
+                   if e.get("ok") is True and _intel_lookup(e)]
         if not lookups:
-            failed.append("the verdict cites no successful read-only lookup")
+            failed.append("the verdict cites no successful threat-intel lookup")
         else:
             import json
             for t in targets:
                 if not any(t in json.dumps(e.get("args") or {}, default=str)
                            for _, e in lookups):
-                    failed.append(f"no cited lookup was about {t}")
+                    failed.append(f"no cited threat-intel lookup was about {t}")
     elif w.evidence is not None:
         failed.append("no verdict to cite evidence")
 

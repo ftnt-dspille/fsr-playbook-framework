@@ -117,6 +117,38 @@ def test_text_in_the_record_cannot_satisfy_the_rule():
     assert d["outcome"] == "would_not_act"
 
 
+@pytest.mark.parametrize("entry", [
+    # The live .159 case: a SIEM search that found NO events for 8.8.8.8 was
+    # cited as the lookup about it, and the policy blocked Google DNS.
+    {"name": "siem_search", "ok": True,
+     "args": {"by": "ip", "value": EXT, "direction": "any"}},
+    {"name": "get_record", "ok": True, "args": {"iri": f"/api/3/indicators/{EXT}"}},
+    {"name": "search_module_records", "ok": True,
+     "args": {"module": "indicators", "q": EXT}},
+    # Read-only connector ops that are not threat intelligence.
+    {"name": "run_op", "ok": True, "args": {"connector": "fortigate-firewall",
+                                           "op": "get_blocked_ip",
+                                           "params": {"ip": EXT}}},
+    {"name": "run_op", "ok": True, "args": {"connector": "fortinet-fortisiemv2",
+                                           "op": "get_entity_context",
+                                           "params": {"value": EXT}}},
+], ids=["siem-search", "record-read", "module-search", "firewall-block-list",
+        "siem-entity-context"])
+def test_only_a_threat_intel_lookup_is_evidence(entry):
+    d = _eval(registry={"tu1": entry})
+    assert d["outcome"] == "would_not_act"
+    assert any("threat-intel" in f for f in d["failed"]), d["failed"]
+
+
+@pytest.mark.parametrize("connector, op", [
+    ("virustotal", "query_ip"),
+    ("fortinet-fortiguard-ioc", "ioc_search"),
+    ("abuseipdb", "check_ip"),
+])
+def test_threat_intel_connectors_count(connector, op):
+    assert _eval(registry=_registry(connector=connector, op=op))["outcome"] == "would_act"
+
+
 def test_enforce_is_not_available_in_this_build():
     d = _eval(policy=_pol(mode="enforce"))
     assert d["outcome"] == "would_act" and d["mode"] == "enforce_unavailable"
