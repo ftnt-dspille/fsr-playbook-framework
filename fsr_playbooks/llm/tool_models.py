@@ -121,7 +121,8 @@ class EmitActionCardArgs(BaseModel):
     # keeps the pre-#60 behavior exactly.
     requested_by: str | None = None
     # The connector configuration to run on (name or id); unset = the default.
-    config: str | None = None
+    # str in the schema; a dict is tolerated (the model has sent notes here).
+    config: str | dict | None = None
 
 
 class EmitChoiceCardArgs(BaseModel):

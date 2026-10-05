@@ -84,3 +84,36 @@ def test_emit_card_passes_config_through(options, monkeypatch):
                                    "ip_addresses": "203.0.113.9", "time_to_live": "1 Hour"}})
     assert out["ok"], out
     assert out["card"]["config"]["id"] == "agt-1"
+
+
+@pytest.mark.parametrize("notes", [{"notes": "self-contained path"},
+                                   {"preferred_params": {"method": "Quarantine Based"}},
+                                   ["x"], 1])
+def test_config_used_as_notes_is_not_a_crash(options, monkeypatch, notes):
+    """Live regression: the model already sent `config` as free-form notes on
+    action cards; once `config` meant the run-on configuration, that dict hit
+    the name lookup and the card emit raised -- no card, a dead containment
+    turn. Notes are not a choice: the card runs on the default, and says so."""
+    monkeypatch.setattr(tools_execution, "_live_client_for_grounding", lambda: object())
+    monkeypatch.setattr(tools_execution, "_preflight_connector", lambda *a, **k: None)
+    fn = getattr(tools_emit.emit_card, "fn", tools_emit.emit_card)
+    out = fn("action", {"id": "c1", "connector": "fortigate-firewall", "operation": "block_ip_new",
+                        "summary": "Block the address now", "editable_fields": [],
+                        "args": {"method": "Quarantine Based", "ip_addresses": "203.0.113.9",
+                                 "time_to_live": "1 Day"},
+                        "config": notes})
+    assert out["ok"], out
+    assert out["card"]["config"]["id"] == "loc-1"
+    assert "runs on fortigate-lab" in out["note"]
+
+
+def test_a_config_object_that_names_one_is_honored(options, monkeypatch):
+    monkeypatch.setattr(tools_execution, "_live_client_for_grounding", lambda: object())
+    monkeypatch.setattr(tools_execution, "_preflight_connector", lambda *a, **k: None)
+    fn = getattr(tools_emit.emit_card, "fn", tools_emit.emit_card)
+    out = fn("action", {"id": "c1", "connector": "fortigate-firewall", "operation": "block_ip_new",
+                        "summary": "Block the address now", "editable_fields": [],
+                        "args": {"method": "Quarantine Based", "ip_addresses": "203.0.113.9",
+                                 "time_to_live": "1 Day"},
+                        "config": {"name": "Lab FortiGate (edge-agent)"}})
+    assert out["card"]["config"]["id"] == "agt-1" and "note" not in out

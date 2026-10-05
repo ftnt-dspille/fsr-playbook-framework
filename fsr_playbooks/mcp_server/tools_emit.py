@@ -223,7 +223,7 @@ def _card_config(client, connector: str, config: str | None
         return None, []
     if not options:
         return None, []
-    want = (config or "").strip()
+    want = _config_name(config)
     if want:
         hit = next((o for o in options if want in (o["id"], o["name"])), None)
         if hit is None:
@@ -240,6 +240,26 @@ def _card_config(client, connector: str, config: str | None
     if hit is None and len(options) == 1:
         hit = options[0]
     return hit, options
+
+
+def _config_name(config: Any) -> str:
+    """The configuration a card's ``config`` names, or "" for none.
+
+    Before `config` meant "the connector configuration to run on", the model
+    already sent a `config` key on action cards -- as free-form NOTES
+    (`{"notes": "self-contained containment path"}`), which the card used to
+    drop. Live, that dict reached the name lookup and the card emit raised, so
+    the containment turn ended with "the card emitter is failing" and no card.
+    A dict that names one (`{"id": ...}` / `{"name": ...}`) is honored; any
+    other non-string is not a choice and means the default."""
+    if isinstance(config, str):
+        return config.strip()
+    if isinstance(config, dict):
+        for k in ("id", "name", "config_id", "config"):
+            v = config.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
 
 
 @mcp.tool()
@@ -393,6 +413,14 @@ def emit_action_card(
     chosen, options = _card_config(_client, connector, config)
     if isinstance(chosen, dict) and chosen.get("ok") is False:
         return chosen
+    # A `config` that names nothing (notes, a flag) is dropped, but said so: the
+    # model learns where the action will actually run.
+    _config_note = None
+    if config not in (None, "") and not _config_name(config):
+        _config_note = ("`config` names the connector configuration to run on "
+                        "(a name or id); the value sent names none, so the card "
+                        "runs on " + ((chosen or {}).get("name") or "the default")
+                        + ".")
     # Record the staged action into the session trace so a later trace-built
     # playbook AUTOMATES it -- the analyst was offered this containment but it
     # was never executed, so `run_op` never recorded it and the trace compiler
@@ -427,6 +455,8 @@ def emit_action_card(
         branch = []
     if branch:
         card["branch"] = branch
+    if _config_note:
+        return {"ok": True, "card": card, "note": _config_note}
     return {"ok": True, "card": card}
 
 
