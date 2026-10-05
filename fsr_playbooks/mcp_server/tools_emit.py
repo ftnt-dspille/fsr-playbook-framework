@@ -206,6 +206,42 @@ def emit_choice_card(
     }
 
 
+def _card_config(client, connector: str, config: str | None
+                 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """(chosen config, all options) for an action card.
+
+    ``chosen`` is the named config (by name or id), else the default, else the
+    only one. An unknown name returns an error envelope as ``chosen`` naming
+    the real choices. No live box, or nothing listed: (None, []) -- fail open,
+    the action runs on the default exactly as before."""
+    if client is None:
+        return None, []
+    try:
+        from .tools_execution import connector_config_options
+        options = connector_config_options(client, connector)
+    except Exception:  # noqa: BLE001
+        return None, []
+    if not options:
+        return None, []
+    want = (config or "").strip()
+    if want:
+        hit = next((o for o in options if want in (o["id"], o["name"])), None)
+        if hit is None:
+            hit = next((o for o in options
+                        if o["name"].lower() == want.lower()), None)
+        if hit is None:
+            return _err(
+                "unknown_config",
+                f"'{connector}' has no configuration named {want!r}. Its "
+                f"configurations: {[o['name'] for o in options]}. Pass one of "
+                f"those as `config`, or omit it to use the default."), options
+        return hit, options
+    hit = next((o for o in options if o["default"]), None)
+    if hit is None and len(options) == 1:
+        hit = options[0]
+    return hit, options
+
+
 @mcp.tool()
 def emit_action_card(
     id: str,
@@ -215,12 +251,20 @@ def emit_action_card(
     args: dict[str, Any],
     editable_fields: list[str],
     requested_by: str | None = None,
+    config: str | None = None,
 ) -> dict[str, Any]:
     """Emit an `action_card` so the widget renders an editable preview
     of a connector operation and halts the turn until the user confirms
     or cancels. On confirm, the widget calls chat_resume with the
     (possibly-edited) args and the agent runs the operation in the
     next turn.
+
+    `config` is the connector configuration the action runs on, by name or
+    id. Pass it when the analyst names one, or when `find` shows the action
+    `runs_on_agent` (a FortiSOAR agent reaches targets the master cannot).
+    Omit it to use the connector's default. The card shows where it runs and,
+    when the connector has several configurations, lets the analyst change it
+    before approving.
 
     `requested_by` is declared intent consumed by the hunt-floor guard
     upstream (`_loop_helpers.TriageDiscipline`), not by the card: an
@@ -332,6 +376,7 @@ def emit_action_card(
     # card renders) instead of after approval. Fails open on any preflight
     # hiccup (transient network, no live target, box unreachable) so a real op
     # is never false-rejected.
+    _client = None
     try:
         from .tools_execution import _live_client_for_grounding, _preflight_connector
         _client = _live_client_for_grounding()
@@ -341,6 +386,13 @@ def emit_action_card(
                 return cfg_err
     except Exception:
         pass  # fail open -- never block a real op on a preflight hiccup
+    # Where it runs. The card used to carry no config at all, so an approved
+    # action always ran on the connector's default -- an analyst who asked for
+    # the agent-bound config got the master's instead, and agent-only targets
+    # were unreachable from the chat.
+    chosen, options = _card_config(_client, connector, config)
+    if isinstance(chosen, dict) and chosen.get("ok") is False:
+        return chosen
     # Record the staged action into the session trace so a later trace-built
     # playbook AUTOMATES it -- the analyst was offered this containment but it
     # was never executed, so `run_op` never recorded it and the trace compiler
@@ -358,6 +410,10 @@ def emit_action_card(
         "args": args,
         "editable_fields": editable_fields,
     }
+    if chosen:
+        card["config"] = chosen
+    if len(options) > 1:
+        card["config_options"] = options
     # State the branch, don't just imply it. For a discriminated op (fortigate
     # `block_ip_new` takes `ip_addresses` under `method: Quarantine Based` and
     # `ip_block_policy` under `Policy Based`) the validator resolved the active

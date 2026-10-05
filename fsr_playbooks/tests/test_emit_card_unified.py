@@ -167,7 +167,9 @@ def test_keys_the_card_cannot_hold_are_dropped_but_named():
     round-trip later; saying so keeps that visible."""
     from fsr_playbooks.mcp_server.tools_emit import emit_card
     r = emit_card("action", dict(_REFUSED_ACTION_PAYLOAD))
-    assert r["ignored_fields"] == ["config", "description", "rationale",
+    # `config` is a card field now (the connector configuration it runs on);
+    # the model reaching for it unprompted is part of why it became one.
+    assert r["ignored_fields"] == ["description", "rationale",
                                    "severity", "target"]
 
 

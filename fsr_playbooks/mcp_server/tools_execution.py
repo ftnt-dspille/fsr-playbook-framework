@@ -622,6 +622,65 @@ def populate_op_definitions(client, time_budget_s: float = 60.0,
             "elapsed_s": round(time.time() - start, 1)}
 
 
+def connector_config_options(client, connector: str) -> list[dict[str, Any]]:
+    """Every active configuration of ``connector`` an action could run on.
+
+    One entry per config: ``{id, name, default, runs_on_agent, agent_id,
+    agent_name}``. Agent-bound configs come from the per-agent listing (the
+    master's own listing hides them), so this is the set an approved action
+    card can choose from. Returns ``[]`` on any hiccup -- callers fail open."""
+    try:
+        rows = _configured_rows(client)
+    except Exception:  # noqa: BLE001
+        return []
+    agent_of: dict[str, str] = {}
+    try:
+        for ar in _agent_configured_rows(client):
+            if ar.get("name") == connector:
+                for cid in _row_config_ids(ar):
+                    agent_of[str(cid)] = ar.get("_agent_id") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    names: dict[str, str] = {}
+    if agent_of:
+        try:
+            r = client.session.get(client.base_url + "/api/3/agents",
+                                   verify=client.verify_ssl)
+            for m in (r.json().get("hydra:member") or []):
+                if m.get("agentId"):
+                    names[m["agentId"]] = m.get("name") or ""
+        except Exception:  # noqa: BLE001
+            pass
+    local = set()
+    try:
+        local = _local_config_ids(client)
+    except Exception:  # noqa: BLE001
+        pass
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if row.get("name") != connector:
+            continue
+        for key in ("configuration", "configurations", "configs", "config"):
+            for c in row.get(key) or []:
+                if not isinstance(c, dict):
+                    continue
+                cid = str(c.get("config_id") or c.get("id") or c.get("uuid") or "")
+                if not cid or cid in seen:
+                    continue
+                seen.add(cid)
+                agent_id = agent_of.get(cid, "") if cid not in local else ""
+                out.append({
+                    "id": cid,
+                    "name": c.get("name") or cid,
+                    "default": bool(c.get("default")),
+                    "runs_on_agent": bool(agent_id),
+                    "agent_id": agent_id,
+                    "agent_name": names.get(agent_id, "") if agent_id else "",
+                })
+    return out
+
+
 def _resolve_config_id(rows: list[dict[str, Any]], connector: str,
                        config_name: str) -> str:
     """Map a run_op `config` name/id to its UUID using configured rows.

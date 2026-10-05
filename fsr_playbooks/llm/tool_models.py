@@ -120,6 +120,8 @@ class EmitActionCardArgs(BaseModel):
     # `_loop_helpers.TriageDiscipline`. Optional and defaulted so an unset field
     # keeps the pre-#60 behavior exactly.
     requested_by: str | None = None
+    # The connector configuration to run on (name or id); unset = the default.
+    config: str | None = None
 
 
 class EmitChoiceCardArgs(BaseModel):

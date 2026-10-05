@@ -1254,6 +1254,15 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                     "first. Do not claim `analyst` to bypass the floor."
                 ),
             },
+            "config": {
+                "type": "string",
+                "description": (
+                    "Connector configuration to run on, by name or id. Pass it "
+                    "when the analyst names one, or when only a FortiSOAR-agent "
+                    "configuration can reach the target. Omit it to use the "
+                    "default; the analyst can switch before approving."
+                ),
+            },
         },
     },
     "emit_manual_input": {
