@@ -775,7 +775,12 @@ class OpenAIProvider(CapabilityMixin):
                 tool_calls_for_msg, tool_calls = [], []
             if tool_calls_for_msg:
                 assistant_msg["tool_calls"] = tool_calls_for_msg
-            history.append(assistant_msg)
+            # An empty reply (no text, no calls) is not history: replayed as
+            # {"content": null} it makes the NEXT request a 400. Live on .159
+            # gpt-5.4-mini answered a delivered verdict with nothing, and the
+            # follow-through round that should have staged the block died on it.
+            if assistant_msg["content"] or tool_calls_for_msg:
+                history.append(assistant_msg)
 
             tool_call_usage: list[ToolCallUsage] = []
 

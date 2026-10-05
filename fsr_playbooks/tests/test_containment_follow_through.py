@@ -233,3 +233,22 @@ def test_anthropic_forced_true_positive_is_asked_in_turn():
                and b.get("tool_use_id") == "c_forced" for b in last)
     assert any(isinstance(b, dict) and b.get("text") == UNATTENDED_CONTAIN_DIRECTIVE
                for b in last)
+
+
+def _empty():
+    return [_delta_chunk(finish="stop"), _usage_chunk()]
+
+
+def test_an_empty_reply_after_the_verdict_is_not_replayed():
+    """The live shape on .159: the model answered its delivered verdict with
+    nothing. Replayed as {"role": "assistant", "content": None} with no calls,
+    that message makes the follow-through request a 400 and the turn dies."""
+    events, disp, sent = _run([_hunt_round(), _verdict_round(), _empty(),
+                               _block_round(), _prose()])
+    assert _fired(events) == 1
+    for msgs in sent:
+        for m in msgs:
+            if m.get("role") == "assistant":
+                assert m.get("content") or m.get("tool_calls"), m
+    assert sent[3][-1] == {"role": "user", "content": UNATTENDED_CONTAIN_DIRECTIVE}
+    assert _staged_block(disp)

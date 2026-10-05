@@ -984,7 +984,10 @@ class AnthropicProvider(CapabilityMixin):
                                              final.stop_reason, dropped)}]
                 tool_calls = []
 
-            history.append(Message(role="assistant", content=assistant_blocks))
+            # An empty reply is not history: Anthropic refuses a message with
+            # empty content, so replaying it fails the next request.
+            if assistant_blocks:
+                history.append(Message(role="assistant", content=assistant_blocks))
 
             usage = getattr(final, "usage", None)
             input_tok = getattr(usage, "input_tokens", 0) or 0 if usage else 0
