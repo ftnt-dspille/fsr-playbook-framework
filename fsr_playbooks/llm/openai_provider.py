@@ -558,9 +558,9 @@ class OpenAIProvider(CapabilityMixin):
         # dispatch will run ANY tool name, so refuse names the caller didn't
         # advertise. The model only ever sees `allowed_names`; this is a
         # backstop against a stale widget / replayed transcript.
-        allowed_names = {
-            (t.get("function") or {}).get("name") or t.get("name")
-            for t in tools
+        allowed_names: set[str] = {
+            n for t in tools
+            if (n := (t.get("function") or {}).get("name") or t.get("name"))
         }
 
         # P4 -- repeated-error guard. Don't re-run an identical (name, args)

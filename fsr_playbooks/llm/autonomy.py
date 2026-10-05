@@ -266,9 +266,7 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
             failed.append("the verdict cites no successful read-only lookup")
         else:
             import json
-            for t in targets or [None]:
-                if t is None:
-                    continue
+            for t in targets:
                 if not any(t in json.dumps(e.get("args") or {}, default=str)
                            for _, e in lookups):
                     failed.append(f"no cited lookup was about {t}")
