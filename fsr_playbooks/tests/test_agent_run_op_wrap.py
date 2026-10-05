@@ -204,3 +204,24 @@ def test_agent_wrap_connector_error_surfaces_as_failure():
     assert out["ok"] is False
     assert out["_via_agent"] is True
     assert "auth scope denied" in out["message"]
+
+
+def test_agent_wrap_prunes_params_the_branch_hides():
+    """Live: an approved block card carried `duration` with time_to_live='1 Day'.
+    On an on-box config FSR ignores the hidden field and the block runs; the
+    agent wrap compiles the op into a playbook, and the compiler refused the
+    two-branch set (agent_wrap_compile_failed), so the same approval failed
+    only on the agent."""
+    if not _has_connector("fortigate-firewall"):
+        pytest.skip("fortigate-firewall not in reference DB")
+    run_step = {"name": "Run", "status": "finished",
+                "result": {"data": {"newly_blocked": ["203.0.113.9"]},
+                           "status": "Success", "_status": True}}
+    params = {"method": "Quarantine Based", "ip_addresses": "203.0.113.9",
+              "time_to_live": "1 Day", "duration": 3600}
+    out = te._run_op_via_agent_playbook(
+        "fortigate-firewall", "block_ip_new", params,
+        "cfg-uuid-1", "5.4.0", "agent-xyz", _FakeClient(run_step), timeout_s=5)
+    assert out["ok"] is True, out
+    assert out["ignored_params"] == ["duration"]
+    assert "duration" in params, "the caller's dict must not be mutated"

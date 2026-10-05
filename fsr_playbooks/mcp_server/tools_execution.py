@@ -1390,6 +1390,20 @@ def _agent_config_ids(client) -> set[str]:
     return ids
 
 
+def _prune_hidden_for_wrap(connector: str, op: str, params: dict) -> list[str]:
+    """Remove (in place) the params FSR would hide for these discriminator
+    values; returns the dropped names. A catalog miss leaves params untouched."""
+    try:
+        from ..compiler.resolver import Resolver
+        from ..compiler.skill_compiler import prune_hidden_params
+        resolver = Resolver(DB_PATH)
+        step = {"type": "connector", "connector": connector, "operation": op,
+                "params": params}
+        return prune_hidden_params(step, resolver.operation_param_rules)
+    except Exception:  # noqa: BLE001 -- the compile below still reports a real conflict
+        return []
+
+
 def _run_op_via_agent_playbook(connector: str, op: str,
                                params: dict[str, Any], config_id: str,
                                version: str, agent_id: str,
@@ -1423,6 +1437,15 @@ def _run_op_via_agent_playbook(connector: str, op: str,
     # so a leaked-cleanup regression is observable without box-side logs.
     _diag: dict[str, Any] = {}
 
+    # Drop params the chosen branch hides. A direct execute ignores them (FSR
+    # never sends a hidden field), but the wrap COMPILES the op as a playbook
+    # step, and the compiler rightly refuses a two-branch param set -- so an
+    # approved card carrying `duration` with time_to_live='1 Day' ran fine on
+    # an on-box config and failed only on the agent. Same fix, same helper, as
+    # the trace path (`prune_hidden_params`): the pruned set is what executes.
+    params = dict(params or {})
+    _pruned = _prune_hidden_for_wrap(connector, op, params)
+
     # Unique, non-colliding collection name so concurrent wraps never clash.
     suffix = str(int(time.time() * 1000))[-9:]
     coll_name = f"00 - Agent Run {connector} {suffix}"
@@ -1440,7 +1463,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                  "connector": connector,
                  "operation": op,
                  "config": config_id,
-                 "params": params or {}},
+                 "params": params},
                 {"name": "Boom", "type": "set_variable",
                  "vars": {"boom": "{{ 1/0 }}"}},
             ],
@@ -1587,6 +1610,8 @@ def _run_op_via_agent_playbook(connector: str, op: str,
             "_agent_id": agent_id,
             "_cleanup": _diag,
         }
+        if _pruned:
+            out["ignored_params"] = _pruned
         if truncated:
             out["output_truncated"] = True
             out["note"] = ("Output summarized to keep context lean -- full shape "
