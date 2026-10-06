@@ -647,9 +647,14 @@ def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
     return internal, external
 
 
-# Modules that describe the estate (the CMDB) rather than detections: a lookup
-# there identifies a host, it does not correlate a campaign.
-_CMDB_MODULES = frozenset({"assets"})
+# Modules a lookup of an internal address IDENTIFIES it in, rather than
+# correlating a campaign: the CMDB (what host is this) and the platform's own
+# indicator store (is this address a known indicator, and how is it rated).
+# Asked "is the source IP in our indicator database?", the guard steered the
+# agent off every record search, it never reached `indicators` -- where the
+# address sat rated Suspicious -- and it answered "no, an RFC1918 address
+# cannot be an indicator".
+_CMDB_MODULES = frozenset({"assets", "indicators"})
 
 
 def _effective_tool_name(name: str, args: Any) -> str:
@@ -940,8 +945,10 @@ class TriageDiscipline:
                         f"Pivot internal hosts through the SIEM/CMDB context "
                         f"ops instead (get_ip_context / siem_search, when they "
                         f"are in your tool list), or read the alert's own "
-                        f"linked records. Do not retry this "
-                        f"search."
+                        f"linked records. To identify the host or check it is "
+                        f"a known indicator, search_module_records on "
+                        f"{' or '.join(sorted(_CMDB_MODULES))} is allowed. "
+                        f"Do not retry this search."
                     ),
                 }
         # 1c. Enrichment source cap (#128). Once an external indicator holds

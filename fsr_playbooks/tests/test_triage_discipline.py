@@ -975,3 +975,16 @@ def test_internal_ip_asset_lookup_is_not_correlation():
     r = d.evaluate("search_module_records",
                    {"module": "alerts", "q": "10.20.5.50"})
     assert r is not None and r.get("internal_correlation_guard")
+
+
+def test_internal_ip_indicator_lookup_is_not_correlation():
+    """Asked whether the source IP is in the indicator database, the guard
+    steered the agent off record search entirely; it never read `indicators`
+    (where the address was rated Suspicious) and answered "no"."""
+    d = _fresh128()
+    assert d.evaluate("search_module_records",
+                      {"module": "indicators", "q": "10.50.60.70"}) is None
+    r = d.evaluate("search_module_records",
+                   {"module": "incidents", "q": "10.50.60.70"})
+    assert r is not None and r.get("internal_correlation_guard")
+    assert "indicators" in r["error"] and "assets" in r["error"]
