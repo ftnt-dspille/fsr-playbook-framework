@@ -216,7 +216,7 @@ converted to underscores (case preserved):
 | Step type | Where the output lands |
 |---|---|
 | `connector` | `vars.steps.<name>.data` (or `.records` per op output schema) |
-| `find_record` | `vars.steps.<name>.records[]` (each is a full module record) |
+| `find_record` | `vars.steps.<name>` itself is a LIST of full module records: `vars.steps.<name>[0]`, `| length`, `for_each` (live-verified on 8.0; there is no `.records` and no `hydra:member`) |
 | `set_variable` | variables go directly to `vars.<var_name>` (not under `vars.steps`) |
 | `manual_input` | `vars.steps.<name>.input.<field>` (after the operator submits) |
 | `code_snippet` | `return` value, at `vars.steps.<name>.data.code_output` |
@@ -405,7 +405,7 @@ busy module can pull an unbounded child set.
 
 - name: Update Alert
   type: update_record
-  record: "{{ vars.steps.Find.records[0]['@id'] }}"
+  record: "{{ vars.steps.Find[0]['@id'] }}"
   module: alerts
   fields:
     status: Investigating
@@ -564,7 +564,7 @@ the difference if the read comes back short.
 ```yaml
 - name: Delete Record
   type: delete_record
-  record: "{{ vars.steps.Find.records[0]['@id'] }}"
+  record: "{{ vars.steps.Find[0]['@id'] }}"
   # or by module + ID:
   # module: alerts
   # record_id: "123"

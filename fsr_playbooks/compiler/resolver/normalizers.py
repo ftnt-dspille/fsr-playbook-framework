@@ -106,6 +106,11 @@ def _rewrite_query_filter_ops(
     for i, f in enumerate(filters):
         if not isinstance(f, dict):
             continue
+        # `op:` (the trigger spelling) is an alias, never a key the wire keeps.
+        if "op" in f and not f.get("operator"):
+            f["operator"] = f.get("_operator") or f["op"]
+            f.setdefault("_operator", f["operator"])
+        f.pop("op", None)
         orig = f.get("operator") or f.get("_operator")
         if not isinstance(orig, str):
             continue
@@ -967,12 +972,26 @@ class NormalizerMixin:
                 wf: dict[str, Any] = {"type": f.get("type", "primitive")}
                 wf["field"] = f.get("field")
                 wf["value"] = f.get("value")
-                op = f.get("operator", "eq")
+                # `op:` is the trigger `when:` spelling, and models carry it
+                # over. Unread here, it rode to the wire beside a defaulted
+                # `operator: eq` -- `op: contains` searched for an exact name
+                # and the step found nothing, green at compile time.
+                op = f.get("operator") or f.get("op") or "eq"
+                if (f.get("operator") and f.get("op")
+                        and str(f["operator"]).lower() != str(f["op"]).lower()):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"filter on {f.get('field')!r} sets both "
+                                 f"operator: {f['operator']!r} and op: "
+                                 f"{f['op']!r}"),
+                        path=f"{path}.arguments.filters",
+                        suggestion="keep one: operator",
+                    ))
                 wf["operator"] = op
                 wf["_operator"] = op
                 # Carry through any extra keys the author set (e.g. _value)
                 for k, v in f.items():
-                    if k not in ("type", "field", "value", "operator"):
+                    if k not in ("type", "field", "value", "operator", "op"):
                         wf.setdefault(k, v)
                 wire_filters.append(wf)
             a["query"] = {

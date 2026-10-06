@@ -41,4 +41,4 @@ playbooks:
         type: update_record
         module: indicators
         fields:
-          tags: "{{ vars.steps.find['hydra:member'][0].tags + [vars.input.params.tag] }}"
+          tags: "{{ vars.steps.find[0].tags + [vars.input.params.tag] }}"

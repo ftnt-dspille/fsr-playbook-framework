@@ -22,6 +22,19 @@ _VARS_STEPS_RE = re.compile(
     r"|\[\s*(?:\d+|'[^']*'|\"[^\"]*\")\s*\])*)"
 )
 
+# The first access after a find_record step's key: `.name` or `['name']`
+# (a key lookup -- wrong on a list), as opposed to `[0]` (an index -- right).
+_FIND_RECORD_KEY_ACCESS_RE = re.compile(
+    r"\s*(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*(['\"])(.+?)\2\s*\])")
+
+# vars.steps['<key>'] / vars.steps["<key>"] -- the subscript spelling. It was
+# never checked: a repair turn "fixed" `vars.steps.analyst_ip_action` to
+# `vars.steps['Analyst IP Action']` (the display name, spaces and all), verify
+# passed it, and the step still read nothing -- the key is the name with
+# spaces replaced by underscores.
+_VARS_STEPS_SUBSCRIPT_RE = re.compile(
+    r"\bvars\.steps\[\s*(['\"])(.+?)\1\s*\]")
+
 
 # Top-level keys present on every workflow's `vars` context at runtime.
 # Setting one of these via SetVariable shadows the FSR-provided value
@@ -142,12 +155,8 @@ def _step_output_top_keys(s: Step) -> set[str] | None:
         # code_snippet, and the corrected `get_step_type('connector')` grounding.
         return {"data", "status", "message", "operation"}
 
-    if s.type == "find_record":
-        # FindRecords returns a hydra:Collection-shaped envelope. Top-level
-        # keys are the canonical hydra ones. Skip strict validation for
-        # this -- most authors index `[0]` directly.
-        return {"@context", "@id", "@type", "hydra:member",
-                "hydra:totalItems", "hydra:itemsPerPage"}
+    # find_record is NOT keyed: its output is a plain LIST of records, checked
+    # separately in _check_jinja_paths (_FIND_RECORD_KEY_ACCESS_RE).
 
     if s.type == "manual_input":
         # Output is the resumed input + chosen option.
@@ -263,6 +272,30 @@ def _check_jinja_paths(pb: Playbook, pi: int,
         for sub, val in _walk_strings(s.arguments):
             for jm in _JINJA_EXPR_RE.finditer(val):
                 expr = jm.group(1)
+                for m in _VARS_STEPS_SUBSCRIPT_RE.finditer(expr):
+                    key = m.group(2)
+                    if key in by_jinja_key:
+                        continue
+                    fixed = key.replace(" ", "_")
+                    if fixed in by_jinja_key:
+                        msg = (f"Jinja reference vars.steps[{key!r}] in step "
+                               f"{s.id!r}: step keys replace spaces with "
+                               f"underscores, so this resolves to nothing")
+                        suggestion = fixed
+                    else:
+                        suggestion = _closest_step(fixed, by_jinja_key.keys())
+                        msg = (f"Jinja reference vars.steps[{key!r}] in step "
+                               f"{s.id!r}: no step with jinja-key {key!r} in "
+                               f"this playbook")
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=msg,
+                        path=f"{spath}.arguments.{sub}",
+                        near=suggestion,
+                        suggestion=(f"use vars.steps.{suggestion}"
+                                    if suggestion else None),
+                        severity="error",
+                    ))
                 for m in _VARS_STEPS_RE.finditer(expr):
                     key = m.group(1)
                     rest = m.group(2) or ""
@@ -311,6 +344,29 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                                 severity="error",
                             ))
                             continue
+                    # A find_record's output is a LIST of records (live-verified
+                    # on 8.0, with and without `partial: true`): `[0]`, `|
+                    # length` and for_each work; `.records` and
+                    # `['hydra:member']` -- both of which our own docs taught --
+                    # render empty, and the playbook runs on with nothing.
+                    if target.type == "find_record":
+                        km = _FIND_RECORD_KEY_ACCESS_RE.match(rest)
+                        if km:
+                            attr = km.group(1) or km.group(3)
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"Jinja reference vars.steps.{key}{rest} in "
+                                    f"step {s.id!r}: {key!r} is a find_record "
+                                    f"step, whose output is a LIST of records "
+                                    f"-- {attr!r} renders empty"),
+                                path=f"{spath}.arguments.{sub}",
+                                suggestion=(f"index or iterate it: "
+                                            f"vars.steps.{key}[0].<field>, "
+                                            f"vars.steps.{key} | length"),
+                                severity="error",
+                            ))
+                        continue
                     # Validate first attribute against known top-level keys.
                     if not rest.startswith("."):
                         continue

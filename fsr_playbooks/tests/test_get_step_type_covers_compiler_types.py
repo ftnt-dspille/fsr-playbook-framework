@@ -66,3 +66,10 @@ def test_trigger_examples_compile_as_the_trigger(trigger):
     ]}]}
     v = verify_playbook(yaml.safe_dump(doc, sort_keys=False))
     assert v["ready_to_push"], v["required_fixes"]
+
+
+def test_no_note_is_cut_on_the_slim_page():
+    from fsr_playbooks.mcp_server.tools_discovery import _NOTE_CAP
+    long = {k: len(" ".join((v.get("note") or v.get("shape") or "").split()))
+            for k, v in _FRIENDLY_FORMS.items()}
+    assert {k: n for k, n in long.items() if n > _NOTE_CAP} == {}

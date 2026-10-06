@@ -1885,9 +1885,13 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "Flat `filters:` / `limit:` / `logic:` are friendly keys that "
             "compile to the wire `query:` envelope (a raw `query:` is still "
             "accepted for back-compat). Keys go at the step level (no "
-            "`arguments:` wrapper). Returns a hydra envelope: records are at "
-            "`vars.steps.<name>['hydra:member']`, NOT `.records`. "
-            "`partial: true` returns first page only."
+            "`arguments:` wrapper). The output is a plain LIST of records "
+            "(live-verified on 8.0, with or without `partial:`): "
+            "`vars.steps.<Name>[0]['@id']`, `vars.steps.<Name> | length`, or "
+            "`for_each` over `vars.steps.<Name>`. NOT `.records` and NOT "
+            "`['hydra:member']` -- both render empty. `partial: true` "
+            "returns the first page only. Filters use `operator:` (trigger "
+            "`when:` filters use `op:`)."
         ),
         "filters_shape": (
             "list of {field, operator, value} -- operator is one of "
@@ -2188,6 +2192,10 @@ def _concept_answer(name: str) -> dict[str, Any] | None:
     }
 
 
+# Longest note the slim get_step_type page shows in full.
+_NOTE_CAP = 700
+
+
 def _render_step_type_md(short: str, ff: dict, st_row: dict) -> str:
     """Compact markdown for a step type. Replaces the nested
     friendly_form JSON with a single annotated YAML skeleton + the
@@ -2199,8 +2207,11 @@ def _render_step_type_md(short: str, ff: dict, st_row: dict) -> str:
     note = ff.get("note") or ff.get("shape")
     if note:
         note = " ".join(note.split())
-        if len(note) > 320:
-            note = note[:317].rstrip() + "..."
+        # A cap, not a cut: the 320-char cut ended find_record's note at
+        # "`partial: true` ret..." and hid start's and approval's guidance.
+        # test_get_step_type_covers_compiler_types keeps every note under it.
+        if len(note) > _NOTE_CAP:
+            note = note[:_NOTE_CAP - 3].rstrip() + "..."
         lines.append("")
         lines.append(note)
 
