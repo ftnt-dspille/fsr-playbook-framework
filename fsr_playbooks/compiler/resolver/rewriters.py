@@ -24,12 +24,12 @@ class RewriterMixin:
     ) -> None:
         """Rewrite `vars.steps.<set_var_step>.<key>` → `vars.<key>`.
 
-        SetVariable step outputs live at `vars.<key>` at runtime, not
-        under the step-output namespace. The agent commonly reaches for
-        `vars.steps.<step_name>.<key>` (correct shape for connector /
-        find_record / manual_input outputs), which silently evaluates
-        to empty for set_variable steps. Auto-rewrite so the playbook
-        does what was intended; emit a warning so the agent learns.
+        A SetVariable value is bound at BOTH `vars.<key>` and
+        `vars.steps.<step_name>.<key>` at runtime (live-verified on 8.0:
+        a run's context carries the value in both places). `vars.<key>`
+        is the canonical form, so rewrite to it and emit a WARNING -- never
+        an error: the step-ref form is valid, and refusing it would send
+        the agent round a repair loop for a playbook that already works.
         """
         # Map: jinja-key form of step name (spaces→underscores) → set of
         # variable names that step writes.
