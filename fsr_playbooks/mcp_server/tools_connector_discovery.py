@@ -301,6 +301,29 @@ _ENRICH_RANK_DEFAULT = 5
 _ENRICH_PER_CONNECTOR_CAP = 3
 
 
+# Param names that carry an indicator of any type ("ioc_search(indicator)").
+_GENERIC_INDICATOR_PARAMS = frozenset({"indicator", "ioc", "observable", "artifact"})
+
+
+def _indicator_param(params: list[dict[str, Any]], target: str | None) -> str | None:
+    """The param that takes the indicator being enriched, from the op's own
+    signature: one named after the target type (`query_ip(ip)`) or a generic
+    indicator param (`ioc_search(indicator)`). None when no param can carry
+    it -- `get_threat_categories(title)`, a signal report by `slug`. Live, the
+    agent picked get_threat_categories as its FortiGuard IP lookup, read its
+    "Information not found" as FortiGuard disagreeing with VirusTotal, and
+    under-called a C2 address both sources rate malicious."""
+    if not target:
+        return None
+    kws = set(_TARGET_KEYWORDS.get(target, ())) | {target}
+    for p in params or []:
+        name = str(p.get("name") or "")
+        tokens = set(name.lower().split("_"))
+        if tokens & kws or tokens & _GENERIC_INDICATOR_PARAMS:
+            return name
+    return None
+
+
 def _enrich_connector_rank(connector: str) -> int:
     c = (connector or "").lower()
     for frag, rank in _ENRICH_CONNECTOR_RANK:
@@ -937,6 +960,9 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
                 "params": _param_sig(conn, connector, op),
                 "runs_on_agent": connector in agent_of,
             })
+            ip_ = _indicator_param(actions[-1]["params"], target)
+            if ip_:
+                actions[-1]["indicator_param"] = ip_
 
     # 3. Scoped healthcheck: probe ONLY the connectors carrying a candidate op.
     # Drop actions whose connector we actively probed and found unhealthy, but
@@ -965,7 +991,11 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
     # then name -- so the preferred sources survive the `limit` cut instead of
     # losing to alphabetical order. Then cap per connector so one chatty
     # connector can't crowd the slate out of the budget.
+    # An op that can take the indicator outranks one that cannot, whatever
+    # its connector: the slate is the agent's menu, and the top of it is what
+    # gets run.
     actions.sort(key=lambda a: (a["deprecated"],
+                                bool(target) and "indicator_param" not in a,
                                 _enrich_connector_rank(a["connector"]),
                                 a["connector"], a["op"]))
     per_connector: dict[str, int] = {}
