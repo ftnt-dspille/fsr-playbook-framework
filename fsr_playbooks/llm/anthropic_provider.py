@@ -1399,7 +1399,7 @@ class AnthropicProvider(CapabilityMixin):
                 if call_id:
                     success = not _is_error_result(result)
                     from ..mcp_server._citation_validator import register_tool_result
-                    register_tool_result(call_id, name, success, args)
+                    register_tool_result(call_id, name, success, args, result)
                 content_str = _stringify(result)
                 block = {
                     "type": "tool_result",

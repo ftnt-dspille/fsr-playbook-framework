@@ -252,3 +252,21 @@ def test_an_empty_reply_after_the_verdict_is_not_replayed():
                 assert m.get("content") or m.get("tool_calls"), m
     assert sent[3][-1] == {"role": "user", "content": UNATTENDED_CONTAIN_DIRECTIVE}
     assert _staged_block(disp)
+
+
+def test_the_loop_hands_each_run_op_result_to_the_evidence_reader():
+    """The autonomy policy grades what a cited lookup SAID; that needs the
+    provider to pass the dispatched result through to the evidence registry."""
+    from fsr_playbooks.mcp_server import _citation_validator as cv
+    seen = []
+    cv.set_result_reader(lambda c, o, p, r: seen.append((c, o, r)) or None)
+    lookup = [_delta_chunk(tool_calls=[_tc(
+                  index=0, id="l1", name="run_op",
+                  args='{"connector": "virustotal", "op": "query_ip", '
+                       '"params": {"ip": "203.0.113.9"}}')]),
+              _delta_chunk(finish="tool_calls"), _usage_chunk()]
+    try:
+        _run([lookup, _prose()], unattended=False)
+    finally:
+        cv.set_result_reader(None)
+    assert seen == [("virustotal", "query_ip", {"ok": True})]

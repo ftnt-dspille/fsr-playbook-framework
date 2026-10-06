@@ -52,9 +52,21 @@ def _block(ip=EXT):
 
 # A read-only TI lookup (virustotal query_ip is tier 2) about the target. An
 # op the catalog does not know tiers as 3 and is NOT a lookup: fails closed.
-def _registry(ip=EXT, ok=True, op="query_ip", connector="virustotal"):
-    return {"tu1": {"name": "run_op", "ok": ok,
-                    "args": {"connector": connector, "op": op, "params": {"value": ip}}}}
+# What the lookup SAID, as the host's result reader reports it.
+MAL = {"source": "VirusTotal", "verdict": "malicious", "severity": "error",
+       "score_str": "9/94"}
+CLEAN = {"source": "VirusTotal", "verdict": "clean", "severity": "ok",
+         "score_str": "0/94"}
+WEAK = {"source": "VirusTotal", "verdict": "malicious", "severity": "warning",
+        "score_str": "1/94"}
+
+
+def _registry(ip=EXT, ok=True, op="query_ip", connector="virustotal", finding=MAL):
+    entry = {"name": "run_op", "ok": ok,
+             "args": {"connector": connector, "op": op, "params": {"value": ip}}}
+    if finding is not None:
+        entry["finding"] = finding
+    return {"tu1": entry}
 
 
 def _verdict(disposition="true_positive", confidence=0.95, evidence=("tu1",)):
@@ -162,20 +174,26 @@ def test_a_policy_that_does_not_parse_is_never_half_applied():
 
 # ---- the turn wiring: verdicts recorded as delivered, shadow on the card ----
 
+# A result the test reader rates malicious.
+_MAL_RESULT = {"ok": True, "_finding": MAL}
+
+
 @pytest.fixture
 def turn():
     ev = cv.TurnEvidence()
     cv.set_turn_evidence(ev)
+    cv.set_result_reader(lambda c, o, p, r: r.get("_finding"))
     set_turn_policy(POLICY, counter=lambda r, t: (0, 0))
     yield ev
     set_turn_policy(None)
+    cv.set_result_reader(None)
     cv.set_turn_evidence(None)
 
 
 def test_a_verdict_delivered_after_the_action_does_not_count(turn):
     cv.register_tool_result("tu1", "run_op", True,
                             {"connector": "virustotal",
-                             "op": "query_ip", "params": {"value": EXT}})
+                             "op": "query_ip", "params": {"value": EXT}}, _MAL_RESULT)
     before = shadow_decision(_block())
     assert before["outcome"] == "would_not_act"
     turn.record_verdict(_verdict())
@@ -225,7 +243,7 @@ def test_the_dispatch_envelope_carries_the_shadow_decision_and_still_suspends(tu
     monkeypatch.setattr(T, "_active_eval_policy", lambda: None)
     cv.register_tool_result("tu1", "run_op", True,
                             {"connector": "virustotal",
-                             "op": "query_ip", "params": {"value": EXT}})
+                             "op": "query_ip", "params": {"value": EXT}}, _MAL_RESULT)
     turn.record_verdict(_verdict())
     T.clear_audit_log()
     env = T.dispatch("run_op", {"connector": "fortigate-firewall", "op": "block_ip_new",
@@ -248,7 +266,7 @@ def test_the_action_card_carries_the_shadow_decision(turn, monkeypatch):
     monkeypatch.setattr(tools_execution, "_preflight_connector", lambda *a, **k: None)
     cv.register_tool_result("tu1", "run_op", True,
                             {"connector": "virustotal", "op": "query_ip",
-                             "params": {"value": EXT}})
+                             "params": {"value": EXT}}, _MAL_RESULT)
     turn.record_verdict(_verdict())
     fn = getattr(tools_emit.emit_action_card, "fn", tools_emit.emit_action_card)
     out = fn(id="c1", connector="fortigate-firewall", operation="block_ip_new",
@@ -265,3 +283,79 @@ def test_one_address_under_two_keys_is_one_target():
     call["args"]["ip"] = EXT
     d = _eval(call=call)
     assert d["targets"] == [EXT] and d["outcome"] == "would_act"
+
+
+# ---- what the cited lookup SAID ---------------------------------------------
+# Live on .159 the policy acted on lookups that found nothing about the target.
+# Citing a threat-intel lookup is not enough: it must rate the target.
+
+def test_a_lookup_that_rated_the_target_clean_is_not_evidence():
+    d = _eval(registry=_registry(finding=CLEAN))
+    assert d["outcome"] == "would_not_act"
+    assert any(f"rated {EXT} malicious (VirusTotal: clean 0/94)" in f
+               for f in d["failed"]), d["failed"]
+
+
+def test_an_unreadable_result_rates_nothing():
+    d = _eval(registry=_registry(finding=None))
+    assert d["outcome"] == "would_not_act"
+    assert any("result not readable" in f for f in d["failed"]), d["failed"]
+
+
+def test_a_weak_hit_meets_suspicious_but_not_malicious():
+    assert _eval(registry=_registry(finding=WEAK))["outcome"] == "would_not_act"
+    rule = {**POLICY["rules"][0]}
+    rule["when"] = {**rule["when"], "evidence": {"cites_tool_kind": "enrichment",
+                                                 "rated": "suspicious"}}
+    pol = _pol(rules=[rule])
+    assert _eval(policy=pol, registry=_registry(finding=WEAK))["outcome"] == "would_act"
+
+
+def test_one_strong_source_is_enough_when_another_is_clean():
+    reg = {**_registry(finding=CLEAN),
+           "tu2": {**_registry(finding=MAL)["tu1"]}}
+    v = _verdict(evidence=("tu1", "tu2"))
+    assert _eval(registry=reg, verdicts=[v])["outcome"] == "would_act"
+
+
+def test_the_reader_sees_the_connector_op_and_params():
+    seen = {}
+
+    def reader(c, o, p, r):
+        seen.update(c=c, o=o, p=p, r=r)
+        return MAL
+
+    cv.set_result_reader(reader)
+    try:
+        f = cv.read_finding("run_op", {"connector": "virustotal", "op": "query_ip",
+                                       "params": {"ip": EXT}}, {"ok": True, "data": {}})
+    finally:
+        cv.set_result_reader(None)
+    assert f == MAL
+    assert seen["c"] == "virustotal" and seen["o"] == "query_ip"
+    assert seen["p"] == {"ip": EXT}
+
+
+@pytest.mark.parametrize("name, args, result", [
+    ("siem_search", {"value": EXT}, {"ok": True}),       # not a run_op
+    ("run_op", {"connector": "virustotal", "op": "query_ip"}, "text"),
+])
+def test_only_a_run_op_result_is_read(name, args, result):
+    cv.set_result_reader(lambda *a: MAL)
+    try:
+        assert cv.read_finding(name, args, result) is None
+    finally:
+        cv.set_result_reader(None)
+
+
+def test_a_reader_bug_never_fails_the_call(turn):
+    cv.set_result_reader(lambda *a: 1 / 0)
+    cv.register_tool_result("tu9", "run_op", True,
+                            {"connector": "virustotal", "op": "query_ip"}, {"ok": True})
+    assert "finding" not in turn.valid_ids()["tu9"]
+
+
+def test_a_failed_call_records_no_finding(turn):
+    cv.register_tool_result("tu9", "run_op", False,
+                            {"connector": "virustotal", "op": "query_ip"}, _MAL_RESULT)
+    assert "finding" not in turn.valid_ids()["tu9"]

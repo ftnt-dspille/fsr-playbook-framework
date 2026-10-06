@@ -56,9 +56,14 @@ class TargetCond(_Strict):
 
 
 class EvidenceCond(_Strict):
-    # "enrichment": the verdict must cite a successful READ-ONLY lookup whose
-    # arguments name the action's target.
+    # "enrichment": the verdict must cite a successful threat-intel lookup
+    # whose arguments name the action's target...
     cites_tool_kind: Literal["enrichment"] = "enrichment"
+    # ...and that lookup must RATE the target at least this bad. "malicious"
+    # is a strong signal (e.g. VirusTotal 3+ engines, FortiGuard or AbuseIPDB
+    # risk 75+); "suspicious" also accepts a weaker one. A lookup whose result
+    # the host cannot read rates nothing, so it never satisfies the rule.
+    rated: Literal["malicious", "suspicious"] = "malicious"
 
 
 class RuleWhen(_Strict):
@@ -250,6 +255,22 @@ def _intel_lookup(entry: dict[str, Any]) -> bool:
     return _enrich_connector_rank(connector) < _ENRICH_RANK_DEFAULT
 
 
+# The finding's severity (the host's threat-intel reader: "error" is a strong
+# malicious signal, "warning" a weak one, "ok" clean, "info" no rating).
+_RATED_SEVERITIES = {"malicious": frozenset({"error"}),
+                     "suspicious": frozenset({"error", "warning"})}
+
+
+def _said(entry: dict[str, Any]) -> str:
+    """What one cited lookup rated its target, for the failure line."""
+    f = entry.get("finding") or {}
+    src = f.get("source") or (entry.get("args") or {}).get("connector") or "lookup"
+    if not f.get("verdict"):
+        return f"{src}: result not readable"
+    score = f" {f['score_str']}" if f.get("score_str") not in (None, "--") else ""
+    return f"{src}: {f['verdict']}{score}"
+
+
 def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
              registry: dict[str, dict[str, Any]],
              counter: Counter | None = None) -> dict[str, Any] | None:
@@ -310,10 +331,17 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
             failed.append("the verdict cites no successful threat-intel lookup")
         else:
             import json
+            ok_sev = _RATED_SEVERITIES[w.evidence.rated]
             for t in targets:
-                if not any(t in json.dumps(e.get("args") or {}, default=str)
-                           for _, e in lookups):
+                about = [e for _, e in lookups
+                         if t in json.dumps(e.get("args") or {}, default=str)]
+                if not about:
                     failed.append(f"no cited threat-intel lookup was about {t}")
+                elif not any((e.get("finding") or {}).get("severity") in ok_sev
+                             for e in about):
+                    said = "; ".join(_said(e) for e in about)
+                    failed.append(f"no cited threat-intel lookup rated {t} "
+                                  f"{w.evidence.rated} ({said})")
     elif w.evidence is not None:
         failed.append("no verdict to cite evidence")
 

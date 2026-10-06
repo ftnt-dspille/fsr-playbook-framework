@@ -12,6 +12,7 @@ bodies (those are in history already).
 from __future__ import annotations
 
 import contextvars
+from collections.abc import Callable
 from typing import Any
 
 # Async-safe context variable for the current turn's evidence registry.
@@ -37,13 +38,17 @@ class TurnEvidence:
         self._verdicts: list[dict[str, Any]] = []
 
     def register(self, tool_use_id: str, tool_name: str, success: bool,
-                 args: dict[str, Any] | None = None) -> None:
+                 args: dict[str, Any] | None = None,
+                 finding: dict[str, Any] | None = None) -> None:
         """Record that a tool call succeeded or failed. ``args`` is kept so a
         policy can tell WHAT a cited call looked up (its target), not just
-        which tool ran."""
+        which tool ran; ``finding`` is what a threat-intel lookup SAID (see
+        ``set_result_reader``)."""
         entry: dict[str, Any] = {"name": tool_name, "ok": success}
         if isinstance(args, dict):
             entry["args"] = _bounded_args(args)
+        if isinstance(finding, dict):
+            entry["finding"] = finding
         self._registry[tool_use_id] = entry
 
     def record_verdict(self, card: dict[str, Any]) -> None:
@@ -93,8 +98,47 @@ def get_turn_evidence() -> TurnEvidence | None:
     return _turn_evidence.get()
 
 
+# (connector, op, params, result) -> {verdict, severity, source, ...} | None.
+# Installed by the host (the SOC Assistant connector installs its threat-intel
+# card reader), so the autonomy policy can test what a cited lookup SAID, not
+# just that one ran: live, a block was justified by lookups that rated the
+# target clean or found nothing at all.
+ResultReader = Callable[[str, str, dict[str, Any], dict[str, Any]], "dict[str, Any] | None"]
+_RESULT_READER: ResultReader | None = None
+
+_FINDING_KEYS = ("indicator", "source", "verdict", "severity", "score_str")
+
+
+def set_result_reader(reader: ResultReader | None) -> None:
+    global _RESULT_READER
+    _RESULT_READER = reader
+
+
+def read_finding(tool_name: str, args: dict[str, Any] | None,
+                 result: Any) -> dict[str, Any] | None:
+    """What a successful run_op lookup said, via the installed reader. None
+    when there is no reader, it is not a run_op, or the reader cannot tell.
+    A reader bug never fails the call."""
+    if (_RESULT_READER is None or tool_name != "run_op"
+            or not isinstance(args, dict) or not isinstance(result, dict)):
+        return None
+    params = args.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    try:
+        rec = _RESULT_READER(str(args.get("connector") or ""),
+                             str(args.get("op") or args.get("operation") or ""),
+                             params, result)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(rec, dict):
+        return None
+    return {k: rec.get(k) for k in _FINDING_KEYS if rec.get(k) is not None}
+
+
 def register_tool_result(tool_use_id: str, tool_name: str, success: bool,
-                         args: dict[str, Any] | None = None) -> None:
+                         args: dict[str, Any] | None = None,
+                         result: Any = None) -> None:
     """Record that a tool call succeeded or failed.
 
     Called by the provider as tool results arrive. Routes to the contextvar
@@ -102,7 +146,8 @@ def register_tool_result(tool_use_id: str, tool_name: str, success: bool,
     """
     evidence = get_turn_evidence()
     if evidence is not None:
-        evidence.register(tool_use_id, tool_name, success, args)
+        finding = read_finding(tool_name, args, result) if success else None
+        evidence.register(tool_use_id, tool_name, success, args, finding)
 
 
 def record_delivered_verdict(card: dict[str, Any]) -> None:
