@@ -43,6 +43,7 @@ from typing import Any
 
 from ._loop_helpers import MAX_TOOL_TURNS, today_line
 from .intents import (
+    INTENTS,
     classify_message,
     gate_directive,
     load_intent_prompt,
@@ -169,6 +170,37 @@ def _ask_for(budget: TurnBudget, tools: list[dict[str, Any]]) -> TurnRequest:
     )
 
 
+def _playbook_side_refusal(name: str, args: dict[str, Any] | None
+                           ) -> dict[str, Any] | None:
+    """A playbook (build) turn uses the playbook tools only.
+
+    The advertised list is one constant across intents (it is the prompt-cache
+    prefix), so the build slice in ``intents.py`` was enforced by the prompt
+    alone -- and a troubleshooting turn ran ``run_op`` to probe a fix, parking
+    on an approval card instead of delivering it. The triage-only tools
+    (connector calls, record reads/writes, SIEM/FAZ/FMG, containment cards) are
+    refused here; the run-a-playbook verbs stay available in both intents.
+    """
+    from .intents import RUN_VERB_TOOLS, TRIAGE_ONLY_TOOLS
+    blocked = name in (TRIAGE_ONLY_TOOLS - RUN_VERB_TOOLS)
+    if name == "emit_card":
+        blocked = (args or {}).get("card_type") == "action"
+    if not blocked:
+        return None
+    return {
+        "ok": False,
+        "code": "not_a_playbook_tool",
+        "error": (
+            f"'{name}' is not available while building or fixing a playbook: "
+            "this turn uses the playbook tools. To see what a run did, use "
+            "why_did_playbook_fail / list_playbook_runs; to learn an op's "
+            "inputs and output, get_op_schema; to check a draft, "
+            "verify_playbook. Put the connector call in the playbook as a "
+            "step rather than running it now."
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class TurnPlan:
     """Everything a host needs to run one turn, resolved in one place."""
@@ -195,6 +227,11 @@ class TurnPlan:
     #: what failed. A failsafe plan states no page facts -- it only keeps the
     #: dispatch gate armed. See ``TurnPlan.failsafe``.
     failsafe_reason: str | None = None
+
+    #: True only when the caller NAMED the intent. `resolve_intent(None)` is
+    #: "build", so a plan derived without one (the resume re-bind) must not
+    #: be read as a playbook turn -- that would fence a resumed triage loop.
+    intent_stated: bool = False
 
     @classmethod
     def failsafe(cls, reason: str) -> TurnPlan:
@@ -229,6 +266,10 @@ class TurnPlan:
         forward -- the model is told to name the gap via
         ``emit_card(card_type='capability_gap')`` rather than dead-ending.
         """
+        if self.intent_stated and self.intent == "build":
+            refusal = _playbook_side_refusal(name, args)
+            if refusal is not None:
+                return refusal
         gated = name in _OPEN_PLAYBOOK_TOOLS
         if name == "emit_card":
             gated = (args or {}).get("card_type") in _OPEN_PLAYBOOK_CARD_TYPES
@@ -368,6 +409,7 @@ def plan_turn(
     """Resolve one turn: prompt + tools + tier policy + budget, in one place."""
     from .tools import TOOL_TIERS, anthropic_tools
 
+    stated = intent in INTENTS
     intent = resolve_intent(intent)
     ctx = context or TurnContext()
     budget = TurnBudget(max_tool_turns=max_tool_turns)
@@ -385,7 +427,7 @@ def plan_turn(
     return TurnPlan(
         intent=intent, prompt=prompt, tools=tools, base_prompt=base_prompt,
         tier_policy=tier_policy, budget=budget, context=ctx,
-        ask=_ask_for(budget, tools),
+        ask=_ask_for(budget, tools), intent_stated=stated,
     )
 
 
