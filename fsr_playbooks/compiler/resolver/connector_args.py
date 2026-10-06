@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..errors import CompileError, ErrorCode
+from .catalog import CatalogLookupMixin
 from ..ir import Playbook, Step
 from ..typed_args.steps import expand_connector as _expand_connector_typed
 from ..typed_args.steps import (
@@ -367,6 +368,8 @@ class ConnectorArgsMixin:
             # instead of being auto-lifted into params or flagged unknown.
             "agent",
             "params", "step_variables", "pickFromTenant", "name",
+            # Friendly spelling of wire `name`, consumed further down.
+            "display_name",
             "mock_result", "useMockOutput",
             # Generic step-level skip gate. FSR evaluates it at runtime;
             # falsy → step is bypassed. Whitelisted here so the resolver
@@ -382,7 +385,37 @@ class ConnectorArgsMixin:
                     if existing_params is None:
                         existing_params = {}
                         a["params"] = existing_params
+                    if k in existing_params and existing_params[k] != a[k]:
+                        # setdefault kept the params value and threw the
+                        # step-level one away without a word.
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(f"param {k!r} is set twice with different "
+                                     f"values -- under params: and at step "
+                                     f"level; only the params: value is used"),
+                            path=f"{path}.arguments.{k}",
+                            suggestion=f"keep one: params.{k}",
+                        ))
                     existing_params.setdefault(k, a.pop(k))
+            # A key that is neither a param of this op nor a step argument
+            # stays beside `params` on the wire, where FSR ignores it: the
+            # playbook compiles green and runs without it. Live, an enhance
+            # turn left a filter value at step level and nothing said so.
+            stray = sorted(set(a) - _CONNECTOR_RESERVED
+                           - CatalogLookupMixin._UNIVERSAL_STEP_KEYS)
+            for k in stray:
+                near = difflib.get_close_matches(k, sorted(valid_params), n=1)
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=(f"{k!r} is not a param of {connector}.{operation} "
+                             f"and not a step argument; FSR ignores it at "
+                             f"runtime"),
+                    path=f"{path}.arguments.{k}",
+                    near=near[0] if near else None,
+                    suggestion=(f"did you mean params.{near[0]}?" if near else
+                                f"params of {operation}: "
+                                f"{', '.join(sorted(valid_params))}"),
+                ))
         provided = a.get("params") or {}
         if not isinstance(provided, dict):
             errors.append(CompileError(

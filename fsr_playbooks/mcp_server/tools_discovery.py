@@ -1776,8 +1776,10 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
             "operation": "query_ip",
             "config": "",
             "params": {"ip": "{{ vars.input.params.ip }}"},
-            "output_ref_example": "{{ vars.steps.Query_VirusTotal.data.reputation }}",
         },
+        # Beside the example, not in it: copied into a step it rode to the
+        # wire as an argument FSR ignores.
+        "output_ref_example": "{{ vars.steps.Query_VirusTotal.data.reputation }}",
     },
     "stop": {
         "accepted_keys": [],
