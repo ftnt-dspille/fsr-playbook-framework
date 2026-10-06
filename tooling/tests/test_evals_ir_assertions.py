@@ -337,3 +337,14 @@ def test_a_subscript_step_reference_counts_as_the_dotted_one():
     sub = GATED.replace(dotted, f"vars.steps['{m.group(1)}']")
     r = _check(sub, [{"kind": "arg_text_contains", "contains": dotted}])
     assert r["passed"] is True, r["failures"]
+
+
+def test_a_double_quoted_subscript_counts_as_the_single_quoted_one():
+    # A correct failed-run fix wrote `[0]["@id"]`; the row asserted
+    # `[0]['@id']` and failed it for its quote style.
+    from tooling.evals.ir_assertions import _arg_text
+
+    class _Step:
+        arguments = {"params": {"iri": '{{ vars.steps.Fetch_Alert[0]["@id"] }}'}}
+
+    assert "fetch_alert[0]['@id']" in _arg_text(_Step).lower()

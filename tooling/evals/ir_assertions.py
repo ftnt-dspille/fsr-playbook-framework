@@ -63,6 +63,9 @@ _SUBSCRIPT_STEP_KEY = re.compile(
     r"vars\.steps\[\s*(['\"])([A-Za-z_][A-Za-z0-9_]*)\1\s*\]")
 
 
+_DQ_SUBSCRIPT = re.compile(r'\[\\"([^"\\]+)\\"\]')
+
+
 def _arg_text(step) -> str:
     """Every argument value flattened to searchable text.
 
@@ -74,7 +77,11 @@ def _arg_text(step) -> str:
         text = json.dumps(step.arguments or {}, default=str)
     except Exception:  # noqa: BLE001 -- diagnostics only, never blocks
         text = str(step.arguments or {})
-    return _SUBSCRIPT_STEP_KEY.sub(r"vars.steps.\2", text)
+    text = _SUBSCRIPT_STEP_KEY.sub(r"vars.steps.\2", text)
+    # `x["@id"]` and `x['@id']` are one subscript; JSON-encoding escapes the
+    # double quotes, so fold that form to the single-quoted spelling (a
+    # correct fix was failed for its quote style).
+    return _DQ_SUBSCRIPT.sub(r"['\1']", text)
 
 
 def _matches(step, sel: dict[str, Any]) -> bool:

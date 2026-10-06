@@ -757,6 +757,23 @@ def _strip_default(raw: Any) -> str | None:
 # get_op_schema
 # ---------------------------------------------------------------------------
 
+# A sentence ends at ". " -- except after an abbreviation, where the cut
+# used to land: 138 catalog params read "...(E.g" with the example that
+# answers the question cut off (make_cyops_request's `iri` among them).
+_NOT_A_SENTENCE_END = re.compile(r"\b(?:e\.g|i\.e|etc|vs|ex|no|approx|incl)\.$", re.I)
+
+
+def _first_sentence(txt: str) -> str:
+    start = 0
+    while True:
+        i = txt.find(". ", start)
+        if i < 0:
+            return txt
+        if not _NOT_A_SENTENCE_END.search(txt[: i + 1]):
+            return txt[:i]
+        start = i + 2
+
+
 def _short_desc(p: dict) -> str:
     """First sentence (or 120-char clip) of description, falling back
     to tooltip when description is missing. Keeps the slim response
@@ -765,7 +782,7 @@ def _short_desc(p: dict) -> str:
     if not raw:
         return ""
     txt = " ".join(raw.split())  # collapse whitespace
-    cut = txt.split(". ", 1)[0]
+    cut = _first_sentence(txt)
     if len(cut) > 120:
         cut = cut[:117].rstrip() + "..."
     return cut.rstrip(".")
@@ -884,7 +901,7 @@ def _render_op_schema_md(
 
     lines = [f"# {head}", f"connector: {connector}"]
     if desc:
-        first = " ".join(desc.split()).split(". ", 1)[0]
+        first = _first_sentence(" ".join(desc.split()))
         if len(first) > 240:
             first = first[:237].rstrip() + "..."
         lines.append(f"_{first}_")
