@@ -324,3 +324,16 @@ def test_arg_text_absent_refuses_an_empty_needle():
     # "" is in every string; an empty needle would fail everything forever.
     r = _check(GATED, [{"kind": "arg_text_absent", "contains": ""}])
     assert r["passed"] is False
+
+
+def test_a_subscript_step_reference_counts_as_the_dotted_one():
+    sub = GATED.replace("vars.steps.", "vars.steps['", 1)
+    # Build a playbook whose connector reads vars.steps['X'] -- the same
+    # reference as vars.steps.X -- and assert on the dotted spelling.
+    import re as _re
+    m = _re.search(r"vars\.steps\.([A-Za-z_][A-Za-z0-9_]*)", GATED)
+    assert m, "fixture must reference a step"
+    dotted = m.group(0)
+    sub = GATED.replace(dotted, f"vars.steps['{m.group(1)}']")
+    r = _check(sub, [{"kind": "arg_text_contains", "contains": dotted}])
+    assert r["passed"] is True, r["failures"]

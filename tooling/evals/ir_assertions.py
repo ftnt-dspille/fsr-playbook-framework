@@ -51,6 +51,7 @@ typo'd assertion that silently passes is worse than no assertion.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
@@ -58,12 +59,22 @@ def _steps(pb) -> list:
     return list(pb.steps or [])
 
 
+_SUBSCRIPT_STEP_KEY = re.compile(
+    r"vars\.steps\[\s*(['\"])([A-Za-z_][A-Za-z0-9_]*)\1\s*\]")
+
+
 def _arg_text(step) -> str:
-    """Every argument value flattened to searchable text."""
+    """Every argument value flattened to searchable text.
+
+    `vars.steps['Name']` and `vars.steps.Name` are the same reference; the
+    subscript is folded to the dotted spelling so a text assertion grades
+    the reference, not how it was typed (a correct repair was failed for
+    writing the subscript)."""
     try:
-        return json.dumps(step.arguments or {}, default=str)
+        text = json.dumps(step.arguments or {}, default=str)
     except Exception:  # noqa: BLE001 -- diagnostics only, never blocks
-        return str(step.arguments or {})
+        text = str(step.arguments or {})
+    return _SUBSCRIPT_STEP_KEY.sub(r"vars.steps.\2", text)
 
 
 def _matches(step, sel: dict[str, Any]) -> bool:

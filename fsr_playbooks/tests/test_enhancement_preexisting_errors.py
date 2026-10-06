@@ -59,3 +59,61 @@ def test_an_error_the_edit_introduces_still_blocks():
     blocking = [f["message"] for f in r["required_fixes"]]
     assert any("params.other" in m for m in blocking)
     assert not any("params.rec" in m for m in blocking)
+
+
+# The exemption must not cover a HALF-FIX. Live (sweep repair row): the edit
+# fixed `vars.steps.gate_step` in one step and left the identical broken
+# reference in the next; grandfathered as pre-existing, the half-fix was
+# offered as verified.
+_TWO_BAD_REFS = """
+collection: C
+description: d
+playbooks:
+  - name: P
+    description: d
+    steps:
+      - name: start
+        type: start
+        next: Gate Step
+      - name: Gate Step
+        type: set_variable
+        vars:
+          ip: "1.2.3.4"
+        next: Use One
+      - name: Use One
+        type: set_variable
+        vars:
+          a: "{{ vars.steps.gate_step.ip }}"
+        next: Use Two
+      - name: Use Two
+        type: set_variable
+        vars:
+          b: "{{ vars.steps.gate_step.ip }}"
+"""
+
+
+def test_fixing_one_instance_of_a_defect_makes_the_other_instances_block():
+    half = _TWO_BAD_REFS.replace(
+        'a: "{{ vars.steps.gate_step.ip }}"', 'a: "{{ vars.steps.Gate_Step.ip }}"')
+    r = verify_enhancement(_TWO_BAD_REFS, half)
+    assert r["ready_to_push"] is False
+    (left,) = r["required_fixes"]
+    assert "use_two" in left["message"] and "fix every instance" in left["message"]
+    assert not [w for w in r["warnings"] if w.get("pre_existing")
+                and "gate_step" in w.get("message", "")]
+
+
+def test_fixing_every_instance_passes():
+    whole = _TWO_BAD_REFS.replace("vars.steps.gate_step.ip", "vars.steps.Gate_Step.ip")
+    assert verify_enhancement(_TWO_BAD_REFS, whole)["ready_to_push"] is True
+
+
+def test_an_unrelated_edit_still_grandfathers_both():
+    add = _TWO_BAD_REFS + """        next: Mark
+      - name: Mark
+        type: set_variable
+        vars:
+          done: true
+"""
+    r = verify_enhancement(_TWO_BAD_REFS, add)
+    assert r["ready_to_push"] is True

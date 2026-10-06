@@ -711,6 +711,15 @@ def _scope_warnings(warnings, after, diff_summary: dict[str, Any]
     return out
 
 
+_IN_STEP = re.compile(r"\s+in step '[^']*'")
+
+
+def _defect_signature(f: dict[str, Any]) -> tuple:
+    """A finding minus WHERE it is: the same bad reference in two steps is one
+    defect. Strips the verifier's own `in step '<id>'` locator."""
+    return (f.get("code"), _IN_STEP.sub("", str(f.get("message") or "")))
+
+
 def _grandfather_preexisting(result: dict[str, Any],
                              before_yaml: str) -> dict[str, Any]:
     """A problem the analyst's playbook ALREADY had is theirs, not the edit's:
@@ -731,13 +740,28 @@ def _grandfather_preexisting(result: dict[str, Any],
         before = verify_playbook(before_yaml)
     except Exception:  # noqa: BLE001 -- no baseline means nothing to excuse
         return result
-    already = {(f.get("code"), f.get("message"))
-               for f in before.get("required_fixes") or []}
+    before_fixes = before.get("required_fixes") or []
+    already = {(f.get("code"), f.get("message")) for f in before_fixes}
     keep = [f for f in fixes if (f.get("code"), f.get("message")) not in already]
-    if len(keep) == len(fixes):
+    # ...except the same defect the edit just fixed somewhere else. Live: a
+    # repair fixed a bad step reference in the block step and left the
+    # identical one in the next step; grandfathered as "pre-existing", the
+    # half-fix shipped as a verified offer. An instance the edit RESOLVED
+    # makes every remaining instance of it this edit's business.
+    now = {(f.get("code"), f.get("message")) for f in fixes}
+    resolved = {_defect_signature(f) for f in before_fixes
+                if (f.get("code"), f.get("message")) not in now}
+    remaining = [f for f in fixes
+                 if f not in keep and _defect_signature(f) in resolved]
+    for f in remaining:
+        keep.append(dict(f, remaining_instance=True, message=(
+                f"{f.get('message')} -- this edit fixed the same defect "
+                f"elsewhere; fix every instance")))
+    if len(keep) == len(fixes) and not any(
+            f.get("remaining_instance") for f in keep):
         return result
     moved = [dict(f, severity="warning", pre_existing=True)
-             for f in fixes if f not in keep]
+             for f in fixes if f not in keep and f not in remaining]
     kept_codes = {f.get("code") for f in keep}
     moved_codes = {f.get("code") for f in moved} - kept_codes
     out = dict(result)
