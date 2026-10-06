@@ -26,6 +26,7 @@ from ._shared import (
     _db,
     _err,
     _validate_op_params,
+    get_grounded_source,
     get_grounded_yaml,
     load_yaml_text,
     mcp,
@@ -859,6 +860,15 @@ def _step_names(yaml_text: str) -> list[str]:
         return []
 
 
+def _playbook_names(yaml_text: str) -> set[str]:
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+    except Exception:  # noqa: BLE001 -- unreadable names nothing
+        return set()
+    return {str(pb.get("name")) for pb in ((doc or {}).get("playbooks") or [])
+            if isinstance(pb, dict) and pb.get("name")}
+
+
 def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
     """Refuse an offer that would overwrite the OPEN playbook, or lose its work.
 
@@ -889,6 +899,14 @@ def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
     if not open_steps:
         return None                     # cannot read the open doc: do not block
 
+    # A playbook this conversation built (an unsaved draft, or one it saved)
+    # is not on the analyst's screen: a request for a DIFFERENT playbook is a
+    # new build, not an edit of it. Told apart by the playbook's name -- the
+    # one thing a re-typed copy of the same playbook keeps.
+    if get_grounded_source() and not (
+            _playbook_names(open_yaml) & _playbook_names(yaml_text)):
+        return None
+
     # RULE 1 -- new vs existing. "NOT for editing a playbook the analyst
     # already has open; that is emit_enhancement_offer. The test is whether the
     # playbook exists yet." Something IS open, so this is an edit.
@@ -913,6 +931,18 @@ def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
                 "emit_card(card_type='enhancement_offer', payload={verified_id: ..., summary: ...}) to edit the open playbook",
                 "answer in prose if the analyst only asked you to explain",
             ],
+        )
+    if get_grounded_source():
+        return _err(
+            "playbook_already_open",
+            "This is the playbook you built earlier in this conversation, so "
+            "this is an edit of it, not a new playbook. Change it with "
+            "edit_playbook(operations=[...]) -- it keeps every step and field "
+            "you do not name -- then emit_card(card_type='enhancement_offer', "
+            "payload={id, summary, verified_id}). To build a DIFFERENT "
+            "playbook, give it its own name.",
+            suggestions=["edit_playbook(operations=[...])",
+                         "emit_card(card_type='enhancement_offer', payload={id, summary, verified_id})"],
         )
     return _err(
         "playbook_already_open",
@@ -948,7 +978,8 @@ def _yaml_ops_summary(yaml_text: str) -> list[dict[str, Any]]:
 
 def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
                      title_suggestion: str | None,
-                     editable_title: bool) -> dict[str, Any]:
+                     editable_title: bool,
+                     edit_of_draft: bool = False) -> dict[str, Any]:
     """Direct-build mode of `emit_playbook_offer` (§A): the card carries the
     final validated YAML; accept compiles + pushes THAT text deterministically
     (no trace involved). The steps list is a display summary parsed from the
@@ -967,7 +998,7 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
     # refuse the fenced text for a reason that has nothing to do with the YAML.
     yaml_text = _unfence(yaml_text)
 
-    guard = _guard_against_open_playbook(yaml_text)
+    guard = None if edit_of_draft else _guard_against_open_playbook(yaml_text)
     if guard is not None:
         return guard
 
@@ -1114,6 +1145,16 @@ def emit_enhancement_offer(
         )
 
     yaml_text = entry["yaml"]
+
+    # An edit to the conversation's unsaved draft has nothing to apply to: it
+    # is delivered as the draft's next Create card, through the same gate every
+    # Create card passes (verify on these exact bytes, no unconfigured
+    # connectors, ...). The open-playbook guard is skipped because the draft IS
+    # the grounded document -- that is what makes this an edit.
+    if get_grounded_source() == "draft":
+        return _offer_from_yaml(id, summary, yaml_text, title_suggestion=None,
+                                editable_title=True, edit_of_draft=True)
+
     ops_summary = _yaml_ops_summary(yaml_text)
 
     diff = entry.get("diff_summary") or {}

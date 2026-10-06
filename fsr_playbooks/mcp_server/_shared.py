@@ -208,6 +208,36 @@ def get_grounded_yaml() -> str | None:
     return _GROUNDED_YAML.get()
 
 
+# Where the grounded playbook came from. None: the analyst has it open (the
+# designer sent it). "draft": the playbook this conversation OFFERED and nobody
+# has saved. "saved": the playbook this conversation saved. A host binds the
+# last two when no playbook is open, so refining what the chat just built edits
+# it (edit_playbook) instead of re-typing it -- re-typed refinements dropped a
+# link field and rewrote a condition nobody asked about, live on the build
+# sweep. Neither is on screen, so neither blocks a request for a DIFFERENT
+# playbook, and an edit to a draft is delivered as a new Create card (there is
+# nothing saved to apply it to).
+GROUNDED_SOURCES = ("draft", "saved")
+_GROUNDED_SOURCE: ContextVar[str | None] = ContextVar(
+    "_grounded_source", default=None)
+
+
+def set_grounded_source(source: str | None) -> Any:
+    """Bind where the grounded playbook came from. Returns a reset token."""
+    return _GROUNDED_SOURCE.set(source if source in GROUNDED_SOURCES else None)
+
+
+def reset_grounded_source(token: Any) -> None:
+    try:
+        _GROUNDED_SOURCE.reset(token)
+    except (ValueError, LookupError):      # foreign context -- nothing to undo
+        pass
+
+
+def get_grounded_source() -> str | None:
+    return _GROUNDED_SOURCE.get()
+
+
 # The analyst's own words for the current turn. Bound by the chat loop and read
 # at tool dispatch, exactly like `_GROUNDED_YAML` above and for the same reason.
 #
