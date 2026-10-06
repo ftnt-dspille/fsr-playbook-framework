@@ -84,3 +84,48 @@ def test_the_card_brief_says_evidence_holds_ids_not_sentences():
     brief = TOOL_SCHEMA_OVERRIDES["emit_card"]["properties"]["payload"]["description"]
     verdict = next(ln for ln in brief.splitlines() if ln.startswith("verdict:"))
     assert "evidence* [evidence id" in verdict
+
+
+def test_anthropic_results_show_the_id_too():
+    # The contract tells every model the id tops each result, so it must.
+    from test_anthropic_enhance_delivery_forced import _FakeStream as _AStream
+    from test_anthropic_enhance_delivery_forced import (
+        _text_block,
+        _tool_use_block,
+        _usage,
+    )
+
+    from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
+
+    hunt = _AStream([], MagicMock(content=[
+        _tool_use_block("toolu_rec", "get_record", {"record": "a"})],
+        stop_reason="tool_use", usage=_usage()))
+    done = _AStream(["ok"], MagicMock(content=[_text_block("ok")],
+                                      stop_reason="end_turn", usage=_usage()))
+    seen: list = []
+
+    def _stream(**kw):
+        seen.append(kw.get("messages"))
+        return [hunt, done][len(seen) - 1]
+
+    client = MagicMock()
+    client.messages = MagicMock()
+    client.messages.stream = MagicMock(side_effect=_stream)
+    client.messages.create = AsyncMock(return_value=MagicMock(content=[]))
+    p = AnthropicProvider(model="claude-sonnet-5", base_url="http://x", api_key="x",
+                          client=client)
+
+    async def _drain(gen):
+        return [ev async for ev in gen]
+
+    with patch("fsr_playbooks.llm.anthropic_provider.dispatch",
+               MagicMock(return_value={"ok": True, "record": {}})), \
+         patch("fsr_playbooks.llm.anthropic_provider._tier_for", return_value=0):
+        asyncio.run(_drain(p.stream(
+            system="s", messages=[Message(role="user", content="triage")],
+            tools=[{"name": "get_record", "description": "r",
+                    "input_schema": {"type": "object", "properties": {}}}])))
+    blocks = [b for m in seen[-1] for b in (m.get("content") if isinstance(m, dict)
+                                            else getattr(m, "content", None)) or []
+              if isinstance(b, dict) and b.get("type") == "tool_result"]
+    assert blocks and blocks[0]["content"].startswith("[evidence id: toolu_rec]\n")

@@ -44,6 +44,7 @@ from ._loop_helpers import (
     TriageDiscipline,
     VerdictDeliveryGuard,
     drain_with_idle_timeout,
+    evidence_id_line,
     is_authoring_slice,
     latest_user_text,
     stall_directive,
@@ -1396,11 +1397,12 @@ class AnthropicProvider(CapabilityMixin):
                 _progress.note_result(name, args, result)
                 _build_progress.note_result(name, args, result)
                 # Register the tool result for citation validation
+                success = not _is_error_result(result)
                 if call_id:
-                    success = not _is_error_result(result)
                     from ..mcp_server._citation_validator import register_tool_result
                     register_tool_result(call_id, name, success, args, result)
-                content_str = _stringify(result)
+                content_str = (evidence_id_line(call_id, name, args, success)
+                               + _stringify(result))
                 block = {
                     "type": "tool_result",
                     "tool_use_id": "",  # filled by caller

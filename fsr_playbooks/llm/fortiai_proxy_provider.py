@@ -36,6 +36,7 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     TriageDiscipline,
+    evidence_id_line,
     is_authoring_slice,
     latest_user_text,
 )
@@ -692,7 +693,9 @@ class FortiAIProxyProvider(CapabilityMixin):
                     )
 
                     # Record tool-call usage
-                    content_str = _stringify(result)
+                    content_str = (evidence_id_line(call_id, tool_name, parsed_args,
+                                                    not _is_error_result(result))
+                                   + _stringify(result))
                     try:
                         args_chars = len(json.dumps(parsed_args, default=str))
                     except Exception:

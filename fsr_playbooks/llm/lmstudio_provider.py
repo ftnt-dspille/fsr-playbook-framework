@@ -36,6 +36,7 @@ from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
+    evidence_id_line,
     unexecuted_tool_calls_note,
 )
 from ._loop_helpers import (
@@ -303,7 +304,9 @@ class LMStudioProvider(CapabilityMixin):
                 register_tool_result(call_id, name, not _is_error_result(result), args,
                                      result)
                 yield ToolResultEvent(call_id=call_id, result=result)
-                content_str = _stringify(result)
+                content_str = (evidence_id_line(call_id, name, args,
+                                                not _is_error_result(result))
+                               + _stringify(result))
                 history.append({
                     "role": "tool",
                     "tool_call_id": call_id,
