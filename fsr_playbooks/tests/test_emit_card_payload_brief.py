@@ -30,7 +30,7 @@ def test_verdict_line_carries_the_shapes_the_model_got_wrong():
     line = next(ln for ln in _brief().splitlines() if ln.startswith("verdict:"))
     assert "|".join(VERDICT_DISPOSITIONS) in line
     assert "confidence* (number 0.0-1.0)" in line
-    assert "findings* [{claim*, evidence* [string]}]" in line
+    assert "findings* [{claim*, evidence* [evidence id, e.g. call_ab12]}]" in line
 
 
 def test_a_card_without_a_schema_falls_back_to_its_signature():

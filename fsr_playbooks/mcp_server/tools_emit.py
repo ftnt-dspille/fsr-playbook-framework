@@ -1208,7 +1208,8 @@ def verdict_contract() -> str:
         + "; severity: one of "
         + ", ".join(VERDICT_SEVERITIES) + "; confidence: a number 0.0-1.0; "
         "summary: plain English, at most 600 characters; findings: a non-empty "
-        "list of {claim: string, evidence: [tool_use ids from this turn]}; "
+        "list of {claim: string, evidence: [evidence ids -- the id shown as "
+        "[evidence id: ...] atop each tool result this turn, never a description]}; "
         "unknowns: a list of open questions, required when confidence < 0.8; "
         "recommended_actions (optional): a list of {label: string, tool?, args?}}"
     )

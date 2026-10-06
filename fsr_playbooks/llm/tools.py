@@ -1414,8 +1414,12 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                         "evidence": {
                             "type": "array",
                             "minItems": 1,
-                            "items": {"type": "string", "minLength": 1},
-                            "description": "tool_use_ids from THIS session that support this finding.",
+                            "items": {"type": "string", "minLength": 1,
+                                      "description": "evidence id, e.g. call_ab12"},
+                            "description": (
+                                "The evidence ids of the tool results that support "
+                                "this finding -- the id shown as [evidence id: ...] "
+                                "at the top of each result. Not a description."),
                         },
                     },
                 },
@@ -1471,7 +1475,11 @@ def _field_brief(name: str, prop: dict[str, Any], required: bool) -> str:
                 _field_brief(k, v, k in req)
                 for k, v in items["properties"].items())
             return f"{name}{star} [{{{inner}}}]"
-        it = items.get("type")
+        # A list of strings with a meaning beyond "string": say it. The
+        # verdict's evidence read `[string]`, and the box model filled it with
+        # sentences describing the evidence -- refused on nearly every
+        # triage -- when it must hold the ids the results are labelled with.
+        it = (items.get("description") if items.get("type") == "string" else None) or items.get("type")
         return f"{name}{star} [{it}]" if it else f"{name}{star} [..]"
     return f"{name}{star}"
 

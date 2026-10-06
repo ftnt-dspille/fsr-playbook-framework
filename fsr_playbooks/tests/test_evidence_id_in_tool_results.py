@@ -76,3 +76,11 @@ def test_the_loop_shows_the_id_the_verdict_must_cite():
 def test_a_failed_read_is_not_offered_as_evidence():
     msgs = _tool_messages({"ok": False, "error": "not found"})
     assert msgs and not msgs[0]["content"].startswith("[evidence id:")
+
+
+def test_the_card_brief_says_evidence_holds_ids_not_sentences():
+    # The brief read `evidence* [string]` and the box model wrote sentences.
+    from fsr_playbooks.llm.tools import TOOL_SCHEMA_OVERRIDES
+    brief = TOOL_SCHEMA_OVERRIDES["emit_card"]["properties"]["payload"]["description"]
+    verdict = next(ln for ln in brief.splitlines() if ln.startswith("verdict:"))
+    assert "evidence* [evidence id" in verdict
