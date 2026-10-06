@@ -32,6 +32,10 @@ Assertion kinds (all take an optional `note` describing what the prompt asked):
                                             containing this text
   arg_text_contains   {contains, type?}  -- the text appears in the arguments of
                                             (a step of that type / any step)
+  arg_text_absent     {contains, type?}  -- the text appears in NO argument of
+                                            (a step of that type / any step):
+                                            a repair must remove the defect,
+                                            not only add the right form
   branch_count        {type=decision, min}
                                          -- a step of that type with >= min arms
   reachable           {from:{...}, to:{...}}
@@ -157,6 +161,17 @@ def _check_one(pb, a: dict[str, Any]) -> tuple[bool, str]:
         return hit, (label if hit else
                      f"{label}: {needle!r} appears in no "
                      f"{a.get('type') or 'step'} arguments")
+
+    if kind == "arg_text_absent":
+        needle = str(a.get("contains", "")).lower()
+        pool = [s for s in steps
+                if "type" not in a or s.type == a.get("type")]
+        if not needle:
+            return False, f"{label}: arg_text_absent needs a non-empty `contains`"
+        culprits = [s.id for s in pool if needle in _arg_text(s).lower()]
+        return not culprits, (label if not culprits else
+                              f"{label}: {needle!r} still appears in "
+                              f"{', '.join(culprits)}")
 
     if kind == "branch_count":
         want = int(a.get("min", 2))

@@ -308,3 +308,19 @@ def test_fixture_17_still_fails_a_playbook_that_blocks_beside_the_gate():
 still compile -- otherwise it fails for the wrong reason"
     assert r["levels"]["behavior"]["passed"] is False
     assert any("P2" in f for f in r["levels"]["behavior"]["failures"])
+
+
+def test_arg_text_absent_passes_when_the_text_is_gone_and_names_the_culprit():
+    gone = _check(GATED, [{"kind": "arg_text_absent", "type": "connector",
+                           "contains": "no-such-text"}])
+    assert gone["passed"] is True, gone["failures"]
+    there = _check(GATED, [{"kind": "arg_text_absent", "type": "connector",
+                            "contains": "vars.steps."}])
+    assert there["passed"] is False
+    assert "still appears in" in " ".join(there["failures"])
+
+
+def test_arg_text_absent_refuses_an_empty_needle():
+    # "" is in every string; an empty needle would fail everything forever.
+    r = _check(GATED, [{"kind": "arg_text_absent", "contains": ""}])
+    assert r["passed"] is False
