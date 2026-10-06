@@ -21,6 +21,7 @@ cross-step refs resolve deterministically offline.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any
 
@@ -81,6 +82,7 @@ CHECK_GROUPS: dict[str, frozenset[str]] = {
     "snippet": frozenset({"snippet_sandbox"}),
     # Usually fatal structural problems; offered for completeness.
     "structure": frozenset({
+        "elided_document",
         "parse_error", "missing_field", "unknown_step_type",
         "duplicate_step_id", "no_trigger", "internal"}),
 }
@@ -656,6 +658,8 @@ def verify_playbook(
       - workflow_reference_unresolvable (error severity only)
       - jinja_syntax_error              (un-parseable Jinja template; emitted
                                          by the compile stage)
+      - elided_document                 (the YAML carries a `(truncated)` /
+                                         `# ... rest unchanged` style marker)
 
     Warning codes (do not block):
       - unknown_jinja_filter            (filter/test name outside the FSR catalog)
@@ -691,6 +695,9 @@ def verify_playbook(
     required_fixes: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     evidence: dict[str, Any] = {}
+
+    # 0. A shortened document can parse and compile clean; refuse it first.
+    required_fixes.extend(_elision_fixes(yaml_text or ""))
 
     # 1. Compile
     cres = _compile(yaml_text, DB_PATH)
@@ -914,6 +921,51 @@ def _dedupe_diagnostics(diags: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# Elision markers: what a model writes when it shortens a document it was asked
+# to reproduce. Live on 8.0 (tracker #131) the model passed verify_enhancement a
+# playbook with a literal `... (truncated) ...` inside a step argument; it
+# parsed, compiled and verified, and the salvaged patch would have put the stub
+# behind an Apply button. These are markers in the DOCUMENT, never in the
+# analyst's request. A bare `...` at column 0 is YAML's document-end marker and
+# is left alone; an indented one is not YAML anyone writes on purpose.
+_ELISION_MARKERS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"[(\[<]\s*(truncated|snip|snipped|omitted|elided)\s*[)\]>]",
+                re.IGNORECASE), "a truncation marker"),
+    (re.compile(r"(\.\.\.|\u2026)\s*\(?\s*(rest|remaining|other|existing|"
+                r"unchanged|same as|omitted|more|etc)\b", re.IGNORECASE),
+     "an ellipsis standing in for omitted content"),
+    (re.compile(r"#\s*(\.\.\.|\u2026)"), "an ellipsis comment"),
+    (re.compile(r"#.*\b(rest|remainder) of (the )?(playbook|steps|file|"
+                r"document|yaml)\b", re.IGNORECASE),
+     "a 'rest of the playbook' comment"),
+    (re.compile(r"^\s+(\.\.\.|\u2026)\s*$"), "a line that is only an ellipsis"),
+)
+
+
+def _elision_fixes(yaml_text: str) -> list[dict[str, Any]]:
+    """One required fix per marker kind found, message free of line numbers so
+    a marker the before-playbook already carried is grandfathered by
+    verify_enhancement's (code, message) match."""
+    fixes: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for lineno, line in enumerate(yaml_text.splitlines(), 1):
+        for pat, what in _ELISION_MARKERS:
+            if what in seen or not pat.search(line):
+                continue
+            seen.add(what)
+            fixes.append({
+                "code": "elided_document",
+                "message": (f"the YAML contains {what}, so it is not the "
+                            "whole playbook. Send the complete document, or "
+                            "use edit_playbook(operations=[...]) to change the "
+                            "open playbook without re-typing it."),
+                "path": f"line {lineno}",
+                "severity": "error",
+                "check": "structure",
+            })
+    return fixes
+
+
 # Compile-stage WARNINGS this gate treats as required fixes. The compiler has to
 # accept whatever an appliance holds, so it only warns; an authored playbook is
 # held to the stricter bar. Live: an agent re-typed a verified playbook, dropped
@@ -969,7 +1021,7 @@ def _finalize(checks_run, required_fixes, warnings, evidence,
     seen_codes: set[str] = set()
     # Priority: compile errors first, then schema, then walker.
     priority_codes = (
-        "parse_error", "missing_field", "unknown_step_type",
+        "elided_document", "parse_error", "missing_field", "unknown_step_type",
         "jinja_syntax_error",
         "required_op_param_missing", "op_param_unknown",
         "required_record_field_missing", "connector_config_missing",

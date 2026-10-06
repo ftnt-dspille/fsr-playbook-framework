@@ -472,8 +472,9 @@ def verify_enhancement(
     regressions the build-mode gate cannot see.
 
     Args:
-      before_yaml: omit it. Defaults to the open playbook; pass it only when
-        verifying against some other baseline.
+      before_yaml: omit it. Defaults to the open playbook, and while a
+        playbook is open that copy always wins; it only counts when nothing
+        is open.
       after_yaml: the proposed edited YAML (required).
       user_message: the chat turn that asked for the edit. Used to mark
         which steps were "fair game" to touch -- steps changed outside
@@ -546,6 +547,16 @@ def verify_enhancement(
 
     # The baseline is the open playbook, read from FortiSOAR -- never a copy the
     # model typed. Same pattern as analyze_playbook's empty `yaml_text`.
+    # When a playbook IS open, FortiSOAR's copy wins over one the model typed
+    # into the call: a typed copy can only lose content. Live (tracker #131) the
+    # model passed an elided stub as before_yaml AND after_yaml, and the stub
+    # diffed clean against itself.
+    grounded = get_grounded_yaml()
+    before_overridden = bool(
+        grounded and isinstance(before_yaml, str) and before_yaml.strip()
+        and before_yaml.strip() != grounded.strip())
+    if grounded:
+        before_yaml = grounded
     if not (isinstance(before_yaml, str) and before_yaml.strip()):
         before_yaml = get_grounded_yaml()
         if not before_yaml:
@@ -592,6 +603,12 @@ def verify_enhancement(
                                "steps_modified": [], "unchanged": 0,
                                "changes": []}
         return _issue_verified_id(out, after_yaml, before_yaml)
+
+    if before_overridden:
+        after_result = dict(after_result)
+        after_result.setdefault("evidence", {})["before_yaml_ignored"] = (
+            "a playbook is open, so the baseline is FortiSOAR's copy of it, "
+            "not the before_yaml passed in")
 
     # 3. Diff.
     regressions, diff_summary = _diff_collections(
