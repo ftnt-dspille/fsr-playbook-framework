@@ -66,6 +66,7 @@ from ._loop_helpers import (
     TriageDiscipline,
     _effective_tool_name,
     drain_with_idle_timeout,
+    evidence_id_line,
     is_authoring_slice,
     latest_user_text,
     stall_directive,
@@ -1137,11 +1138,12 @@ class OpenAIProvider(CapabilityMixin):
             def _record(name: str, args: dict[str, Any], result: Any,
                         duration_ms: int | None = None, call_id: str | None = None) -> str:
                 # Register the tool result for citation validation
+                success = not _is_error_result(result)
                 if call_id:
                     from ..mcp_server._citation_validator import register_tool_result
-                    success = not _is_error_result(result)
                     register_tool_result(call_id, name, success, args, result)
-                content_str = _stringify(result)
+                content_str = (evidence_id_line(call_id, name, args, success)
+                               + _stringify(result))
                 try:
                     args_chars = len(json.dumps(args, default=str))
                 except Exception:

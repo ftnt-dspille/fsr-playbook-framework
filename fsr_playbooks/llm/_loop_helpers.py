@@ -1983,6 +1983,18 @@ def is_verdict_evidence(name: str, args: Any = None) -> bool:
     return counts_as_investigation(name)
 
 
+def evidence_id_line(call_id: str | None, name: str, args: Any, success: bool) -> str:
+    """The line that opens a citable tool result: its own id, the value a
+    verdict finding must cite. The prompt said ids were "shown in tool
+    results", but an OpenAI-shaped tool message carries the id only in its
+    envelope, never in the text -- live on the box model nearly every first
+    verdict cited prose ("get_record on alert X showed ...") and was refused
+    for invalid evidence ids, learning the real ids only from the refusal."""
+    if not call_id or not success or not is_verdict_evidence(name, args):
+        return ""
+    return f"[evidence id: {call_id}]\n"
+
+
 def verdict_directive(evidence_ids: list[str]) -> str:
     """Forced-round directive for the verdict guard.
 
