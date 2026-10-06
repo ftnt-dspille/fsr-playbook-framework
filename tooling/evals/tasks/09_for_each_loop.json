@@ -16,14 +16,24 @@
     },
     {
       "kind": "for_each_over",
-      "contains": "vars.steps.",
-      "note": "loops over the list the earlier step built"
+      "contains": "vars.",
+      "note": "loops over a variable (set_variable output lives at vars.<name>; the compiler rewrites vars.steps.<step>.<name> to it, so the resolved IR never holds vars.steps. here)"
     },
     {
       "kind": "arg_text_contains",
       "type": "create_record",
       "contains": "vars.item",
       "note": "each iteration uses vars.item"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "set_variable"
+      },
+      "to": {
+        "type": "create_record"
+      },
+      "note": "the list is built before the loop that creates the alerts"
     }
   ]
 }
