@@ -23,6 +23,7 @@ import re
 from typing import Any
 
 from ._shared import (
+    _db,
     _err,
     _validate_op_params,
     get_grounded_yaml,
@@ -782,6 +783,70 @@ def _has_action_steps(yaml_text: str) -> bool:
     return False
 
 
+def _yaml_connectors(yaml_text: str) -> list[str]:
+    """Connector names the YAML's connector steps call, first-seen order."""
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+    except Exception:  # noqa: BLE001 -- an unparseable offer fails elsewhere
+        return []
+    seen: list[str] = []
+    for pb in pbs if isinstance(pbs, list) else []:
+        for s in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
+            if not isinstance(s, dict):
+                continue
+            args = s.get("arguments") if isinstance(s.get("arguments"), dict) else {}
+            name = s.get("connector") or args.get("connector")
+            if isinstance(name, str) and name.strip() and name not in seen:
+                seen.append(name.strip())
+    return seen
+
+
+def _needs_configuration(connector: str) -> bool:
+    """Whether the connector can only run with a saved configuration. One whose
+    catalog config schema declares no fields (cyops_utilities) runs bare.
+    Unknown to the catalog -> False: verify already rejects an unknown
+    connector, and a slim catalog missing a built-in must not block it here."""
+    import json
+    try:
+        row = _db().execute(
+            "SELECT config_schema_json FROM connectors WHERE name=?",
+            (connector,)).fetchone()
+    except Exception:  # noqa: BLE001
+        return False
+    if row is None or not row[0]:
+        return False
+    try:
+        schema = json.loads(row[0])
+    except (TypeError, ValueError):
+        return True
+    return bool(isinstance(schema, dict) and schema.get("fields"))
+
+
+def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str]]:
+    """(connectors the YAML calls that THIS box has not configured, the ones it
+    has). ([], []) when the box cannot be asked -- the gate fails open, the
+    same way run_op's preflight does, so a listing outage never blocks a save.
+
+    Called through the module so an offline inventory patched onto
+    `tools_connector_discovery` answers here too."""
+    used = _yaml_connectors(yaml_text)
+    if not used:
+        return [], []
+    from . import tools_connector_discovery as _tcd
+    try:
+        listing = _tcd.list_configured_connectors()
+    except Exception:  # noqa: BLE001
+        return [], []
+    rows = listing.get("configured") if isinstance(listing, dict) else None
+    if not rows:
+        return [], []
+    have = sorted({r.get("name") for r in rows
+                   if isinstance(r, dict) and r.get("name")})
+    missing = [c for c in used if c not in have and _needs_configuration(c)]
+    return missing, have
+
+
 def _step_names(yaml_text: str) -> list[str]:
     """Step `name:` values of the first playbook, in order. [] if unparseable."""
     try:
@@ -929,6 +994,25 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
             "what it does), and end the turn.",
             suggestions=["emit_card(card_type='choice', ...) or one plain "
                          "question -- no playbook_offer until it does something"],
+        )
+
+    # The analyst saves this onto THIS box. A step on a connector it has not
+    # configured fails the first time the playbook runs -- live, "isolate with
+    # CrowdStrike Falcon" was offered for a box with no Falcon, after the
+    # model had itself said Falcon was unavailable.
+    missing, have = _unconfigured_connectors(yaml_text)
+    if missing:
+        return _err(
+            "offer_uses_unconfigured_connector",
+            f"this playbook calls {', '.join(repr(m) for m in missing)}, which "
+            "this FortiSOAR box has not configured, so those steps would fail "
+            "the first time it runs. Rebuild it on a configured connector "
+            "that does the same job, or, if none does, tell the analyst what "
+            "is missing instead of offering it.",
+            suggestions=[f"configured here: {', '.join(have)}",
+                         "find(kind='action', ...) to pick the op on one of "
+                         "those connectors"],
+            unconfigured=missing,
         )
 
     ops_summary = _yaml_ops_summary(yaml_text)
