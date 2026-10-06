@@ -23,7 +23,11 @@ from test_openai_build_progress_forced import (
     _usage_chunk,
 )
 
-from fsr_playbooks.llm._loop_helpers import PromisedActionGuard, promised_action
+from fsr_playbooks.llm._loop_helpers import (
+    PromisedActionGuard,
+    fabricated_call,
+    promised_action,
+)
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.openai_provider import OpenAIProvider
 from fsr_playbooks.llm.provider import DoneEvent, Message, ToolUseEvent
@@ -187,3 +191,42 @@ def test_anthropic_hollow_close_gets_the_directive():
             system="s", messages=[Message(role="user", content="mark it completed")],
             tools=_ANTHROPIC_TOOLS, tags={})))
     assert "update_record" in [e.name for e in events if isinstance(e, ToolUseEvent)]
+
+
+# --- a tool call WRITTEN as text --------------------------------------------
+# Live (build sweep): a refinement turn replayed history carrying the
+# connector's `[called name(args)]` / `[tool result: ...]` markers, and the
+# model answered with that transcript in prose -- no call, no card, 3 of 4 runs.
+FAKE = ('[called edit_playbook({"operations": [{"op": "add_step"}]})]\n'
+        '[tool result: {"ok": true, "card": {"type": "playbook_offer"}}]')
+
+
+def test_a_written_call_is_caught_with_its_own_directive():
+    g = PromisedActionGuard()
+    said = g.outstanding(FAKE)
+    assert said and said.startswith("[called edit_playbook(")
+    assert "wrote a tool call as text" in g.directive(said)
+
+
+def test_a_written_result_alone_is_caught():
+    assert fabricated_call('Done.\n[tool result: {"ok": true}]')
+
+
+@pytest.mark.parametrize("text", [
+    "I called the analyst's attention to step 3.",
+    "The [called] label in the designer is cosmetic.",
+    "See [tool results] below.",
+])
+def test_prose_that_merely_mentions_calls_is_not(text):
+    assert fabricated_call(text) is None
+
+
+def test_openai_written_call_gets_the_directive_then_the_real_call():
+    events, sent = _run_openai([
+        _text(FAKE),
+        _call("c1", "get_record", {"uuid": "u"}),
+        _text("Here it is."),
+    ])
+    assert [e.name for e in events if isinstance(e, ToolUseEvent)] == ["get_record"]
+    assert any("wrote a tool call as text" in str(m.get("content"))
+               for m in sent[1] if m.get("role") == "user")

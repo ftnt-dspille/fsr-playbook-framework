@@ -2254,6 +2254,30 @@ def promised_action(text: str) -> str | None:
     return None
 
 
+# The history a later turn replays renders earlier tool calls as text markers
+# (`[called name(args)]`, `[tool result: ...]` -- the connector's `_text_of`).
+# A model that copies that format has written a call down instead of making
+# it: live on the build sweep, "now also set notified" ended with a perfect
+# `[called edit_playbook(...)]` / `[tool result: {"ok": true, "card": ...}]`
+# transcript in prose and no call at all -- 3 of 4 runs. Our own syntax, so
+# matching it is structural, not a guess at intent.
+_FABRICATED_CALL = re.compile(r"\[(?:called [A-Za-z_]\w*\(|tool result: )")
+
+
+def fabricated_call(text: str) -> str | None:
+    """The first tool-call marker the model WROTE as text, or None."""
+    m = _FABRICATED_CALL.search(text or "")
+    return (text or "")[m.start():m.start() + 160] if m else None
+
+
+FABRICATED_CALL_DIRECTIVE = (
+    'You wrote a tool call as text ("{said}") instead of making it. Text like '
+    "that runs nothing: no tool was called and no card exists. Make the call "
+    "now with the tool itself, and do not write call or result markers in "
+    "your reply."
+)
+
+
 PROMISED_ACTION_DIRECTIVE = (
     'You told the analyst: "{said}" -- but this turn made no call, so nothing '
     "ran and there is no card for them to approve. If you mean to do it, make "
@@ -2265,11 +2289,13 @@ PROMISED_ACTION_DIRECTIVE = (
 
 
 class PromisedActionGuard:
-    """Fires once when a turn ends promising an action/card it never produced."""
+    """Fires once when a turn ends promising an action/card it never produced,
+    or writing a tool call as text instead of making it."""
 
     def __init__(self) -> None:
         self._delivered = False
         self._forced = False
+        self._fabricated = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         if not isinstance(result, dict):
@@ -2283,10 +2309,17 @@ class PromisedActionGuard:
     def outstanding(self, text: str) -> str | None:
         if self._forced or self._delivered:
             return None
+        fake = fabricated_call(text)
+        if fake:
+            self._fabricated = True
+            return fake
         return promised_action(text)
 
     def directive(self, said: str) -> str:
-        return PROMISED_ACTION_DIRECTIVE.format(said=said.replace('"', "'"))
+        template = (FABRICATED_CALL_DIRECTIVE
+                    if getattr(self, "_fabricated", False)
+                    else PROMISED_ACTION_DIRECTIVE)
+        return template.format(said=said.replace('"', "'"))
 
     def mark_forced(self) -> None:
         self._forced = True
