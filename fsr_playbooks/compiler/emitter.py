@@ -197,10 +197,19 @@ def emit(collection: Collection) -> dict[str, Any]:
         steps_out: list[dict[str, Any]] = []
         routes_out: list[dict[str, Any]] = []
 
+        # Seed for derived step/route/group UUIDs. A playbook read back from
+        # FortiSOAR carries its real uuid, and that is the seed: names alone
+        # are not unique on the box. Live (tracker #153) an enhancement apply
+        # 409'd on (uuid) because a step it added had the same uuid5 as an
+        # orphaned step left by a deleted collection with the same names. A
+        # fresh build has no uuid yet and keeps the name seed, so its output
+        # is unchanged.
+        salt = ("wf", pb.uuid) if pb.uuid else (collection.name, pb.name)
+
         # Pass 1: assign UUIDs, compute step layout
         # Prefer IR-carried UUID (round-trip) over deterministic uuid5.
         step_uuids: dict[str, str] = {
-            s.id: (s.uuid or _u("step", collection.name, pb.name, s.id))
+            s.id: (s.uuid or _u("step", *salt, s.id))
             for s in pb.steps
         }
         step_layout: dict[str, tuple[int, int]] = {}  # id -> (top, left)
@@ -246,7 +255,7 @@ def emit(collection: Collection) -> dict[str, Any]:
         for ann in annotations:
             if ann.kind != "block":
                 continue
-            ann_uuid = ann.uuid or _u("group", collection.name, pb.name, ann.id)
+            ann_uuid = ann.uuid or _u("group", *salt, ann.id)
             ann.uuid = ann_uuid
             for sid in ann.contains:
                 step_group[sid] = ann_uuid
@@ -413,7 +422,7 @@ def emit(collection: Collection) -> dict[str, Any]:
         groups_out: list[dict[str, Any]] = []
         for ann in annotations:
             if not ann.uuid:
-                ann.uuid = _u("group", collection.name, pb.name, ann.id)
+                ann.uuid = _u("group", *salt, ann.id)
             groups_out.append(_emit_group(ann, step_layout))
 
         # Pass 2: emit routes from .next + .branches
@@ -434,7 +443,7 @@ def emit(collection: Collection) -> dict[str, Any]:
                 if tgt:
                     tgt_disp = name_by_id.get(s.next, s.next)
                     routes_out.append(_emit_route(
-                        collection.name, pb.name, s.id, s.next,
+                        *salt, s.id, s.next,
                         src_iri, _step_iri(tgt),
                         display_name=f"{src_disp} -> {tgt_disp}",
                     ))
@@ -443,7 +452,7 @@ def emit(collection: Collection) -> dict[str, Any]:
                 if tgt:
                     tgt_disp = name_by_id.get(target, target)
                     routes_out.append(_emit_route(
-                        collection.name, pb.name, f"{s.id}:{option}", target,
+                        *salt, f"{s.id}:{option}", target,
                         src_iri, _step_iri(tgt), label=option,
                         display_name=f"{src_disp} -> {tgt_disp}",
                     ))
@@ -452,7 +461,7 @@ def emit(collection: Collection) -> dict[str, Any]:
                 if tgt:
                     tgt_disp = name_by_id.get(target, target)
                     routes_out.append(_emit_route(
-                        collection.name, pb.name, f"{s.id}:_{target}", target,
+                        *salt, f"{s.id}:_{target}", target,
                         src_iri, _step_iri(tgt),
                         display_name=f"{src_disp} -> {tgt_disp}",
                     ))
