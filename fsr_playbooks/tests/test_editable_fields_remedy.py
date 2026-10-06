@@ -111,3 +111,18 @@ def test_the_remedy_actually_terminates() -> None:
     # ngfw_mode: drop it (one of the two offered remedies). vdom then heals.
     out = _emit(["vdom"], dict(BASE_ARGS))
     assert out["ok"] is True, out
+
+
+def test_editable_fields_written_as_args_paths_mean_the_args_keys() -> None:
+    """Live, an unattended containment named its editable fields as paths
+    ("args.method", "args.ip"), was told twice the op has no such parameter,
+    and the turn ended with nothing staged."""
+    from fsr_playbooks.mcp_server.tools_emit import emit_card
+    args = dict(BASE_ARGS)
+    out = emit_card(card_type="action", payload={
+        "id": "c1", "connector": CONNECTOR, "operation": OP,
+        "summary": "block the C2", "args": args,
+        "editable_fields": [f"args.{k}" for k in args]})
+    assert out.get("ok") is not False, out
+    card = out.get("card") or out
+    assert card["editable_fields"] == list(args)

@@ -1450,6 +1450,15 @@ def _normalize_card_payload(kt: str, payload: dict[str, Any]) -> tuple[
     if kt == "action" and "editable_fields" not in out:
         if isinstance(out.get("args"), dict):
             out["editable_fields"] = list(out["args"])
+    # editable_fields name keys of `args`; a model that writes the path
+    # ("args.ip") means the same key. Live, an unattended containment was
+    # refused twice with "has no such parameter" for args.method/args.ip and
+    # the turn ended with nothing staged.
+    ef = out.get("editable_fields") if kt == "action" else None
+    if isinstance(ef, list):
+        out["editable_fields"] = [
+            f[len("args."):] if isinstance(f, str) and f.startswith("args.") else f
+            for f in ef]
 
     return out, []
 
