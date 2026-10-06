@@ -72,3 +72,21 @@ def test_structural_and_id_problems_arrive_together():
     codes = [p["code"] for p in r["problems"]]
     assert codes == ["bad_confidence", "invalid_evidence_ids"], codes
     assert any("call_1" in h for h in r["suggestions"])
+
+
+def test_the_contract_defines_every_disposition():
+    # Undefined labels let the model call a malicious-rated destination
+    # "suspicious" at 0.96 confidence; the contract now says what each means.
+    from fsr_playbooks.mcp_server.tools_emit import DISPOSITION_MEANINGS
+    c = verdict_contract()
+    for label, meaning in DISPOSITION_MEANINGS.items():
+        assert f"{label} = {meaning}" in c
+
+
+def test_the_tool_schema_enum_matches_the_validator():
+    from fsr_playbooks.llm.tools import TOOL_SCHEMA_OVERRIDES as TOOL_SCHEMAS
+    from fsr_playbooks.mcp_server.tools_emit import VERDICT_DISPOSITIONS
+    disp = TOOL_SCHEMAS["emit_verdict"]["properties"]["disposition"]
+    assert tuple(disp["enum"]) == VERDICT_DISPOSITIONS
+    for label in VERDICT_DISPOSITIONS:
+        assert label in disp["description"]

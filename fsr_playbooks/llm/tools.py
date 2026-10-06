@@ -1375,7 +1375,13 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
             "disposition": {
                 "type": "string",
                 "enum": ["true_positive", "false_positive", "benign", "suspicious", "needs_more_info"],
-                "description": "Investigation outcome classification.",
+                "description": (
+                    "Investigation outcome. true_positive = real malicious activity "
+                    "(e.g. traffic to an address threat intel rates malicious; doubt "
+                    "goes in confidence); suspicious = leans malicious but weak or "
+                    "conflicting evidence; false_positive = the detection was wrong; "
+                    "benign = real but harmless; needs_more_info = cannot conclude."
+                ),
             },
             "severity": {
                 "type": "string",

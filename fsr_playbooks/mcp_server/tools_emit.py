@@ -1179,8 +1179,22 @@ def _evidence_hint(eid: Any) -> str:
     return ""
 
 
-VERDICT_DISPOSITIONS = ("true_positive", "false_positive", "benign", "suspicious",
-                        "needs_more_info")
+#: What each disposition means. The labels had no definitions, and a model
+#: left to guess called a destination its own threat-intel lookup rated
+#: malicious "suspicious" at 0.96 confidence while calling a near-identical
+#: one "true_positive" -- and only true_positive gets containment proposed.
+#: Doubt belongs in confidence; the label says what the evidence showed.
+DISPOSITION_MEANINGS = {
+    "true_positive": ("the alert caught real malicious activity (for example "
+                      "traffic to an address your threat-intel lookup rates "
+                      "malicious); put any doubt in confidence, not in the label"),
+    "false_positive": "the detection itself was wrong",
+    "benign": "real activity that is not harmful",
+    "suspicious": ("the evidence leans malicious but is weak or conflicting, "
+                   "and no lookup rates it malicious"),
+    "needs_more_info": "you cannot conclude from what you could check",
+}
+VERDICT_DISPOSITIONS = tuple(DISPOSITION_MEANINGS)
 VERDICT_SEVERITIES = ("critical", "high", "medium", "low", "info")
 
 
@@ -1189,8 +1203,9 @@ def verdict_contract() -> str:
     constants. Read by the refusal (so a repair is one retry) and by the
     forced-verdict directive, so the two can't state different rules."""
     return (
-        "payload = {disposition: one of " + ", ".join(VERDICT_DISPOSITIONS)
-        + " (needs_more_info when you cannot conclude); severity: one of "
+        "payload = {disposition: one of "
+        + "; ".join(f"{k} = {v}" for k, v in DISPOSITION_MEANINGS.items())
+        + "; severity: one of "
         + ", ".join(VERDICT_SEVERITIES) + "; confidence: a number 0.0-1.0; "
         "summary: plain English, at most 600 characters; findings: a non-empty "
         "list of {claim: string, evidence: [tool_use ids from this turn]}; "
