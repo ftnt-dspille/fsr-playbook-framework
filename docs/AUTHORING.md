@@ -84,7 +84,7 @@ playbooks:
 | `find_record` | Queries records from a module. | `module`, `filters: [{field, operator, value}]`, `limit`, `logic`, `sort`, `select`, `relationships`, `max_relations` |
 | `create_record` | Creates a new record. | `module` (required), `fields: {field: value}`, `operation`, `is_upsert`, `on_conflict`, `update_fields` |
 | `update_record` | Updates an existing record. | `record` (IRI), `module` (required), `fields: {field: value}`, `link:`/`unlink: {rel: [uuid]}` (append/detach), `operation` |
-| `delete_record` | Deletes a record. | `record:`, or `module:` + `record_id:`, or `module:` + `filters:` (bulk); `show_deleted:` |
+| `delete_record` | Deletes a record. | `record:`, or `module:` + `record_id:`, or `module:` + `query: {logic, filters}` (bulk); `show_deleted:` |
 | `manual_input` | Pauses for human input (form or buttons). | `title`, `description`, `options`, `inputs`, `email`, `assign_to`, `is_approval` |
 | `delay` | Waits for a duration or event. | `seconds` (or `minutes`/`hours`/`days`) |
 | `code_snippet` | Runs inline Python. | `code: \|...`, `config` (optional) |

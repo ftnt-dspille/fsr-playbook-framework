@@ -132,7 +132,8 @@ def test_step_type_without_friendly_form_still_returns_examples():
     """Step types that aren't in _FRIENDLY_FORMS (like ManualDecision,
     ApprovalManualInput) should still get a corpus example so the AI
     has something to anchor on."""
-    r = mcp_server.get_step_type("ManualTask")
+    # ManualTask (create_task) gained a friendly form; SetAPIKeys has none.
+    r = mcp_server.get_step_type("SetAPIKeys")
     assert "examples" in r
 
 

@@ -1536,27 +1536,13 @@ def get_connector_source(connector: str, file: str = "operations.py") -> dict[st
 # get_step_type
 # ---------------------------------------------------------------------------
 
-# Friendly YAML short names → canonical FSR step type names. Mirrors
-# compiler.resolver.SHORT_TYPE_TO_FSR; duplicated here to avoid a
-# resolver import in the MCP layer.
-_SHORT_TO_CANONICAL: dict[str, str] = {
-    "connector": "Connectors",
-    "set_variable": "SetVariable",
-    "decision": "Decision",
-    "start": "cybersponse.abstract_trigger",
-    "find_record": "FindRecords",
-    "update_record": "UpdateRecord",
-    "create_record": "InsertData",
-    "delay": "Delay",
-    "manual_input": "ManualInput",
-    "code_snippet": "CodeSnippet",
-    "approval": "Approval",
-    "workflow_reference": "WorkflowReference",
-    "stop": "Connectors",
-    "end": "Connectors",
-    "start_on_create": "cybersponse.post_create",
-    "start_on_update": "cybersponse.post_update",
-}
+# Friendly YAML short names → canonical FSR step type names: the compiler's
+# own map. A hand-kept copy here lagged it by nine types (api_endpoint,
+# send_email, delete_record, start_on_delete, ...), so get_step_type told the
+# model those types did not exist while the compiler accepted them.
+from ..compiler.resolver._constants import SHORT_TYPE_TO_FSR  # noqa: E402
+
+_SHORT_TO_CANONICAL: dict[str, str] = dict(SHORT_TYPE_TO_FSR)
 
 
 # ── Build the inputs_shape text dynamically from the single source of truth ──
@@ -1595,7 +1581,12 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
         "accepted_keys": ["module", "modules", "button_label",
                           "requires_record", "run_mode"],
         "note": (
-            "Manual / designer trigger. With NO `module:` it's a pure "
+            "Manual / designer trigger: it runs only when someone clicks "
+            "it. If the playbook should fire BY ITSELF when a record is "
+            "created, updated, or deleted, this is the wrong type -- use "
+            "`start_on_create`, `start_on_update`, or `start_on_delete` "
+            "(get_step_type on that name), whose `when:` filters records. "
+            "With NO `module:` it's a pure "
             "designer trigger. With a `module:` set it becomes a "
             "record-context Execute action -- `button_label:` is what the "
             "user sees in the Execute menu (NOT the step name). "
@@ -1645,6 +1636,99 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
                 "logic": "AND",
                 "filters": [{"field": "status", "op": "changed"}],
             },
+        },
+    },
+    "start_on_delete": {
+        "accepted_keys": ["module", "modules", "when"],
+        "note": (
+            "Auto-fires after a record in `module` is deleted; the deleted "
+            "record(s) arrive at `vars.input.records`. `when:` filters match "
+            "the record as it was before the delete."
+        ),
+        "example": {
+            "type": "start_on_delete",
+            "module": "alerts",
+            "when": {
+                "logic": "AND",
+                "filters": [{"field": "name", "op": "contains",
+                             "value": "phish"}],
+            },
+        },
+    },
+    "api_endpoint": {
+        "accepted_keys": ["route", "authentication_methods"],
+        "note": (
+            "Trigger that exposes the playbook as an HTTP endpoint at "
+            "`POST /api/triggers/1/<route>`. Token-based auth is the default "
+            "(leave `authentication_methods` out); `[\"anonymous\"]` is No "
+            "Auth, `[\"Basic\"]` is HTTP Basic. The request body and query "
+            "params arrive at `vars.steps.<Step_Name>.input.params.api_body` "
+            "and `.api_params`."
+        ),
+        "example": {"type": "api_endpoint", "name": "Start",
+                    "route": "lookup_ip"},
+    },
+    "send_email": {
+        "accepted_keys": ["to", "subject", "body", "from", "cc", "bcc",
+                          "attachments", "config"],
+        "note": (
+            "Sends mail through the box's SMTP connector (no connector:/"
+            "operation: needed). `to`/`cc`/`bcc` are lists; `from`, `cc`, "
+            "`bcc` and `attachments` are optional."
+        ),
+        "example": {
+            "type": "send_email",
+            "name": "Notify Team",
+            "to": ["soc@example.com"],
+            "subject": "Alert: {{ vars.input.records[0].name }}",
+            "body": "Please review this alert.",
+        },
+    },
+    "delete_record": {
+        "accepted_keys": ["record", "module", "record_id", "query",
+                          "show_deleted"],
+        "note": (
+            "Deletes records. Exactly one target: `record:` (an IRI such as "
+            "`{{ vars.input.records[0]['@id'] }}`), or `module:` + "
+            "`record_id:`, or `module:` + `query: {logic, filters}` for a "
+            "bulk delete. Step-level `filters:`/`logic:` are rejected -- "
+            "they go inside `query:`. A bulk filter the platform rejects "
+            "deletes nothing and still reports success, so check the count."
+        ),
+        "example": {
+            "type": "delete_record",
+            "name": "Delete Alert",
+            "record": "{{ vars.input.records[0]['@id'] }}",
+        },
+    },
+    "utilities": {
+        "accepted_keys": ["operation", "params", "config"],
+        "note": (
+            "Shorthand for `connector: cyops_utilities` -- the built-in "
+            "utility ops (make_cyops_request, ip_cidr_check, "
+            "markdown_to_html, ...). Find the op and its params with "
+            "find(kind='operation', connector='cyops_utilities') and "
+            "get_op_schema; params go under `params:`."
+        ),
+        "example": {
+            "type": "utilities",
+            "name": "Is Internal",
+            "operation": "ip_cidr_check",
+            "params": {"ip_address": "{{ vars.input.records[0].sourceIp }}",
+                       "cidr": "10.0.0.0/8"},
+        },
+    },
+    "create_task": {
+        "accepted_keys_step_level": ["resource"],
+        "note": (
+            "Creates a record in the tasks module. `resource:` holds the "
+            "task fields (name, description, status, priority, dueBy, ...)."
+        ),
+        "example": {
+            "type": "create_task",
+            "name": "Create Task",
+            "resource": {"name": "Review suspicious IP",
+                         "description": "Raised by the playbook."},
         },
     },
     "set_variable": {
@@ -1996,8 +2080,11 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
 # so get_step_type can slim responses regardless of which spelling the
 # caller used (the agent often passes the canonical name it saw in a
 # corpus row, not the friendly form).
-_CANONICAL_TO_SHORT: dict[str, str] = {v: k for k, v in _SHORT_TO_CANONICAL.items()
-                                       if k != "stop" and k != "end"}
+_CANONICAL_TO_SHORT: dict[str, str] = {}
+for _short, _canon in _SHORT_TO_CANONICAL.items():
+    # First short per wire type wins: `Connectors` is `connector`, never one
+    # of the connector-family aliases (stop, end, utilities, delete_record).
+    _CANONICAL_TO_SHORT.setdefault(_canon, _short)
 
 
 # Things the model asks `get_step_type` for that are real FortiSOAR concepts

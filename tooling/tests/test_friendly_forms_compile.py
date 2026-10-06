@@ -18,7 +18,8 @@ from fsr_playbooks.mcp_server import _FRIENDLY_FORMS
 # Friendly forms that document a non-trigger step type. We synthesize a
 # Start → <step> → End scaffold; trigger / terminator types are exercised
 # elsewhere and don't fit this scaffold.
-_TRIGGER_LIKE = {"start", "start_on_create", "start_on_update"}
+_TRIGGER_LIKE = {"start", "start_on_create", "start_on_update",
+                 "start_on_delete", "api_endpoint"}
 _TERMINATOR_LIKE = {"end", "stop"}
 _NEEDS_TARGET = {"workflow_reference"}  # references another playbook
 
