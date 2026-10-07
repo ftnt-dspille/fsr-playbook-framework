@@ -157,7 +157,11 @@ def test_only_a_threat_intel_lookup_is_evidence(entry):
     ("fortinet-fortiguard-ioc", "ioc_search"),
     ("abuseipdb", "check_ip"),
 ])
-def test_threat_intel_connectors_count(connector, op):
+def test_threat_intel_connectors_count(connector, op, monkeypatch):
+    # The op's read tier comes from the catalog; the slim packaged one (CI)
+    # lacks fortiguard-ioc and fails closed. The tier is not under test here.
+    from fsr_playbooks.llm import tools as T
+    monkeypatch.setattr(T, "_tier_for_run_op", lambda args: 1)
     assert _eval(registry=_registry(connector=connector, op=op))["outcome"] == "would_act"
 
 

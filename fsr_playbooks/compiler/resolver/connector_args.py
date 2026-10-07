@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..errors import CompileError, ErrorCode
-from .catalog import CatalogLookupMixin
 from ..ir import Playbook, Step
 from ..typed_args.steps import expand_connector as _expand_connector_typed
 from ..typed_args.steps import (
@@ -20,6 +19,7 @@ from ..typed_args.steps import (
 from ..typed_args.steps import (
     expand_workflow_reference as _expand_workflow_reference_typed,
 )
+from .catalog import CatalogLookupMixin
 
 # UUID pattern for cross-collection target: detection.
 _UUID_RE = re.compile(
