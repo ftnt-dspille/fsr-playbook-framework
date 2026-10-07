@@ -165,3 +165,18 @@ def test_decompile(repo_root, db_path, corpus_path, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "collection:" in r.stdout
     assert "playbooks:" in r.stdout
+
+
+def test_decompile_is_the_authoring_yaml_and_no_layout_is_leaner(repo_root, db_path, corpus_path, tmp_path):
+    """Default output is the minimal authoring form (no iris, no resolved routes);
+    --no-layout also drops step positions and uuids; --raw is the old internal dump."""
+    src = json.loads(corpus_path.read_text())
+    p = tmp_path / "in.json"
+    p.write_text(json.dumps({"type": "workflow_collections", "macros": [], "exported_tags": [], "data": [src["data"][0]]}))
+    default = _run(repo_root, "decompile", str(p))
+    lean = _run(repo_root, "decompile", str(p), "--no-layout")
+    raw = _run(repo_root, "decompile", str(p), "--raw")
+    assert default.returncode == lean.returncode == raw.returncode == 0, (default.stderr, lean.stderr, raw.stderr)
+    assert "- id:" in raw.stdout and "- id:" not in default.stdout      # the old dump numbers every step
+    assert "top:" in default.stdout and "top:" not in lean.stdout       # layout kept by default, dropped on request
+    assert len(lean.stdout.splitlines()) < len(default.stdout.splitlines())

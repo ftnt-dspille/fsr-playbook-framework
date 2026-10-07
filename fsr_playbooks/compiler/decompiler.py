@@ -191,13 +191,21 @@ def _step_modules(out: dict) -> list[str]:
     return []
 
 
-def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
+def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path, *, layout: bool = True) -> str:
     """Decompile FSR WorkflowCollection JSON into authored-style YAML.
 
     Single-source-of-truth for the YAML serialization shape -- the CLI
     pull/diff/decompile commands and the `generate_recipe` MCP tool
     both go through here so a recipe stored to the DB looks identical
     to a recipe pulled from a live FSR.
+
+    ``layout=False`` drops each step's canvas position and uuid (``top``,
+    ``left``, ``uuid``), which are noise to a reader. The YAML still compiles:
+    positions are laid out again and uuids are regenerated.
+
+    ``db_path`` can be the packaged slim catalog: the catalog is only used to
+    drop values the compiler would re-derive, so the output is identical to the
+    one produced with a full probed reference DB.
     """
     import yaml
 
@@ -211,7 +219,7 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        playbooks = [
+        playbooks: list[dict[str, Any]] = [
             {
                 "name": pb.name,
                 "uuid": pb.uuid,
@@ -262,6 +270,12 @@ def decompile_to_yaml(fsr_json: dict[str, Any], db_path: Path) -> str:
         if isinstance(o, list):
             return [_clean(x) for x in o]
         return o
+
+    if not layout:
+        for pb in playbooks:
+            for step in pb["steps"]:
+                for k in ("uuid", "top", "left"):
+                    step.pop(k, None)
 
     return yaml.safe_dump(_clean(out), sort_keys=False, allow_unicode=True)
 

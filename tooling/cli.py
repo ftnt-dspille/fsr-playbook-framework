@@ -3752,12 +3752,34 @@ def cmd_validate_ingestion(args: argparse.Namespace) -> int:
 
 
 def cmd_decompile(args: argparse.Namespace) -> int:
-    """FSR JSON -> simplified YAML (one playbook, optionally filtered by name)."""
+    """FSR JSON -> authored-style YAML (one playbook, optionally filtered by name).
+
+    Default output is the same minimal authoring YAML ``pull`` writes (it compiles back).
+    ``--no-layout`` also drops step positions and uuids, for reading. ``--raw`` is the old
+    internal dump (iris, resolved routes), kept for debugging the decompiler itself.
+    """
     import yaml
 
-    from fsr_playbooks.compiler.decompiler import decompile
+    from fsr_playbooks.compiler.decompiler import decompile, decompile_to_yaml
 
     src = json.loads(Path(args.input).read_text())
+
+    if not args.raw:
+        if args.workflow:
+            for c in src.get("data") or []:
+                c["workflows"] = [w for w in c.get("workflows") or [] if w.get("name") == args.workflow]
+            src["data"] = [c for c in src.get("data") or [] if c.get("workflows")]
+            if not src["data"]:
+                print(f"no playbook named {args.workflow!r}", file=sys.stderr)
+                return 1
+        text = decompile_to_yaml(src, Path(args.db), layout=not args.no_layout)
+        if args.output:
+            Path(args.output).write_text(text)
+            print(f"wrote {args.output}", file=sys.stderr)
+        else:
+            sys.stdout.write(text)
+        return 0
+
     coll = decompile(src, Path(args.db))
 
     if args.workflow:
@@ -5244,6 +5266,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-o", "--output", default=None)
     sp.add_argument("-w", "--workflow", default=None,
                     help="filter to a single workflow by exact name")
+    sp.add_argument("--no-layout", action="store_true",
+                    help="drop step positions and uuids (top/left/uuid): easier to read, still compiles")
+    sp.add_argument("--raw", action="store_true",
+                    help="the old internal dump (iris, resolved routes) instead of the authoring YAML")
     sp.set_defaults(func=cmd_decompile)
 
     sp = sub.add_parser("roundtrip", help="FSR JSON round-trip semantic diff")
