@@ -200,3 +200,53 @@ def test_collect_fixes_is_sorted_by_position():
     assert "stop_to_end" in codes
     assert "norway_quote" in codes
     assert "input_param_ref" in codes
+
+
+# A create_record's `fields.name` is a record field, not a step name. The old
+# line regex matched every `name:` and rewrote this one -- free text with
+# Jinja -- into `'Escalated Alert_ _ vars_input_records_0_name '`, and the
+# tool told the model to adopt that copy. Seen on a Frank build sweep.
+_FIELD_NAME_PB = (
+    "playbooks:\n"
+    "  - name: 'Create Incident: from alert'\n"
+    "    steps:\n"
+    "      - name: Start\n"
+    "        type: start\n"
+    "        module: alerts\n"
+    "        next: Make Incident (v2)\n"
+    "      - name: Make Incident (v2)\n"
+    "        type: create_record\n"
+    "        module: incidents\n"
+    "        fields:\n"
+    "          name: 'Escalated Alert: {{ vars.input.records[0].name }}'\n"
+    "        next: End\n"
+    "      - name: End\n"
+    "        type: end\n"
+)
+
+
+def test_step_name_charset_leaves_record_fields_and_playbook_name_alone():
+    fixed = apply_fixes(_FIELD_NAME_PB, collect_fixes(_FIELD_NAME_PB))
+    assert "name: 'Escalated Alert: {{ vars.input.records[0].name }}'" in fixed
+    assert "  - name: 'Create Incident: from alert'\n" in fixed
+
+
+def test_step_name_charset_renames_the_step_and_its_next_links():
+    fixed = apply_fixes(_FIELD_NAME_PB, collect_fixes(_FIELD_NAME_PB))
+    assert "      - name: Make Incident _v2\n" in fixed
+    assert "        next: Make Incident _v2\n" in fixed
+    assert "(v2)" not in fixed
+    import yaml
+    steps = yaml.safe_load(fixed)["playbooks"][0]["steps"]
+    names = {s["name"] for s in steps}
+    assert all(s.get("next") in names for s in steps if s.get("next"))
+    assert collect_fixes(fixed) == []
+
+
+def test_step_name_charset_keeps_quote_style_and_skips_unparseable_yaml():
+    text = ("playbooks:\n  - name: P\n    steps:\n"
+            "      - name: \"Find--Records\"\n        type: end\n")
+    (f,) = [x for x in collect_fixes(text) if x.code == "step_name_charset"]
+    assert f.original == '"Find--Records"' and f.replacement == '"Find_Records"'
+    assert [x for x in collect_fixes("steps: [\n  - name: a:b")
+            if x.code == "step_name_charset"] == []

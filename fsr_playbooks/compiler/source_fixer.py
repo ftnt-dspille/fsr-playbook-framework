@@ -141,48 +141,92 @@ def _fix_norway(text: str) -> list[Fix]:
     return out
 
 
-# --- (4) Step name charset: disallowed chars in `name:` --------------------
+# --- (4) Step name charset: disallowed chars in a STEP's `name:` -----------
 
-_NAME_RE = re.compile(r"(?m)^(\s*-?\s*name:\s*)(.*?)(\s*(?:#.*)?)$")
-_BAD_CHAR_RUN = re.compile(r"[^A-Za-z0-9 _\"]+")
 _NAME_OK = re.compile(r"^[A-Za-z0-9 _]+$")
 
 
-def _strip_quotes(s: str) -> tuple[str, str, str]:
-    s = s.strip()
-    if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
-        return s[0], s[1:-1], s[-1]
-    return "", s, ""
+def _step_name_nodes(text: str):
+    """(step name scalar nodes, `next:` scalar nodes) from the composed
+    YAML, with their source positions. A step is a mapping that is an item
+    of a sequence under a `steps:` key, at any depth. Unparseable text
+    yields nothing -- the parse error is reported elsewhere, and a fixer
+    that guesses structure from lines is how this one used to rewrite a
+    create_record's `fields.name` Jinja into garbage."""
+    try:
+        root = yaml.compose(text)
+    except yaml.YAMLError:
+        return [], []
+    names: list = []
+    nexts: list = []
+
+    def walk(node, under_steps: bool = False) -> None:
+        if isinstance(node, yaml.SequenceNode):
+            for item in node.value:
+                if under_steps and isinstance(item, yaml.MappingNode):
+                    for k, v in item.value:
+                        if (isinstance(k, yaml.ScalarNode) and k.value == "name"
+                                and isinstance(v, yaml.ScalarNode)):
+                            names.append(v)
+                walk(item)
+        elif isinstance(node, yaml.MappingNode):
+            for k, v in node.value:
+                key = k.value if isinstance(k, yaml.ScalarNode) else None
+                if key == "next":
+                    if isinstance(v, yaml.ScalarNode):
+                        nexts.append(v)
+                    elif isinstance(v, yaml.SequenceNode):
+                        nexts.extend(x for x in v.value
+                                     if isinstance(x, yaml.ScalarNode))
+                walk(v, under_steps=(key == "steps"))
+
+    if root is not None:
+        walk(root)
+    return names, nexts
+
+
+def _scalar_fix(text: str, node, new_value: str, code: str,
+                message: str) -> Fix:
+    """Replace one scalar's source span, keeping its quote style."""
+    start, end = node.start_mark.index, node.end_mark.index
+    original = text[start:end]
+    style = node.style if node.style in ("'", '"') else ""
+    line, col = _line_col(text, start)
+    end_line, end_col = _line_col(text, end)
+    return Fix(line=line, col=col, end_line=end_line, end_col=end_col,
+               original=original, replacement=f"{style}{new_value}{style}",
+               code=code, message=message)
 
 
 def _fix_step_name_charset(text: str) -> list[Fix]:
-    """Rewrite step `name:` values that contain characters outside
-    `[A-Za-z0-9 _]` -- the FSR designer rejects these on save. Substitutes
-    runs of disallowed chars with `_`. Conservative: only fires when the
-    surrounding line clearly looks like a step `name:` (we can't know
-    structure without parsing, so a `playbook.name` may also match -- but
-    those are typically clean strings, so the regex stays harmless).
-    """
+    """Rewrite STEP names that contain characters outside `[A-Za-z0-9 _]`
+    -- the FSR designer rejects these on save -- and every `next:` that
+    names the renamed step, so the fix never leaves a dangling link.
+    Runs of disallowed characters become `_`.
+
+    Only real step names: a record field called `name` (`fields.name` on a
+    create_record, which is free text and usually Jinja) and the playbook's
+    own name are not step names and are left alone."""
     out: list[Fix] = []
-    for m in _NAME_RE.finditer(text):
-        head, raw, tail = m.group(1), m.group(2), m.group(3)
-        ql, inner, qr = _strip_quotes(raw)
+    names, nexts = _step_name_nodes(text)
+    renamed: dict[str, str] = {}
+    for node in names:
+        inner = node.value
         if not inner or _NAME_OK.match(inner):
             continue
-        # Rewrite disallowed runs to `_`. Keep quotes if the source had
-        # them; add quotes when the new value still contains spaces and
-        # the source was unquoted (defensive -- current substitution
-        # never introduces quote-requiring chars, but keeps shape stable).
         fixed = re.sub(r"[^A-Za-z0-9 _]+", "_", inner).strip("_")
         if not fixed or fixed == inner:
             continue
-        replacement = f"{head}{ql}{fixed}{qr}{tail}"
-        out.append(_emit_match(
-            text, m, replacement,
-            "step_name_charset",
+        renamed[inner] = fixed
+        out.append(_scalar_fix(
+            text, node, fixed, "step_name_charset",
             (f"step name {inner!r} contains characters outside "
-             f"[A-Za-z0-9 _]; the FSR designer rejects this on save"),
-        ))
+             f"[A-Za-z0-9 _]; the FSR designer rejects this on save")))
+    for node in nexts:
+        if node.value in renamed:
+            out.append(_scalar_fix(
+                text, node, renamed[node.value], "step_name_charset",
+                f"`next:` follows the renamed step {node.value!r}"))
     return out
 
 
