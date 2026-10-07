@@ -108,6 +108,30 @@ def test_printing_the_edit_instead_of_applying_it_fails():
     assert r["score"] < r["max"]
 
 
+def test_retyping_the_edit_and_only_narrating_it_fails():
+    # Seen on the matrix once the open playbook was mounted: the model
+    # rebuilt the playbook through validate_yaml / verify_playbook, offered
+    # nothing, and said "the editor now shows the updated playbook". The
+    # delivery gate called that a read-only turn and SKIPPED it -- 3/3.
+    trace = [{"name": "validate_yaml", "args": {"yaml_text": AFTER}},
+             {"name": "verify_playbook", "args": {"yaml_text": AFTER},
+              "verify": {"ready_to_push": True}}]
+    r = _score(AFTER, trace=trace, text="The editor now shows the updated playbook.")
+    d = r["levels"]["enhance_delivery"]
+    assert d["passed"] is False and d["code"] == "not_delivered"
+    assert r["score"] < r["max"]
+
+
+def test_offering_the_edit_as_a_new_playbook_fails():
+    # The pre-mount fallback: a Create offer for a playbook that is already
+    # open would save a duplicate, not update it.
+    trace = [{"name": "verify_playbook", "args": {"yaml_text": AFTER},
+              "verify": {"ready_to_push": True}},
+             {"name": "emit_playbook_offer", "args": {"yaml": AFTER}}]
+    d = _score(AFTER, trace=trace)["levels"]["enhance_delivery"]
+    assert d["passed"] is False and d["code"] == "offered_as_new"
+
+
 # --- mode plumbing --------------------------------------------------------
 
 def test_the_open_playbook_reaches_the_model_with_the_ask():

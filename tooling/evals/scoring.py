@@ -1805,11 +1805,33 @@ def score(
         # call returned ok and nothing was ever written.
         counted_here = {"behavior", "verified", "no_collateral_damage"}
         if enhance:
-            out["levels"]["enhance_delivery"] = (
+            delivery = (
                 score_enhance_delivery(trace, final_text or "")
                 if trace is not None else
                 {"passed": False, "skipped": True,
                  "detail": "no tool-use trace supplied"})
+            # Every enhance fixture asks for an edit, so "no enhancement
+            # attempted" is not a read-only turn here -- it is the edit never
+            # reaching the open playbook. Skipping it let two failures score
+            # full marks: a playbook re-typed through validate_yaml and only
+            # narrated ("the editor now shows the updated playbook", no
+            # offer), and a Create offer that would duplicate the open
+            # playbook instead of updating it.
+            if trace is not None and delivery.get("skipped"):
+                created = any(
+                    c.get("name") == "emit_playbook_offer"
+                    for c in canonicalize_trace(trace) or [])
+                delivery = {
+                    "passed": False, "skipped": False,
+                    "code": "offered_as_new" if created else "not_delivered",
+                    "detail": (
+                        "delivered the edit as a NEW playbook (Create offer) "
+                        "instead of an update to the open one" if created else
+                        "the edit never reached the open playbook: no "
+                        "edit_playbook / verify_enhancement and no "
+                        "enhancement offer"),
+                }
+            out["levels"]["enhance_delivery"] = delivery
             counted_here.add("enhance_delivery")
         for k, lv in out["levels"].items():
             if k in counted_here:
