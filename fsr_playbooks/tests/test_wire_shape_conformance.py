@@ -237,6 +237,7 @@ playbooks:
       - name: Upd
         type: update_record
         module: incidents
+        record: "{{ vars.input.records[0]['@id'] }}"
         resource: {status: Closed}
 """),
     "InsertData": ("check", "New", """

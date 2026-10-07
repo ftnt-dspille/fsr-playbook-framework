@@ -861,6 +861,18 @@ class NormalizerMixin:
             a = new
         step.arguments = a
 
+        # An update names the record it writes. Without `record:` the step
+        # compiles, imports, and fails at run time with nothing to update;
+        # every one of the 1342 update steps in the reference corpus sets it.
+        if step.type == "update_record" and not a.get("collection"):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="update_record has no `record:` -- it has nothing to write to",
+                path=f"{path}.arguments.record",
+                suggestion=("set the IRI, e.g. `record: \"{{ vars.input.records[0]['@id'] }}\"` "
+                            "or `record: \"{{ vars.steps.find[0]['@id'] }}\"`"),
+            ))
+
         # An upsert with nothing to match on is not an upsert.
         #
         # `/api/3/upsert/<m>` reconciles duplicates by the module's UNIQUE
@@ -965,11 +977,16 @@ class NormalizerMixin:
                     "_fieldTitle": so.get("_fieldTitle", fld),
                 })
             wire_filters = []
+            date_module = module_schema.module_name(a.get("module"))
             for f in filters_in:
                 if not isinstance(f, dict):
                     wire_filters.append(f)
                     continue
-                wf: dict[str, Any] = {"type": f.get("type", "primitive")}
+                # A date filter sent as `primitive` is a 400 from /api/query.
+                ftype = f.get("type") or (
+                    "datetime" if module_schema.is_datetime_field(
+                        self.conn, date_module, f.get("field")) else "primitive")
+                wf: dict[str, Any] = {"type": ftype}
                 wf["field"] = f.get("field")
                 wf["value"] = f.get("value")
                 # `op:` is the trigger `when:` spelling, and models carry it

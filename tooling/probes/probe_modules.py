@@ -177,7 +177,10 @@ def _insert_field(
             module,
             name,
             _scalarize(attr.get("title") or attr.get("displayName") or name),
-            _scalarize(attr.get("type") or attr.get("formType")),
+            # Date fields are `type: integer` (epoch) with `formType: datetime`;
+            # keep the datetime -- a query filter on one needs `type: datetime`.
+            "datetime" if attr.get("formType") == "datetime"
+            else _scalarize(attr.get("type") or attr.get("formType")),
             _bool(_is_required(attr.get("validation"))),
             json.dumps(options) if options else None,
             _scalarize(attr.get("tooltip")),

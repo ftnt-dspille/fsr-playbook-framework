@@ -42,6 +42,7 @@ playbooks:
         type: update_record
 {body}
         module: incidents
+        record: "{{{{ vars.input.records[0]['@id'] }}}}"
         resource: {{status: Closed}}
 """
 

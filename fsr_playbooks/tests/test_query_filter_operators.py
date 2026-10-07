@@ -137,3 +137,67 @@ def test_bulk_delete_query_is_rewritten():
     assert '"operator": "like"' in body
     assert '"value": "%junk%"' in body
     assert "contains" not in body
+
+
+def _date_filters(field: str, extra: str = "") -> dict:
+    return _filters(f"""
+      - name: S1
+        type: find_record
+        module: alerts
+        filters:
+          - field: {field}
+            operator: gte
+            value: "{{{{ arrow.utcnow().shift(days=-1).int_timestamp }}}}"{extra}
+""")[0]
+
+
+def test_date_filters_are_typed_datetime():
+    # /api/query answers 400 to a date filter typed `primitive`
+    # (live-verified on 8.0.0); the designer always writes `datetime`.
+    assert _date_filters("createDate")["type"] == "datetime"
+    assert _date_filters("modifyDate")["type"] == "datetime"
+    assert _date_filters("description")["type"] == "primitive"
+
+
+def test_author_filter_type_wins():
+    assert _date_filters("createDate", "\n            type: primitive")["type"] == "primitive"
+
+
+def test_declared_date_fields_come_from_the_store(tmp_path):
+    import shutil
+    import sqlite3
+
+    from fsr_playbooks import module_schema
+
+    db = tmp_path / "ref.db"
+    shutil.copy(DB, db)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT OR REPLACE INTO module_fields (module_name, field_name, title, type) "
+                 "VALUES ('alerts', 'dueBy', 'Due By', 'datetime')")
+    conn.commit()
+    assert module_schema.is_datetime_field(conn, "alerts", "dueBy")
+    assert not module_schema.is_datetime_field(conn, "alerts", "description")
+    assert not module_schema.is_datetime_field(None, "alerts", "dueBy")
+    conn.close()
+    res = compile_yaml(_HEAD + """
+      - name: S1
+        type: find_record
+        module: alerts
+        filters:
+          - field: dueBy
+            operator: isnull
+            value: "true"
+""", db)
+    steps = res.fsr_json["data"][0]["workflows"][0]["steps"]
+    assert next(s for s in steps if s["name"] == "S1")["arguments"]["query"]["filters"][0]["type"] == "datetime"
+
+
+def test_update_without_a_record_is_an_error():
+    res = compile_yaml(_HEAD + """
+      - name: S1
+        type: update_record
+        module: alerts
+        fields: {name: x}
+""", DB)
+    assert not res.ok
+    assert any("record:" in e.message for e in res.errors if e.severity == "error")

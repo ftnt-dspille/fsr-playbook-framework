@@ -19,6 +19,7 @@ playbooks:
       - name: u
         type: update_record
         module: alerts
+        record: /api/3/alerts/abc
         resource:
           "@id": "/api/3/alerts/abc"
           description: "x"

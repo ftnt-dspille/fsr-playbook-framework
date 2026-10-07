@@ -36,6 +36,11 @@ SYSTEM_FIELDS: frozenset[str] = frozenset({
 })
 
 
+# Date fields every record carries. Module metadata types a date as
+# `integer` (it is stored as epoch) with `formType: datetime`; the store keeps
+# `datetime` for declared ones (see probe_modules), these are the implicit ones.
+SYSTEM_DATETIME_FIELDS: frozenset[str] = frozenset({"createDate", "modifyDate"})
+
 # Names authors reach for that are not the platform's field, where spelling
 # similarity cannot find the right one. Every tag filter and tag write in the
 # reference corpus uses `recordTags` (none use `tags`); a filter on `tags`
@@ -121,3 +126,22 @@ def catalog_is_instance(conn: sqlite3.Connection) -> bool:
                     or _catalog_meta.get(conn, "modules_warmed_at"))
     except sqlite3.Error:
         return False
+
+
+def is_datetime_field(conn: sqlite3.Connection | None, module: str | None, field: object) -> bool:
+    """True when `field` on `module` is a date. A query filter on one must say
+    `type: datetime`: sent as `primitive`, `/api/query` answers 400 and the
+    find_record step fails."""
+    if not isinstance(field, str):
+        return False
+    if field in SYSTEM_DATETIME_FIELDS:
+        return True
+    if conn is None or not module:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT type FROM module_fields WHERE module_name=? AND field_name=?",
+            (module, field)).fetchone()
+    except sqlite3.Error:
+        return False
+    return bool(row) and row[0] == "datetime"
