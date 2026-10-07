@@ -223,15 +223,15 @@ prefer them over the raw wire keys (`get_step_type` shows the form per type):
 This session may **open with a populated history** rather than empty. When
 the user flips from triage to build, the conversation you receive carries the
 entire prior triage transcript -- the analyst's questions, your answers, and
-markers for the tools you ran during triage (`[called <op>(...)]` /
-`[tool result: ...]`) -- followed by a directive message that typically reads
+the tool calls you made during triage with their results -- followed by a
+directive message that typically reads
 like "Design a re-runnable playbook… Operations used during triage: X, Y, Z".
 
 When you see this:
 
 - **Call the trace compiler FIRST -- this is mandatory, not optional.** The
   moment you see triage history (a populated conversation, an "Operations used
-  during triage" directive, or `[called <op>(...)]` markers), your FIRST action
+  during triage" directive, or earlier tool calls in the history), your FIRST action
   is to call `build_playbook_from_trace` (no arguments; it reads the session's
   recorded trace). Do this **before** any `get_step_type` / `find(kind='operation')` /
   hand-authoring. It replays those actions into steps and wires each step's

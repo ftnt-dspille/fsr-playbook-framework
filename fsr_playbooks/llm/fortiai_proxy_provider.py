@@ -62,6 +62,7 @@ from .provider import (
     TurnRequest,
     UsageEvent,
 )
+from .replay import blocks_to_prose, is_block_content
 from .tools import _resolve_tier as _tier_for
 from .tools import anthropic_tools as _anthropic_tools
 from .tools import dispatch
@@ -443,6 +444,12 @@ class FortiAIProxyProvider(CapabilityMixin):
         for m in messages:
             if isinstance(m.content, str):
                 history.append({"role": m.role, "content": m.content})
+            elif is_block_content(m.content):
+                # Replayed history: the proxy has no native tool turns, so it
+                # gets prose that is not call-shaped (see llm/replay.py).
+                prose = blocks_to_prose(m.role, m.content)
+                if prose:
+                    history.append({"role": m.role, "content": prose})
             else:
                 # Internal turns carried as block lists (from resume).
                 # Flatten: each block carries its own role.

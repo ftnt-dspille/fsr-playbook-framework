@@ -63,6 +63,7 @@ from .provider import (
     ToolUseEvent,
     UsageEvent,
 )
+from .replay import blocks_to_openai, is_block_content
 from .tools import dispatch, openai_tools
 
 DEFAULT_BASE_URL = os.environ.get(
@@ -85,6 +86,9 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
     for m in messages:
         if isinstance(m.content, str):
             out.append({"role": m.role, "content": m.content})
+        elif is_block_content(m.content):
+            # Replayed history in the neutral block form -- see llm/replay.py.
+            out.extend(blocks_to_openai(m.role, m.content))
         else:
             # Already an OpenAI-shaped dict (assistant w/ tool_calls, or
             # tool result message). Trust it.
