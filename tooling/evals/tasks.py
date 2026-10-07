@@ -89,6 +89,22 @@ class Task:
     # Tool slice to advertise: "build" / "triage" (intents.tools_for_intent)
     # or None for the full registry the agentic provider defaults to.
     tool_slice: str | None = None
+    # The prompt's own ```yaml block is the playbook the analyst has OPEN (a
+    # fixture written before `before_scenario` existed). See `open_yaml`.
+    prompt_yaml_is_open: bool = False
+
+    def open_yaml(self) -> str | None:
+        """The playbook the analyst has open for this turn, mounted as the
+        session's grounded playbook exactly as the connector mounts
+        `entity.playbook_yaml` -- so `edit_playbook` and the enhance offer
+        work as they do in the product. Pasting it into the prompt alone left
+        every enhance fixture with `no_open_playbook`, falling back to
+        re-typing the playbook as a new Create offer."""
+        if self.prompt_yaml_is_open:
+            import re
+            m = re.search(r"```ya?ml\s*\n(.*?)```", self.prompt, re.DOTALL)
+            return m.group(1) if m else None
+        return self.broken_yaml_text()
 
     def broken_yaml_text(self) -> str | None:
         """The playbook the turn starts FROM -- a broken one to repair, or an
@@ -142,6 +158,7 @@ def load_tasks(filter_names: list[str] | None = None) -> list[Task]:
             before_scenario=data.get("before_scenario"),
             prompt_variant=data.get("prompt_variant"),
             tool_slice=data.get("tool_slice"),
+            prompt_yaml_is_open=bool(data.get("prompt_yaml_is_open")),
         ))
     if filter_names:
         wanted = set(filter_names)

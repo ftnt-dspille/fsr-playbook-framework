@@ -123,6 +123,24 @@ def _user_message_for(task: Task) -> str:
     return f"{task.prompt}\n\nHere is the playbook:\n\n```yaml\n{broken}\n```"
 
 
+def _with_open_playbook(task: Task, fn):
+    """Run `fn` with the task's open playbook mounted (Task.open_yaml), the
+    way the connector binds `entity.playbook_yaml` for a turn. Called inside
+    the worker thread's copied context so the binding is the task's own."""
+    from fsr_playbooks.mcp_server._shared import (  # noqa: PLC0415
+        reset_grounded_yaml,
+        set_grounded_yaml,
+    )
+    open_yaml = task.open_yaml()
+    if not open_yaml:
+        return fn()
+    token = set_grounded_yaml(open_yaml)
+    try:
+        return fn()
+    finally:
+        reset_grounded_yaml(token)
+
+
 def _gold_lookup_for(tasks: list[Task]):
     """Build a `prompt -> gold_yaml_text` map for the gold provider."""
     by_prompt = {t.prompt: t.gold_yaml_text() for t in tasks}
@@ -374,7 +392,8 @@ def run_matrix(
                 _sys = (_plan.prompt if _plan is not None
                         else _prompt_for(t, system_prompt))
                 _usr = _user_message_for(t)
-                raw = _call_with_deadline(lambda: provider(_sys, _usr))
+                raw = _call_with_deadline(
+                    lambda: _with_open_playbook(t, lambda: provider(_sys, _usr)))
             except Exception as e:  # noqa: BLE001
                 _err_row = {
                     "model": model_name, "task": t.name,

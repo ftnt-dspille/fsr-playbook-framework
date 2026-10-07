@@ -352,6 +352,7 @@ def _agentic_anthropic_provider() -> Callable:
                         "required_fix_count": len(result.get("required_fixes") or []),
                         "warning_count": len(result.get("warnings") or []),
                     }
+                _thread_result(entry, name, result)
                 trace.append(entry)
                 tool_results.append({
                     "type": "tool_result",
@@ -502,6 +503,7 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
                         "required_fix_count": len(result.get("required_fixes") or []),
                         "warning_count": len(result.get("warnings") or []),
                     }
+                _thread_result(entry, name, result)
                 trace.append(entry)
                 history.append({
                     "role": "tool", "tool_call_id": tc.get("id", ""),
@@ -519,6 +521,25 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
         return {"text": "\n".join(text_chunks), "trace": trace,
                 "turns": turns, "audit": _snap()}
     return _call
+
+
+# Result keys the scorer reads off a call record (scoring.delivered_yaml,
+# scoring's enhancement-delivery grade). Threaded for these tools only: a whole
+# result per call would bloat every archived row.
+_THREADED_RESULT_KEYS = ("ok", "code", "verified_id", "ready_to_push", "after_yaml")
+_THREADED_RESULT_TOOLS = _VERIFY_TOOL_NAMES | {
+    "emit_enhancement_offer", "emit_playbook_offer", "emit_card"}
+
+
+def _thread_result(entry: dict[str, Any], name: str, result: Any) -> None:
+    """Attach the scorer-relevant slice of a tool's result to its trace entry.
+    Without it, `edit_playbook`'s edited document (`after_yaml`) and every
+    verify's `verified_id` were invisible: an edit-path delivery scored as no
+    delivery, and an offer's id could never be matched to the verify that
+    issued it."""
+    if name in _THREADED_RESULT_TOOLS and isinstance(result, dict):
+        entry["result"] = {k: result[k] for k in _THREADED_RESULT_KEYS
+                           if k in result}
 
 
 def _agentic_lmstudio_provider() -> Callable:
