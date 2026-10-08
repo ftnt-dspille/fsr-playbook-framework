@@ -16,7 +16,12 @@ from __future__ import annotations
 import pytest
 
 from fsr_playbooks.llm import autonomy
-from fsr_playbooks.llm.autonomy import evaluate, parse_policy, set_turn_policy, set_turn_subject
+from fsr_playbooks.llm.autonomy import (
+    evaluate,
+    parse_policy,
+    set_turn_policy,
+    set_turn_subject,
+)
 
 ALERT = "/api/3/alerts/11111111-1111-1111-1111-111111111111"
 OTHER = "22222222-2222-2222-2222-222222222222"
