@@ -1034,10 +1034,12 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                     "properties": {
                         "op": {"type": "string",
                                "enum": ["add_step", "update_step", "rename_step",
-                                        "remove_step", "set_route", "remove_route"]},
+                                        "remove_step", "set_route", "remove_route",
+                                        "add_parameter"]},
                         "name": {"type": "string",
                                  "description": "The step this op acts on "
-                                                "(update/rename/remove)."},
+                                                "(update/rename/remove); "
+                                                "add_parameter: the parameter."},
                         "step": {"type": ["object", "string"],
                                  "description": "add_step: the new step "
                                                 "{name, type, ...step keys}. "

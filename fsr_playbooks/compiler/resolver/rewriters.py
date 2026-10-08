@@ -254,7 +254,9 @@ class RewriterMixin:
                     message=(
                         f"`vars.input.params.{name}` references playbook "
                         f"parameter {name!r}, which is not declared. Add "
-                        f"{name!r} to the playbook's `parameters:` list so the "
+                        f"{name!r} to the playbook's `parameters:` list "
+                        f"(editing the open playbook: {{op: add_parameter, "
+                        f"name: {name}}}) so the "
                         f"trigger materializes it as an input variable -- "
                         f"otherwise the reference evaluates to empty at runtime."
                     ),

@@ -595,3 +595,26 @@ def test_a_rename_outside_edit_playbook_is_not_requested_by_default(open_yaml):
     kinds = {r["kind"] for r in res["regressions"]}
     assert "step_renamed_silently" in kinds
     assert not res["ready_to_push"]
+
+
+def test_add_parameter_declares_what_a_step_reads():
+    """Live: a step read `vars.input.params.servicenow_caller_id`, the gate
+    said to declare it, and edit_playbook had no op that could -- the model
+    fell back to re-typing the whole playbook. Declaring it is one op."""
+    edit = {"op": "update_step", "name": "Note B",
+            "set": {"vars.b": "{{ vars.input.params.caller_id }}"}}
+    refused = edit_playbook([edit], user_message="set Note B from the caller id")
+    assert "add_parameter" in str(refused.get("required_fixes"))
+    res = edit_playbook([edit, {"op": "add_parameter", "name": "caller_id"}],
+                        user_message="set Note B from the caller id")
+    assert res["ready_to_push"], res.get("required_fixes")
+    doc = YAML(typ="safe").load(res["after_yaml"])
+    assert "caller_id" in doc["playbooks"][0]["parameters"]
+    again = edit_playbook([edit, {"op": "add_parameter", "name": "caller_id"},
+                           {"op": "add_parameter", "name": "caller_id"}])
+    assert again["applied"][-1] == "parameter 'caller_id' already declared"
+
+
+def test_add_parameter_refuses_a_non_identifier():
+    out = edit_playbook([{"op": "add_parameter", "name": "caller id"}])
+    assert out["code"] == "bad_operation"

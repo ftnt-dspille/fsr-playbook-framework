@@ -899,7 +899,7 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
 # ---------------------------------------------------------------------------
 
 _EDIT_OPS = ("add_step", "update_step", "rename_step", "remove_step",
-             "set_route", "remove_route")
+             "set_route", "remove_route", "add_parameter")
 # Step-level keys an update may not change: `name` has its own op because
 # routes point at it; `uuid` ties the step to its live record.
 _UPDATE_FORBIDDEN = frozenset({"name", "uuid"})
@@ -1053,6 +1053,7 @@ _OP_SHAPES = {
     "remove_step": "{op: remove_step, name: <step>, reconnect: true}",
     "set_route": "{op: set_route, from: <step>, to: <step>, option: <branch>}",
     "remove_route": "{op: remove_route, from: <step>, option: <branch>}",
+    "add_parameter": "{op: add_parameter, name: <parameter>}",
 }
 
 
@@ -1304,6 +1305,8 @@ def edit_playbook(
       - {op: set_route, from: <step>, to: <step>, option: <branch label>}
           `option` for a decision condition / manual-input option; omit for `next`.
       - {op: remove_route, from: <step>, option: <branch label>}
+      - {op: add_parameter, name: <parameter>}
+          declares a playbook parameter, so `vars.input.params.<name>` resolves.
 
     `playbook`: which playbook, when the open collection holds several.
     Returns the verify_enhancement envelope plus `applied` (one line per op) and
@@ -1378,6 +1381,26 @@ def edit_playbook(
 
     def _apply(op: dict) -> str:
         n = _normalize_op(op)
+        if n.get("op") == "add_parameter":
+            # Playbook-level, not a step: live, a step read
+            # `vars.input.params.servicenow_caller_id`, the gate said "add it
+            # to `parameters:`", and no op could -- so the model re-typed the
+            # whole playbook through verify_enhancement to declare one name.
+            pname = n.get("name")
+            if not isinstance(pname, str) or not re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]*", pname.strip()):
+                raise _EditError("add_parameter needs name=<identifier>")
+            pname = pname.strip()
+            params = target.get("parameters")
+            if params is None:
+                target["parameters"] = params = []
+            if not isinstance(params, list):
+                raise _EditError("the playbook's parameters: is not a list")
+            have = {(p.get("name") if isinstance(p, dict) else str(p)) for p in params}
+            if pname in have:
+                return f"parameter {pname!r} already declared"
+            params.append(pname)
+            return f"declared parameter {pname!r}"
         old = None
         if n.get("op") == "rename_step":
             try:
