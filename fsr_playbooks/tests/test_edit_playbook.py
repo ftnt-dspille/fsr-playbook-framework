@@ -565,3 +565,33 @@ def test_a_step_added_into_a_branch_that_already_routes_to_it_does_not_loop():
         assert after["Note"].get("next") not in ("Note", "note")
     finally:
         reset_grounded_yaml(tok)
+
+
+def test_a_rename_that_also_edits_the_step_is_still_a_rename():
+    """Live (analyst sim): "rename the manual task to 'Approve IPv4 Block'" --
+    the model sent rename_step plus an update_step retitling the same step.
+    The changed contents broke the projection pairing, so the verifier called
+    the step dropped and refused the analyst's own rename three times. The
+    step kept its uuid; that, and the rename_step op, are what decide it."""
+    res = edit_playbook([
+        {"op": "rename_step", "name": "Note B", "to": "Close Out"},
+        {"op": "update_step", "name": "Close Out", "set": {"vars.b": "2"}},
+    ], user_message="tidy up the last step")
+    kinds = {r["kind"]: r for r in res["regressions"]}
+    assert "step_dropped" not in kinds
+    assert kinds["step_renamed_as_requested"]["severity"] == "warning"
+    assert res["ready_to_push"], res.get("required_fixes")
+    renamed = [c for c in res["diff_summary"]["changes"] if c["kind"] == "renamed"]
+    assert renamed and "arguments" in renamed[0]["changed_fields"]
+    assert "Close Out" in res["diff_summary"]["steps_modified"]
+
+
+def test_a_rename_outside_edit_playbook_is_not_requested_by_default(open_yaml):
+    """The rename_step exemption comes from the op, not from the model's say-so:
+    the same rename re-typed through verify_enhancement, with no rename asked
+    for, still blocks."""
+    after = open_yaml.replace("name: Note B", "name: Close Out")
+    res = verify_enhancement(after_yaml=after, user_message="tidy up")
+    kinds = {r["kind"] for r in res["regressions"]}
+    assert "step_renamed_silently" in kinds
+    assert not res["ready_to_push"]

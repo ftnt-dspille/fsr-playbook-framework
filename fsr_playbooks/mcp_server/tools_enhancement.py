@@ -18,12 +18,19 @@ tell us where to loosen.
 """
 from __future__ import annotations
 
+import contextvars
 import re
 from typing import Any
 
 from . import _verified_yaml
 from ._shared import _err, get_grounded_yaml, get_turn_user_message, mcp
 from .tools_verify import verify_playbook
+
+# Renames `edit_playbook`'s own rename_step ops performed, for the verify it
+# runs. Not a verify_enhancement argument: that is a model-facing tool, and a
+# model that could declare its renames "requested" would bypass the check.
+_OP_RENAMES: contextvars.ContextVar[dict[str, str] | None] = \
+    contextvars.ContextVar("_OP_RENAMES", default=None)
 
 
 def _parse(yaml_text: str):
@@ -170,9 +177,14 @@ def _expand_by_type(referenced: set[str], user_message: str,
 # Structural diff
 # ---------------------------------------------------------------------------
 
-def _diff_collections(before, after, user_message: str | None
+def _diff_collections(before, after, user_message: str | None,
+                      op_renames: dict[str, str] | None = None,
                       ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Compare two IR Collections. Returns (regressions, diff_summary)."""
+    """Compare two IR Collections. Returns (regressions, diff_summary).
+
+    `op_renames` (old name -> new name) are renames an explicit `rename_step`
+    operation performed: the analyst's request in structured form, so they
+    are requested renames whatever words `user_message` used."""
     regressions: list[dict[str, Any]] = []
 
     # Pair playbooks by name (FSR's stable identifier within a collection).
@@ -246,13 +258,31 @@ def _diff_collections(before, after, user_message: str | None
         added = set(a_names - b_names)
         common = b_names & a_names
 
-        # Pair silent renames FIRST so we don't also flag the same pair
-        # as drop+add. A rename = same projection, different name.
+        # Pair renames FIRST so we don't also flag the same pair as
+        # drop+add. A step that kept its uuid is the same step whatever else
+        # changed -- live, "rename the manual task" also retitled its form in
+        # the same edit, the projections differed, and the analyst's own
+        # rename came back as `step_dropped` three times. Without uuids
+        # (hand-written YAML) a rename = same projection, different name.
+        def _uuid_of(s) -> str | None:
+            return getattr(s, "uuid", None) or None
+
+        b_uuids = [_uuid_of(s) for s in bpb.steps if _uuid_of(s)]
+        a_uuids = [_uuid_of(s) for s in apb.steps if _uuid_of(s)]
+        # A duplicated uuid identifies nothing; fall back to projections.
+        uuids_ok = (len(b_uuids) == len(set(b_uuids))
+                    and len(a_uuids) == len(set(a_uuids)))
+
+        def _same_step(dn: str, an: str) -> bool:
+            bu, au = _uuid_of(b_steps[dn]), _uuid_of(a_steps[an])
+            if uuids_ok and bu and au:
+                return bu == au
+            return _step_projection(a_steps[an]) == _step_projection(b_steps[dn])
+
         if dropped and added:
             for dn in list(dropped):
-                dproj = _step_projection(b_steps[dn])
                 for an in list(added):
-                    if _step_projection(a_steps[an]) == dproj:
+                    if _same_step(dn, an):
                         # A rename the analyst asked for BY NAME is not
                         # silent, and blocking it told them their own
                         # request was a regression -- `ready_to_push` went
@@ -263,9 +293,10 @@ def _diff_collections(before, after, user_message: str | None
                         # diff` already uses, narrowed by an explicit
                         # rename verb so an unrequested rename cannot
                         # inherit it from a step merely being mentioned.
-                        requested = (referenced is not None
-                                     and dn in referenced
-                                     and _asked_to_rename(user_message))
+                        requested = ((op_renames or {}).get(dn) == an
+                                     or (referenced is not None
+                                         and dn in referenced
+                                         and _asked_to_rename(user_message)))
                         regressions.append({
                             "kind": ("step_renamed_as_requested" if requested
                                      else "step_renamed_silently"),
@@ -282,15 +313,20 @@ def _diff_collections(before, after, user_message: str | None
                                 "breaks external vars.steps.<slug>.* "
                                 "consumers -- confirm with the user"),
                         })
+                        b_proj = _step_projection(b_steps[dn])
+                        a_proj = _step_projection(a_steps[an])
+                        also = sorted(k for k in b_proj if b_proj[k] != a_proj.get(k))
                         changes.append({
                             "playbook": pb_name,
                             "step": dn,
                             "kind": "renamed",
                             "type": b_steps[dn].type,
-                            "before": {"name": dn},
-                            "after": {"name": an},
-                            "changed_fields": ["name"],
+                            "before": {"name": dn, **(b_proj if also else {})},
+                            "after": {"name": an, **(a_proj if also else {})},
+                            "changed_fields": ["name", *also],
                         })
+                        if also:
+                            steps_modified.append(an)
                         dropped.discard(dn)
                         added.discard(an)
                         break
@@ -612,7 +648,7 @@ def verify_enhancement(
 
     # 3. Diff.
     regressions, diff_summary = _diff_collections(
-        before_coll, after_coll, user_message
+        before_coll, after_coll, user_message, _OP_RENAMES.get()
     )
 
     # 4. Merge into the verify_playbook envelope.
@@ -1338,12 +1374,30 @@ def edit_playbook(
     # Such an op waits until the rest has run, then applies in order.
     applied: list[str] = []
     deferred: list[tuple[int, dict]] = []
+    renames: dict[str, str] = {}  # old -> new, from rename_step ops
+
+    def _apply(op: dict) -> str:
+        n = _normalize_op(op)
+        old = None
+        if n.get("op") == "rename_step":
+            try:
+                old = str(_find(steps, n.get("name"))[1].get("name") or "") or None
+            except _EditError:
+                old = None
+        msg = _apply_op(steps, op)
+        if old:
+            new = str(n.get("to")).strip()
+            # A -> B then B -> C is one rename, A -> C.
+            first = next((k for k, v in renames.items() if v == old), old)
+            renames[first] = new
+        return msg
+
     for i, op in enumerate(operations):
         if not isinstance(op, dict):
             return _err("bad_operation", f"operations[{i}] is not an object",
                         operation_index=i)
         try:
-            applied.append(_apply_op(steps, op))
+            applied.append(_apply(op))
         except _MissingStep as exc:
             later = {_added_name(o) for o in operations[i + 1:]}
             if exc.ref in later or _slug(exc.ref) in {_slug(n) for n in later if n}:
@@ -1354,15 +1408,19 @@ def edit_playbook(
             return _refused(i, op, exc)
     for i, op in deferred:
         try:
-            applied.append(_apply_op(steps, op))
+            applied.append(_apply(op))
         except _EditError as exc:
             return _refused(i, op, exc)
 
     buf = io.StringIO()
     y.dump(doc, buf)
     after = buf.getvalue()
-    out = verify_enhancement(before_yaml=before, after_yaml=after,
-                             user_message=user_message)
+    token = _OP_RENAMES.set(renames)
+    try:
+        out = verify_enhancement(before_yaml=before, after_yaml=after,
+                                 user_message=user_message)
+    finally:
+        _OP_RENAMES.reset(token)
     out = dict(out)
     out["applied"] = applied
     out["after_yaml"] = after
