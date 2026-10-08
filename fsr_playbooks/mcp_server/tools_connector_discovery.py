@@ -10,6 +10,7 @@ connector's fsr_soc_triage. Extracted (transitive closure) from the pre-carve to
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Any
 
@@ -149,6 +150,23 @@ def _canon_target_type(target_type: str) -> str:
     if t in _TARGET_KEYWORDS:
         return t
     return _TARGET_ALIASES.get(t, t)
+
+
+def _word_tokens(text: str | None) -> list[str]:
+    """`blockIPAddress` / `run_script` / "Block IP" -> lowercase words."""
+    t = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text or "")
+    t = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", t)
+    return [w for w in re.split(r"[^a-z0-9]+", t.lower()) if w]
+
+
+def _names_target(op: str | None, title: str | None,
+                  keywords: tuple[str, ...]) -> bool:
+    """Does the op's name or title name the target? Matched on word prefixes,
+    never raw substrings: `"ip" in "run_script"` offered NinjaOne's Run Script
+    as IP containment, and "file" is inside "profile". A prefix still takes
+    `ipv4`, `hostname`, `files`."""
+    words = _word_tokens(op) + _word_tokens(title)
+    return any(w.startswith(k) for w in words for k in keywords)
 
 
 _CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
@@ -488,8 +506,7 @@ def _connectors_that_could_contain(
                      or any(v in nm for v in _CONTAINMENT_VERBS))
         if not is_action:
             continue
-        if keywords and not any(
-                k in nm or k in (title or "").lower() for k in keywords):
+        if keywords and not _names_target(op, title, keywords):
             continue
         found[connector] = op or ""
         if len(found) >= limit:
@@ -730,8 +747,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                          or any(v in nm for v in _CONTAINMENT_VERBS))
             if not is_action:
                 continue
-            if keywords and not any(
-                    k in nm or k in (title or "").lower() for k in keywords):
+            if keywords and not _names_target(op, title, keywords):
                 continue
             # The decisive guard: a real response action is one the dispatch
             # gate would force through approval (tier >= 3). This drops
