@@ -37,7 +37,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .roundtrip import normalize_collection
-from .wire import UnexpandedRelationshipsError, require_expanded_collection
+from .wire import (
+    UnexpandedRelationshipsError,
+    as_record_list,
+    require_expanded_collection,
+)
 
 
 @dataclass
@@ -189,6 +193,83 @@ def _identity(item: Any) -> str:
     return str(item)
 
 
+def _step_renames(live_json: dict[str, Any], outgoing_json: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """{workflow name: {old step name: new step name}} for steps whose uuid
+    survives under a different name -- a rename, not a delete plus an add.
+
+    Normalization drops uuids (they do not survive a round trip), so it is
+    read off the raw documents. Live, keying on name alone refused every
+    rename the analyst asked for as `would_drop_fields`."""
+    def _wfs(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        try:
+            coll = as_record_list(doc.get("data"), path="data")[0]
+            wfs = as_record_list(coll.get("workflows"), path="collection.workflows")
+        except Exception:  # noqa: BLE001 -- no renames is the safe answer
+            return {}
+        return {str(w.get("name")): w for w in wfs if isinstance(w, dict)}
+
+    out: dict[str, dict[str, str]] = {}
+    after = _wfs(outgoing_json)
+    for name, wf in _wfs(live_json).items():
+        awf = after.get(name)
+        if awf is None:
+            continue
+        try:
+            before_steps = as_record_list(wf.get("steps"), path="workflow.steps")
+            after_steps = as_record_list(awf.get("steps"), path="workflow.steps")
+        except Exception:  # noqa: BLE001
+            continue
+        before_uuids = [s.get("uuid") for s in before_steps if isinstance(s, dict)]
+        after_uuids = [s.get("uuid") for s in after_steps if isinstance(s, dict)]
+        if (len([u for u in before_uuids if u]) != len({u for u in before_uuids if u})
+                or len([u for u in after_uuids if u]) != len({u for u in after_uuids if u})):
+            continue  # an ambiguous identity proves nothing: compare by name
+        new_by_uuid = {s.get("uuid"): s.get("name") for s in after_steps
+                       if isinstance(s, dict) and s.get("uuid")}
+        kept = {s.get("name") for s in after_steps if isinstance(s, dict)}
+        live_names = {s.get("name") for s in before_steps if isinstance(s, dict)}
+        renames: dict[str, str] = {}
+        for s in before_steps:
+            if not isinstance(s, dict) or not s.get("uuid"):
+                continue
+            new = new_by_uuid.get(s["uuid"])
+            # A rename only when the old name is otherwise GONE and the new
+            # one is NOT a live step's name: mapping onto an existing name
+            # would let that step's own deletion hide behind the rename.
+            if (new and new != s.get("name") and s.get("name") not in kept
+                    and new not in live_names):
+                renames[str(s.get("name"))] = str(new)
+        if len(set(renames.values())) != len(renames):
+            continue  # two steps "renamed" to one name: fail closed
+        if renames:
+            out[name] = renames
+    return out
+
+
+def _renamed(before: dict[str, Any], renames: dict[str, dict[str, str]]) -> dict[str, Any]:
+    """The normalized live document with renamed steps (and the route ends
+    and trigger that name them) under their NEW names, so the loss walk
+    compares a renamed step with itself."""
+    for wf in before.get("workflows") or []:
+        m = renames.get(str(wf.get("name"))) or {}
+        if not m:
+            continue
+        names = [m.get(s.get("name"), s.get("name")) for s in wf.get("steps") or []]
+        if len(names) != len(set(names)):
+            continue  # a rename that would collide proves nothing: fail closed
+        for s in wf.get("steps") or []:
+            if s.get("name") in m:
+                s["name"] = m[s["name"]]
+        for r in wf.get("routes") or []:
+            for k in ("src_name", "tgt_name"):
+                if r.get(k) in m:
+                    r[k] = m[r[k]]
+        for k in ("trigger_step_name",):
+            if isinstance(wf.get(k), str) and wf[k] in m:
+                wf[k] = m[wf[k]]
+    return before
+
+
 def diff_losses(live_json: dict[str, Any], outgoing_json: dict[str, Any]) -> list[str]:
     """Semantic paths present in `live_json` and gone from `outgoing_json`.
 
@@ -196,7 +277,8 @@ def diff_losses(live_json: dict[str, Any], outgoing_json: dict[str, Any]) -> lis
     the live one as pulled from the appliance, the outgoing one as the compiler
     emitted it from the YAML about to be saved.
     """
-    before = normalize_collection(live_json)
+    before = _renamed(normalize_collection(live_json),
+                      _step_renames(live_json, outgoing_json))
     after = normalize_collection(outgoing_json)
     losses: list[str] = []
     _walk_losses(before, after, "collection", losses)
@@ -244,7 +326,8 @@ def entailed_route_drops(
     `A->B` while adding an unrelated step elsewhere gets no forgiveness, which
     keeps "silently reshapes execution" caught.
     """
-    before = normalize_collection(live_json)
+    before = _renamed(normalize_collection(live_json),
+                      _step_renames(live_json, outgoing_json))
     after = normalize_collection(outgoing_json)
     after_wfs = {w.get("name"): w for w in after.get("workflows") or []}
 
