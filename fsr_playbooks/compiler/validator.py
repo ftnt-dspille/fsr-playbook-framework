@@ -6,6 +6,7 @@ linear paths terminate, etc.
 """
 from __future__ import annotations
 
+import json
 import re
 
 from .errors import CompileError, ErrorCode
@@ -382,14 +383,38 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                                       "uuid", "@id", "@type", "step_id"}:
                         continue
                     valid = sorted(keys)[:8]
+                    # A connector result's top level is the envelope, so a
+                    # field read off it directly renders empty -- certain, not
+                    # a guess. Live (analyst sim): `vars.steps.VT.attributes
+                    # .last_analysis_stats.malicious | default(0)` was always 0,
+                    # the block never ran, and ready_to_push said yes. Other
+                    # step types' keys are best-effort, so they stay warnings,
+                    # as does a mocked step whose mock_result has the key (2
+                    # shipped demo playbooks read mock output that way).
+                    mock = (target.arguments or {}).get("mock_result") \
+                        if isinstance(target.arguments, dict) else None
+                    if isinstance(mock, str):
+                        # A JSON string is the documented form, returned
+                        # verbatim under useMockOutput.
+                        try:
+                            mock = json.loads(mock)
+                        except ValueError:
+                            mock = None
+                    certain = (target.type == "connector"
+                               and not (isinstance(mock, dict) and first_attr in mock))
                     errors.append(CompileError(
                         code=ErrorCode.BAD_VALUE,
                         message=(f"Jinja reference vars.steps.{key}.{first_attr} "
                                  f"in step {s.id!r}: {first_attr!r} is not in "
                                  f"step {target.id!r}'s output keys "
-                                 f"({', '.join(valid)})"),
+                                 f"({', '.join(valid)})"
+                                 + (f" -- a connector's output sits under "
+                                    f"`vars.steps.{key}.data`; read the op's "
+                                    f"shape (get_op_schema, or a run_op "
+                                    f"sample) for the path beneath it"
+                                    if certain else "")),
                         path=f"{spath}.arguments.{sub}",
-                        severity="warning",
+                        severity="error" if certain else "warning",
                     ))
 
 

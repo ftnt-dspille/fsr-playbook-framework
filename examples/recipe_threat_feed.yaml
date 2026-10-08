@@ -101,7 +101,7 @@ playbooks:
           the current source-feed record at IngestBulkFeed time, NOT
           here. This step just unboxes the array into `ingestedData`.
         vars:
-          ingestedData: "{{ vars.steps.Fetch_indicators.indicators }}"
+          ingestedData: "{{ vars.steps.Fetch_indicators.data.indicators }}"
 
       - name: Any data
         type: decision
