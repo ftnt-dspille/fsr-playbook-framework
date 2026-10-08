@@ -1098,6 +1098,12 @@ def _apply_op(steps, op: dict) -> str:
             steps.append(new)
             return f"added {new['name']!r} (unrouted -- route to it with set_route)"
         i, prev = _find(steps, after)
+        if any(str(box[key]) in _refs(new) for box, key in _route_slots(prev)):
+            # prev already routes here (the batch named each successor before
+            # adding it), so `after` is satisfied: place it, splice nothing.
+            _place_after(steps, prev, new)
+            steps.insert(i + 1, new)
+            return f"added {new['name']!r} after {prev.get('name')!r}"
         if any(k in prev for k in ("conditions", "options")) and "next" not in prev:
             # A branching step (decision / manual_input): splice into ONE branch.
             # Live: `after` a manual_input with a single "Continue" button was

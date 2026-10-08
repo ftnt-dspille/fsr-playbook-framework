@@ -535,7 +535,8 @@ def test_a_step_added_after_one_that_already_routes_to_it_does_not_loop():
              "step": {"name": "Check", "type": "decision", "conditions": [
                  {"display": "Go", "when": "{{ true }}", "next": "Note"},
                  {"display": "Else", "default": True, "next": "End"}]}},
-            {"op": "add_step", "after": "Check", "option": "Go",
+            # no option: Check's "Go" branch already routes to Note (live)
+            {"op": "add_step", "after": "Check",
              "step": {"name": "Note", "type": "set_variable", "vars": {"n": "1"},
                       "next": "End"}},
             {"op": "add_step", "after": "Note", "step": {"name": "End", "type": "end"}},
