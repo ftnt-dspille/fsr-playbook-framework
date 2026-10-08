@@ -98,3 +98,18 @@ def test_genuine_unhealthy_status_is_still_cached(monkeypatch):
 
     te.populate_connector_health(client=object(), force=True)
     assert any(a[2] == "Disconnected" for a in stored), stored
+
+
+def test_a_connector_stack_trace_never_reaches_the_message():
+    """Live: a FortiGate block failed and the analyst's chat showed the
+    connector's whole response -- a Python traceback. Its `message` is the
+    part that says what went wrong."""
+    body = ('{"message":"Failed to block IP address with error Invalid endpoint '
+            'or credentials  Connector :: fortigate-firewallV5.4.0",'
+            '"stack_trace":"Traceback (most recent call last):\\n  File '
+            '\\"/opt/cyops-integrations/.env/lib/python3.12/site-packages/'
+            'urllib3/connection.py\\", line 204"}')
+    out = _classify_execute_error("fortigate-firewall", "block_ip", 400, body)
+    assert "Invalid endpoint or credentials" in out["message"]
+    assert "Traceback" not in out["message"]
+    assert "stack_trace" not in out["message"]

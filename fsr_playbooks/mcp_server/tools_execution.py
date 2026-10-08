@@ -1650,6 +1650,24 @@ def _run_op_via_agent_playbook(connector: str, op: str,
             _diag["coll"] = {"exc": repr(e)}
 
 
+def _without_stack_trace(msg: Any) -> Any:
+    """A connector error body minus its Python traceback. FortiSOAR returns
+    `{"message": ..., "stack_trace": ...}`; live, the whole body reached the
+    analyst's chat. The `message` says what went wrong; the trace is for logs."""
+    if not isinstance(msg, str) or "stack_trace" not in msg:
+        return msg
+    try:
+        body = json.loads(msg)
+    except ValueError:
+        return msg.split('"stack_trace"', 1)[0].rstrip(' ,{')
+    if not isinstance(body, dict):
+        return msg
+    body.pop("stack_trace", None)
+    if isinstance(body.get("message"), str) and body["message"].strip():
+        return body["message"].strip()
+    return json.dumps(body)
+
+
 def _classify_execute_error(connector: str, op: str,
                             status: Any, msg: str) -> dict[str, Any]:
     """Shape an `/api/integration/execute/` failure into the right error code.
@@ -1662,6 +1680,7 @@ def _classify_execute_error(connector: str, op: str,
     Incident Id" -- a wrong param, not a down connector). Classify by status and
     surface the connector's own message so the caller can self-repair.
     """
+    msg = _without_stack_trace(msg)
     if isinstance(status, int) and 400 <= status < 500:
         return _err(
             "op_request_rejected",
