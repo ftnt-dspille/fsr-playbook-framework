@@ -94,6 +94,9 @@ class TurnBudget:
 # open there is nothing to patch/enhance, so the affordance gate refuses them
 # at dispatch (still advertised -- the refusal teaches, removal never did).
 _OPEN_PLAYBOOK_CARD_TYPES = frozenset({"enhancement_offer"})
+# Its mirror: card types that create a NEW playbook, refused while one is open.
+_NEW_PLAYBOOK_CARD_TYPES = frozenset({"playbook_offer"})
+_NEW_PLAYBOOK_TOOLS = frozenset({"emit_playbook_offer"})
 # Direct (pre-union) emitters for the same frontier, kept in lockstep with
 # intents.ENHANCE_ONLY_TOOLS.
 _OPEN_PLAYBOOK_TOOLS = frozenset({
@@ -291,6 +294,26 @@ class TurnPlan:
                     "card_type='capability_gap', ...) naming the gap and the "
                     "closest available path -- do not end in prose asking "
                     "them to advise."
+                ),
+            }
+        creates_new = name in _NEW_PLAYBOOK_TOOLS or (
+            name == "emit_card"
+            and (args or {}).get("card_type") in _NEW_PLAYBOOK_CARD_TYPES)
+        if creates_new and self.context.has_open_playbook:
+            # The mirror of the frontier below: with a playbook open, a
+            # create-new offer saves a SECOND playbook and leaves the one on
+            # the canvas untouched (analyst sim, empty designer playbook).
+            return {
+                "ok": False,
+                "code": "not_afforded",
+                "error": (
+                    "A playbook is open in the designer, so the change goes "
+                    "INTO it: build it with edit_playbook (on an empty "
+                    "playbook, add the start step first with no `after`), then "
+                    "end with emit_card(card_type='enhancement_offer', "
+                    "payload={id, summary, verified_id}). playbook_offer "
+                    "creates a separate new playbook and would leave the open "
+                    "one unchanged."
                 ),
             }
         if gated and not self.context.has_open_playbook:

@@ -199,3 +199,18 @@ def test_emit_card_top_level_fields_folded_into_payload():
     bad = dispatch("emit_card", {"id": "x", "summary": "no card_type"})
     assert (bad or {}).get("ok") is not True and (
         bad.get("error") is not None or bad.get("code"))
+
+
+def test_gate_refuses_a_create_offer_while_a_playbook_is_open():
+    """The mirror of the frontier above. Live (analyst sim, empty designer
+    playbook): the turn ended on playbook_offer, whose Save creates a SECOND
+    playbook and leaves the open one untouched. The prompt forbids it in
+    bold; the model did it anyway, so the gate holds it."""
+    plan = plan_turn("build", context=TurnContext(has_open_playbook=True))
+    r = plan.gate_refusal("emit_card", {"card_type": "playbook_offer"})
+    assert r is not None and r["code"] == "not_afforded"
+    assert "enhancement_offer" in r["error"] and "edit_playbook" in r["error"]
+    assert plan.gate_refusal("emit_playbook_offer", {})["code"] == "not_afforded"
+    # With nothing open, a new playbook is exactly what playbook_offer is for.
+    none_open = plan_turn("build", context=TurnContext(has_open_playbook=False))
+    assert none_open.gate_refusal("emit_card", {"card_type": "playbook_offer"}) is None
