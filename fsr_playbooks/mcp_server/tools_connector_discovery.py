@@ -775,6 +775,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
     # listing status rather than silently dropping a valid containment action.
     # A probe gap must never manufacture a dead end out of a configured op.
     probe_timing: dict[str, Any] = {}
+    dropped: list[dict[str, Any]] = []
     if probe and actions:
         candidates = {a["connector"] for a in actions}
         targets = [(c, version_of[c], agent_of.get(c, ""))
@@ -790,6 +791,8 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
             # have (probe gap → fail open, don't drop).
             st = health.get(a["connector"], a.get("status") or "")
             if str(st).lower() not in healthy_ok:
+                dropped.append({"connector": a["connector"], "op": a["op"],
+                                "title": a.get("title"), "status": str(st)})
                 continue
             a["status"] = st
             kept.append(a)
@@ -802,6 +805,20 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                            "probed": probe}
     if probe_timing:
         out["_timing"] = probe_timing
+    if dropped:
+        # Live: a Disconnected FortiGate was dropped silently, the one action
+        # left was a script runner, and the agent staged it as an IP block.
+        # Never stage on a dead connector -- but say which one could do it.
+        names = sorted({d["connector"] for d in dropped})
+        out["unavailable"] = dropped[:limit]
+        out["message"] = (
+            f"{', '.join(names)} can do this but {'is' if len(names) == 1 else 'are'} "
+            f"not reachable ({dropped[0]['status'] or 'unhealthy'}). Tell the "
+            f"analyst its connection needs fixing (Settings > Connectors) before "
+            f"it can run. Do not stage a different product's operation in its "
+            f"place unless that operation itself does what was asked.")
+        if not actions:
+            return out
     if not actions:
         # Connectors are configured, but none can contain this (the set is
         # intel/utility only, or nothing matches the target type). Don't dead-

@@ -128,8 +128,13 @@ def _find_actions(containment, enrichment, record, *, query: str,
     merged: list[dict[str, Any]] = []
     sections: dict[str, Any] = {}
 
+    unavailable: list[dict[str, Any]] = []
+
     def _take(name: str, res: dict[str, Any]) -> None:
         sections[name] = {kk: vv for kk, vv in res.items() if kk != "actions"}
+        # Lifted to the top: a dropped-but-capable connector buried in
+        # `sections` was never read live (see find_containment_actions).
+        unavailable.extend(res.get("unavailable") or [])
         for a in (res.get("actions") or [])[:limit]:
             row = dict(a)
             row["action_type"] = name
@@ -144,6 +149,9 @@ def _find_actions(containment, enrichment, record, *, query: str,
         if res.get("ok") is False:      # query was prose, not an action name
             res = record(action="", module=module or "alerts")
         _take("record", res)
-    return {"target_type": target, "action_type": fam or "all",
-            "actions": merged[: limit * 3 if not fam else limit],
-            "count": len(merged), "sections": sections}
+    out = {"target_type": target, "action_type": fam or "all",
+           "actions": merged[: limit * 3 if not fam else limit],
+           "count": len(merged), "sections": sections}
+    if unavailable:
+        out["unavailable"] = unavailable
+    return out
