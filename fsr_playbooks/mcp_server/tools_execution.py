@@ -2587,7 +2587,9 @@ def connector_health(name: str, version: str | None = None,
     Use it before authoring a step against a connector (a recipe that ships
     compile-clean still fails at runtime on a missing connector) and before
     recommending an op (configured but Disconnected means the vendor is
-    down). Not-installed returns close-match names from the instance's real
+    down). For authoring, installed + configured is the bar: a Disconnected
+    connector still gets the step the analyst asked for, with a note that
+    its connection needs fixing before the playbook runs. Not-installed returns close-match names from the instance's real
     catalog; installed proceeds to a live reachability probe whose status is
     Available (green), Disconnected (configured, upstream down), or
     no-config (installed but never configured).
