@@ -84,6 +84,7 @@ _FIND_KIND_TO_TOOL = {
     "step": "find_step_examples",
     "jinja_block": "find_jinja_pattern",
     "filter_usage": "get_filter_examples",
+    "field": "find_fields",  # no legacy tool; kind='field' was born in find
 }
 _ACTION_TYPE_TO_TOOL = {
     "containment": "find_containment_actions",

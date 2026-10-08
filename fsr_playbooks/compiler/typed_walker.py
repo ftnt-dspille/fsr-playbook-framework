@@ -684,9 +684,15 @@ def _synth_step_shape(
                 safety = op_safety_fn(connector, op) or "unknown"
             except Exception:  # noqa: BLE001
                 safety = "unknown"
-        if safety == "safe" and probe and connector and op:
+        # A live probe may run the op, so only a safe op gets one. A RECORDED
+        # shape (grounded_shapes) runs nothing, so it applies whatever the
+        # op's safety: live, virustotal.query_ip has a recording, safety
+        # "unknown", and the walk discarded it -- `vars.steps.VT.attributes`
+        # (the path is `.data.attributes`) passed as an unknown shape.
+        use = probe if safety == "safe" else getattr(probe, "recorded_only", None)
+        if use and connector and op:
             try:
-                probed = probe(connector, op, dict(step.arguments))
+                probed = use(connector, op, dict(step.arguments))
             except Exception:  # noqa: BLE001
                 probed = None
             if probed is not None:

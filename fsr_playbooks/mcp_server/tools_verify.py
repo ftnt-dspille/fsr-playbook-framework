@@ -175,6 +175,7 @@ def _combined_probe(live_probe_fn):
         if shape is not None:
             return shape
         return grounded(connector, op, arguments)
+    _probe.recorded_only = grounded  # type: ignore[attr-defined]
     return _probe
 
 

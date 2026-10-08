@@ -212,4 +212,7 @@ def grounded_probe(store: GroundedShapeStore):
     """
     def _probe(connector: str, op: str, _arguments: dict) -> Shape | None:
         return store.shape_for(connector, op)
+    # Reading a stored shape runs nothing, so it is safe for any op; the
+    # walker consults `recorded_only` where it would refuse a live probe.
+    _probe.recorded_only = _probe  # type: ignore[attr-defined]
     return _probe

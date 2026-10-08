@@ -1166,6 +1166,16 @@ def get_op_schema(connector: str, op: str,
         out_fields = _output_field_names(op_row[0])
         if out_fields:
             out["output_fields"] = out_fields
+        recorded = _recorded_output_paths(connector, op)
+        if recorded:
+            # A shape measured from a real run beats every other source: live,
+            # the model wrote `.data.data.attributes` (VirusTotal's API docs)
+            # where the run says `.data.attributes`, and the gate never knew.
+            out["output_schema"] = ("recorded from a real run -- reference "
+                                    "`vars.steps.<Step_Name>.<path>` with a "
+                                    "path from `output_paths`")
+            out["output_paths"] = recorded
+            return out
         if op_row[0].get("output_schema_observed"):
             out["output_schema"] = "observed -- pass verbose=True for the run-derived shape"
         elif out_fields:
@@ -1173,16 +1183,63 @@ def get_op_schema(connector: str, op: str,
                 f"field names known ({', '.join(out_fields)}); types unobserved -- "
                 "run_op in a safe context for the run-derived shape"
             )
-        elif _op_risk(op, op_row[0].get("category")) == "safe":
-            out["output_schema"] = (
-                "none yet -- this op is read-only; run_op to observe its real output shape"
-            )
         else:
+            # Building, run_op is refused, so do not send the model there.
             out["output_schema"] = (
-                "none -- static schema is untyped and excluded; run_op in a safe "
-                "context to observe the real shape"
+                "unknown -- no run of this op is recorded. Do not guess a path "
+                "below `vars.steps.<Step_Name>.data`: vendor API docs nest "
+                "differently from the connector's result. Bind the whole "
+                "`.data` (e.g. into a comment or `| to_json`), or name the "
+                "assumed path in the offer so the analyst can confirm it"
+                + ("; on a triage turn, run_op shows the real shape"
+                   if _op_risk(op, op_row[0].get("category")) == "safe" else "")
             )
         return out
+
+
+def _recorded_output_paths(connector: str, op: str, *, limit: int = 40,
+                           max_depth: int = 5, wide: int = 25) -> list[str]:
+    """`data.attributes.last_analysis_stats.malicious (integer)`-style paths
+    from the recorded (grounded) shape of one op, envelope included. A map
+    with more than `wide` keys is keyed by data (per-engine results) and is
+    shown as `<key>` once instead of every key. When there are more than
+    `limit`, the shallowest win -- a certificate's 30 nested fields must not
+    crowd out `data.attributes.reputation`."""
+    try:
+        from .tools_verify import _grounded_store
+        shape = _grounded_store().shape_for(connector, op)
+    except Exception:  # noqa: BLE001 -- discovery never fails on the oracle
+        return []
+    found: list[tuple[int, str]] = []  # (depth, path), in walk order
+
+    def walk(sh: Any, path: str, depth: int) -> None:
+        if not isinstance(sh, dict) or len(found) > 2000:
+            return
+        kind = sh.get("kind")
+        keys = sh.get("keys")
+        if isinstance(keys, dict) and (kind in (None, "object")):
+            if depth >= max_depth:
+                found.append((depth, f"{path} (object)"))
+                return
+            if len(keys) > wide:
+                sample = next(iter(keys.values()))
+                walk(sample, f"{path}.<key>" if path else "<key>", depth + 1)
+                return
+            for k, v in keys.items():
+                walk(v, f"{path}.{k}" if path else k, depth + 1)
+            return
+        if kind == "list":
+            item = sh.get("item")
+            if isinstance(item, dict) and item.get("keys") and depth < max_depth:
+                walk(item, f"{path}[0]", depth + 1)
+            else:
+                found.append((depth, f"{path} (list)"))
+            return
+        found.append((depth, f"{path} ({sh.get('type') or kind or 'value'})"))
+
+    walk(shape, "", 0)
+    keep = {p for _, p in sorted(found, key=lambda dp: dp[0])[:limit]}
+    return [p for _, p in found if p in keep]
 
 
 # Op-name prefixes that are almost certainly read-only API calls.

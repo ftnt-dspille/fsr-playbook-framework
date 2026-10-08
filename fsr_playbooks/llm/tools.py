@@ -1083,7 +1083,7 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                 "type": "string",
                 "enum": ["connector", "operation", "action", "example",
                          "recipe", "api", "jinja", "playbook",
-                         "step", "jinja_block", "filter_usage"],
+                         "step", "jinja_block", "filter_usage", "field"],
                 "description": "Catalog to search; see the tool description "
                                "for when each applies.",
             },
@@ -1101,8 +1101,9 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                             "description": "kind=action: restrict to one "
                                            "family."},
             "module": {"type": "string",
-                       "description": "kind=action record writes: target "
-                                      "module (alerts, incidents, ...)."},
+                       "description": "kind=field: the module whose fields "
+                                      "to list; kind=action record writes: "
+                                      "target module (alerts, incidents, ...)."},
             "limit": {"type": "integer", "default": 10},
         },
     },

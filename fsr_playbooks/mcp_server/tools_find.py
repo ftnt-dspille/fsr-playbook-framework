@@ -20,6 +20,9 @@ FIND_KINDS = (
     # B3a: three corpus searches that were their own tools, called 0 times in
     # 287 live sessions while each cost a schema on every turn.
     "step", "jinja_block", "filter_usage",
+    # A module's fields, from the catalog -- the build-side answer to "what is
+    # the alert's destination IP called?" (record reads are triage tools).
+    "field",
 )
 
 
@@ -42,6 +45,8 @@ def find(kind: str, query: str = "", connector: str = "",
     playbooks. `step` = real examples of one step type (query = the type).
     `jinja` = a filter for a transform; `filter_usage` = real usages of one
     named filter; `jinja_block` = whole {% set %}/{% for %} idioms.
+    `field` = a module's record fields (`module` required, `query` ranks
+    them) -- look one up before writing `vars.input.records[0].<field>`.
     """
     k = (kind or "").strip().lower()
     if k not in FIND_KINDS:
@@ -95,6 +100,8 @@ def find(kind: str, query: str = "", connector: str = "",
     elif k == "jinja_block":
         from .tools_jinja import find_jinja_pattern  # noqa: PLC0415
         out = find_jinja_pattern(query, limit=limit)
+    elif k == "field":
+        out = _find_fields(module, query, limit=limit)
     elif k == "filter_usage":
         from .tools_jinja import get_filter_examples  # noqa: PLC0415
         out = get_filter_examples(query, limit=limit)
@@ -155,3 +162,51 @@ def _find_actions(containment, enrichment, record, *, query: str,
     if unavailable:
         out["unavailable"] = unavailable
     return out
+
+
+def _find_fields(module: str, query: str, *, limit: int) -> dict[str, Any]:
+    """A module's fields from the catalog, best match to `query` first.
+
+    Live: build turns read `vars.input.records[0].destIp` (the field is
+    `destinationIp`) because record reads are refused there and nothing else
+    named the fields. Catalog-only: no record data, no box call."""
+    import difflib  # noqa: PLC0415
+
+    from fsr_playbooks import module_schema  # noqa: PLC0415
+
+    from ._shared import _db  # noqa: PLC0415
+    name = module_schema.module_name(module or "")
+    if not name:
+        return {"ok": False, "code": "missing_module",
+                "message": "kind='field' needs `module` (e.g. alerts, incidents)"}
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT field_name, title, type, picklist_name FROM module_fields "
+            "WHERE module_name=? ORDER BY field_name", (name,)).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return {"ok": False, "code": "module_not_in_catalog",
+                "module": name,
+                "message": (f"the catalog has no fields for {name!r} -- it is "
+                            "not warmed for this module, or the name is wrong "
+                            "(modules are plural: alerts, incidents, indicators)")}
+    fields = [{"name": r[0], "title": r[1] or "", "type": r[2] or "",
+               **({"picklist": r[3]} if r[3] else {})} for r in rows]
+    q = (query or "").strip().lower()
+    if q:
+        words = q.replace("_", " ").split()
+
+        def score(f: dict[str, Any]) -> float:
+            hay = f"{f['name']} {f['title']}".lower()
+            hits = sum(1 for w in words if w in hay)
+            close = difflib.SequenceMatcher(None, q.replace(" ", ""),
+                                            f["name"].lower()).ratio()
+            return hits + close
+        fields.sort(key=score, reverse=True)
+    return {"ok": True, "module": name, "count": len(rows),
+            "fields": fields[:max(1, limit)],
+            "system_fields": sorted(module_schema.SYSTEM_FIELDS),
+            "usage": ("the trigger record's field: vars.input.records[0].<name>; "
+                      "a find_record result's: vars.steps.<Step>[0].<name>")}

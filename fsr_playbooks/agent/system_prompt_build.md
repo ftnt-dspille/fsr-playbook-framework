@@ -40,6 +40,15 @@ to create it).
   `get_api_response`) doesn't exist and a guessed key (`stepType:` instead of
   `type:`, `templates:` instead of `playbooks:`) just burns a `validate_yaml`
   round-trip. Confirm the shape, then write it once, correctly.
+- **The same rule covers the data a step reads.** A record field: look it up
+  with `find(kind='field', module=<trigger module>, query=<what you need>)`
+  before writing `vars.input.records[0].<field>` (the alert's destination IP
+  is `destinationIp`, not `destIp`). An op's output: read `get_op_schema`; when
+  it lists `output_paths` (recorded from a real run) bind exactly one of them,
+  `vars.steps.<Step_Name>.<path>`. Never take a path from the vendor's API docs:
+  the connector's result nests differently (`data.attributes...`, not
+  `data.data.attributes...`). When the output is unknown, do not invent a deep
+  path; say in the offer which path you assumed.
 - **Before authoring from scratch, query the example library.** Call
   `find(kind='recipe', query=<user_intent>)` (e.g. `kind='recipe',
   query='block an IP on FortiGate with approval'`) and adapt the closest

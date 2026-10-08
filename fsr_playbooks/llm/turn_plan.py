@@ -195,9 +195,10 @@ def _playbook_side_refusal(name: str, args: dict[str, Any] | None
         "code": "not_a_playbook_tool",
         "error": (
             f"'{name}' is not available while building or fixing a playbook: "
-            "this turn uses the playbook tools. To see what a run did, use "
-            "why_did_playbook_fail / list_playbook_runs; to learn an op's "
-            "inputs and output, get_op_schema; to check a draft, "
+            "this turn uses the playbook tools. For a record's field names, "
+            "find(kind='field', module=...); to learn an op's inputs and "
+            "output, get_op_schema; to see what a run did, "
+            "why_did_playbook_fail / list_playbook_runs; to check a draft, "
             "verify_playbook. Put the connector call in the playbook as a "
             "step rather than running it now."
         ),
