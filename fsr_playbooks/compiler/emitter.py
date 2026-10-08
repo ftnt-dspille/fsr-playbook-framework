@@ -434,11 +434,17 @@ def emit(collection: Collection) -> dict[str, Any]:
         # Verified empirically: every playbook we'd pushed with the old
         # `f"{s.id}->{tgt_id}"` format failed to render; FSR-UI-built
         # playbooks with the spaced display-name format work.
+        # One route per (source, target): the designer refuses a second connection
+        # between the same two steps ("Duplicate routes are not allowed") and stops
+        # adding routes there, so a pasted or opened playbook loses every route
+        # after it. A labelled branch wins over an unlabelled one to the same step,
+        # e.g. a manual_input whose `next:` is also one of its options' targets.
         name_by_id = {s.id: s.name or s.id for s in pb.steps}
         for s in pb.steps:
             src_iri = _step_iri(step_uuids[s.id])
             src_disp = name_by_id[s.id]
-            if s.next:
+            labelled = {t for t in s.branches.values() if t in step_uuids}
+            if s.next and s.next not in labelled:
                 tgt = step_uuids.get(s.next)
                 if tgt:
                     tgt_disp = name_by_id.get(s.next, s.next)
@@ -458,7 +464,7 @@ def emit(collection: Collection) -> dict[str, Any]:
                     ))
             for target in s.unlabeled_next:
                 tgt = step_uuids.get(target)
-                if tgt:
+                if tgt and target not in labelled and target != s.next:
                     tgt_disp = name_by_id.get(target, target)
                     routes_out.append(_emit_route(
                         *salt, f"{s.id}:_{target}", target,
