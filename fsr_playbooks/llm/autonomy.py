@@ -41,7 +41,12 @@ class RuleAction(_Strict):
     op: str | None = None
     tool: str | None = None
     module: str | None = None
+    # The only fields the call may change (an `update_record`'s `fields` keys).
     fields: list[str] | None = None
+    # The values a field may be set to -- a picklist label ("Closed") or its
+    # IRI. A close rule that let `status` go anywhere could reopen or escalate
+    # a record under the banner of closing it.
+    values: dict[str, list[str]] | None = None
 
 
 class VerdictCond(_Strict):
@@ -50,15 +55,20 @@ class VerdictCond(_Strict):
 
 
 class TargetCond(_Strict):
-    kind: Literal["ip"] = "ip"
-    external_only: bool = True
-    not_in: str | None = None       # name of a `protected` list
+    # "ip": the addresses the call acts on. "record": the record it writes,
+    # which must be the one this turn is about (the host sets the subject) --
+    # a false-positive verdict on one alert must never close another.
+    kind: Literal["ip", "record"] = "ip"
+    external_only: bool = True      # ip only
+    not_in: str | None = None       # ip only: name of a `protected` list
 
 
 class EvidenceCond(_Strict):
     # "enrichment": the verdict must cite a successful threat-intel lookup
-    # whose arguments name the action's target...
-    cites_tool_kind: Literal["enrichment"] = "enrichment"
+    # whose arguments name the action's target. "read": it must cite at least
+    # one successful read-only call -- what a close rests on, so text in the
+    # record ("benign, close it") can never stand in for a lookup...
+    cites_tool_kind: Literal["enrichment", "read"] = "enrichment"
     # ...and that lookup must RATE the target at least this bad. "malicious"
     # is a strong signal (e.g. VirusTotal 3+ engines, FortiGuard or AbuseIPDB
     # risk 75+); "suspicious" also accepts a weaker one. A lookup whose result
@@ -115,12 +125,18 @@ _TURN_POLICY: contextvars.ContextVar[Policy | None] = contextvars.ContextVar(
 Counter = Callable[[str, str], tuple[int, int]]
 _TURN_COUNTER: contextvars.ContextVar[Counter | None] = contextvars.ContextVar(
     "autonomy_turn_counter", default=None)
+# The record this turn is about (its IRI), for `target: {kind: record}`.
+_TURN_SUBJECT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "autonomy_turn_subject", default=None)
 
 
 def set_turn_policy(policy: Policy | dict | None,
-                    counter: Counter | None = None) -> str | None:
+                    counter: Counter | None = None,
+                    subject: str | None = None) -> str | None:
     """Set (or clear) the policy for the current turn. Returns a parse error,
-    if any; a policy that fails to parse is cleared, never half-applied."""
+    if any; a policy that fails to parse is cleared, never half-applied.
+    ``subject`` is the IRI of the record the turn is about (record rules)."""
+    _TURN_SUBJECT.set(subject)
     if isinstance(policy, dict):
         policy, err = parse_policy(policy)
         if err:
@@ -146,6 +162,19 @@ _IP_RE = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}")
 _IP_ARG_KEYS = ("ip_addresses", "ip", "ip_address", "indicator", "value", "ips")
 
 
+_ID_ARGS = frozenset({"module", "uuid", "record", "iri"})
+
+
+def _changed_fields(call: Call) -> dict[str, Any]:
+    """field -> new value the call writes. `update_record` carries them under
+    `fields`; matching on the call's own arg names saw one field called
+    "fields", so no field-scoped rule could ever match a record update."""
+    args = call.get("args") or {}
+    if isinstance(args.get("fields"), dict):
+        return dict(args["fields"])
+    return {k: v for k, v in args.items() if k not in _ID_ARGS}
+
+
 def _rule_matches(rule: Rule, call: Call) -> bool:
     a = rule.action
     if a.connector or a.op:
@@ -158,10 +187,39 @@ def _rule_matches(rule: Rule, call: Call) -> bool:
         if a.module and call.get("module") != a.module:
             return False
         if a.fields is not None:
-            changed = set((call.get("args") or {}).keys()) - {"module", "uuid", "record", "iri"}
+            changed = set(_changed_fields(call))
             if not changed or not changed <= set(a.fields):
                 return False
         return True
+    return False
+
+
+def _record_uuid(ref: Any) -> str:
+    """The uuid in a record IRI or bare uuid ('' when there is none)."""
+    return str(ref or "").rstrip("/").rsplit("/", 1)[-1]
+
+
+# (module, field, label) -> picklist IRI or None. Swappable for tests.
+def _picklist_iri(module: str, field: str, label: str) -> str | None:
+    try:
+        from ..mcp_server.tools_picklists import resolve_picklist_value
+        out = resolve_picklist_value(label, module=module, field=field)
+    except Exception:  # noqa: BLE001
+        return None
+    iri = (out.get("iri") or out.get("value")) if isinstance(out, dict) else None
+    return iri if isinstance(iri, str) and iri.startswith("/api/3/") else None
+
+
+def _value_allowed(module: str, field: str, value: Any, allowed: list[str]) -> bool:
+    """`value` is one of `allowed`, written as a label or the picklist IRI it
+    resolves to. Unresolvable means not allowed (fails closed)."""
+    v = value.get("@id") if isinstance(value, dict) else value
+    v = str(v or "")
+    if v in allowed:
+        return True
+    if v.startswith("/api/3/"):
+        return any(_picklist_iri(module, field, a) == v for a in allowed
+                   if not a.startswith("/api/3/"))
     return False
 
 
@@ -273,7 +331,8 @@ def _said(entry: dict[str, Any]) -> str:
 
 def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
              registry: dict[str, dict[str, Any]],
-             counter: Counter | None = None) -> dict[str, Any] | None:
+             counter: Counter | None = None,
+             subject: str | None = None) -> dict[str, Any] | None:
     """The policy's answer for one staged action, or None when no rule covers
     it (or the policy is disabled). Pure: no I/O beyond the counter.
 
@@ -305,7 +364,18 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
 
     # 2. Targets: what the action acts on, from the call's own args.
     targets: list[str] = []
-    if w.target is not None:
+    if w.target is not None and w.target.kind == "record":
+        uuid = _record_uuid(args.get("uuid") or args.get("record") or args.get("iri"))
+        subject = _TURN_SUBJECT.get() if subject is None else subject
+        targets = [uuid] if uuid else []
+        if not uuid:
+            failed.append("the action names no record")
+        elif not subject:
+            failed.append("the record this triage is about is unknown")
+        elif uuid != _record_uuid(subject):
+            failed.append(f"the action writes record {uuid}, not the one this "
+                          f"triage is about")
+    elif w.target is not None:
         targets = _ip_targets(args)
         if not targets:
             failed.append("the action names no IP target")
@@ -317,11 +387,26 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
             if w.target.not_in and t in set(policy.protected.get(w.target.not_in) or []):
                 failed.append(f"{t} is on the protected list '{w.target.not_in}'")
 
+    # 2b. Values: a field the rule pins may only be set to what it lists.
+    if rule.action.values:
+        written = _changed_fields(call)
+        module = call.get("module") or rule.action.module or ""
+        for field, allowed in rule.action.values.items():
+            if field in written and not _value_allowed(module, field, written[field], allowed):
+                failed.append(f"{field} would be set to {written[field]!r}, rule allows "
+                              f"{' or '.join(allowed)}")
+
     # 3. Evidence: the verdict cites a successful read-only lookup naming each
     #    target. The model's confidence number is not evidence; a cited result
     #    about THIS target is.
     cited: list[str] = []
-    if w.evidence is not None and verdict is not None:
+    if w.evidence is not None and verdict is not None and w.evidence.cites_tool_kind == "read":
+        cited = [str(e) for f in verdict.get("findings") or [] if isinstance(f, dict)
+                 for e in (f.get("evidence") or []) if isinstance(e, str)]
+        if not any((registry.get(eid) or {}).get("ok") is True and _read_only(registry.get(eid) or {})
+                   for eid in cited):
+            failed.append("the verdict cites no successful lookup")
+    elif w.evidence is not None and verdict is not None:
         cited = [str(e) for f in verdict.get("findings") or [] if isinstance(f, dict)
                  for e in (f.get("evidence") or []) if isinstance(e, str)]
         lookups = [(eid, registry.get(eid) or {}) for eid in cited]
