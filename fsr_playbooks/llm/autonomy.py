@@ -148,6 +148,13 @@ def set_turn_policy(policy: Policy | dict | None,
     return None
 
 
+def set_turn_subject(iri: str | None) -> None:
+    """Set the record this turn is about (for `target: {kind: record}`). The
+    host binds its mounted record after the policy, so this is separate from
+    :func:`set_turn_policy`."""
+    _TURN_SUBJECT.set(iri or None)
+
+
 def get_turn_policy() -> Policy | None:
     return _TURN_POLICY.get()
 

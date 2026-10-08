@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 from fsr_playbooks.llm import autonomy
-from fsr_playbooks.llm.autonomy import evaluate, parse_policy, set_turn_policy
+from fsr_playbooks.llm.autonomy import evaluate, parse_policy, set_turn_policy, set_turn_subject
 
 ALERT = "/api/3/alerts/11111111-1111-1111-1111-111111111111"
 OTHER = "22222222-2222-2222-2222-222222222222"
@@ -126,3 +126,13 @@ def test_a_field_scoped_rule_now_matches_update_record_fields():
     """The original defect: arg names, not `fields` keys, were compared."""
     assert autonomy._changed_fields(_close()) == {"status": CLOSED_IRI,
                                                   "closureReason": "False Positive"}
+
+
+def test_the_host_can_bind_the_subject_after_the_policy():
+    set_turn_policy(_pol())
+    set_turn_subject(ALERT)
+    try:
+        d = evaluate(_pol(), _close(), verdicts=[_verdict()], registry=_read())
+        assert d["outcome"] == "would_act", d["failed"]
+    finally:
+        set_turn_policy(None)
