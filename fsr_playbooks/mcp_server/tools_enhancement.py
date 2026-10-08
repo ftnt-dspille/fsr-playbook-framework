@@ -1116,15 +1116,20 @@ def _apply_op(steps, op: dict) -> str:
                 raise _EditError(
                     f"{prev.get('name')!r} branches {labels}; name the branch to "
                     f"insert into with option=<label>")
-            if entry.get("next") and "next" not in new:
+            if entry.get("next") and "next" not in new \
+                    and str(entry["next"]) not in _refs(new):
                 new["next"] = entry["next"]
             entry["next"] = str(new["name"])
             _place_after(steps, prev, new)
             steps.insert(i + 1, new)
             label = entry.get("display") or entry.get("option") or entry.get("label")
             return f"added {new['name']!r} after {prev.get('name')!r} [{label}]"
-        # Splice into the chain: prev -> new -> whatever prev pointed at.
-        if prev.get("next") and "next" not in new:
+        # Splice into the chain: prev -> new -> whatever prev pointed at --
+        # unless prev already pointed at new (a batch that names each step's
+        # successor before adding it): inheriting that made new route to
+        # itself, refused live as `cycle end -> end` the model never wrote.
+        if prev.get("next") and "next" not in new \
+                and str(prev["next"]) not in _refs(new):
             new["next"] = prev["next"]
         prev["next"] = str(new["name"])
         _place_after(steps, prev, new)

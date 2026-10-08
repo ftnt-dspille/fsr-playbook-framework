@@ -519,3 +519,48 @@ def test_a_misnamed_op_key_is_refused_at_the_gate_by_name():
         {"type": "update_step", "name": "Note C", "set": {"vars.c": "2"}}]})
     assert res["ok"] is False and res["code"] == "invalid_tool_args"
     assert "operations[0]: 'op' is a required property" in res["error"]
+
+
+def test_a_step_added_after_one_that_already_routes_to_it_does_not_loop():
+    """Live: a build-from-empty batch had each step name its successor
+    (`next: End`) and then added End `after` its predecessor. The splice gave
+    End the predecessor's old `next` -- itself -- and the batch was refused as
+    `cycle end -> end`, though the model wrote no cycle; it never recovered."""
+    tok = _grounded_as(_EMPTY)
+    try:
+        res = edit_playbook([
+            {"op": "add_step", "step": {"name": "Start", "type": "start",
+                                        "module": "alerts", "next": "Check"}},
+            {"op": "add_step", "after": "Start",
+             "step": {"name": "Check", "type": "decision", "conditions": [
+                 {"display": "Go", "when": "{{ true }}", "next": "Note"},
+                 {"display": "Else", "default": True, "next": "End"}]}},
+            {"op": "add_step", "after": "Check", "option": "Go",
+             "step": {"name": "Note", "type": "set_variable", "vars": {"n": "1"},
+                      "next": "End"}},
+            {"op": "add_step", "after": "Note", "step": {"name": "End", "type": "end"}},
+        ], user_message="build it")
+        assert res["ready_to_push"], (res.get("code"), res.get("message"), res.get("required_fixes"))
+        after = _steps(res["after_yaml"])
+        assert not after["End"].get("next")
+        assert after["Note"]["next"] == "End"
+        assert after["Check"]["conditions"][1]["next"] == "End"
+    finally:
+        reset_grounded_yaml(tok)
+
+
+def test_a_step_added_into_a_branch_that_already_routes_to_it_does_not_loop():
+    tok = _grounded_as(compile_and_decompile(_GATED))
+    try:
+        res = edit_playbook([
+            {"op": "set_route", "from": "Ask", "option": "Continue", "to": "Note"},
+            {"op": "add_step", "after": "Ask",
+             "step": {"name": "Note", "type": "set_variable", "vars": {"n": "1"}}},
+        ])
+        assert res.get("ready_to_push"), (res.get("code"), res.get("message"),
+                                          res.get("required_fixes"))
+        after = _steps(res["after_yaml"])
+        assert after["Ask"]["options"][0]["next"] == "Note"
+        assert after["Note"].get("next") not in ("Note", "note")
+    finally:
+        reset_grounded_yaml(tok)
