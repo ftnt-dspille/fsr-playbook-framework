@@ -348,3 +348,38 @@ def test_a_double_quoted_subscript_counts_as_the_single_quoted_one():
         arguments = {"params": {"iri": '{{ vars.steps.Fetch_Alert[0]["@id"] }}'}}
 
     assert "fetch_alert[0]['@id']" in _arg_text(_Step).lower()
+
+
+EMAIL_SHORTCUT = """
+collection: Email Fixtures
+description: the send_email shortcut.
+
+playbooks:
+  - name: Notify
+    description: fixture.
+    steps:
+      - name: start
+        type: start
+        next: Email SOC
+      - name: Email SOC
+        type: send_email
+        to: soc@example.com
+        subject: Summary
+        body: done
+"""
+
+
+def test_connector_op_matches_the_send_email_shortcut():
+    """`send_email` compiles to smtp.send_email; requiring the smtp connector
+    must not fail a playbook for using the shortcut (analyst sim, 2 of 30)."""
+    res = ira.check_ir_assertions(EMAIL_SHORTCUT, [
+        {"kind": "connector_op", "connector": "smtp"},
+        {"kind": "connector_op", "connector": "smtp", "operation_contains": "send_email"},
+    ])
+    assert res["passed"], res
+
+
+def test_connector_op_does_not_match_a_terminal_no_op():
+    res = ira.check_ir_assertions(EMAIL_SHORTCUT, [
+        {"kind": "connector_op", "connector": "cyops_utilities"}])
+    assert not res["passed"]

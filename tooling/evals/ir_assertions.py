@@ -84,6 +84,15 @@ def _arg_text(step) -> str:
     return _DQ_SUBSCRIPT.sub(r"['\1']", text)
 
 
+def _dispatches(step) -> bool:
+    """Does the resolved step call a connector op? (`connector` steps and the
+    connector-family shortcuts the normalizer expands, e.g. `send_email`.)"""
+    a = step.arguments if isinstance(step.arguments, dict) else {}
+    return step.type == "connector" or (
+        bool(a.get("connector")) and bool(a.get("operation"))
+        and step.type not in ("start", "end", "stop"))
+
+
 def _matches(step, sel: dict[str, Any]) -> bool:
     if not isinstance(sel, dict):
         return False
@@ -149,8 +158,11 @@ def _check_one(pb, a: dict[str, Any]) -> tuple[bool, str]:
     if kind == "connector_op":
         sel = {k: v for k, v in a.items()
                if k in ("connector", "operation_contains")}
-        sel["type"] = "connector"
-        hit = any(_matches(s, sel) for s in steps)
+        # Any step the compiler resolved onto a connector, not only
+        # `type: connector`: the `send_email` shortcut compiles to
+        # smtp.send_email, and an email requirement failed a correct answer
+        # for using it.
+        hit = any(_dispatches(s) and _matches(s, sel) for s in steps)
         return hit, f"{label}: no connector step matching {sel}" if not hit else label
 
     if kind == "for_each_over":
