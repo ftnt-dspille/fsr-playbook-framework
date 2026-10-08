@@ -267,6 +267,51 @@ class RewriterMixin:
                     ),
                 ))
 
+    # `vars.input.records[<n>].<field>` / `['<field>']`, and the single-record
+    # `vars.input.record.<field>`: a read of the record the trigger fired on.
+    _RECORD_REF_RE = _re.compile(
+        r"\bvars\.input\.(?:records\s*\[\s*\d+\s*\]|record\b)"
+        r"(?:\.([A-Za-z_][A-Za-z0-9_]*)"
+        r"|\[\s*['\"]([^'\"]+)['\"]\s*\])"
+    )
+    _TRIGGER_TYPES = frozenset({"start", "start_on_create", "start_on_update",
+                                "start_on_delete"})
+
+    def _validate_input_record_refs(
+        self, pb, pi: int, errors: list[CompileError],
+    ) -> None:
+        """Flag reads of a field the trigger module does not have.
+
+        Live (analyst sim): three alert playbooks read
+        `vars.input.records[0].destIp` / `.destinationAddress` -- the field is
+        `destinationIp`. Each compiled, verified, and would have queried with
+        an empty value on every run. The typed walk only resolves
+        `vars.steps.*`, so nothing looked. This reuses the field validator the
+        trigger filters and find_record already go through: same
+        did-you-mean, same system fields, same severity rule (error against a
+        catalog read from the target box, warning against a generic one).
+        """
+        from ...module_schema import module_name
+        from ..typed_args.field_validator import FieldValueValidator
+        trigger = next((s for s in pb.steps
+                        if s.type in self._TRIGGER_TYPES), None)
+        a = getattr(trigger, "arguments", None) or {}
+        module = module_name(a.get("module") or a.get("resource"))
+        if not module:
+            return
+        named: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for si, step in enumerate(pb.steps):
+            def scan(text: str, _si: int = si) -> None:
+                for m in self._RECORD_REF_RE.finditer(text):
+                    field = m.group(1) or m.group(2)
+                    if field and field not in seen:
+                        seen.add(field)
+                        named.append((field, f"playbooks[{pi}].steps[{_si}].arguments"))
+            self._walk_strings_inplace_ro(step.arguments, scan)
+        if named:
+            FieldValueValidator(self.conn).validate_field_names(named, module, errors)
+
     @classmethod
     def _walk_strings_inplace_ro(cls, value, fn) -> None:
         """Read-only string walk: call `fn(str)` for every string leaf

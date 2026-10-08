@@ -115,6 +115,29 @@ def _scoped_tables(db: sqlite3.Connection) -> list[tuple[str, str]]:
     return out
 
 
+# Custom fields the eval tasks' world assumes the box has. The tasks are
+# written against a SOC whose alerts carry `sender_ips` (a phishing pack's
+# list of sender IPs), `affected_host`, and so on -- none are stock fields.
+# This catalog is stamped as a box's, so a field missing from it is an error
+# (a read of `vars.input.records[0].<field>` is checked against the module);
+# declaring the world's fields here keeps that check honest instead of
+# pretending they exist everywhere.
+EVAL_CUSTOM_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("alerts", "sender_ips", "json"),
+    ("alerts", "sourceIps", "json"),
+    ("alerts", "affected_host", "text"),
+    ("alerts", "artifactsRelatedToAlerts", "json"),
+    ("events", "user_iri", "text"),
+)
+
+
+def declare_eval_custom_fields(db: sqlite3.Connection) -> None:
+    db.executemany(
+        "INSERT OR REPLACE INTO module_fields (module_name, field_name, title, type) "
+        "VALUES (?, ?, ?, ?)",
+        [(m, f, f, t) for m, f, t in EVAL_CUSTOM_FIELDS])
+
+
 def main() -> int:
     if not DEV.exists():
         print(f"dev cache missing: {DEV}", file=sys.stderr)
@@ -197,6 +220,9 @@ def main() -> int:
     counts = probe_op_safety.run(db)
     db.commit()
     print(f"  op_safety reclassified: {counts}")
+
+    declare_eval_custom_fields(db)
+    db.commit()
 
     # 6. compact
     db.execute("VACUUM")
