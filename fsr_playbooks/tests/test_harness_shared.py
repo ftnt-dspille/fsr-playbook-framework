@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from fsr_playbooks.harness.classify import classify_turn
-from fsr_playbooks.harness.frames import assistant_summary, assistant_text, pending_halt
+from fsr_playbooks.harness.frames import (
+    assistant_summary,
+    assistant_text,
+    cards,
+    pending_halt,
+)
 from fsr_playbooks.harness.llm import DEFAULT_FRANK_MODEL, LLMConfigError, resolve_llm
 
 FRANK_ENV = {"FRANK_BASE_URL": "https://gw.example.com/v1", "FRANK_API_KEY": "k-frank",
@@ -71,3 +76,11 @@ def test_text_deltas_coalesce_and_history_keeps_tool_ids():
          {"type": "tool_result", "tool_use_id": "t1", "content": {"ok": True}}]
     assert assistant_text(t) == "Hello"
     assert [b["type"] for b in assistant_summary(t)] == ["text", "tool_use", "tool_result"]
+
+
+def test_a_nested_card_without_its_own_type_takes_the_frame_type():
+    """Connector frames sometimes wrap the card; the frame type names it when
+    the card dict does not, so the halt still resumes on the right key."""
+    t = {"transcript": [{"type": "choice_card", "card": {"id": "c-7"}}]}
+    assert pending_halt(t) == {"key": "choice_id", "value": "c-7", "kind": "choice_card"}
+    assert cards(t) == [{"id": "c-7"}]
