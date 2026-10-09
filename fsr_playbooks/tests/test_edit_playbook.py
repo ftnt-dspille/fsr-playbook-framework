@@ -704,3 +704,15 @@ def test_a_pre_existing_missing_trigger_still_blocks_because_apply_compiles():
     assert not res["ready_to_push"]
     assert "no_trigger" in [f["code"] for f in res["required_fixes"]]
     assert not compile_yaml(after, DB_PATH).ok  # the reason it must block
+
+
+def test_a_call_to_a_child_dropped_from_the_list_says_keep_add_playbook():
+    # Live (box model): the second edit_playbook call re-sent the call step but
+    # not the add_playbook, and the error only said to look the child up on
+    # the box -- where it does not exist yet. The turn ended with no offer.
+    res = edit_playbook([{"op": "add_step", "after": "Note A", "step": {
+        "name": "Call child", "type": "workflow_reference",
+        "target": "ZZ Child", "note": "hello"}}])
+    msg = " ".join(f["message"] for f in res["required_fixes"])
+    assert "workflow_reference_unresolvable" in [f["code"] for f in res["required_fixes"]]
+    assert "keep its edit_playbook {op: add_playbook} in the same operations list" in msg

@@ -884,7 +884,11 @@ class ConnectorArgsMixin:
                         "it up with find(kind='playbook', query=<name>) -- rows "
                         "with on_this_box: true carry its uuid and parameters -- "
                         "and set `workflowReference: /api/3/workflows/<uuid>` "
-                        "instead of `target:`."),
+                        "instead of `target:`. If this edit is creating that "
+                        "playbook, keep its edit_playbook {op: add_playbook} in "
+                        "the same operations list -- every call starts again "
+                        "from the open playbook, so an earlier call's "
+                        "add_playbook is not there."),
                     path=f"{path}.arguments.target",
                     near=sug[0] if sug else None,
                     suggestion=f"did you mean {sug[0]!r}?" if sug else None,
