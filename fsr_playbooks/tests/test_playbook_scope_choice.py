@@ -49,7 +49,7 @@ def test_modify_answer_authorizes_the_removal():
         reset_playbook_scope(tok)
     assert _drop_kinds(res) == ["step_deleted_as_requested"]
     assert res["ready_to_push"], res.get("required_fixes")
-    assert res["acknowledged_drops"] == ["Placeholder"]
+    assert [t for t in res["acknowledged_drops"] if not t.endswith(".*")] == ["Placeholder"]
 
 
 def test_create_new_answer_affords_a_second_playbook():

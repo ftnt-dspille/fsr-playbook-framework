@@ -114,3 +114,13 @@ def test_same_type_step_losing_an_argument_is_still_refused():
     lost = _PLACEHOLDER.replace('vars: {pending_note: "wire the real block later"}', 'vars: {other: 1}')
     verdict = check_prewrite(_only("Reputation Gate", _PLACEHOLDER), _only("Reputation Gate", lost))
     assert not verdict.ok
+
+
+def test_a_modified_step_token_covers_its_fields_and_routes_not_the_step():
+    from fsr_playbooks.compiler.prewrite import _ack_matches
+    tok = "Ping Team.*"
+    assert _ack_matches(tok, "collection.workflows[w].routes[Ping Team->End:Dismiss]")
+    assert _ack_matches(tok, "collection.workflows[w].steps[Ping Team].arguments.message.content")
+    assert not _ack_matches(tok, "collection.workflows[w].steps[Ping Team]")
+    assert not _ack_matches(tok, "collection.workflows[w].steps[Other].arguments.x")
+    assert not _ack_matches(tok, "collection.workflows[w].routes[Other->Ping Team:x]")

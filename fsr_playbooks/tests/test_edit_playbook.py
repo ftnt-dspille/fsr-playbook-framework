@@ -785,6 +785,8 @@ def test_a_removed_unread_parameter_is_acknowledged_for_the_save():
         reset_grounded_yaml(tok)
     assert not still_read["ready_to_push"]
     assert res["ready_to_push"], res.get("required_fixes")
-    assert res["acknowledged_drops"] == ["lead_email"]
+    assert "lead_email" in res["acknowledged_drops"]
+    # Note A was modified, so what it shed is covered too (not the step itself).
+    assert "Note A.*" in res["acknowledged_drops"]
     from fsr_playbooks.compiler.prewrite import _ack_matches
     assert _ack_matches("lead_email", "collection.workflows[P].parameters[lead_email]")

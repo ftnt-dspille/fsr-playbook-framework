@@ -260,7 +260,8 @@ def test_an_explicit_argument_still_wins_over_the_bound_message(turn_message):
 def test_a_requested_deletion_is_carried_as_an_acknowledgement(turn_message):
     turn_message("delete the Dead End step")
     result = verify_enhancement(_BEFORE, _DELETED)
-    assert result["acknowledged_drops"] == ["Dead End"]
+    # Removed steps by bare name; `<step>.*` covers a modified step's insides.
+    assert [t for t in result["acknowledged_drops"] if not t.endswith(".*")] == ["Dead End"]
 
 
 def test_an_unrequested_drop_is_never_acknowledged(turn_message):
@@ -285,7 +286,8 @@ def test_the_offer_card_carries_the_acknowledgement(turn_message):
         verified_id=verified["verified_id"])
 
     assert offer["ok"] is True
-    assert offer["card"]["acknowledged_drops"] == ["Dead End"], (
+    assert [t for t in offer["card"]["acknowledged_drops"]
+            if not t.endswith(".*")] == ["Dead End"], (
         "the accept path cannot clear the pre-write guard without this"
     )
 

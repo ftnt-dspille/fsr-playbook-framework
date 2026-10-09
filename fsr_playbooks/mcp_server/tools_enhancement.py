@@ -920,6 +920,10 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
         [str(r.get("step")) for r in (out.get("regressions") or [])
          if r.get("kind") == "step_deleted_as_requested" and r.get("step")]
         + _unread_dropped_parameters(before_yaml, after_yaml)
+        # A step this verified edit MODIFIED may shed fields and outgoing
+        # routes (type change, rewritten message). The diff named the step;
+        # the write guard needs the same consent for what is inside it.
+        + [f"{n}.*" for n in ((out.get("diff_summary") or {}).get("steps_modified") or [])]
     )
 
     out["verified_id"] = _verified_yaml.remember(

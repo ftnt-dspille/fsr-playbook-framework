@@ -450,6 +450,15 @@ def _ack_matches(token: str, path: str) -> bool:
     token = token.strip()
     if not token:
         return False
+    if token.endswith(".*"):
+        # `<step>.*`: everything INSIDE a step the verified edit modified --
+        # its own fields and the routes leaving it. Analyst sim: changing a
+        # manual input into an email step verified, then Apply refused the
+        # dropped option routes; rewriting a step's message refused its
+        # `message.*` keys. The step itself is not covered: deleting it still
+        # needs its bare name.
+        name = token[:-2]
+        return (f"steps[{name}]." in path or f"routes[{name}->" in path)
     return (token == path
             or path.endswith(f".{token}")
             or path.endswith(f"[{token}]"))
