@@ -618,3 +618,13 @@ def test_add_parameter_declares_what_a_step_reads():
 def test_add_parameter_refuses_a_non_identifier():
     out = edit_playbook([{"op": "add_parameter", "name": "caller id"}])
     assert out["code"] == "bad_operation"
+
+
+def test_the_enhancement_card_states_the_trigger():
+    """The analyst approves what starts the playbook, not only its steps."""
+    res = edit_playbook([{"op": "update_step", "name": "Note C",
+                          "set": {"vars": {"c": "2"}}}])
+    card = emit_card("enhancement_offer", {"id": "e2", "summary": "c to 2",
+                                           "verified_id": res["verified_id"]})["card"]
+    assert card["trigger"]["label"].startswith("Runs when an analyst")
+    assert card["trigger"]["modules"] == ["alerts"]

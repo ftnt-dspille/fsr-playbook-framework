@@ -976,6 +976,55 @@ def _yaml_ops_summary(yaml_text: str) -> list[dict[str, Any]]:
     return out
 
 
+_TRIGGER_EVENTS = {"start_on_create": "created", "start_on_update": "updated",
+                   "start_on_delete": "deleted"}
+
+
+def _a_record(modules: list[str]) -> str:
+    """`alerts` -> "an alert"; `[alerts, incidents]` -> "an alert or incident"."""
+    names = [(m[:-1] if m.endswith("s") else m).replace("_", " ") for m in modules]
+    text = " or ".join(names)
+    return ("an " if text[:1].lower() in "aeiou" else "a ") + text
+
+
+def _trigger_summary(yaml_text: str) -> dict[str, Any] | None:
+    """What starts the playbook, in the analyst's words, read from its trigger
+    step -- shown on the offer card so the analyst confirms it.
+
+    Live (analyst sim): "runs when an alert is created" came back as a manual
+    Execute button twice; the card listed the steps, the trigger was invisible,
+    and the analyst said yes. Structure only: the trigger step's type, module
+    and conditions -- nothing is read from the request."""
+    try:
+        doc, _ = load_yaml_text(yaml_text)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+    except Exception:  # noqa: BLE001 -- display only
+        return None
+    trig = next((st for st in steps if isinstance(st, dict)
+                 and str(st.get("type") or "").startswith("start")), None)
+    if trig is None:
+        return None
+    kind = str(trig.get("type"))
+    raw = trig.get("module") or trig.get("modules") or trig.get("resources") \
+        or (trig.get("arguments") or {}).get("resource")
+    modules = [str(m) for m in (raw if isinstance(raw, list) else [raw]) if m]
+    out: dict[str, Any] = {"kind": kind, "modules": modules}
+    rec = _a_record(modules) if modules else "a record"
+    if kind in _TRIGGER_EVENTS:
+        out["label"] = f"Runs automatically when {rec} is {_TRIGGER_EVENTS[kind]}"
+        if trig.get("when") or trig.get("trigger_filter") or trig.get("conditions"):
+            out["label"] += " and matches its conditions"
+    elif kind == "start_on_api_call":
+        out["label"] = "Runs when its API endpoint is called"
+    else:
+        button = trig.get("button_label") or trig.get("title")
+        out["label"] = (f"Runs when an analyst clicks \"{button}\" on {rec}"
+                        if button else f"Runs when an analyst starts it on {rec}")
+        out["manual"] = True
+    return out
+
+
 def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
                      title_suggestion: str | None,
                      editable_title: bool,
@@ -1061,6 +1110,9 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
                      "-- review the steps before saving."),
         "final_yaml": yaml_text,
     }
+    trigger = _trigger_summary(yaml_text)
+    if trigger:
+        card["trigger"] = trigger
     # Non-blocking findings reach the analyst on the card, not only in the
     # model's prose, which is where they were live -- and then ignored.
     if verdict.get("warnings"):
@@ -1180,6 +1232,9 @@ def emit_enhancement_offer(
         # The name lists above stay as the header index.
         "changes": list(diff.get("changes") or []),
     }
+    trigger = _trigger_summary(yaml_text)
+    if trigger:
+        card["trigger"] = trigger
     # Non-blocking findings still reach the human. verify_enhancement lets
     # warnings through to ready_to_push, so this card is the last place an
     # analyst can see "this will compile but the connector will reject it at
