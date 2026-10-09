@@ -762,9 +762,18 @@ def walk_paths(yaml_text: str, playbook: str | None = None, *,
             for o in st.get("options") or []:
                 if isinstance(o, dict) and (o.get("display") or o.get("option")):
                     pins.append(("manual", sid, str(o.get("display") or o.get("option"))))
-    runs: list[dict[str, Any]] = [{}] + [
-        {("branch_choices" if k == "branch" else "manual_choices"): {sid: lab}}
-        for k, sid, lab in pins][: max(0, max_walks - 1)]
+    # A pin only matters if the walk reaches its step: a decision behind
+    # another decision's non-default branch is never entered on sample data
+    # (live: the "Failed" branch after "Create Incident", which sits behind
+    # the Critical arm, was reported never reached). Pin the way there too.
+    approach = _approach_choices(pb)
+    runs: list[dict[str, Any]] = [{}]
+    for k, sid, lab in pins:
+        bc, mc = dict(approach.get(sid, ({}, {}))[0]), dict(approach.get(sid, ({}, {}))[1])
+        (bc if k == "branch" else mc)[sid] = lab
+        runs.append({**({"branch_choices": bc} if bc else {}),
+                     **({"manual_choices": mc} if mc else {})})
+    runs = runs[: max(1, max_walks)]
     token = _FORCE_OFFLINE.set(True)
     seen: set[tuple[str, str]] = set()
     empty: list[dict[str, Any]] = []
@@ -794,6 +803,59 @@ def walk_paths(yaml_text: str, playbook: str | None = None, *,
             "steps_reached": len(reached & set(total)), "steps_total": len(total),
             "never_reached": [n for n in total if n not in reached],
             "renders_empty": empty, "unrendered": sorted(unrendered)}
+
+
+def _approach_choices(pb: dict[str, Any]) -> dict[str, tuple[dict, dict]]:
+    """For each step, the decision branches / manual options on one route from
+    the trigger to it: ({decision: label}, {manual_input: label})."""
+    from fsr_playbooks.compiler.parser import _slugify  # noqa: PLC0415
+    steps = [s for s in pb.get("steps") or [] if isinstance(s, dict)]
+    alias: dict[str, str] = {}
+    for st in steps:
+        name = str(st.get("name") or st.get("id") or "")
+        for a in (name, str(st.get("id") or ""), _slugify(name)):
+            if a:
+                alias.setdefault(a, name)
+
+    def _to(ref: Any) -> str | None:
+        return alias.get(str(ref)) if ref else None
+
+    edges: dict[str, list[tuple[str, str | None, str | None]]] = {}
+    for st in steps:
+        name = str(st.get("name") or st.get("id") or "")
+        out: list[tuple[str, str | None, str | None]] = []
+        if st.get("type") == "decision":
+            for c in st.get("conditions") or []:
+                if isinstance(c, dict) and _to(c.get("next")):
+                    out.append((_to(c.get("next")), "branch", str(c.get("display") or "")))
+        elif st.get("type") == "manual_input":
+            for o in st.get("options") or []:
+                if isinstance(o, dict) and _to(o.get("next")):
+                    out.append((_to(o.get("next")), "manual",
+                                str(o.get("display") or o.get("option") or "")))
+        if _to(st.get("next")):
+            out.append((_to(st.get("next")), None, None))
+        edges[name] = out
+    start = next((str(s.get("name") or s.get("id")) for s in steps
+                  if str(s.get("type") or "").startswith("start")), None)
+    if not start:
+        return {}
+    found: dict[str, tuple[dict, dict]] = {start: ({}, {})}
+    queue = [start]
+    while queue:
+        cur = queue.pop(0)
+        bc, mc = found[cur]
+        for nxt, kind, label in edges.get(cur, []):
+            if nxt in found:
+                continue
+            nbc, nmc = dict(bc), dict(mc)
+            if kind == "branch" and label:
+                nbc[cur] = label
+            elif kind == "manual" and label:
+                nmc[cur] = label
+            found[nxt] = (nbc, nmc)
+            queue.append(nxt)
+    return found
 
 
 def _loop_item_placeholder():
@@ -1405,14 +1467,18 @@ def _next_step(step: dict, taken_branch: str | None,
     provided, else the first branch (deterministic default -- agent can
     pin a path with branch_choices).
     """
+    branches = step.get("branches") or {}
+    # A taken branch beats a step-level `next`: the compiler drops a decision's
+    # stray `next` when a default condition exists, so following it walked a
+    # route the playbook does not have (live: a pinned "Failed" branch went to
+    # the success email, and its target was reported never reached).
+    if taken_branch and taken_branch in branches:
+        return branches[taken_branch]
     nxt = step.get("next")
     if nxt:
         return nxt
-    branches = step.get("branches") or {}
     if not branches:
         return None
-    if taken_branch and taken_branch in branches:
-        return branches[taken_branch]
     # Deterministic default: lowest-key branch.
     first_key = sorted(branches.keys())[0]
     return branches[first_key]
