@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsr_playbooks.llm import autonomy
+from fsr_playbooks.llm import autonomy, session_state
 from fsr_playbooks.llm.autonomy import (
     evaluate,
     parse_policy,
@@ -119,12 +119,12 @@ def test_each_check_failing_means_would_not_act(case, kwargs, needle):
 def test_the_turn_subject_comes_from_set_turn_policy():
     set_turn_policy(_pol(), subject=ALERT)
     try:
-        assert autonomy._TURN_SUBJECT.get() == ALERT
+        assert session_state.current().autonomy_subject == ALERT
         d = evaluate(_pol(), _close(), verdicts=[_verdict()], registry=_read())
         assert d["outcome"] == "would_act", d["failed"]
     finally:
         set_turn_policy(None)
-    assert autonomy._TURN_SUBJECT.get() is None
+    assert session_state.current().autonomy_subject is None
 
 
 def test_a_field_scoped_rule_now_matches_update_record_fields():

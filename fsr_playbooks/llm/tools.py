@@ -22,7 +22,6 @@ import time
 import typing
 import uuid
 from collections.abc import Callable
-from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
 
@@ -527,7 +526,7 @@ def set_run_playbook_auto_resolver(fn: Callable[[dict], bool] | None) -> None:
 #
 # Default True (fail-open): a host that never calls `set_change_affordance`
 # behaves exactly as before.
-_CHANGE_AFFORDANCE: ContextVar[bool] = ContextVar("_change_affordance", default=True)
+# Held on SessionState (llm.session_state) as `change_affordance`.
 
 # A read-only turn (explain / find_issues chip): the write frontier is REFUSED
 # at dispatch, not just hidden from the tool list.  The advertised-list gate
@@ -541,7 +540,7 @@ _CHANGE_AFFORDANCE: ContextVar[bool] = ContextVar("_change_affordance", default=
 #
 # Default False (fail-open): a host that never calls `set_read_only_turn`
 # behaves exactly as before.
-_READ_ONLY_TURN: ContextVar[bool] = ContextVar("_read_only_turn", default=False)
+# Held on SessionState (llm.session_state) as `read_only`.
 
 # Gating an edit to an EXISTING playbook, or delivering one. Kept deliberately
 # tight:
@@ -622,7 +621,8 @@ def set_change_affordance(present: bool) -> Any:
     """Declare whether THIS turn carries an analyst-made change affordance.
     Returns a token for ``reset_change_affordance``. A ContextVar because the
     turn runs on its own thread/task, same as the grounded-YAML bind."""
-    return _CHANGE_AFFORDANCE.set(bool(present))
+    from . import session_state
+    return session_state.update(change_affordance=bool(present))
 
 
 def reset_change_affordance(token: Any) -> None:
@@ -630,14 +630,10 @@ def reset_change_affordance(token: Any) -> None:
     leak the gate into the next turn on this worker, so callers put it in a
     ``finally`` and we swallow the token-mismatch that a re-entrant bind
     would otherwise raise."""
-    try:
-        _CHANGE_AFFORDANCE.reset(token)
-    except (RuntimeError, ValueError, LookupError):
-        # RuntimeError is the real one: CPython raises it for a token already
-        # used, or one created on another context. Fail OPEN -- a gate latched
-        # on by a leaked token would card a legitimate flow with nothing to
-        # tell the analyst why.
-        _CHANGE_AFFORDANCE.set(True)
+    # Fail OPEN on an unusable token -- a gate latched on by a leaked token
+    # would card a legitimate flow with nothing to tell the analyst why.
+    from . import session_state
+    session_state.reset_or(token, change_affordance=True)
 
 
 def set_read_only_turn(read_only: bool) -> Any:
@@ -645,30 +641,25 @@ def set_read_only_turn(read_only: bool) -> Any:
 
     Returns a token for ``reset_read_only_turn``.  A ContextVar because the
     turn runs on its own thread/task, same as ``set_change_affordance``."""
-    return _READ_ONLY_TURN.set(bool(read_only))
+    from . import session_state
+    return session_state.update(read_only=bool(read_only))
 
 
 def reset_read_only_turn(token: Any) -> None:
     """Undo ``set_read_only_turn``. Never raises -- same fail-open reasoning
     as ``reset_change_affordance``."""
-    try:
-        _READ_ONLY_TURN.reset(token)
-    except (RuntimeError, ValueError, LookupError):
-        _READ_ONLY_TURN.set(False)
+    from . import session_state
+    session_state.reset_or(token, read_only=False)
 
 
 def _is_read_only_turn() -> bool:
-    try:
-        return bool(_READ_ONLY_TURN.get())
-    except LookupError:  # pragma: no cover - defensive
-        return False
+    from . import session_state
+    return bool(session_state.current().read_only)
 
 
 def _change_affordance_present() -> bool:
-    try:
-        return bool(_CHANGE_AFFORDANCE.get())
-    except LookupError:  # pragma: no cover - defensive
-        return True
+    from . import session_state
+    return bool(session_state.current().change_affordance)
 
 
 def _resolve_tier(name: str, args: dict[str, Any]) -> int:

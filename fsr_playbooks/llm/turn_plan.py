@@ -37,7 +37,6 @@ plan sees zero behavior change (fail-open, like every other turn-scoped gate).
 """
 from __future__ import annotations
 
-from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -463,28 +462,25 @@ def plan_turn(
 
 # --- turn-scoped installation (same pattern as set_read_only_turn) ---------
 
-_ACTIVE_PLAN: ContextVar[TurnPlan | None] = ContextVar("_active_turn_plan", default=None)
+# Held on SessionState (llm.session_state) as `turn_plan`.
 
 
 def set_turn_plan(plan: TurnPlan | None) -> Any:
     """Install the plan for this turn; dispatch consults its gates.
     Returns a token for ``reset_turn_plan``."""
-    return _ACTIVE_PLAN.set(plan)
+    from . import session_state
+    return session_state.update(turn_plan=plan)
 
 
 def reset_turn_plan(token: Any) -> None:
     """Undo ``set_turn_plan``. Never raises (turn-boundary cleanup)."""
-    try:
-        _ACTIVE_PLAN.reset(token)
-    except (RuntimeError, ValueError, LookupError):
-        _ACTIVE_PLAN.set(None)
+    from . import session_state
+    session_state.reset_or(token, turn_plan=None)
 
 
 def active_turn_plan() -> TurnPlan | None:
-    try:
-        return _ACTIVE_PLAN.get()
-    except LookupError:  # pragma: no cover - defensive
-        return None
+    from . import session_state
+    return session_state.current().turn_plan
 
 
 __all__ = [

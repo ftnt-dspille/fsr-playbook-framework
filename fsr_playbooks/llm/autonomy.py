@@ -19,7 +19,6 @@ record and sets it for the turn with ``set_turn_policy``.
 """
 from __future__ import annotations
 
-import contextvars
 import ipaddress
 import re
 import time
@@ -118,16 +117,10 @@ def parse_policy(raw: Any) -> tuple[Policy | None, str | None]:
 
 # ---- per-turn policy slot ----------------------------------------------------
 
-_TURN_POLICY: contextvars.ContextVar[Policy | None] = contextvars.ContextVar(
-    "autonomy_turn_policy", default=None)
-
 # (rule_id, target) -> (actions in the last hour, actions on target today).
 Counter = Callable[[str, str], tuple[int, int]]
-_TURN_COUNTER: contextvars.ContextVar[Counter | None] = contextvars.ContextVar(
-    "autonomy_turn_counter", default=None)
-# The record this turn is about (its IRI), for `target: {kind: record}`.
-_TURN_SUBJECT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "autonomy_turn_subject", default=None)
+# The policy, its counter and the turn's subject record (its IRI, for
+# `target: {kind: record}`) are held on SessionState (llm.session_state).
 
 
 def set_turn_policy(policy: Policy | dict | None,
@@ -136,15 +129,15 @@ def set_turn_policy(policy: Policy | dict | None,
     """Set (or clear) the policy for the current turn. Returns a parse error,
     if any; a policy that fails to parse is cleared, never half-applied.
     ``subject`` is the IRI of the record the turn is about (record rules)."""
-    _TURN_SUBJECT.set(subject)
+    from . import session_state
     if isinstance(policy, dict):
         policy, err = parse_policy(policy)
         if err:
-            _TURN_POLICY.set(None)
-            _TURN_COUNTER.set(None)
+            session_state.update(autonomy_policy=None, autonomy_counter=None,
+                                 autonomy_subject=subject)
             return err
-    _TURN_POLICY.set(policy)
-    _TURN_COUNTER.set(counter)
+    session_state.update(autonomy_policy=policy, autonomy_counter=counter,
+                         autonomy_subject=subject)
     return None
 
 
@@ -152,11 +145,18 @@ def set_turn_subject(iri: str | None) -> None:
     """Set the record this turn is about (for `target: {kind: record}`). The
     host binds its mounted record after the policy, so this is separate from
     :func:`set_turn_policy`."""
-    _TURN_SUBJECT.set(iri or None)
+    from . import session_state
+    session_state.update(autonomy_subject=iri or None)
 
 
 def get_turn_policy() -> Policy | None:
-    return _TURN_POLICY.get()
+    from . import session_state
+    return session_state.current().autonomy_policy
+
+
+def _session_state() -> Any:
+    from . import session_state
+    return session_state.current()
 
 
 # ---- evaluation ---------------------------------------------------------------
@@ -373,7 +373,7 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
     targets: list[str] = []
     if w.target is not None and w.target.kind == "record":
         uuid = _record_uuid(args.get("uuid") or args.get("record") or args.get("iri"))
-        subject = _TURN_SUBJECT.get() if subject is None else subject
+        subject = _session_state().autonomy_subject if subject is None else subject
         targets = [uuid] if uuid else []
         if not uuid:
             failed.append("the action names no record")
@@ -479,6 +479,6 @@ def shadow_decision(call: Call) -> dict[str, Any] | None:
         return evaluate(policy, call,
                         verdicts=ev.verdicts() if ev is not None else [],
                         registry=ev.valid_ids() if ev is not None else {},
-                        counter=_TURN_COUNTER.get())
+                        counter=_session_state().autonomy_counter)
     except Exception:  # noqa: BLE001
         return None

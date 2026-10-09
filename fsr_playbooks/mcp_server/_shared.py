@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -185,27 +184,29 @@ class YamlLoad:
     grounding_reason: str = ""
 
 
+def _ss() -> Any:
+    from ..llm import session_state
+    return session_state
+
+
 # The open playbook for the current turn, as read from the appliance. Set by
 # the chat loop (which owns `entity.playbook_yaml`) and read here at tool
 # dispatch. A ContextVar because the turn runs on its own thread/task -- the
 # same reason the active profile and record IRI are bound this way.
-_GROUNDED_YAML: ContextVar[str | None] = ContextVar("_grounded_yaml", default=None)
+# Held on SessionState (llm.session_state) as `grounded_yaml`.
 
 
 def set_grounded_yaml(yaml_text: str | None) -> Any:
     """Bind the turn's authoritative open-playbook YAML. Returns a reset token."""
-    return _GROUNDED_YAML.set(yaml_text or None)
+    return _ss().update(grounded_yaml=yaml_text or None)
 
 
 def reset_grounded_yaml(token: Any) -> None:
-    try:
-        _GROUNDED_YAML.reset(token)
-    except (ValueError, LookupError):      # foreign context -- nothing to undo
-        pass
+    _ss().reset(token)
 
 
 def get_grounded_yaml() -> str | None:
-    return _GROUNDED_YAML.get()
+    return _ss().current().grounded_yaml
 
 
 # Where the grounded playbook came from. None: the analyst has it open (the
@@ -218,24 +219,20 @@ def get_grounded_yaml() -> str | None:
 # playbook, and an edit to a draft is delivered as a new Create card (there is
 # nothing saved to apply it to).
 GROUNDED_SOURCES = ("draft", "saved")
-_GROUNDED_SOURCE: ContextVar[str | None] = ContextVar(
-    "_grounded_source", default=None)
+# Held on SessionState (llm.session_state) as `grounded_source`.
 
 
 def set_grounded_source(source: str | None) -> Any:
     """Bind where the grounded playbook came from. Returns a reset token."""
-    return _GROUNDED_SOURCE.set(source if source in GROUNDED_SOURCES else None)
+    return _ss().update(grounded_source=source if source in GROUNDED_SOURCES else None)
 
 
 def reset_grounded_source(token: Any) -> None:
-    try:
-        _GROUNDED_SOURCE.reset(token)
-    except (ValueError, LookupError):      # foreign context -- nothing to undo
-        pass
+    _ss().reset(token)
 
 
 def get_grounded_source() -> str | None:
-    return _GROUNDED_SOURCE.get()
+    return _ss().current().grounded_source
 
 
 # The analyst's own words for the current turn. Bound by the chat loop and read
@@ -247,24 +244,20 @@ def get_grounded_source() -> str | None:
 # so every intent-aware exemption in that tool was dead code. This is the same
 # finding as tracker #60, where `requested_by` was set on 0 of 4 live calls; the
 # lesson recorded there is DERIVE the intent, never ask the model to declare it.
-_TURN_USER_MESSAGE: ContextVar[str | None] = ContextVar(
-    "_turn_user_message", default=None)
+# Held on SessionState (llm.session_state) as `user_message`.
 
 
 def set_turn_user_message(text: str | None) -> Any:
     """Bind the turn's user message. Returns a reset token."""
-    return _TURN_USER_MESSAGE.set((text or "").strip() or None)
+    return _ss().update(user_message=(text or "").strip() or None)
 
 
 def reset_turn_user_message(token: Any) -> None:
-    try:
-        _TURN_USER_MESSAGE.reset(token)
-    except (ValueError, LookupError):      # foreign context -- nothing to undo
-        pass
+    _ss().reset(token)
 
 
 def get_turn_user_message() -> str | None:
-    return _TURN_USER_MESSAGE.get()
+    return _ss().current().user_message
 
 
 # The analyst's answer to the "Modify this playbook / Create new playbook"
@@ -285,24 +278,21 @@ SCOPE_CHOICE_PAYLOAD = {
         {"label": "Create new playbook", "value": SCOPE_CREATE_NEW},
     ],
 }
-_PLAYBOOK_SCOPE: ContextVar[str | None] = ContextVar("_playbook_scope", default=None)
+# Held on SessionState (llm.session_state) as `playbook_scope`.
 
 
 def set_playbook_scope(scope: str | None) -> Any:
     """Bind the session's scope answer. Returns a reset token."""
-    return _PLAYBOOK_SCOPE.set(
-        scope if scope in (SCOPE_MODIFY, SCOPE_CREATE_NEW) else None)
+    return _ss().update(
+        playbook_scope=scope if scope in (SCOPE_MODIFY, SCOPE_CREATE_NEW) else None)
 
 
 def reset_playbook_scope(token: Any) -> None:
-    try:
-        _PLAYBOOK_SCOPE.reset(token)
-    except (ValueError, LookupError):
-        pass
+    _ss().reset(token)
 
 
 def get_playbook_scope() -> str | None:
-    return _PLAYBOOK_SCOPE.get()
+    return _ss().current().playbook_scope
 
 
 def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True,
