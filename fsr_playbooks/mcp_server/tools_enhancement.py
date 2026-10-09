@@ -41,6 +41,15 @@ from .tools_verify import verify_playbook
 _OP_RENAMES: contextvars.ContextVar[dict[str, str] | None] = \
     contextvars.ContextVar("_OP_RENAMES", default=None)
 
+# Steps `edit_playbook`'s own ops named (update/rename/re-route), for the same
+# verify. Only these may get a `<step>.*` write acknowledgement: a step that
+# merely came out different in a re-typed document was not asked for.
+_OP_TOUCHED: contextvars.ContextVar[frozenset[str] | None] = \
+    contextvars.ContextVar("_OP_TOUCHED", default=None)
+
+_TOUCHING_OPS = {"update_step": ("name",), "rename_step": ("name", "to"),
+                 "set_route": ("from",), "remove_route": ("from",)}
+
 
 def _parse(yaml_text: str):
     """Parse → IR. Returns (Collection | None, errors). Wraps the sys.path
@@ -853,6 +862,17 @@ def _grandfather_preexisting(result: dict[str, Any],
     return out
 
 
+def _modified_step_acks(out: dict[str, Any]) -> list[str]:
+    """`<step>.*` for steps this edit's explicit ops changed -- never for one
+    that only differs in a re-typed document, nor one whose behaviour changed
+    outside the diff."""
+    touched = _OP_TOUCHED.get() or frozenset()
+    outside = {str(r.get("step")) for r in out.get("regressions") or []
+               if r.get("kind") == "behavior_changed_outside_diff"}
+    modified = (out.get("diff_summary") or {}).get("steps_modified") or []
+    return [f"{n}.*" for n in modified if n in touched and n not in outside]
+
+
 def _parameter_names(yaml_text: str) -> set[str]:
     from ruamel.yaml import YAML
     try:
@@ -923,7 +943,7 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
         # A step this verified edit MODIFIED may shed fields and outgoing
         # routes (type change, rewritten message). The diff named the step;
         # the write guard needs the same consent for what is inside it.
-        + [f"{n}.*" for n in ((out.get("diff_summary") or {}).get("steps_modified") or [])]
+        + _modified_step_acks(out)
     )
 
     out["verified_id"] = _verified_yaml.remember(
@@ -1625,11 +1645,19 @@ def edit_playbook(
     buf = io.StringIO()
     y.dump(doc, buf)
     after = buf.getvalue()
+    touched = set()
+    for op in operations:
+        n = _normalize_op(op) if isinstance(op, dict) else {}
+        for key in _TOUCHING_OPS.get(n.get("op"), ()):
+            if isinstance(n.get(key), str) and n[key].strip():
+                touched.add(n[key].strip())
     token = _OP_RENAMES.set(renames)
+    t_token = _OP_TOUCHED.set(frozenset(touched))
     try:
         out = verify_enhancement(before_yaml=before, after_yaml=after,
                                  user_message=user_message)
     finally:
+        _OP_TOUCHED.reset(t_token)
         _OP_RENAMES.reset(token)
     out = dict(out)
     out["applied"] = applied

@@ -790,3 +790,17 @@ def test_a_removed_unread_parameter_is_acknowledged_for_the_save():
     assert "Note A.*" in res["acknowledged_drops"]
     from fsr_playbooks.compiler.prewrite import _ack_matches
     assert _ack_matches("lead_email", "collection.workflows[P].parameters[lead_email]")
+
+
+def test_a_retyped_document_gets_no_modified_step_acknowledgement():
+    # Security review: `<step>.*` must cover only steps an explicit edit op
+    # named, not anything that came out different in a re-typed document.
+    tok = set_grounded_yaml(_WITH_PARAM)
+    try:
+        before = _WITH_PARAM
+        after = before.replace("{to: '{{ vars.input.params.lead_email }}'}",
+                               "{to: '{{ vars.input.params.lead_email }}', x: 1}")
+        res = verify_enhancement(before, after)
+    finally:
+        reset_grounded_yaml(tok)
+    assert not [t for t in res.get("acknowledged_drops") or [] if t.endswith(".*")]

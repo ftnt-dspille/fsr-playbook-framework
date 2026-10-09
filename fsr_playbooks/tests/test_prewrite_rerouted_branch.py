@@ -124,3 +124,9 @@ def test_a_modified_step_token_covers_its_fields_and_routes_not_the_step():
     assert not _ack_matches(tok, "collection.workflows[w].steps[Ping Team]")
     assert not _ack_matches(tok, "collection.workflows[w].steps[Other].arguments.x")
     assert not _ack_matches(tok, "collection.workflows[w].routes[Other->Ping Team:x]")
+
+
+def test_a_modified_step_token_matches_whole_segments_only():
+    from fsr_playbooks.compiler.prewrite import _ack_matches
+    assert not _ack_matches("A.*", "collection.workflows[w].steps[A2].arguments.x")
+    assert not _ack_matches("A.*", "collection.workflows[w].routes[BA->C:x]")

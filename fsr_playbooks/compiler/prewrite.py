@@ -33,6 +33,7 @@ Additions and in-place value changes are never refused -- those are the edit.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -457,8 +458,10 @@ def _ack_matches(token: str, path: str) -> bool:
         # dropped option routes; rewriting a step's message refused its
         # `message.*` keys. The step itself is not covered: deleting it still
         # needs its bare name.
-        name = token[:-2]
-        return (f"steps[{name}]." in path or f"routes[{name}->" in path)
+        # Exact segments only: `.steps[<name>].` / `.routes[<name>->`, so
+        # "A" never covers "A2" or a route INTO the step.
+        name = re.escape(token[:-2])
+        return re.search(rf"\.steps\[{name}\]\.|\.routes\[{name}->", path) is not None
     return (token == path
             or path.endswith(f".{token}")
             or path.endswith(f"[{token}]"))
