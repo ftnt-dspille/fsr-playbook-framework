@@ -63,9 +63,9 @@ GOLDEN_DIR = REPO_ROOT / "tooling" / "evals" / "golden_traces"
 _DEFAULT_BRIDGES = [
     Path(os.environ["FSRPB_RENDER_BRIDGE"]) if os.environ.get("FSRPB_RENDER_BRIDGE") else None,
     REPO_ROOT.parent.parent / "WebstormProjects" / "fsr_all_widgets"
-    / "widgets-src" / "fsrSocAssistant" / "tools" / "render_check.cjs",
+    / "widgets-src" / "fortiaiAgenticAssistant" / "tools" / "render_check.cjs",
     Path.home() / "WebstormProjects" / "fsr_all_widgets"
-    / "widgets-src" / "fsrSocAssistant" / "tools" / "render_check.cjs",
+    / "widgets-src" / "fortiaiAgenticAssistant" / "tools" / "render_check.cjs",
 ]
 
 
