@@ -21,7 +21,7 @@
           "@type": "Workflow",
           "debug": true,
           "description": "Manually fetch indicators from Synthetic Threat Feed. Diagnostic / on-demand.",
-          "isActive": false,
+          "isActive": true,
           "name": "Get Indicators",
           "parameters": [],
           "recordTags": [
@@ -92,7 +92,7 @@
           "@type": "Workflow",
           "debug": true,
           "description": "Fetch and create indicators from Synthetic Threat Feed. Called as a child workflow.",
-          "isActive": false,
+          "isActive": true,
           "name": "> Synthetic Threat Feed > Fetch and Create",
           "parameters": [
             "lastPullTime"
@@ -325,7 +325,7 @@
           "@type": "Workflow",
           "debug": true,
           "description": "Scheduled ingestion orchestrator for Synthetic Threat Feed. Maintains per-install LastPullTime macro.",
-          "isActive": false,
+          "isActive": true,
           "name": "Synthetic Threat Feed > Ingest",
           "parameters": [],
           "recordTags": [

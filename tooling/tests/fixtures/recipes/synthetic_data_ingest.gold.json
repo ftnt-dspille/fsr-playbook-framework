@@ -23,7 +23,7 @@
           "@type": "Workflow",
           "debug": true,
           "description": "Manually fetch a sample of alerts from Synthetic Data Ingest.",
-          "isActive": false,
+          "isActive": true,
           "name": "Get Alerts",
           "parameters": [],
           "recordTags": [
@@ -94,7 +94,7 @@
           "@type": "Workflow",
           "debug": true,
           "description": "Fetch and create alerts/incidents from Synthetic Data Ingest.",
-          "isActive": false,
+          "isActive": true,
           "name": "> Synthetic Data Ingest > Fetch and Create",
           "parameters": [
             "lastPullTime"
@@ -325,7 +325,7 @@
           "@type": "Workflow",
           "debug": true,
           "description": "Scheduled ingestion orchestrator for Synthetic Data Ingest.",
-          "isActive": false,
+          "isActive": true,
           "name": "Synthetic Data Ingest > Ingest",
           "parameters": [],
           "recordTags": [
