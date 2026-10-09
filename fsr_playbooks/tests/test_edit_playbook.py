@@ -628,3 +628,19 @@ def test_the_enhancement_card_states_the_trigger():
                                            "verified_id": res["verified_id"]})["card"]
     assert card["trigger"]["label"].startswith("Runs when an analyst")
     assert card["trigger"]["modules"] == ["alerts"]
+
+
+def test_an_error_branch_points_at_ignore_errors_and_ignore_errors_applies():
+    # Analyst sim: "if creating the incident fails, still email" -- the model
+    # tried set_route option 'on_error' / 'Error' (FortiSOAR has no error
+    # branch) and was told only "has no branch". The failure email it then
+    # wired after the create could never run: without ignore_errors a failed
+    # step halts the playbook.
+    bad = edit_playbook([{"op": "set_route", "from": "Note A", "to": "Note B",
+                          "option": "on_error"}])
+    assert not bad.get("ok")
+    assert "ignore_errors" in str(bad)
+    good = edit_playbook([{"op": "update_step", "name": "Note A",
+                           "set": {"ignore_errors": True}}])
+    assert good["ready_to_push"], good.get("required_fixes")
+    assert _steps(good["after_yaml"])["Note A"].get("ignore_errors") is True

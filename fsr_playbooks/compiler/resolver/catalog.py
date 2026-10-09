@@ -8,6 +8,15 @@ import sqlite3
 from ..errors import CompileError, ErrorCode
 from ._constants import SHORT_TYPE_TO_FSR
 
+# Names models reach for when they want an error route. FortiSOAR has none; the
+# step-level `ignore_errors` is the mechanism. Live (analyst sim): `on_error`,
+# then `onError`, refused with no pointer, and the failure email it wired up
+# could never run.
+ERROR_HANDLER_KEYS = frozenset({
+    "on_error", "onError", "on_failure", "onFailure", "on_fail", "continue_on_error",
+    "continueOnError", "error_handler", "errorHandler", "catch", "ignoreErrors",
+    "ignore_error", "on_exception"})
+ERROR_BRANCH_HINT = ('A FortiSOAR step has no error branch: to keep going when it fails, set `ignore_errors: true` on the step and branch on its output in a `decision` after it.')
 
 class CatalogLookupMixin:
     """Methods for querying step types, connectors, and operations from the SQLite DB."""
@@ -48,12 +57,13 @@ class CatalogLookupMixin:
         )
         if not unknown:
             return False
+        hint = (" " + ERROR_BRANCH_HINT) if set(unknown) & ERROR_HANDLER_KEYS else ""
         errors.append(CompileError(
             code=ErrorCode.UNKNOWN_PARAM,
             message=(
                 f"{kind}: unknown argument(s) "
                 f"{', '.join(repr(k) for k in unknown)}; "
-                f"FSR drops these silently at runtime"
+                f"FSR drops these silently at runtime" + hint
             ),
             path=f"{path}.arguments",
             suggestion=(

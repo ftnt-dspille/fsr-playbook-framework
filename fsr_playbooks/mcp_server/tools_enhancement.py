@@ -985,7 +985,14 @@ def _branch_entry(step, option: str):
                       if entry.get(k) is not None}
             if option in labels or (option.lower() == "default" and entry.get("default")):
                 return entry
-    raise _EditError(f"step {step.get('name')!r} has no branch {option!r}")
+    from fsr_playbooks.compiler.resolver.catalog import (  # noqa: PLC0415
+        ERROR_BRANCH_HINT,
+        ERROR_HANDLER_KEYS,
+    )
+    hint = (" " + ERROR_BRANCH_HINT
+            if option in ERROR_HANDLER_KEYS or option.lower() in ("error", "failure", "failed")
+            else "")
+    raise _EditError(f"step {step.get('name')!r} has no branch {option!r}.{hint}")
 
 
 # Canvas placement for added steps. A step with no `top`/`left` falls to the

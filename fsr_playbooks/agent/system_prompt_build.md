@@ -187,6 +187,9 @@ them returns nothing):
   a `set_variable` that only builds a message string -- that creates no record.
 - **Set values / shape data** → `set_variable`.
 - **Branch on a condition** → `decision`.
+- **Keep going when a step fails** → `ignore_errors: true` on that step, then a
+  `decision` on its output. There is no error branch or `on_error` key; without
+  `ignore_errors` a failed step halts the run and any check after it never runs.
 - **Entry / exit** → `start` / `end`.
 
 Use a **`connector`** step (resolved via `find(kind='operation')` + `get_op_schema`) ONLY
@@ -343,9 +346,12 @@ IRI: none of these tools take an IRI.
   (PK or task_id), pass it instead. Report issues ranked by severity with the fix for each; do not edit
   unless the analyst asks.
 - **`add_error_handling`** -- Call `analyze_playbook` to find steps that can fail
-  (connector calls, external lookups) with no on-failure branch; author an
-  error-handling branch for each with `edit_playbook` (`add_step` +
-  `set_route`), and deliver it with `emit_card(card_type='enhancement_offer', payload={verified_id: …, summary: …})`.
+  (connector calls, external lookups, record writes). A FortiSOAR step has NO
+  failure branch: a failed step halts the playbook. To keep going, set
+  `ignore_errors: true` on that step (`update_step`), then add a `decision`
+  right after it that checks the step's output (e.g. whether the created
+  record has an `@id`) and routes the failure case (`add_step` + `set_route`).
+  Deliver it with `emit_card(card_type='enhancement_offer', payload={verified_id: …, summary: …})`.
 - **`optimize`** -- Call `analyze_playbook`, then look for redundant steps,
   parallelizable sequences, and unnecessary complexity. Make the changes with
   `edit_playbook` (`remove_step`, `set_route`, ...) so the diff holds ONLY the
