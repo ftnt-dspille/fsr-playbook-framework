@@ -41,6 +41,8 @@ if str(REPO_ROOT / "tooling") not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from harness.frames import assistant_text, pending_halt  # noqa: E402
+
 from evals.levers import lever_for  # noqa: E402
 
 # The deployed connector's `name` (info.json), NOT the repo/dir name. It was
@@ -48,7 +50,9 @@ from evals.levers import lever_for  # noqa: E402
 # a future rename doesn't need a code edit (see the "read info.json, don't
 # hardcode" rule). A stale value here surfaces as "Connector ... does not exists".
 CONN = os.environ.get("FSR_BUILDER_CONNECTOR", "connector-fsr-soc-assistant")
-DEFAULT_VERSION = "0.3.116"
+# None: the box resolves the ACTIVE installed version. A pinned literal went
+# stale with the next release and failed every run with "does not exists".
+DEFAULT_VERSION: str | None = None
 DEFAULT_CONFIG = "fsrpb-live"
 RUN_DIR = REPO_ROOT / "data" / "eval_runs"
 TASKS_DIR = REPO_ROOT / "tooling" / "evals" / "tasks"
@@ -67,7 +71,7 @@ _DEFAULT_BRIDGES = [
 
 # ───────────────────────── drive ─────────────────────────
 
-def _execute(client, op: str, params: dict, version: str, config: str,
+def _execute(client, op: str, params: dict, version: str | None, config: str,
              timeout: int = 290) -> Any:
     body = {"connector": CONN, "operation": op,
             "config": config, "params": params}
@@ -88,7 +92,7 @@ def _unwrap(resp: Any) -> Any:
 
 def drive_scenario(message: str, intent: str, *, record: Any = None,
                    entity: Any = None,
-                   version: str = DEFAULT_VERSION, config: str = DEFAULT_CONFIG,
+                   version: str | None = DEFAULT_VERSION, config: str = DEFAULT_CONFIG,
                    resume: dict | None = None, session: str | None = None,
                    log=print) -> dict:
     """Drive a sync chat_turn (+ optional chat_resume) and return the merged
@@ -139,6 +143,11 @@ def drive_scenario(message: str, intent: str, *, record: Any = None,
     if resume or stop_reason == "approval_required":
         rp = dict(resume or {"decision": "approve"})
         rp["session_id"] = session
+        # chat_resume routes on the id it is sent; a bare {"decision"} resumed
+        # nothing. Answer the halt this turn actually stopped on.
+        halt = pending_halt(res)
+        if halt is not None and halt["key"] not in rp:
+            rp[halt["key"]] = halt["value"]
         log(f">> chat_resume decision={rp.get('decision')} "
             f"(stop_reason was {stop_reason})")
         t1 = time.time()
@@ -150,9 +159,7 @@ def drive_scenario(message: str, intent: str, *, record: Any = None,
             log(f">> resume returned stop_reason={stop_reason}")
 
     trace = transcript_to_trace(transcript)
-    final_text = "".join(
-        e.get("text", "") for e in transcript
-        if isinstance(e, dict) and e.get("type") == "text").strip()
+    final_text = assistant_text(transcript)
     return {
         "session": session, "transcript": transcript, "trace": trace,
         "final_text": final_text, "stop_reason": stop_reason,

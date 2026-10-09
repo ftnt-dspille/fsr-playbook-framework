@@ -244,16 +244,11 @@ def _build_provider(kind: str, model: str):
     a run measures a model nobody chose.
     """
     if kind == "frank":
-        import os as _os
-
-        from fsr_playbooks.llm.openai_provider import OpenAIProvider
-        base_url = _os.environ.get("FRANK_BASE_URL")
-        key = _os.environ.get("FRANK_API_KEY")
-        if not base_url or not key:
-            raise SystemExit("--provider frank needs FRANK_BASE_URL + "
-                             "FRANK_API_KEY (see .env)")
-        return OpenAIProvider(base_url=base_url, api_key=key,
-                              model=model or _os.environ.get("FRANK_MODEL"))
+        from harness.llm import LLMConfigError, resolve_llm
+        try:
+            return resolve_llm("frank", model).provider_instance()
+        except LLMConfigError as e:
+            raise SystemExit(f"--provider frank: {e} (see .env)") from e
 
     from anthropic import AsyncAnthropic
 
@@ -266,30 +261,10 @@ def _build_provider(kind: str, model: str):
     return AnthropicProvider(model=model, client=AsyncAnthropic(max_retries=12))
 
 
-# Only TRANSPORT failures make a run unscoreable. The distinction is
-# load-bearing and was nearly lost: run 20260817T025645Z lost a repeat to a
-# provider `400`, and that 400 arrived immediately after THREE `run_op` calls
-# carrying `__bad_tool_arguments__` -- the model emitted malformed JSON until
-# the request itself was invalid. Excluding that as "lost" would hide the exact
-# agent defect the harness exists to catch. A rejection is a result; only a
-# connection that never delivered one is a loss.
-# NOTE the friendly-wrapper entries. The providers do not surface the raw
-# exception: `openai_provider._friendly_error` turns an `APIConnectionError`
-# into "Could not reach the OpenAI endpoint at <url> -- check network
-# connectivity and the base URL", which contains not one word of the raw
-# `httpx.ConnectError`. Matching only the raw text classified a DEAD gateway
-# as a provider rejection and scored it 0.0 -- the exact reading the lost-run
-# work exists to prevent, still live against `--provider frank`. Caught by
-# pointing a real run at a closed port; see test_calibrate_gateway_resilience.
-_TRANSPORT_FAILURE_MARKERS = (
-    "connecterror", "connect error", "all connection attempts failed",
-    "could not reach", "connection refused", "network is unreachable",
-    "name or service not known", "nodename nor servname",
-    "timed out", "timeout", "readerror", "read error",
-    "remoteprotocolerror", "connection reset", "temporarily unavailable",
-    "502", "503", "504",
-)
-
+# Only TRANSPORT failures make a run unscoreable; a provider rejection is a
+# result. The classification is shared with every harness (tooling/harness).
+from harness.classify import _TRANSPORT_FAILURE_MARKERS  # noqa: E402,F401
+from harness.classify import is_transport_failure as _is_transport_failure  # noqa: E402
 
 # Backoff between retries of a turn whose transport died (#142). Indexed by
 # attempt, last value repeats. Longer than a request timeout on purpose: the
@@ -308,22 +283,6 @@ def contamination_exit_code(lost_total: int, allow_contaminated: bool) -> int:
     if lost_total and not allow_contaminated:
         return 3
     return 0
-
-
-def _is_transport_failure(message: str) -> bool:
-    """True when the turn never got a response at all.
-
-    A provider REJECTION (4xx other than 429) is deliberately NOT a transport
-    failure: the request reached the model and was refused, usually because of
-    what the agent put in it."""
-    m = (message or "").lower()
-    if "429" in m or "rate limit" in m:
-        return True          # never delivered; retryable, not the agent's doing
-    if any(k in m for k in ("400", "422", "bad request", "badrequest",
-                            "invalid_request", "context length",
-                            "maximum context")):
-        return False         # the request was malformed -- that IS a result
-    return any(k in m for k in _TRANSPORT_FAILURE_MARKERS)
 
 
 async def _run_one(prompt: str, model: str, provider_kind: str = "anthropic",
