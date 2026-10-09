@@ -94,35 +94,6 @@ def test_failed_investigation_attempts_still_count():
     assert _drive(d, "emit_action_card", {}) is None
 
 
-# ───────────────────── forbidden TI pivot ─────────────────────
-
-def test_internal_ip_ti_pivot_blocked():
-    d = TriageDiscipline()
-    g = d.evaluate("run_op", {"connector": "virustotal", "op": "ip",
-                           "params": {"ip": "192.168.77.49"}})
-    assert g is not None and g["forbidden_pivot_guard"] is True
-
-
-def test_external_ip_ti_pivot_allowed():
-    d = TriageDiscipline()
-    assert d.evaluate("run_op", {"connector": "virustotal", "op": "ip",
-                              "params": {"ip": "102.220.160.21"}}) is None
-
-
-def test_mixed_ips_ti_pivot_allowed():
-    """When a public IP is also present, it's a legit external lookup."""
-    d = TriageDiscipline()
-    assert d.evaluate("run_op", {"connector": "shodan", "op": "ip",
-                              "params": {"ip": "8.8.8.8", "ctx": "192.168.1.1"}}) is None
-
-
-def test_internal_ip_non_ti_connector_allowed():
-    d = TriageDiscipline()
-    # get_ip_context / SIEM pivots on internal IPs are exactly what we WANT.
-    assert d.evaluate("run_op", {"connector": "fortinet-fortisiem", "op": "ctx",
-                              "params": {"ip": "192.168.1.1"}}) is None
-
-
 # ───────────────────── call-once discovery ─────────────────────
 
 def test_find_containment_actions_call_once():
@@ -180,8 +151,8 @@ def test_guard_rejection_carries_the_right_kind():
 
     The hunt-floor guard is a DEFERRAL (retry later), not a terminal redirect,
     so it carries kind='guard_defer' -- a distinct shape from a tool failure
-    (tracker #60). The forbidden-pivot and call-once guards are terminal, so
-    they keep kind='guard_redirect'.
+    (tracker #60). The call-once guard is terminal, so it keeps
+    kind='guard_redirect'.
     """
     # 1. Hunt floor guard -- a deferral, not a terminal redirect
     d = TriageDiscipline()
@@ -190,14 +161,7 @@ def test_guard_rejection_carries_the_right_kind():
     assert g.get("kind") == "guard_defer"
     assert g.get("hunt_floor_guard") is True
 
-    # 2. Forbidden pivot guard -- terminal
-    d2 = TriageDiscipline()
-    g2 = d2.evaluate("run_op", {"connector": "virustotal", "params": {"ip": "10.0.0.1"}})
-    assert g2 is not None
-    assert g2.get("kind") == "guard_redirect"
-    assert g2.get("forbidden_pivot_guard") is True
-
-    # 3. Call-once guard -- terminal
+    # 2. Call-once guard -- terminal
     d3 = TriageDiscipline()
     _drive(d3, "find_enrichment_actions", {})
     g3 = _drive(d3, "find_enrichment_actions", {})
@@ -304,10 +268,6 @@ def test_no_state_behavior_unchanged():
     g = d.evaluate("find_containment_actions", {})
     assert g is not None and g["hunt_floor_guard"] is True
 
-    # Forbidden pivot works
-    g2 = d.evaluate("run_op", {"connector": "virustotal", "params": {"ip": "10.0.0.1"}})
-    assert g2 is not None and g2["forbidden_pivot_guard"] is True
-
     # Call-once works
     d2 = TriageDiscipline()
     d2.evaluate("find_enrichment_actions", {})
@@ -338,13 +298,6 @@ def test_is_error_result_guards_not_errors():
     }) is False
 
     # Guard-redirect results are NOT marked is_error
-    assert _is_error_result({
-        "ok": False,
-        "kind": "guard_redirect",
-        "forbidden_pivot_guard": True,
-        "error": "Skipped: external TI on internal IP",
-    }) is False
-
     assert _is_error_result({
         "ok": False,
         "kind": "guard_redirect",
@@ -885,12 +838,12 @@ def test_duplicate_correlation_search_is_refused():
                       {"module": "incidents", "q": "108.17.204.5"}) is None
 
 
-def test_internal_ip_correlation_search_is_refused():
+def test_internal_ip_correlation_search_is_not_refused():
+    """Searching local records by an internal host is legitimate lateral
+    movement: no discipline guard refuses it."""
     d = _fresh128()
-    r = d.evaluate("search_module_records",
-                   {"module": "alerts", "q": "192.168.77.49"})
-    assert r is not None and r.get("internal_correlation_guard")
-    assert r["kind"] == "guard_redirect"
+    assert d.evaluate("search_module_records",
+                      {"module": "alerts", "q": "192.168.77.49"}) is None
 
 
 def test_non_ip_and_external_ip_searches_pass():
@@ -973,9 +926,8 @@ def test_internal_ip_asset_lookup_is_not_correlation():
     d = _fresh128()
     assert d.evaluate("search_module_records",
                       {"module": "assets", "q": "10.20.5.50"}) is None
-    r = d.evaluate("search_module_records",
-                   {"module": "alerts", "q": "10.20.5.50"})
-    assert r is not None and r.get("internal_correlation_guard")
+    assert d.evaluate("search_module_records",
+                      {"module": "alerts", "q": "10.20.5.50"}) is None
 
 
 def test_internal_ip_indicator_lookup_is_not_correlation():
@@ -985,7 +937,5 @@ def test_internal_ip_indicator_lookup_is_not_correlation():
     d = _fresh128()
     assert d.evaluate("search_module_records",
                       {"module": "indicators", "q": "10.50.60.70"}) is None
-    r = d.evaluate("search_module_records",
-                   {"module": "incidents", "q": "10.50.60.70"})
-    assert r is not None and r.get("internal_correlation_guard")
-    assert "indicators" in r["error"] and "assets" in r["error"]
+    assert d.evaluate("search_module_records",
+                      {"module": "incidents", "q": "10.50.60.70"}) is None

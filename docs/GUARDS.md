@@ -46,7 +46,7 @@ envelopes in tool results. Most traffic is sweeps and the analyst sim.
 
 | Guard | Fires | Decision |
 |---|---|---|
-| Forbidden pivot: internal-IP correlation and external enrichment of an internal IP | 438 | **Open question for the owner.** By far the most frequent guard, so the model keeps reaching for it, and each refusal costs a round. Either the policy is right and the tool descriptions should stop inviting the call, or searching alerts by an internal host is legitimate (lateral movement) and the guard should go. |
+| Forbidden pivot (external TI on an internal IP) and internal-IP correlation search | 438 (earlier measure, removed) | Removed by owner decision: the only internal-address protection kept is the repo-level infra-leak check (`scripts/check_infra_leaks.py`). Recorded fires in the local session DB (`agent_tool_calls`, 2026-08-05 to 2026-10-09): 348 internal-correlation fires on `search_module_records` (alerts 150, incidents 118, indicators 72, other modules 8) and 8 forbidden-pivot fires (all VirusTotal `run_op`), across 177 sessions. |
 | Repeated failed call | 79 | Keep. |
 | Unreadable tool arguments | 33 | Keep; structural. |
 | Hunt floor | 26 | Keep. |

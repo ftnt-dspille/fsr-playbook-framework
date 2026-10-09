@@ -205,9 +205,8 @@ def _result_ok(content: Any) -> bool | None:
 # Discipline-guard markers a tool_result carries when the connector refused to
 # execute a call (TriageDiscipline). A refused call is in the trace (the model
 # attempted it) but never ran, so scoring must not count it as a performed
-# pivot -- a guard-blocked forbidden pivot is a SUCCESS of the platform, not a
-# violation by the agent.
-_GUARD_MARKERS = ("forbidden_pivot_guard", "hunt_floor_guard", "call_once_guard",
+# pivot -- a guard-blocked call is a SUCCESS of the platform, not a violation.
+_GUARD_MARKERS = ("hunt_floor_guard", "call_once_guard",
                   # Every guard TriageDiscipline can return belongs here. The
                   # two below were missing, so a capability-guard skip and a
                   # post-approval-card stop -- both the platform working -- were
@@ -215,8 +214,7 @@ _GUARD_MARKERS = ("forbidden_pivot_guard", "hunt_floor_guard", "call_once_guard"
                   "capability_guard", "action_card_staged",
                   # #128 dispatch levers: refused correlation/enrichment
                   # redundancy is the guard working, not agent spend.
-                  "duplicate_search_guard", "internal_correlation_guard",
-                  "enrichment_cap_guard")
+                  "duplicate_search_guard", "enrichment_cap_guard")
 
 
 def _result_refused(content: Any) -> bool:

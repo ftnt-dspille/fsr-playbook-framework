@@ -352,10 +352,10 @@ async def run_loop(
             }
         guard = discipline.evaluate(name, args)
         if guard is not None:
-            # Terminal guards (forbidden pivot / call-once) can never succeed;
-            # remembering the signature makes an identical re-call hit the
-            # firmer repeated_call_guard. The hunt floor is NOT terminal.
-            if guard.get("forbidden_pivot_guard") or guard.get("call_once_guard"):
+            # Terminal guards (call-once) can never succeed; remembering the
+            # signature makes an identical re-call hit the firmer
+            # repeated_call_guard. The hunt floor is NOT terminal.
+            if guard.get("call_once_guard"):
                 failed_signatures.add(sig)
             return guard
         result = dispatch(name, args)

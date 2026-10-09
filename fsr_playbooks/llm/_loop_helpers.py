@@ -407,9 +407,8 @@ async def drain_with_idle_timeout(pump, *, timeout: float):
 # + pre-flight blocks and acts on the immediate user message, so depth swings
 # wildly on phrasing. A terse opener shortcut to
 #   get_record → find_containment_actions → emit_action_card  (3 calls, no hunt)
-# while a richly-enumerated prompt over-hunted (16 calls) AND fired a forbidden
-# VirusTotal lookup on an internal RFC1918 IP. Prose in system_prompt_triage.md
-# can't hold a weak model; these guards enforce the same discipline structurally
+# while a richly-enumerated prompt over-hunted (16 calls). Prose in the system
+# prompt can't hold a weak model; these guards enforce the same discipline structurally
 # so behavior is consistent regardless of model or phrasing.
 #
 # All three fire only on triage-specific tool names, so build flows (whose tool
@@ -498,9 +497,7 @@ def _call_once_sig(name: str, args: Any) -> str:
     target_type, so each indicator type gets its own single call."""
     tt = str((args or {}).get("target_type") or "").strip().lower()
     return f"{name}\x00{tt}"
-# External threat-intel connectors that should never be pointed at an internal
-# (RFC1918 / loopback / link-local) IP -- enriching a private source IP against
-# public TI is the forbidden pivot the eval fixtures encode.
+# External threat-intel connectors (the enrichment cap's TI subset).
 _TI_CONNECTOR_TOKENS: tuple[str, ...] = (
     "virustotal", "shodan", "ipqualityscore", "abuseipdb",
 )
@@ -675,10 +672,7 @@ _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 # Internal = an address that can only live inside the customer's network. Not
 # `ip.is_private`: Python also counts the RFC 5737 documentation ranges
 # (192.0.2/24, 198.51.100/24, 203.0.113/24) and other reserved blocks as
-# "private". Every seeded demo alert uses a TEST-NET address as its EXTERNAL
-# C2 destination, so live on .159 the hunt's one external indicator,
-# 203.0.113.42, was refused correlation search as "an internal (private)
-# address", and a TI lookup on it would have been refused the same way.
+# "private". Used by the per-indicator enrichment cap and by autonomy.
 _INTERNAL_NETS = tuple(ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",   # RFC 1918
     "100.64.0.0/10",                                     # RFC 6598 carrier NAT
@@ -717,16 +711,6 @@ def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
         else:
             external.add(tok)
     return internal, external
-
-
-# Modules a lookup of an internal address IDENTIFIES it in, rather than
-# correlating a campaign: the CMDB (what host is this) and the platform's own
-# indicator store (is this address a known indicator, and how is it rated).
-# Asked "is the source IP in our indicator database?", the guard steered the
-# agent off every record search, it never reached `indicators` -- where the
-# address sat rated Suspicious -- and it answered "no, an RFC1918 address
-# cannot be an indicator".
-_CMDB_MODULES = frozenset({"assets", "indicators"})
 
 
 def _effective_tool_name(name: str, args: Any) -> str:
@@ -797,7 +781,7 @@ class TriageDiscipline:
       It must NOT read as a tool failure, or the model ends the turn on a
       perfectly good reason to stop (an ``ok: false`` tool_result).
     * ``kind: "guard_redirect"`` (``ok: False``, ``error``) -- a TERMINAL
-      redirect. The forbidden-pivot, call-once and capability guards use this:
+      redirect. The call-once and capability guards use this:
       "don't do this; do something else."
 
     Attempts -- not successes -- count toward the hunt floor, so a config gap or a
@@ -947,37 +931,9 @@ class TriageDiscipline:
                         f"fix the connector and resume."
                     ),
                 }
-        # 1. Forbidden pivot -- external TI on an internal-only IP.
-        if name == "run_op":
-            connector = str((args or {}).get("connector") or "").lower()
-            if any(tok in connector for tok in _TI_CONNECTOR_TOKENS):
-                internal, external = _classify_ips(args)
-                if internal and not external:
-                    return {
-                        "ok": False,
-                        "kind": "guard_redirect",
-                        "forbidden_pivot_guard": True,
-                        "error": (
-                            f"Skipped: {connector} is an EXTERNAL threat-intel "
-                            f"lookup and the only IP in this call is internal "
-                            f"(RFC1918) -- {sorted(internal)[0]}. Private/internal "
-                            f"addresses have no public TI reputation; enriching "
-                            f"them wastes budget and pollutes the verdict. Pivot "
-                            f"on internal hosts via the SIEM/CMDB context ops "
-                            f"(get_ip_context / siem_search_ip, when they are in "
-                            f"your tool list) and reserve TI "
-                            f"connectors for EXTERNAL, routable indicators."
-                        ),
-                    }
-        # 1b. Correlation-search discipline (#128). Two shapes of redundant
-        # `search_module_records` fan-out, both measured stable across every
-        # banked invest trace (both IPs x both modules = 4 searches against a
-        # budget of 2):
-        #   * the SAME (module, query) searched twice -- pure repetition;
-        #   * cross-module correlation of an INTERNAL (RFC1918) address --
-        #     the same doctrine as the forbidden-pivot guard: internal hosts
-        #     pivot through SIEM/CMDB context ops, and correlation search is
-        #     reserved for the external indicator.
+        # 1b. Duplicate-search discipline (#128). A `search_module_records`
+        # with the SAME (module, query) already run this turn is refused: the
+        # correlation search returns its full result in one shot.
         if name == "search_module_records":
             q = str((args or {}).get("q")
                     or (args or {}).get("query") or "").strip()
@@ -993,34 +949,6 @@ class TriageDiscipline:
                         f"{q!r} this turn and correlation search returns its "
                         f"full result in one shot. Do not repeat it -- use the "
                         f"result you already have."
-                    ),
-                }
-            _ip = None
-            try:
-                _ip = ipaddress.ip_address(q)
-            except ValueError:
-                pass
-            # The asset/CMDB module is exempt: looking an internal host up
-            # there IDENTIFIES it (owner, role, an authorized scanner) -- the
-            # very pivot this guard's message recommends. Blocking it left
-            # ka_authorized_scanner judging a host it was never allowed to see.
-            if (_ip is not None and is_internal_ip(_ip)
-                    and module not in _CMDB_MODULES):
-                return {
-                    "ok": False,
-                    "kind": "guard_redirect",
-                    "internal_correlation_guard": True,
-                    "error": (
-                        f"Skipped: {q} is an internal (private) address -- "
-                        f"cross-module correlation search is reserved for the "
-                        f"EXTERNAL indicator, which identifies the campaign. "
-                        f"Pivot internal hosts through the SIEM/CMDB context "
-                        f"ops instead (get_ip_context / siem_search, when they "
-                        f"are in your tool list), or read the alert's own "
-                        f"linked records. To identify the host or check it is "
-                        f"a known indicator, search_module_records on "
-                        f"{' or '.join(sorted(_CMDB_MODULES))} is allowed. "
-                        f"Do not retry this search."
                     ),
                 }
         # 1c. Enrichment source cap (#128). Once an external indicator holds
@@ -1118,8 +1046,7 @@ class TriageDiscipline:
                 # "guard_defer" (distinct from a terminal guard_redirect),
                 # `directive` (not `error`), and `deferred`/`executed` flags so
                 # the model can tell a deferred call from a failed one at a
-                # glance. The terminal guards (forbidden pivot, call-once,
-                # capability) keep the failure-shaped guard_redirect envelope.
+                # glance. The terminal guards (call-once, capability) keep the failure-shaped guard_redirect envelope.
                 "ok": True,
                 "kind": "guard_defer",
                 "deferred": True,

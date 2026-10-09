@@ -3,15 +3,14 @@
 `ipaddress` counts the RFC 5737 documentation ranges as private. Every seeded
 demo alert uses a TEST-NET address as its external C2 destination, so live on
 .159 the hunt's one external indicator (203.0.113.42) was refused correlation
-search as "an internal (private) address" -- the guard blocked the exact pivot
-it exists to steer the model toward.
+search as "an internal (private) address", which is why the classifier must
+not count documentation ranges as internal.
 """
 from __future__ import annotations
 
 import pytest
 
 from fsr_playbooks.llm._loop_helpers import (
-    TriageDiscipline,
     _classify_ips,
     is_internal_ip,
 )
@@ -34,11 +33,3 @@ def test_not_internal(ip):
 def test_classify_puts_a_documentation_ip_on_the_external_side():
     internal, external = _classify_ips({"q": "10.50.60.70 -> 203.0.113.42"})
     assert internal == {"10.50.60.70"} and external == {"203.0.113.42"}
-
-
-def test_the_external_demo_indicator_may_be_correlation_searched():
-    guard = TriageDiscipline()
-    ext = guard.evaluate("search_module_records", {"module": "alerts", "q": "203.0.113.42"})
-    assert not (ext or {}).get("internal_correlation_guard"), ext
-    internal = guard.evaluate("search_module_records", {"module": "alerts", "q": "10.50.60.70"})
-    assert (internal or {}).get("internal_correlation_guard")
