@@ -19,11 +19,20 @@ tell us where to loosen.
 from __future__ import annotations
 
 import contextvars
+import json
 import re
 from typing import Any
 
 from . import _verified_yaml
-from ._shared import _err, get_grounded_yaml, get_turn_user_message, mcp
+from ._shared import (
+    SCOPE_CHOICE_PAYLOAD,
+    SCOPE_MODIFY,
+    _err,
+    get_grounded_yaml,
+    get_playbook_scope,
+    get_turn_user_message,
+    mcp,
+)
 from .tools_verify import verify_playbook
 
 # Renames `edit_playbook`'s own rename_step ops performed, for the verify it
@@ -363,9 +372,10 @@ def _diff_collections(before, after, user_message: str | None,
             # it. That gate is fail-closed AND has an acknowledgement path.
             # This one had neither, so two fail-closed gates in series with no
             # way through made a deletion impossible to perform at all.
-            requested = (referenced is not None
-                         and n in referenced
-                         and _asked_to_delete(user_message))
+            requested = ((referenced is not None
+                          and n in referenced
+                          and _asked_to_delete(user_message))
+                         or get_playbook_scope() == SCOPE_MODIFY)
             regressions.append({
                 "kind": ("step_deleted_as_requested" if requested
                          else "step_dropped"),
@@ -380,9 +390,11 @@ def _diff_collections(before, after, user_message: str | None,
                     if requested else
                     f"step {n!r} (type={b_steps[n].type}) was present "
                     "before and is now missing -- the analyst did not ask to "
-                    "remove it. Keep it, or ask them first with "
-                    "emit_card(card_type='choice', ...) whether to replace "
-                    "the existing steps; their answer is what allows it"),
+                    "remove it. Keep it, or ask first and end the turn: "
+                    "emit_card(card_type='choice', payload="
+                    f"{json.dumps(SCOPE_CHOICE_PAYLOAD)}). 'modify' allows "
+                    "removing steps; 'create_new' builds a separate playbook "
+                    "(playbook_offer)"),
             })
 
         for n in added:

@@ -267,6 +267,44 @@ def get_turn_user_message() -> str | None:
     return _TURN_USER_MESSAGE.get()
 
 
+# The analyst's answer to the "Modify this playbook / Create new playbook"
+# choice (card id SCOPE_CARD_ID), bound by the host for every turn of the
+# session. A STRUCTURAL authorization, not a parse of anyone's wording:
+#   modify     -- removing steps of the open playbook is what they asked for
+#                 (the edit is still diffed, snapshotted and versioned);
+#   create_new -- a separate new playbook (playbook_offer) is afforded even
+#                 with one open in the designer.
+SCOPE_CARD_ID = "playbook_scope"
+SCOPE_MODIFY = "modify"
+SCOPE_CREATE_NEW = "create_new"
+SCOPE_CHOICE_PAYLOAD = {
+    "id": SCOPE_CARD_ID,
+    "prompt": "Should I change the open playbook, or build this as a new one?",
+    "options": [
+        {"label": "Modify this playbook", "value": SCOPE_MODIFY},
+        {"label": "Create new playbook", "value": SCOPE_CREATE_NEW},
+    ],
+}
+_PLAYBOOK_SCOPE: ContextVar[str | None] = ContextVar("_playbook_scope", default=None)
+
+
+def set_playbook_scope(scope: str | None) -> Any:
+    """Bind the session's scope answer. Returns a reset token."""
+    return _PLAYBOOK_SCOPE.set(
+        scope if scope in (SCOPE_MODIFY, SCOPE_CREATE_NEW) else None)
+
+
+def reset_playbook_scope(token: Any) -> None:
+    try:
+        _PLAYBOOK_SCOPE.reset(token)
+    except (ValueError, LookupError):
+        pass
+
+
+def get_playbook_scope() -> str | None:
+    return _PLAYBOOK_SCOPE.get()
+
+
 def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True,
                    ground_when_empty: bool = False) -> tuple[Any, YamlLoad]:
     """Parse a model-supplied ``yaml_text``, repairing what can be repaired.

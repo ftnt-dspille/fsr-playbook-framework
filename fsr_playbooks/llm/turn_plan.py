@@ -173,6 +173,11 @@ def _ask_for(budget: TurnBudget, tools: list[dict[str, Any]]) -> TurnRequest:
     )
 
 
+def _scope_is_create_new() -> bool:
+    from ..mcp_server._shared import SCOPE_CREATE_NEW, get_playbook_scope
+    return get_playbook_scope() == SCOPE_CREATE_NEW
+
+
 def _playbook_side_refusal(name: str, args: dict[str, Any] | None
                            ) -> dict[str, Any] | None:
     """A playbook (build) turn uses the playbook tools only.
@@ -300,7 +305,7 @@ class TurnPlan:
         creates_new = name in _NEW_PLAYBOOK_TOOLS or (
             name == "emit_card"
             and (args or {}).get("card_type") in _NEW_PLAYBOOK_CARD_TYPES)
-        if creates_new and self.context.has_open_playbook:
+        if creates_new and self.context.has_open_playbook and not _scope_is_create_new():
             # The mirror of the frontier below: with a playbook open, a
             # create-new offer saves a SECOND playbook and leaves the one on
             # the canvas untouched (analyst sim, empty designer playbook).
@@ -314,7 +319,8 @@ class TurnPlan:
                     "end with emit_card(card_type='enhancement_offer', "
                     "payload={id, summary, verified_id}). playbook_offer "
                     "creates a separate new playbook and would leave the open "
-                    "one unchanged."
+                    "one unchanged -- only after the analyst picks 'Create new "
+                    "playbook' on the playbook_scope choice."
                 ),
             }
         if gated and not self.context.has_open_playbook:

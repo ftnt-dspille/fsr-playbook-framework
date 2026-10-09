@@ -193,6 +193,13 @@ them returns nothing):
   never rebuild what it does. A NEW reusable one: in ONE `edit_playbook` call,
   `add_playbook` (its whole step list, `type: start` first) and an `add_step`
   of the reference (`target: <its name>`) in the open playbook.
+- **Steps the analyst did not mention are in the way** (the open playbook
+  already has steps and the request is for something else) → do not delete
+  them on your own: `emit_card(card_type='choice', payload={id:
+  'playbook_scope', prompt: ..., options: [{label: 'Modify this playbook',
+  value: 'modify'}, {label: 'Create new playbook', value: 'create_new'}]})`
+  and end the turn. On `modify` you may remove or replace those steps; on
+  `create_new` deliver a separate playbook with `playbook_offer`.
 - **Keep going when a step fails** → `ignore_errors: true` on that step, then a
   `decision` on its output. There is no error branch or `on_error` key; without
   `ignore_errors` a failed step halts the run and any check after it never runs.

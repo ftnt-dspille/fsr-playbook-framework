@@ -894,6 +894,9 @@ def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
     open_yaml = get_grounded_yaml()
     if not open_yaml:
         return None                     # nothing open -- a genuine new build
+    from ._shared import SCOPE_CREATE_NEW, get_playbook_scope
+    if get_playbook_scope() == SCOPE_CREATE_NEW:
+        return None                     # the analyst chose "Create new playbook"
 
     open_steps = _step_names(open_yaml)
     if not open_steps:
