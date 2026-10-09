@@ -53,7 +53,7 @@ def test_openai_never_dispatches_unparseable_args(raw_args: str) -> None:
     ]
     turn2 = [_delta_chunk(content="ok"), _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider([turn1, turn2])
-    with patch("fsr_playbooks.llm.openai_provider.dispatch") as mock_dispatch:
+    with patch("fsr_playbooks.llm.agent_loop.dispatch") as mock_dispatch:
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="block it")],
             tools=_RUN_OP_TOOLS, tags={})))
@@ -78,7 +78,7 @@ def test_openai_sentinel_does_not_leak_into_a_real_call() -> None:
     ]
     turn2 = [_delta_chunk(content="ok"), _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider([turn1, turn2])
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                return_value={"ok": True}) as mock_dispatch:
         asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="x")],
@@ -120,7 +120,7 @@ def test_openai_replays_unparseable_args_as_valid_json(raw_args: str) -> None:
     ]
     turn2 = [_delta_chunk(content="ok"), _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider([turn1, turn2])
-    with patch("fsr_playbooks.llm.openai_provider.dispatch"):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch"):
         asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="block it")],
             tools=_RUN_OP_TOOLS, tags={})))

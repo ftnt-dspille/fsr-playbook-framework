@@ -31,7 +31,6 @@ def test_every_synthesis_site_uses_the_one_definition():
         text = f.read_text()
         assert '\\"superseded_by_approval\\"' not in text, f.name
         assert '"code": "superseded_by_approval"' not in text, f.name
-    for name in ("run_turn.py", "openai_provider.py", "anthropic_provider.py",
-                 "fortiai_proxy_provider.py"):
+    for name in ("run_turn.py", "agent_loop.py"):
         assert "SUPERSEDED_RESULT" in (LLM / name).read_text() \
             or "superseded_result_json" in (LLM / name).read_text(), name

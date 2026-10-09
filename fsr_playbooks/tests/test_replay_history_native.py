@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 
-from fsr_playbooks.llm import lmstudio_provider, openai_provider
+from fsr_playbooks.llm import openai_provider
 from fsr_playbooks.llm.provider import Message
 from fsr_playbooks.llm.replay import blocks_to_prose, is_block_content
 
@@ -60,10 +60,6 @@ def _assert_native(out):
 
 def test_openai_provider_replays_calls_natively():
     _assert_native(openai_provider._to_openai_messages("sys", _HISTORY))
-
-
-def test_lmstudio_provider_replays_calls_natively():
-    _assert_native(lmstudio_provider._to_openai_messages("sys", _HISTORY))
 
 
 def test_openai_carrier_dicts_still_pass_through_untouched():

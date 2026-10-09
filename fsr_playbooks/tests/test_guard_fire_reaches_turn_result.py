@@ -42,9 +42,9 @@ _SPEC.loader.exec_module(fx)
 
 def _run(create):
     provider = fx._provider(create)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=fx._fake_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         return asyncio.run(run_agent_turn(
             provider=provider,
             system="s",

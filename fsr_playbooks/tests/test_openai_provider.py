@@ -116,9 +116,9 @@ def test_accumulates_tool_call_args_across_deltas():
     ]
     turn2 = [_delta_chunk(content="done"), _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider([turn1, turn2])
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                return_value={"matches": []}) as mock_dispatch, \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=1):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=1):
         events = asyncio.run(_drain(p.stream(
             system="", messages=[], tools=_FIND_CONNECTOR_TOOLS, tags={})))
     mock_dispatch.assert_called_once()
@@ -139,9 +139,9 @@ def test_tool_result_carries_duration_ms():
     ]
     turn2 = [_delta_chunk(content="done"), _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider([turn1, turn2])
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                return_value={"matches": []}), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=1):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=1):
         events = asyncio.run(_drain(p.stream(system="", messages=[], tools=[], tags={})))
     tr = next(e for e in events if isinstance(e, ToolResultEvent))
     assert isinstance(tr.duration_ms, int) and tr.duration_ms >= 0
@@ -165,8 +165,8 @@ def test_tier3_call_suspends_and_stashes_session():
                 "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
                 "args_hash": "abc", "summary": "Block 1.2.3.4",
                 "requires_step_up": False}
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", return_value=envelope), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=3):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
         events = asyncio.run(_drain(p.stream(system="sys", messages=[
             Message(role="user", content="block that ip")], tools=_BLOCK_IP_TOOLS, tags={})))
     appr = next(e for e in events if isinstance(e, ApprovalRequestEvent))
@@ -200,8 +200,8 @@ def test_stashed_session_id_is_the_chat_session_not_the_trace_id():
                 "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
                 "args_hash": "abc", "summary": "Block 1.2.3.4",
                 "requires_step_up": False}
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", return_value=envelope), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=3):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
         asyncio.run(_drain(p.stream(
             system="sys", messages=[Message(role="user", content="block that ip")],
             tools=_BLOCK_IP_TOOLS,
@@ -223,8 +223,8 @@ def test_stashed_session_id_falls_back_to_trace_id_without_tags():
     envelope = {"pending_approval": True, "approval_id": "appr_nosid", "tier": 3,
                 "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
                 "args_hash": "abc", "summary": "s", "requires_step_up": False}
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", return_value=envelope), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=3):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
         asyncio.run(_drain(p.stream(system="sys", messages=[
             Message(role="user", content="block that ip")],
             tools=_BLOCK_IP_TOOLS, tags={})))
@@ -248,15 +248,15 @@ def test_resume_approve_redispatches_and_continues():
     envelope = {"pending_approval": True, "approval_id": "appr_2", "tier": 3,
                 "tool": "block_ip", "preview": {}, "args_hash": "h",
                 "requires_step_up": False}
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", return_value=envelope), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=3):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
         asyncio.run(_drain(p.stream(system="sys", messages=[
             Message(role="user", content="block it")], tools=_BLOCK_IP_TOOLS, tags={})))
 
     suspended = gw.pop("appr_2")
     assert suspended is not None
 
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                return_value={"ok": True, "blocked": "1.2.3.4"}) as mock_dispatch:
         events = asyncio.run(_drain(p.resume(suspended=suspended, decision="approve")))
 
@@ -282,13 +282,13 @@ def test_resume_deny_synthesizes_denial_without_dispatch():
     p = _provider([turn1, post], gateway=gw)
     envelope = {"pending_approval": True, "approval_id": "appr_3", "tier": 3,
                 "tool": "block_ip", "preview": {}, "args_hash": "h"}
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", return_value=envelope), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=3):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
         asyncio.run(_drain(p.stream(system="sys", messages=[
             Message(role="user", content="block it")], tools=_BLOCK_IP_TOOLS, tags={})))
     suspended = gw.pop("appr_3")
     # On deny, dispatch must NOT be called for the gated tool.
-    with patch("fsr_playbooks.llm.openai_provider.dispatch") as mock_dispatch:
+    with patch("fsr_playbooks.llm.agent_loop.dispatch") as mock_dispatch:
         events = asyncio.run(_drain(p.resume(suspended=suspended, decision="deny")))
     mock_dispatch.assert_not_called()
     tr = next(e for e in events if isinstance(e, ToolResultEvent))
@@ -331,8 +331,7 @@ def test_output_cap_is_configurable_and_no_longer_4096():
     so the limit can never silently drift back to a value a playbook outgrows.
     """
     from fsr_playbooks.llm._loop_helpers import DEFAULT_MAX_OUTPUT_TOKENS
-    from fsr_playbooks.llm.lmstudio_provider import LMStudioProvider
-    from fsr_playbooks.llm.openai_provider import OpenAIProvider
+    from fsr_playbooks.llm.openai_provider import OpenAIProvider, lmstudio
 
     assert DEFAULT_MAX_OUTPUT_TOKENS > 4096
     # gpt-4o's own output ceiling is exactly 16384 -- going above it would 400.
@@ -340,4 +339,4 @@ def test_output_cap_is_configurable_and_no_longer_4096():
 
     assert OpenAIProvider(api_key="x").max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS
     assert OpenAIProvider(api_key="x", max_output_tokens=2048).max_output_tokens == 2048
-    assert LMStudioProvider().max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS
+    assert lmstudio().max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS

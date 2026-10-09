@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from fsr_playbooks.llm import anthropic_provider as ap
+from fsr_playbooks.llm import agent_loop
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.provider import Message, ToolResultEvent
 
@@ -92,8 +92,8 @@ def test_identical_failing_call_not_rerun(monkeypatch):
         calls.append((name, dict(args)))
         return {"ok": False, "code": 400, "error": "bad incident id"}
 
-    monkeypatch.setattr(ap, "dispatch", _dispatch)
-    monkeypatch.setattr(ap, "_tier_for", lambda name, args: 1)
+    monkeypatch.setattr(agent_loop, "dispatch", _dispatch)
+    monkeypatch.setattr(agent_loop, "_tier_for", lambda name, args: 1)
 
     args = {"incident_id": "563", "op": "siem_events_for_incident"}
     turns = [
@@ -119,8 +119,8 @@ def test_different_args_not_guarded(monkeypatch):
         calls.append((name, dict(args)))
         return {"ok": False, "code": 400, "error": "bad"}
 
-    monkeypatch.setattr(ap, "dispatch", _dispatch)
-    monkeypatch.setattr(ap, "_tier_for", lambda name, args: 1)
+    monkeypatch.setattr(agent_loop, "dispatch", _dispatch)
+    monkeypatch.setattr(agent_loop, "_tier_for", lambda name, args: 1)
 
     turns = [
         _FinalMessage([_tool_use("c1", "run_op", {"incident_id": "563"})]),

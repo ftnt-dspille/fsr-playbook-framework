@@ -53,9 +53,9 @@ def _suspend(ips, *, dispatch_side_effect=None, tier_side_effect=None):
     gw = InMemoryApprovalGateway()
     post = [_delta_chunk(content="Done."), _delta_chunk(finish="stop"), _usage_chunk()]
     p = _provider([_turn(ips), post], gateway=gw)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                side_effect=dispatch_side_effect or (lambda n, a: _envelope(summary=f"Block {a['ip']}"))), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for",
+         patch("fsr_playbooks.llm.agent_loop._tier_for",
                side_effect=tier_side_effect or (lambda n, a: 3)):
         events = asyncio.run(_drain(p.stream(
             system="sys", messages=[Message(role="user", content="block them")],
@@ -79,7 +79,7 @@ def test_approve_runs_every_listed_call_in_order():
     def fake(name, args, _internal=False):
         ran.append((args["ip"], args.get("_approved"), _internal))
         return {"ok": True, "blocked": args["ip"]}
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", side_effect=fake), \
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", side_effect=fake), \
          patch("fsr_playbooks.llm.tools.dispatch", side_effect=fake):
         events = asyncio.run(_drain(p.resume(suspended=s, decision="approve")))
     assert ran == [("1.1.1.1", True, True), ("2.2.2.2", True, True),
@@ -93,7 +93,7 @@ def test_approve_runs_every_listed_call_in_order():
 
 def test_deny_runs_none():
     p, s, _ = _suspend(["1.1.1.1", "2.2.2.2"])
-    with patch("fsr_playbooks.llm.openai_provider.dispatch") as d1, \
+    with patch("fsr_playbooks.llm.agent_loop.dispatch") as d1, \
          patch("fsr_playbooks.llm.tools.dispatch") as d2:
         events = asyncio.run(_drain(p.resume(suspended=s, decision="deny")))
     d1.assert_not_called()
@@ -150,12 +150,14 @@ def test_every_provider_batches_the_same_way():
     """Parallel implementations drift; a provider that still drops the batch
     would bring back seven cards (or seven lost writes) for that provider."""
     llm = Path(A.__file__).parent
+    # One loop serves every provider (agent_loop.py); batching lives there.
+    text = (llm / "agent_loop.py").read_text()
+    assert "_approvals.collect_batch(" in text
+    assert "_approvals.resolve_batch" in text
+    assert "batch=batch" in text and "batch=[b.card() for b in batch]" in text
     for name in ("openai_provider.py", "anthropic_provider.py",
                  "fortiai_proxy_provider.py"):
-        text = (llm / name).read_text()
-        assert "_approvals.collect_batch(" in text, name
-        assert "_approvals.resolve_batch" in text, name
-        assert "batch=batch" in text and "batch=[b.card() for b in batch]" in text, name
+        assert "collect_batch" not in (llm / name).read_text(), name
 
 
 def test_the_approval_event_carries_the_shadow_policy_decision():
@@ -178,9 +180,9 @@ def test_every_provider_passes_the_policy_decision_to_its_approval_event():
     import ast
     llm = Path(__file__).resolve().parent.parent / "llm"
     seen = 0
-    for path in sorted(llm.glob("*_provider.py")):
+    for path in sorted(llm.glob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "ApprovalRequestEvent":
                 seen += 1
                 assert "policy" in {k.arg for k in node.keywords}, path.name
-    assert seen >= 3
+    assert seen >= 1

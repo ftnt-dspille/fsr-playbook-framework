@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fsr_playbooks.llm import anthropic_provider as ap
+from fsr_playbooks.llm import agent_loop
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.provider import DoneEvent, ErrorEvent, Message
 
@@ -54,7 +54,7 @@ def _make_provider():
 
 
 def test_stream_timeout_yields_error_event(monkeypatch):
-    monkeypatch.setattr(ap, "STREAM_TIMEOUT_SECS", 1)
+    monkeypatch.setattr(agent_loop, "STREAM_TIMEOUT_SECS", 1)
     provider = _make_provider()
     messages: list[Message] = [Message(role="user", content="ping")]
 
@@ -72,7 +72,7 @@ def test_stream_timeout_yields_error_event(monkeypatch):
 
 def test_stream_timeout_does_not_block(monkeypatch):
     """Turn must resolve within 3× the timeout, not hang forever."""
-    monkeypatch.setattr(ap, "STREAM_TIMEOUT_SECS", 1)
+    monkeypatch.setattr(agent_loop, "STREAM_TIMEOUT_SECS", 1)
     provider = _make_provider()
     messages: list[Message] = [Message(role="user", content="ping")]
 

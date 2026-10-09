@@ -17,7 +17,7 @@ import asyncio
 import time
 from types import SimpleNamespace
 
-from fsr_playbooks.llm import anthropic_provider as ap
+from fsr_playbooks.llm import agent_loop
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.provider import (
     ApprovalRequestEvent,
@@ -126,9 +126,9 @@ async def _drain(provider, messages, tools=None):
 
 def test_independent_readonly_calls_run_concurrently(monkeypatch):
     rec = _ConcurrencyRecorder(sleep=0.15)
-    monkeypatch.setattr(ap, "dispatch", rec)
+    monkeypatch.setattr(agent_loop, "dispatch", rec)
     # All three are read-only (find_connector → tier 0/1).
-    monkeypatch.setattr(ap, "_tier_for", lambda name, args: 1)
+    monkeypatch.setattr(agent_loop, "_tier_for", lambda name, args: 1)
 
     turns = [
         _FinalMessage([
@@ -165,9 +165,9 @@ def test_mixed_turn_parallelizes_readonly_then_suspends(monkeypatch):
                     "tier": 3, "preview": {}, "args_hash": "h"}
         return rec(name, args)
 
-    monkeypatch.setattr(ap, "dispatch", _dispatch)
+    monkeypatch.setattr(agent_loop, "dispatch", _dispatch)
     monkeypatch.setattr(
-        ap, "_tier_for",
+        agent_loop, "_tier_for",
         lambda name, args: 3 if name == "run_op" else 1,
     )
 

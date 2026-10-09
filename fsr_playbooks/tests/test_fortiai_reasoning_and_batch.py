@@ -69,7 +69,7 @@ async def _drain(gen):
 
 def _run(responses, dispatch_result=None, **kw):
     p, sent = _provider(responses, **kw)
-    with patch("fsr_playbooks.llm.fortiai_proxy_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                return_value=dispatch_result or {"ok": True}) as disp:
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="go")],

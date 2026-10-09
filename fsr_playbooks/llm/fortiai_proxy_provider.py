@@ -21,51 +21,34 @@ docs/plans/FORTIAI_PROXY_CAPABILITY_CORRECTION.md.
 """
 from __future__ import annotations
 
-import asyncio
 import json
-import time
-import uuid as _uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
 from . import approvals as _approvals
-from ._loop_helpers import (
-    DEFAULT_MAX_OUTPUT_TOKENS,
-    MAX_SELF_REPAIR_TURNS,
-    MAX_TOOL_TURNS,
-    TriageDiscipline,
-    evidence_id_line,
-    is_authoring_slice,
-    latest_user_text,
-)
-from ._loop_helpers import (
-    compile_errors as _compile_errors,
-)
-from ._loop_helpers import (
-    extract_yaml_block as _extract_yaml_block,
+from ._loop_helpers import DEFAULT_MAX_OUTPUT_TOKENS
+from .agent_loop import (
+    BAD_ARGS_KEY,
+    Round,
+    RoundUsage,
+    ToolCall,
+    ToolOutcome,
+    parse_tool_arguments,
+    resume_loop,
+    run_loop,
 )
 from .provider import (
-    ApprovalRequestEvent,
     CapabilityMixin,
-    DoneEvent,
-    ErrorEvent,
     Event,
     HostEmulation,
     Message,
     ProviderCapabilities,
-    TextEvent,
-    ToolCallUsage,
-    ToolResultEvent,
-    ToolUseEvent,
     TurnRequest,
-    UsageEvent,
 )
 from .replay import blocks_to_prose, is_block_content
-from .tools import _resolve_tier as _tier_for
 from .tools import anthropic_tools as _anthropic_tools
-from .tools import dispatch
 
 #: FortiAI ``feature`` values, i.e. which backend profile serves the call.
 #: These are what the appliance's connector *configurations* set as
@@ -286,99 +269,33 @@ class FortiAIProxyProvider(CapabilityMixin):
         self._approval_gateway = approval_gateway
         self._client = client or httpx.AsyncClient(timeout=120.0)
 
-    # -- resume ------------------------------------------------------------
+    # -- the loop's seam (see agent_loop) ----------------------------------
 
-    async def resume(
-        self,
-        *,
-        suspended: _approvals.SuspendedSession,
-        decision: str,  # "approve" | "deny"
-    ) -> AsyncIterator[Event]:
-        """Resume a turn suspended on a pending tier-3+ approval.
+    label = "FortiAI proxy"
 
-        Re-dispatches the approved call (or synthesizes a denial), appends
-        flattened-text tool result messages, and re-enters stream()."""
-        if not _approvals.verify(suspended):
-            yield ErrorEvent(
-                message="Approval binding check failed -- the suspended action "
-                        "could not be verified and was not executed. Re-issue "
-                        "the request."
-            )
-            yield DoneEvent(stop_reason="approval_unverified")
-            return
+    def precheck(self) -> str | None:
+        return None
 
-        if decision == "approve":
-            # Off-loop like the main loop's dispatch: live MCP tools call
-            # asyncio.run() internally, which raises on the running loop.
-            resolved = await asyncio.to_thread(
-                dispatch, suspended.tool, {**suspended.args, "_approved": True},
-                _internal=True,
-            )
-        else:
-            resolved = {"ok": False, "code": "user_denied",
-                        "reason": "User denied the action."}
+    def open_turn(self, *, system: str, messages: list[Message],
+                  tools: list[dict[str, Any]] | None, turn_budget: int) -> _FortiAITurn:
+        return _FortiAITurn(self, system, messages, tools)
 
-        # Named synthetic tool_use first -- see anthropic_provider.resume().
-        yield ToolUseEvent(
-            name=suspended.tool, arguments=dict(suspended.args),
-            call_id=suspended.tool_use_id, tier=suspended.tier,
-            synthetic=True,
-        )
-        yield ToolResultEvent(call_id=suspended.tool_use_id, result=resolved)
-        # The rest of the card: the same decision, in order.
-        batch_results = await asyncio.to_thread(
-            _approvals.resolve_batch, suspended, decision)
-        for b, res in batch_results:
-            yield ToolUseEvent(name=b.name, arguments=dict(b.args),
-                               call_id=b.call_id, tier=b.tier, synthetic=True)
-            yield ToolResultEvent(call_id=b.call_id, result=res)
-
-        result_str = _stringify(resolved)
-
-        # Build the rehydrated messages from snapshot + tool results.
-        # history_snapshot is what stream() used (minus system).  The proxy
-        # only accepts flat user/assistant/system messages, so we carry the
-        # snapshot as-is and append the tool round-trip as text.
+    def rehydrate(self, suspended: _approvals.SuspendedSession,
+                  outcomes: list[ToolOutcome]) -> list[Message]:
+        # The proxy only takes flat user/assistant/system messages, so the
+        # tool round-trip is carried as text pairs.
         carried: list[dict[str, Any]] = list(suspended.history_snapshot)
-        carried.append(
-            {"role": "assistant",
-             "content": f"[called {suspended.tool}({json.dumps(suspended.args, default=str)})]"}
-        )
-        carried.append(
-            {"role": "user",
-             "content": f"Tool result: {suspended.tool} = {result_str}"}
-        )
-        for b, res in batch_results:
-            carried.append({"role": "assistant",
-                            "content": f"[called {b.name}({json.dumps(b.args, default=str)})]"})
-            carried.append({"role": "user",
-                            "content": f"Tool result: {b.name} = {_stringify(res)}"})
-        # Remaining (superseded) tool calls also get flat-text placeholders
-        for skipped in suspended.remaining_tool_calls:
-            carried.append({
-                "role": "assistant",
-                "content": f"[called {skipped.name} -- superseded by approval]",
-            })
-            carried.append({
-                "role": "user",
-                "content": (
-                    f"Tool result: {skipped.name} = "
-                    + _approvals.superseded_result_json()
-                ),
-            })
+        for item in suspended.prior_tool_result_blocks:   # each is a text pair
+            carried += item if isinstance(item, list) else [item]
+        for o in outcomes:
+            carried += _text_pair(o)
+        return [Message(role="user", content=carried)]
 
-        rehydrated = [Message(role="user", content=carried)]
+    def contract_stop(self, raw: str | None) -> str:
+        return "end_turn"
 
-        async for ev in self.stream(
-            system=suspended.system,
-            messages=rehydrated,
-            # Old pickled sessions predate the field -- getattr, not attr.
-            tools=list(getattr(suspended, "tools", None) or []),
-            tags=suspended.tags,
-        ):
-            yield ev
-
-    # -- stream -------------------------------------------------------------
+    def friendly_error(self, exc: Exception) -> str:
+        return f"FortiAI proxy error: {exc}"
 
     def request(self, req: TurnRequest) -> HostEmulation:
         """Serve reasoning depth NATIVELY, emulate the rest.
@@ -393,6 +310,55 @@ class FortiAIProxyProvider(CapabilityMixin):
             self.reasoning_effort = req.reasoning
         return super().request(req)
 
+    async def call_proxy(self, history: list[dict[str, Any]],
+                         tool_defs: list[dict[str, Any]]
+                         ) -> tuple[str | None, list[tuple[str, Any]], dict[str, int]]:
+        """One `agent_chat_completions` call.
+
+        Returns (content, calls, usage). ``calls`` is EVERY tool call the proxy
+        elected, as ``[(name, raw_args), ...]`` (see _normalize_tool_calls),
+        empty on a text turn. Raises RuntimeError on any error envelope.
+        """
+        body: dict[str, Any] = {
+            "connector": "fortinet-fortiai-proxy",
+            "operation": "agent_chat_completions",
+            "params": {"messages": history, "tools": tool_defs},
+        }
+        if self.model:
+            body["params"]["model"] = self.model
+        overlay = _resolve_llm_config(self.feature, self.reasoning_effort)
+        if overlay:
+            body["params"]["config"] = overlay
+        headers = {"Authorization": f"Bearer {self._auth}"} if self._auth else {}
+        resp = await self._client.post(f"{self.base_url}/api/integration/execute/",
+                                       json=body, headers=headers)
+        if resp.status_code != 200:
+            try:
+                err_data = resp.json()
+                err_body = err_data.get("message", str(err_data))[:600]
+            except Exception:
+                err_body = resp.text[:600]
+            raise RuntimeError(f"FortiAI proxy returned HTTP {resp.status_code}: {err_body}")
+
+        data = resp.json()
+        if data.get("status", "") not in ("Success", "success", "Completed", "completed", ""):
+            raise RuntimeError(f"FortiAI proxy execution failed: {data.get('message', str(data)[:600])}")
+        payload = data.get("data", data)
+        # ANY truthy `error` is an error, whatever its type: the live envelope
+        # is a DICT ({"status": "Failure", "error_code": "-30000", ...}), and a
+        # string-only check let the turn continue on empty content.
+        err = payload.get("error")
+        if err:
+            raise RuntimeError(f"FortiAI proxy LLM error: {_describe_proxy_error(err)}")
+        # `tool_args` passes through UNCHANGED: the proxy hands args back as a
+        # JSON *string* at times, and coercing a non-dict to {} here produced
+        # `run_op({})` dispatches. The caller parses and reports failures.
+        calls = _normalize_tool_calls(payload.get("tool_name"), payload.get("tool_args"),
+                                      payload.get("tools"))
+        return payload.get("content"), calls, payload.get("usage") or {}
+
+    # -- LLMProvider -------------------------------------------------------
+
     async def stream(
         self,
         *,
@@ -403,493 +369,15 @@ class FortiAIProxyProvider(CapabilityMixin):
         case_state: Any = None,
         max_tool_turns: int | None = None,
     ) -> AsyncIterator[Event]:
-        """Non-streaming agent loop via the on-appliance fortiai-proxy."""
-        # Clear per-turn citation validator state for structured verdicts
-        from ..mcp_server._citation_validator import clear_tool_registry
-        clear_tool_registry()
+        async for ev in run_loop(self, system=system, messages=messages, tools=tools,
+                                 tags=tags, case_state=case_state,
+                                 max_tool_turns=max_tool_turns):
+            yield ev
 
-        tags = tags or {}
-        session_id = _uuid.uuid4().hex[:8]
-        turn_idx = 0
-        self_repair_turns = 0
-        any_tools_run = False
-        assessment_forced = False
-
-        # Own the wire format: fall back to the full tool registry when
-        # the caller passes nothing.  Translate to fortiai shape either way.
-        tool_defs = _normalize_tools_fortiai(tools) if tools else _normalize_tools_fortiai(_anthropic_tools())
-
-        allowed_names = {t.get("name") for t in tool_defs}
-
-        # Triage discipline
-        investigation_state = (
-            getattr(case_state, "investigation", None)
-            if case_state is not None else None
-        )
-        _authoring = is_authoring_slice(allowed_names)
-        _discipline = TriageDiscipline(
-            state=investigation_state,
-            capabilities=(getattr(case_state, "capabilities", None)
-                          if case_state is not None else None),
-            authoring=_authoring,
-            # The analyst's own words are the only reliable carrier of an
-            # explicit containment order -- see `_detect_analyst_order`.
-            user_text=latest_user_text(messages),
-        )
-
-        # Build initial history (flat messages the proxy understands).
-        history: list[dict[str, Any]] = [
-            {"role": "system", "content": system},
-        ]
-        for m in messages:
-            if isinstance(m.content, str):
-                history.append({"role": m.role, "content": m.content})
-            elif is_block_content(m.content):
-                # Replayed history: the proxy has no native tool turns, so it
-                # gets prose that is not call-shaped (see llm/replay.py).
-                prose = blocks_to_prose(m.role, m.content)
-                if prose:
-                    history.append({"role": m.role, "content": prose})
-            else:
-                # Internal turns carried as block lists (from resume).
-                # Flatten: each block carries its own role.
-                for block in m.content:
-                    if isinstance(block, dict):
-                        history.append(block)
-                    else:
-                        # Non-dict block (str, etc.) → wrap as user message
-                        history.append({"role": "user", "content": str(block)})
-
-        # P4 -- repeated-error guard
-        failed_signatures: set[str] = set()
-
-        def _call_signature(nm: str, ar: dict[str, Any]) -> str:
-            try:
-                return nm + "|" + json.dumps(ar, sort_keys=True, default=str)
-            except Exception:
-                return nm + "|" + repr(ar)
-
-        def _guarded_dispatch(nm: str, ar: dict[str, Any]) -> Any:
-            if nm not in allowed_names:
-                return {
-                    "ok": False,
-                    "error": (
-                        f"Tool '{nm}' is not available in this session: the "
-                        f"current task intent does not permit it. Not executed."
-                    ),
-                }
-            sig = _call_signature(nm, ar)
-            if sig in failed_signatures:
-                return {
-                    "ok": False,
-                    "repeated_call_guard": True,
-                    "error": (
-                        f"This exact call to `{nm}` already failed earlier this "
-                        f"turn and was NOT re-run. Do not retry the identical "
-                        f"arguments -- change the inputs or stop and report the "
-                        f"blocker in your assessment."
-                    ),
-                }
-            guard = _discipline.evaluate(nm, ar)
-            if guard is not None:
-                if guard.get("forbidden_pivot_guard") or guard.get("call_once_guard"):
-                    failed_signatures.add(sig)
-                return guard
-            result = dispatch(nm, ar)
-            _discipline.note_result(nm, ar, result)
-            if _is_error_result(result):
-                failed_signatures.add(sig)
-            return result
-
-        # Loop-scoped usage accumulators read by _emit_usage via closure.
-        # Defaults so the helper is callable before the first round-trip.
-        input_tok = 0
-        output_tok = 0
-        history_chars = 0
-        tool_call_usage: list[ToolCallUsage] = []
-
-        def _emit_usage(stop_reason: str, *, repair_delta: int = 0):
-            return UsageEvent(
-                session_id=session_id, turn=turn_idx, model=self.model,
-                input_tokens=input_tok, output_tokens=output_tok,
-                cache_read=0, cache_write=0,
-                history_chars=history_chars,
-                stop_reason=stop_reason,
-                self_repair_turn=self_repair_turns - repair_delta,
-                tool_calls=tool_call_usage, tags=tags,
-            )
-
-        # Internal helper for a single proxy round-trip.
-        async def _call_proxy(
-            *, history: list[dict[str, Any]], tool_defs: list[dict[str, Any]]
-        ) -> tuple[str, list[tuple[str, Any]], dict[str, int]]:
-            """Call agent_chat_completions.
-
-            Returns (content, calls, usage). ``content`` is None for tool-call
-            turns; ``calls`` is EVERY tool call the proxy elected, normalized to
-            ``[(name, raw_args), ...]`` (see _normalize_tool_calls) and empty on
-            a text turn. usage is a dict of token counts.
-            On error, raises RuntimeError.
-            """
-            body: dict[str, Any] = {
-                "connector": "fortinet-fortiai-proxy",
-                "operation": "agent_chat_completions",
-                "params": {
-                    "messages": history,
-                    "tools": tool_defs,
-                },
-            }
-            if self.model:
-                body["params"]["model"] = self.model
-            overlay = _resolve_llm_config(self.feature, self.reasoning_effort)
-            if overlay:
-                body["params"]["config"] = overlay
-
-            headers = {}
-            if self._auth:
-                headers["Authorization"] = f"Bearer {self._auth}"
-
-            url = f"{self.base_url}/api/integration/execute/"
-            resp = await self._client.post(url, json=body, headers=headers)
-
-            if resp.status_code != 200:
-                try:
-                    err_data = resp.json()
-                    err_body = err_data.get("message", str(err_data))[:600]
-                except Exception:
-                    err_body = resp.text[:600]
-                raise RuntimeError(
-                    f"FortiAI proxy returned HTTP {resp.status_code}: {err_body}"
-                )
-
-            data = resp.json()
-            exec_status = data.get("status", "")
-            if exec_status not in ("Success", "success", "Completed", "completed", ""):
-                msg = data.get("message", str(data)[:600])
-                raise RuntimeError(f"FortiAI proxy execution failed: {msg}")
-
-            payload = data.get("data", data)
-            # ANY truthy `error` is an error, whatever its type. This used to
-            # test `isinstance(..., str)`, but the live envelope is a DICT --
-            # `{"status": "Failure", "status_code": "400", "error_code":
-            # "-30000", "error_desc": "The request payload is invalid."}` --
-            # so the check never fired and the turn continued with empty
-            # content, no usage and no exception. The model then narrated an
-            # empty response as a normal answer. A `reasoning_effort` sent
-            # against a non-LARGE feature is a live generator of exactly this
-            # envelope, so the two fixes belong together.
-            err = payload.get("error")
-            if err:
-                raise RuntimeError(
-                    f"FortiAI proxy LLM error: {_describe_proxy_error(err)}")
-
-            content = payload.get("content")
-            usage = payload.get("usage") or {}
-            calls = _normalize_tool_calls(payload.get("tool_name"),
-                                          payload.get("tool_args"),
-                                          payload.get("tools"))
-
-            # Pass `tool_args` through UNCHANGED. Coercing a non-dict to `{}`
-            # here is what produced the `run_op({})` dispatches seen on
-            # contain_block_ip_direct: the proxy hands back tool_args as a
-            # JSON *string*, which this turned into an empty call before the
-            # caller's parser (which handles strings, and now reports a parse
-            # failure instead of emptying) ever saw it.
-            return content, calls, usage
-
-        for _turn in range(MAX_TOOL_TURNS):
-            turn_idx += 1
-            try:
-                history_chars = len(json.dumps(history, default=str))
-            except Exception:
-                history_chars = 0
-
-            # Single proxy call
-            try:
-                content, calls, usage = await _call_proxy(
-                    history=history, tool_defs=tool_defs
-                )
-            except Exception as exc:
-                import logging
-                logging.exception("fortiai-proxy call failed")
-                yield ErrorEvent(message=f"FortiAI proxy error: {exc}")
-                return
-
-            # Usage accounting
-            input_tok = usage.get("prompt_tokens", 0) or 0
-            output_tok = usage.get("completion_tokens", 0) or 0
-
-            tool_call_usage = []
-
-            if calls:
-                # EVERY call in the batch, in order. The proxy can elect
-                # more than one (see _normalize_tool_calls); running only
-                # the first was a silent drop.
-                for _ci, (tool_name, tool_args) in enumerate(calls):
-                    # --- Tool call turn ------------------------------------------
-                    raw_args = tool_args
-                    args_error: str | None = None
-                    try:
-                        if isinstance(raw_args, str):
-                            parsed_args = json.loads(raw_args)
-                            if not isinstance(parsed_args, dict):
-                                args_error = ("arguments must be a JSON object, got "
-                                              f"{type(parsed_args).__name__}")
-                                parsed_args = {}
-                        elif isinstance(raw_args, dict):
-                            parsed_args = raw_args
-                        else:
-                            args_error = ("arguments must be a JSON object, got "
-                                          f"{type(raw_args).__name__}")
-                            parsed_args = {}
-                    except Exception as exc:  # noqa: BLE001
-                        args_error = f"arguments were not valid JSON ({exc})"
-                        parsed_args = {}
-
-                    # `_ci` keeps ids unique WITHIN a batch -- two calls in
-                    # one turn previously collided on the same id, which the
-                    # widget matches results by.
-                    call_id = f"call_{session_id}_{turn_idx}_{_ci}"
-                    if args_error is not None:
-                        # Do NOT dispatch a call whose arguments we could not read.
-                        # Emptying them and running anyway is silent arg-dropping:
-                        # observed on contain_block_ip_direct (run 20260815T153152Z)
-                        # as three consecutive `run_op({})` calls that burned a
-                        # third of the turn's budget and staged nothing. It also
-                        # weakens the gate -- `_resolve_tier` reads the op out of
-                        # the args, so a tier-4 containment with unreadable args
-                        # resolves as a plain tier-3 (it escalates from unknown, so
-                        # nothing runs ungated, but a step-up requirement is lost).
-                        # Hand the parse failure back so the model can re-emit.
-                        err = {"ok": False, "code": "bad_tool_arguments",
-                               "message": (f"{tool_name}: {args_error}. Re-issue "
-                                           f"the call with a single valid JSON "
-                                           f"object as the arguments."),
-                               "suggestions": []}
-                        yield ToolUseEvent(name=tool_name, arguments={},
-                                           call_id=call_id,
-                                           tier=_tier_for(tool_name, {}))
-                        yield ToolResultEvent(call_id=call_id, result=err,
-                                              duration_ms=0)
-                        history.append({
-                            "role": "assistant",
-                            "content": f"[called {tool_name} with unreadable arguments]",
-                        })
-                        history.append({
-                            "role": "user",
-                            "content": f"Tool result: {tool_name} = {json.dumps(err)}",
-                        })
-                        # Next call in the batch -- one unreadable call does
-                        # not void the others the model elected.
-                        continue
-                    tier = _tier_for(tool_name, parsed_args)
-                    yield ToolUseEvent(
-                        name=tool_name, arguments=parsed_args,
-                        call_id=call_id, tier=tier,
-                    )
-
-                    _t0 = time.perf_counter()
-                    result = _guarded_dispatch(tool_name, parsed_args)
-                    dur_ms = int((time.perf_counter() - _t0) * 1000)
-                    # Register tool result for citation validation
-                    from ..mcp_server._citation_validator import register_tool_result
-                    register_tool_result(call_id, tool_name, not _is_error_result(result),
-                                         parsed_args, result)
-                    yield ToolResultEvent(
-                        call_id=call_id, result=result, duration_ms=dur_ms
-                    )
-
-                    # Record tool-call usage
-                    content_str = (evidence_id_line(call_id, tool_name, parsed_args,
-                                                    not _is_error_result(result))
-                                   + _stringify(result))
-                    try:
-                        args_chars = len(json.dumps(parsed_args, default=str))
-                    except Exception:
-                        args_chars = 0
-                    tool_call_usage.append(ToolCallUsage(
-                        name=tool_name, args_chars=args_chars,
-                        result_chars=len(content_str), duration_ms=dur_ms,
-                    ))
-
-                    # Check for pending_approval → suspend
-                    if isinstance(result, dict) and result.get("pending_approval"):
-                        approval_id = result["approval_id"]
-                        # The rest of THIS batch has not run yet. `remaining_tool_
-                        # calls` exists precisely to carry them across the
-                        # suspension; leaving it empty (as it was when only one
-                        # call per turn was believed possible) would drop every
-                        # sibling call the moment one of them needed approval.
-                        _rest = [
-                            (f"{call_id}_skipped_{_si}", _sname,
-                             _sargs if isinstance(_sargs, dict) else {})
-                            for _si, (_sname, _sargs) in enumerate(calls[_ci + 1:])
-                        ]
-                        # Gated calls right behind this one share its card.
-                        batch, _rest = _approvals.collect_batch(
-                            _rest, _guarded_dispatch, _tier_for)
-                        remaining = [
-                            _approvals.SkippedToolCall(call_id=_c, name=_n, args=_a)
-                            for _c, _n, _a in _rest
-                        ]
-                        # Capture the current turn evidence so citations survive resume.
-                        from ..mcp_server._citation_validator import get_turn_evidence
-                        evidence = get_turn_evidence()
-                        evidence_state = evidence.to_dict() if evidence else {}
-
-                        suspended_session = _approvals.SuspendedSession(
-                            approval_id=approval_id,
-                            # The CHAT session id, not `session_id` -- that local
-                            # is a per-stream trace id (uuid4().hex[:8]) used for
-                            # telemetry correlation. Stashing it here wrote a value
-                            # into suspended_sessions.session_id that could never
-                            # join to chat_sessions, so the monitor's Pending panel
-                            # showed an unresolvable session with a null intent and
-                            # user, and list_active_sessions could never derive
-                            # `waiting_approval` for any row.
-                            session_id=(tags or {}).get("session_id") or session_id,
-                            tool=tool_name,
-                            tool_use_id=call_id,
-                            args=parsed_args,
-                            tier=int(result.get("tier", 3)),
-                            history_snapshot=list(history),
-                            prior_tool_result_blocks=[],
-                            remaining_tool_calls=list(remaining),
-                            system=system,
-                            tags=dict(tags),
-                            summary=result.get("summary"),
-                            # the advertised slice -- resume re-enters with it
-                            tools=list(tools or []),
-                            turn_evidence_state=evidence_state,
-                            batch=batch,
-                        )
-                        _approvals.bind(suspended_session)
-                        if self._approval_gateway is not None:
-                            self._approval_gateway.stash(suspended_session)
-                        else:
-                            _approvals.stash(suspended_session)
-                        pending = ApprovalRequestEvent(
-                            approval_id=approval_id,
-                            tool_use_id=call_id,
-                            tool=tool_name,
-                            tier=int(result.get("tier", 3)),
-                            preview=result.get("preview") or {},
-                            args_hash=result.get("args_hash", ""),
-                            summary=result.get("summary"),
-                            requires_step_up=bool(result.get("requires_step_up")),
-                            batch=[b.card() for b in batch],
-                            policy=result.get("policy"),
-                        )
-                        yield pending
-                        yield _emit_usage("pending_approval")
-                        yield DoneEvent(stop_reason="pending_approval")
-                        return
-
-                    # Flatten tool call + result into text messages for the proxy
-                    args_summary = json.dumps(parsed_args, default=str)
-                    history.append({
-                        "role": "assistant",
-                        "content": f"[called {tool_name}({args_summary})]",
-                    })
-                    history.append({
-                        "role": "user",
-                        "content": f"Tool result: {tool_name} = {content_str}",
-                    })
-                    # TurnPlan item 3: state the shrinking budget in the soft
-                    # window before the cap (mirrors the other providers).
-                    from ._loop_helpers import budget_note
-                    _bnote = budget_note(_turn + 1, MAX_TOOL_TURNS) \
-                        if self.emulation.task_budget else ""
-                    if _bnote:
-                        history.append({"role": "user",
-                                        "content": f"[turn budget] {_bnote}"})
-                    any_tools_run = True
-
-
-                yield _emit_usage("tool_calls")
-                continue
-
-            # --- Text turn (terminal or self-repair) -------------------------
-            if content is not None:
-                yield TextEvent(text=content)
-
-            # Self-repair on broken YAML
-            if self_repair_turns < MAX_SELF_REPAIR_TURNS and content:
-                yaml_block = _extract_yaml_block(content)
-                if yaml_block:
-                    errors_text = _compile_errors(yaml_block)
-                    if errors_text:
-                        self_repair_turns += 1
-                        history.append({
-                            "role": "user",
-                            "content": (
-                                "The YAML you just produced doesn't compile. "
-                                "Fix the errors and emit a corrected fenced "
-                                "```yaml block.\n\nErrors:\n" + errors_text
-                            ),
-                        })
-                        yield _emit_usage("self_repair", repair_delta=1)
-                        continue
-
-            # Forced assessment when tools ran but no text followed
-            if not content and any_tools_run and not assessment_forced:
-                assessment_forced = True
-                yield _emit_usage("assessment_forced")
-                history.append({
-                    "role": "user",
-                    "content": (
-                        "You ran tools but did not write anything back to the "
-                        "analyst. Stop calling tools. In a short written "
-                        "assessment, tell the analyst: (1) what you found, "
-                        "(2) your severity / disposition verdict, and "
-                        "(3) the single recommended next action. Be concise "
-                        "and do not call tools."
-                    ),
-                })
-                try:
-                    wrap_content, _, _ = await _call_proxy(
-                        history=history, tool_defs=[]
-                    )
-                    if wrap_content:
-                        yield TextEvent(text=wrap_content)
-                except Exception:
-                    import logging
-                    logging.exception("assessment wrap-up failed")
-                yield UsageEvent(
-                    session_id=session_id, turn=turn_idx, model=self.model,
-                    input_tokens=input_tok, output_tokens=output_tok,
-                    cache_read=0, cache_write=0,
-                    history_chars=history_chars,
-                    stop_reason="assessment_summary",
-                    self_repair_turn=self_repair_turns,
-                    tool_calls=tool_call_usage, tags=tags,
-                )
-                yield DoneEvent(stop_reason="end_turn")
-                return
-
-            yield UsageEvent(
-                session_id=session_id, turn=turn_idx, model=self.model,
-                input_tokens=input_tok, output_tokens=output_tok,
-                cache_read=0, cache_write=0,
-                history_chars=history_chars,
-                stop_reason="end_turn",
-                self_repair_turn=self_repair_turns,
-                tool_calls=tool_call_usage, tags=tags,
-            )
-            yield DoneEvent(stop_reason="end_turn")
-            return
-
-        # Tool-turn budget exhausted
-        yield UsageEvent(
-            session_id=session_id, turn=turn_idx, model=self.model,
-            input_tokens=0, output_tokens=0,
-            cache_read=0, cache_write=0,
-            history_chars=0,
-            stop_reason="max_tool_turns",
-            self_repair_turn=self_repair_turns,
-            tool_calls=[], tags=tags,
-        )
-        yield DoneEvent(stop_reason="max_tool_turns")
+    async def resume(self, *, suspended: _approvals.SuspendedSession,
+                     decision: str) -> AsyncIterator[Event]:
+        async for ev in resume_loop(self, suspended=suspended, decision=decision):
+            yield ev
 
     async def aclose(self) -> None:
         """Close the underlying httpx client."""
@@ -903,3 +391,134 @@ class FortiAIProxyProvider(CapabilityMixin):
                 self._client.close()
         except Exception:
             pass
+
+
+def _text_pair(o: ToolOutcome) -> list[dict[str, Any]]:
+    """One call and its result as the flat messages the proxy accepts."""
+    return [
+        {"role": "assistant",
+         "content": f"[called {o.name}({json.dumps(o.args, default=str)})]"},
+        {"role": "user", "content": f"Tool result: {o.name} = {o.content}"},
+    ]
+
+
+def _parse_proxy_args(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        return parse_tool_arguments(raw)
+    return {BAD_ARGS_KEY: f"arguments must be a JSON object, got {type(raw).__name__}"}
+
+
+class _FortiAITurn:
+    """One stream's flat-message history for the proxy.
+
+    Non-streaming: a round is one HTTP call. The proxy has no native tool
+    turns, so calls and results replay as text pairs and replayed block
+    history becomes prose that is not call-shaped (see llm/replay.py)."""
+
+    def __init__(self, provider: FortiAIProxyProvider, system: str,
+                 messages: list[Message], tools: list[dict[str, Any]] | None) -> None:
+        self.p = provider
+        # `is not None`: the budget-ask "deliver" path passes [] to force a
+        # no-research turn.
+        self.plain_tools = _normalize_tools_fortiai(
+            tools if tools is not None else _anthropic_tools())
+        self.allowed_names = {t["name"] for t in self.plain_tools}
+        self.history: list[dict[str, Any]] = [{"role": "system", "content": system}]
+        for m in messages:
+            if isinstance(m.content, str):
+                self.history.append({"role": m.role, "content": m.content})
+            elif is_block_content(m.content):
+                prose = blocks_to_prose(m.role, m.content)
+                if prose:
+                    self.history.append({"role": m.role, "content": prose})
+            else:
+                # Internal turns carried as block lists (from resume); each
+                # block carries its own role.
+                for block in m.content:
+                    self.history.append(block if isinstance(block, dict)
+                                        else {"role": "user", "content": str(block)})
+        self._round = 0
+
+    def before_round(self) -> None:
+        self._round += 1
+
+    def history_chars(self) -> int:
+        try:
+            return len(json.dumps(self.history, default=str))
+        except Exception:
+            return 0
+
+    def history_dicts(self) -> list[dict[str, Any]]:
+        return self.history
+
+    def has_tool(self, name: str) -> bool:
+        return name in self.allowed_names
+
+    def usage_extra(self) -> dict[str, Any]:
+        return {}
+
+    async def stream_round(self) -> AsyncIterator[tuple[str, Any]]:
+        content, calls, usage = await self.p.call_proxy(self.history, self.plain_tools)
+        tool_calls = [
+            # The index keeps ids unique within a batch; the widget matches
+            # results to calls by id.
+            ToolCall(f"call_{id(self):x}_{self._round}_{i}", name, _parse_proxy_args(raw))
+            for i, (name, raw) in enumerate(calls)
+        ]
+        if content and not tool_calls:
+            yield ("text", content)
+        yield ("final", Round(
+            text=content or "", tool_calls=tool_calls,
+            stop_reason="tool_calls" if tool_calls else "end_turn",
+            usage=RoundUsage(usage.get("prompt_tokens", 0) or 0,
+                             usage.get("completion_tokens", 0) or 0),
+            assistant=({"role": "assistant", "content": content}
+                       if content and not tool_calls else None)))
+
+    async def wrapup_round(self, max_tokens: int) -> AsyncIterator[tuple[str, Any]]:
+        content, _calls, usage = await self.p.call_proxy(self.history, [])
+        if content:
+            yield ("text", content)
+        yield ("final", RoundUsage(usage.get("prompt_tokens", 0) or 0,
+                                   usage.get("completion_tokens", 0) or 0))
+
+    async def forced_call(self, name: str) -> ToolCall | None:
+        # The proxy cannot pin tool_choice; offering the one tool is as close
+        # as it gets.
+        schema = [t for t in self.plain_tools if t["name"] == name]
+        _content, calls, _usage = await self.p.call_proxy(self.history, schema)
+        hit = next(((n, raw) for n, raw in calls if n == name), None)
+        if hit is None:
+            return None
+        args = _parse_proxy_args(hit[1])
+        return ToolCall(f"call_{id(self):x}_{self._round}_forced", name,
+                        {} if BAD_ARGS_KEY in args else args)
+
+    def append_assistant(self, rnd: Round) -> None:
+        if rnd.assistant is not None:
+            self.history.append(rnd.assistant)
+
+    def append_user(self, text: str) -> None:
+        self.history.append({"role": "user", "content": text})
+
+    def append_tool_call(self, call: ToolCall) -> None:
+        # Nothing to write yet: a call replays together with its result as one
+        # text pair (append_tool_results).
+        return None
+
+    def result_wire(self, outcome: ToolOutcome) -> list[dict[str, Any]]:
+        return _text_pair(outcome)
+
+    def append_tool_results(self, outcomes: list[ToolOutcome], *,
+                            note: str | None = None, note_role: str = "user") -> None:
+        for o in outcomes:
+            self.history += _text_pair(o)
+        if note:
+            # The proxy takes no mid-conversation system message.
+            self.history.append({"role": "user", "content": note})
+
+    def snapshot(self) -> list[Any]:
+        # Without the leading system message: stream() re-prepends it.
+        return list(self.history[1:])

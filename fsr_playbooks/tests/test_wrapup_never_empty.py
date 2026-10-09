@@ -37,9 +37,9 @@ def _run(rounds):
     p = OpenAIProvider(model="gpt-5.4-mini", base_url="http://x/v1", api_key="x",
                        client=client)
     tools = [t for t in _OPENAI_TOOLS if t["function"]["name"] != "emit_card"]
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="summarize")],
             tools=tools, tags={})))

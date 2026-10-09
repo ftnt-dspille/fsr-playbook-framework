@@ -113,9 +113,9 @@ def test_research_only_turn_is_nudged_and_then_authors():
         _FakeStream(_RESEARCH), _FakeStream(_NARRATE),
         _FakeStream(verify_round), _FakeStream(offer_round), _FakeStream(close)])
     p = _provider(create)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="build a playbook")],
             tools=_BUILD_TOOLS, tags={})))
@@ -133,9 +133,9 @@ def test_nudge_fires_at_most_once():
     create = AsyncMock(side_effect=[
         _FakeStream(_RESEARCH), _FakeStream(_NARRATE), _FakeStream(_NARRATE)])
     p = _provider(create)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="build a playbook")],
             tools=_BUILD_TOOLS, tags={})))
@@ -162,9 +162,9 @@ def test_turn_that_already_authored_is_not_nudged():
         _FakeStream(_RESEARCH), _FakeStream(verify_round),
         _FakeStream(offer_round), _FakeStream(close)])
     p = _provider(create)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="build a playbook")],
             tools=_BUILD_TOOLS, tags={})))

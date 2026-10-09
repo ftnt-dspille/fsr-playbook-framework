@@ -106,13 +106,11 @@ def _register_builtins() -> None:
     except Exception:
         pass
     try:
-        from .lmstudio_provider import LMStudioProvider
-        register("lmstudio", LMStudioProvider)
-    except Exception:
-        pass
-    try:
-        from .openai_provider import OpenAIProvider
+        # LM Studio is plain OpenAI-compatible: the OpenAI provider with its
+        # local defaults.
+        from .openai_provider import OpenAIProvider, lmstudio
         register("openai", OpenAIProvider)
+        register("lmstudio", lmstudio)
     except Exception:
         pass
     try:

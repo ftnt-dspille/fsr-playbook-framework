@@ -32,8 +32,7 @@ from fsr_playbooks.llm.fortiai_proxy_provider import (
     FortiAIProxyProvider,
     _resolve_llm_config,
 )
-from fsr_playbooks.llm.lmstudio_provider import LMStudioProvider
-from fsr_playbooks.llm.openai_provider import OpenAIProvider
+from fsr_playbooks.llm.openai_provider import OpenAIProvider, lmstudio
 from fsr_playbooks.llm.provider import (
     CAPABILITY_NAMES,
     HostEmulation,
@@ -46,7 +45,7 @@ from fsr_playbooks.llm.provider import (
 PROVIDERS = {
     "anthropic": lambda: AnthropicProvider(api_key="test-key"),
     "openai": lambda: OpenAIProvider(api_key="test-key"),
-    "lmstudio": lambda: LMStudioProvider(),
+    "lmstudio": lambda: lmstudio(),
     "fortiai-proxy": lambda: FortiAIProxyProvider(base_url="https://example.invalid",
                                                   api_key="test-key", client=object()),
     "fake": lambda: FakeProvider(),

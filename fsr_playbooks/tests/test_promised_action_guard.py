@@ -124,9 +124,9 @@ def _run_openai(rounds):
     client.chat.completions = MagicMock(create=AsyncMock(side_effect=_create))
     p = OpenAIProvider(model="gpt-5.4-mini", base_url="http://x/v1", api_key="x",
                        client=client)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="mark it completed")],
             tools=_OPENAI_TOOLS, tags={})))
@@ -184,9 +184,9 @@ def test_anthropic_hollow_close_gets_the_directive():
     client.messages.create = AsyncMock()
     p = AnthropicProvider(model="claude-haiku-4-5-20251001", base_url="http://x",
                           api_key="x", client=client)
-    with patch("fsr_playbooks.llm.anthropic_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_dispatch)), \
-         patch("fsr_playbooks.llm.anthropic_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="mark it completed")],
             tools=_ANTHROPIC_TOOLS, tags={})))

@@ -106,8 +106,8 @@ def test_narrated_delivery_is_forced_into_a_real_offer_call():
                        api_key="x", client=client)
 
     disp = MagicMock(side_effect=_fake_dispatch)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", disp), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", disp), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="rewire the branch")],
             tools=_ENHANCE_TOOLS, tags={})))
@@ -152,9 +152,9 @@ def test_forced_delivery_fires_at_most_once():
     client.chat.completions = MagicMock(create=create)
     p = OpenAIProvider(model="gpt-4.1-mini", base_url="http://x/v1",
                        api_key="x", client=client)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_fake_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="rewire")],
             tools=_ENHANCE_TOOLS, tags={})))

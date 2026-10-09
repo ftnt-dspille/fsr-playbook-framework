@@ -369,9 +369,3 @@ class TestToolNameReferencesInCode:
         )
 
 
-def test_lmstudio_provider_resolves_its_error_classifier():
-    """lmstudio_provider called `_is_error_result` without defining or
-    importing it, so its first tool result raised NameError. Pin the name."""
-    from fsr_playbooks.llm import lmstudio_provider
-    assert lmstudio_provider._is_error_result({"ok": False}) is True
-    assert lmstudio_provider._is_error_result({"ok": True}) is False

@@ -850,7 +850,8 @@ def test_every_provider_seeds_the_discipline_from_the_user_message():
     llm = pathlib.Path(__file__).resolve().parents[1] / "llm"
     builders = [p for p in llm.glob("*.py")
                 if "TriageDiscipline(" in p.read_text()]
-    assert len(builders) >= 3, f"expected every provider, found {builders}"
+    # One loop serves every provider; a second builder is a copy that drifts.
+    assert [p.name for p in builders] == ["agent_loop.py"], builders
     for p in builders:
         src = p.read_text()
         for call in _re.findall(r"TriageDiscipline\((.*?)\n\s*\)", src, _re.S):

@@ -74,9 +74,9 @@ def _run(rounds, *, unattended=True, forced=None):
     p = OpenAIProvider(model="gpt-5.4-mini", base_url="http://x/v1", api_key="x",
                        client=client)
     tags = {"unattended": True} if unattended else {}
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(return_value={"ok": True})) as disp, \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="triage this")],
             tools=_TOOLS, tags=tags)))
@@ -220,9 +220,9 @@ def test_anthropic_forced_true_positive_is_asked_in_turn():
     tools = [{"name": n, "description": n,
               "input_schema": {"type": "object", "properties": {}}}
              for n in _FULL_SURFACE]
-    with patch("fsr_playbooks.llm.anthropic_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(return_value={"ok": True})), \
-         patch("fsr_playbooks.llm.anthropic_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="triage")],
             tools=tools, tags={"unattended": True})))

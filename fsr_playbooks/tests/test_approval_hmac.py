@@ -157,7 +157,7 @@ def test_resume_rejects_unverified_session():
     async def _drain():
         evs = []
         # patch dispatch on the module to detect any execution attempt
-        import fsr_playbooks.llm.anthropic_provider as mod
+        import fsr_playbooks.llm.agent_loop as mod
         orig = mod.dispatch
         mod.dispatch = _boom
         try:

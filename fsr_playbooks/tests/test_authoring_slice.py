@@ -33,7 +33,9 @@ def test_triage_slice_is_not_authoring_build_slice_is():
 
 
 def test_no_provider_keeps_its_own_copy():
+    from fsr_playbooks.llm import agent_loop
+    assert "is_authoring_slice(allowed)" in inspect.getsource(agent_loop)
     for mod in (anthropic_provider, openai_provider, fortiai_proxy_provider):
         src = inspect.getsource(mod)
-        assert "is_authoring_slice(allowed_names)" in src, mod.__name__
+        assert "is_authoring_slice" not in src, mod.__name__
         assert '"emit_action_card" not in allowed_names' not in src, mod.__name__

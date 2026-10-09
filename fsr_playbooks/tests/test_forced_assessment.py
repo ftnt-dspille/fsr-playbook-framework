@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from fsr_playbooks.llm import anthropic_provider as ap
+from fsr_playbooks.llm import agent_loop
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.provider import Message, TextEvent, UsageEvent
 
@@ -94,8 +94,8 @@ async def _drain(provider, messages):
 
 
 def _patch_dispatch(monkeypatch):
-    monkeypatch.setattr(ap, "dispatch", lambda name, args: {"ok": True, "echo": args})
-    monkeypatch.setattr(ap, "_tier_for", lambda name, args: 1)
+    monkeypatch.setattr(agent_loop, "dispatch", lambda name, args: {"ok": True, "echo": args})
+    monkeypatch.setattr(agent_loop, "_tier_for", lambda name, args: 1)
 
 
 def test_tools_only_final_forces_assessment(monkeypatch):

@@ -58,9 +58,9 @@ def _tool_messages(results):
     async def _drain(gen):
         return [ev async for ev in gen]
 
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(return_value=results)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="triage this")],
             tools=_TOOLS)))
@@ -118,9 +118,9 @@ def test_anthropic_results_show_the_id_too():
     async def _drain(gen):
         return [ev async for ev in gen]
 
-    with patch("fsr_playbooks.llm.anthropic_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(return_value={"ok": True, "record": {}})), \
-         patch("fsr_playbooks.llm.anthropic_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="triage")],
             tools=[{"name": "get_record", "description": "r",

@@ -179,9 +179,8 @@ def test_providers_inject_budget_note():
 
     import fsr_playbooks
     base = pathlib.Path(fsr_playbooks.__file__).parent / "llm"
-    for prov in ("anthropic_provider.py", "openai_provider.py",
-                 "fortiai_proxy_provider.py"):
-        assert "budget_note" in (base / prov).read_text(), prov
+    # One loop serves every provider.
+    assert "budget_note(" in (base / "agent_loop.py").read_text()
 
 
 def test_emit_card_top_level_fields_folded_into_payload():

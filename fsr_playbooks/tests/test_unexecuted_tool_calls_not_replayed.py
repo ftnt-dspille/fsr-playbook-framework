@@ -35,8 +35,7 @@ from test_openai_build_progress_forced import (
 )
 
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
-from fsr_playbooks.llm.lmstudio_provider import LMStudioProvider
-from fsr_playbooks.llm.openai_provider import OpenAIProvider
+from fsr_playbooks.llm.openai_provider import OpenAIProvider, lmstudio
 from fsr_playbooks.llm.provider import Message, ToolUseEvent
 
 # Does not compile, so self-repair sends a follow-up request.
@@ -83,8 +82,8 @@ def _openai_provider(cls, create):
     client = MagicMock()
     client.chat = MagicMock()
     client.chat.completions = MagicMock(create=create)
-    if cls is LMStudioProvider:
-        return LMStudioProvider(model="m", client=client)
+    if cls is lmstudio:
+        return lmstudio(model="m", client=client)
     return OpenAIProvider(model="gpt-4.1-mini", base_url="http://x/v1",
                           api_key="x", client=client)
 
@@ -109,10 +108,8 @@ def _run_openai_like(cls, rounds, tools):
     call, sent = _snapshotting([_FakeStream(r) for r in rounds])
     create = AsyncMock(side_effect=call)
     p = _openai_provider(cls, create)
-    mod = ("fsr_playbooks.llm.lmstudio_provider" if cls is LMStudioProvider
-           else "fsr_playbooks.llm.openai_provider")
-    with patch(f"{mod}.dispatch", MagicMock(return_value={"ok": True})) as disp, \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", MagicMock(return_value={"ok": True})) as disp, \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="build a playbook")],
             tools=tools, tags={})))
@@ -153,7 +150,7 @@ def test_openai_nudge_after_a_textless_truncated_call_is_well_formed():
 
 def test_lmstudio_self_repair_after_a_truncated_call_is_well_formed():
     requests, disp, _ = _run_openai_like(
-        LMStudioProvider, [_truncated_round(text=_BROKEN_YAML_TEXT), _close_round()],
+        lmstudio, [_truncated_round(text=_BROKEN_YAML_TEXT), _close_round()],
         _BUILD_TOOLS)
     assert len(requests) == 2, "self-repair never sent its follow-up request"
     for msgs in requests:
@@ -202,7 +199,7 @@ def test_anthropic_self_repair_after_a_truncated_call_is_well_formed():
                           api_key="x", client=client)
     tools = [{"name": "emit_card", "description": "emit a card",
               "input_schema": {"type": "object", "properties": {}}}]
-    with patch("fsr_playbooks.llm.anthropic_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(return_value={"ok": True})) as disp:
         asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="build a playbook")],
@@ -223,7 +220,7 @@ def _dropped(events):
 def test_openai_and_lmstudio_record_what_the_dropped_call_was_writing():
     """The live runaway could not be diagnosed: the cut-off arguments were never
     kept anywhere. The usage event for that round now carries them."""
-    for cls in (OpenAIProvider, LMStudioProvider):
+    for cls in (OpenAIProvider, lmstudio):
         _, _, events = _run_openai_like(
             cls, [_truncated_round(text=_BROKEN_YAML_TEXT), _close_round()],
             _BUILD_TOOLS)
@@ -244,7 +241,7 @@ def test_anthropic_records_the_dropped_call():
     client.messages.create = AsyncMock()
     p = AnthropicProvider(model="claude-haiku-4-5-20251001", base_url="http://x",
                           api_key="x", client=client)
-    with patch("fsr_playbooks.llm.anthropic_provider.dispatch", MagicMock()):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", MagicMock()):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="hi")],
             tools=[{"name": "emit_card", "description": "d",

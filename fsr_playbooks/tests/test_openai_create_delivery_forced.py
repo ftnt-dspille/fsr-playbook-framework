@@ -124,8 +124,8 @@ def test_narrated_build_is_forced_into_a_real_offer_call():
     p = _provider(create)
 
     disp = MagicMock(side_effect=_fake_dispatch)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", disp), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", disp), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s",
             messages=[Message(role="user", content="build a phishing playbook")],
@@ -159,9 +159,9 @@ def test_forced_create_delivery_fires_at_most_once():
     create = AsyncMock(side_effect=[
         _FakeStream(turn1), _FakeStream(turn2), empty_forced])
     p = _provider(create)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_fake_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="build one")],
             tools=_BUILD_TOOLS, tags={})))
@@ -193,9 +193,9 @@ def test_offer_already_delivered_is_not_forced():
     create = AsyncMock(side_effect=[
         _FakeStream(turn1), _FakeStream(turn2), _FakeStream(turn3)])
     p = _provider(create)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_fake_dispatch)), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="build one")],
             tools=_BUILD_TOOLS, tags={})))
@@ -235,8 +235,8 @@ def test_trace_build_then_prose_is_forced_into_a_trace_offer():
         return _fake_dispatch(name, args)
 
     disp = MagicMock(side_effect=dispatch)
-    with patch("fsr_playbooks.llm.openai_provider.dispatch", disp), \
-         patch("fsr_playbooks.llm.openai_provider._tier_for", return_value=0):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", disp), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(_provider(create).stream(
             system="s", messages=[Message(role="user", content="Save that as a playbook.")],
             tools=tools, tags={})))

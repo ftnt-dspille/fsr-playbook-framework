@@ -114,8 +114,8 @@ def test_narrated_delivery_is_forced_into_a_real_offer_call():
     p = _provider([turn1, turn2], _forced_resp())
 
     disp = MagicMock(side_effect=_fake_dispatch)
-    with patch("fsr_playbooks.llm.anthropic_provider.dispatch", disp), \
-         patch("fsr_playbooks.llm.anthropic_provider._tier_for", return_value=0):
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", disp), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="rewire the branch")],
             tools=_ENHANCE_TOOLS, tags={})))
@@ -153,9 +153,9 @@ def test_no_force_when_offer_already_made():
                                   stop_reason="end_turn", usage=_usage()))
     forced = _forced_resp()
     p = _provider([turn1, turn2], forced)
-    with patch("fsr_playbooks.llm.anthropic_provider.dispatch",
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
                MagicMock(side_effect=_fake_dispatch)), \
-         patch("fsr_playbooks.llm.anthropic_provider._tier_for", return_value=0):
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="rewire")],
             tools=_ENHANCE_TOOLS, tags={})))
