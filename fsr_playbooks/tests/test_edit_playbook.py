@@ -676,3 +676,31 @@ def test_add_playbook_refuses_a_child_with_no_trigger():
     res = edit_playbook([{"op": "add_playbook", "name": "X",
                           "steps": [{"name": "Only", "type": "set_variable", "vars": {"a": 1}}]}])
     assert res.get("code") == "bad_operation" and "trigger" in res["message"]
+
+
+_EMPTY_OPEN = ("collection: C\nplaybooks:\n- name: test\n"
+               "  uuid: e24a354d-a600-4c41-8299-2c7941af312c\n  steps: []\n")
+
+
+def test_add_playbook_on_an_empty_canvas_says_build_in_the_open_one():
+    # Analyst sim: "start over" on an empty designer canvas became a second
+    # playbook beside the empty open one; it verified, then Apply failed to
+    # compile on the empty one's missing trigger.
+    tok = set_grounded_yaml(_EMPTY_OPEN)
+    try:
+        res = edit_playbook([{"op": "add_playbook", "name": "Sweep",
+                              "steps": _CHILD_STEPS}])
+    finally:
+        reset_grounded_yaml(tok)
+    assert res.get("code") == "bad_operation"
+    assert "'test' is open and has no steps" in res["message"]
+
+
+def test_a_pre_existing_missing_trigger_still_blocks_because_apply_compiles():
+    after = _EMPTY_OPEN + (
+        "- name: Sweep\n  steps:\n  - {name: Start, type: start, next: Note}\n"
+        "  - {name: Note, type: set_variable, vars: {a: 1}}\n")
+    res = verify_enhancement(_EMPTY_OPEN, after)
+    assert not res["ready_to_push"]
+    assert "no_trigger" in [f["code"] for f in res["required_fixes"]]
+    assert not compile_yaml(after, DB_PATH).ok  # the reason it must block

@@ -773,6 +773,13 @@ def _defect_signature(f: dict[str, Any]) -> tuple:
     return (f.get("code"), _IN_STEP.sub("", str(f.get("message") or "")))
 
 
+# Errors the compiler stops on for the whole document. Apply compiles, so
+# these can never be grandfathered (`elided_document` is the verifier's own
+# check and the compiler accepts it, so it stays excusable).
+_COMPILE_FATAL = frozenset({"no_trigger", "parse_error", "duplicate_step_id",
+                            "missing_field", "unknown_step_type"})
+
+
 def _grandfather_preexisting(result: dict[str, Any],
                              before_yaml: str) -> dict[str, Any]:
     """A problem the analyst's playbook ALREADY had is theirs, not the edit's:
@@ -794,7 +801,12 @@ def _grandfather_preexisting(result: dict[str, Any],
     except Exception:  # noqa: BLE001 -- no baseline means nothing to excuse
         return result
     before_fixes = before.get("required_fixes") or []
-    already = {(f.get("code"), f.get("message")) for f in before_fixes}
+    # A structural error stops the compiler for the whole document, so it
+    # cannot be the analyst's to keep: Apply compiles. Analyst sim: an empty
+    # open playbook's `no_trigger` was excused as pre-existing, the edit
+    # verified, and Apply then failed to compile.
+    already = {(f.get("code"), f.get("message")) for f in before_fixes
+               if f.get("code") not in _COMPILE_FATAL}
     keep = [f for f in fixes if (f.get("code"), f.get("message")) not in already]
     # ...except the same defect the edit just fixed somewhere else. Live: a
     # repair fixed a bad step reference in the block step and left the
@@ -1076,6 +1088,17 @@ def _add_playbook(pbs: list, n: dict) -> str:
         raise _EditError("add_playbook needs name=<the new playbook's name>")
     if any(str(p.get("name")) == name for p in pbs if isinstance(p, dict)):
         raise _EditError(f"a playbook named {name!r} already exists in the collection")
+    empty = [str(p.get("name")) for p in pbs
+             if isinstance(p, dict) and not p.get("steps")]
+    if empty:
+        # Analyst sim: on an empty designer canvas, "start over" became a
+        # second playbook beside the empty open one -- which verified, then
+        # failed to compile (`no_trigger`) on Apply.
+        raise _EditError(
+            f"playbook {empty[0]!r} is open and has no steps -- build in it "
+            "instead: add_step the trigger with no `after` "
+            "({name: Start, type: start, ...}), then the rest after it. "
+            "add_playbook is for a second playbook the open one calls.")
     steps = n.get("steps")
     if not isinstance(steps, list) or not steps or not all(isinstance(x, dict) for x in steps):
         raise _EditError("add_playbook needs steps=[{name, type, ...}, ...] -- its whole step list")
