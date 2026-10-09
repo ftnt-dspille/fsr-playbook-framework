@@ -42,9 +42,7 @@ def find(kind: str, query: str = "", connector: str = "",
     get_op_schema → run_op. `example` = a worked call (`connector` set) or
     vendor API docs. `recipe` = a step-sequence pattern for a build. `api` =
     a vendor's raw API for HTTP-fallback steps. `playbook` = existing
-    playbooks: the analyst's own on this FortiSOAR first (`on_this_box: true`,
-    with the uuid and parameters a workflow_reference needs), then examples
-    from the reference library. `step` = real examples of one step type (query = the type).
+    playbooks, this box's first (uuid + parameters to reference). `step` = real examples of one step type (query = the type).
     `jinja` = a filter for a transform; `filter_usage` = real usages of one
     named filter; `jinja_block` = whole {% set %}/{% for %} idioms.
     `field` = a module's record fields (`module` required, `query` ranks
