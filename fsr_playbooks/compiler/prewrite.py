@@ -176,10 +176,30 @@ def _walk_losses(before: Any, after: Any, path: str, out: list[str]) -> None:
             # survived but lost an argument (the `for_each` / `parameters`
             # defect class).
             match = next(v for v in after if ident_of(v) == ident)
+            if _type_changed(value, match):
+                # The step became a different kind of step (a set_variable
+                # placeholder replaced by the real reference step): its old
+                # arguments belong to the old type and cannot survive. Its
+                # other fields are still compared.
+                value = {k: v for k, v in value.items() if k != "arguments"}
             _walk_losses(value, match, f"{path}[{ident}]", out)
         return
     # Two non-empty scalars, or a type change between non-empty values:
     # that is a modification, not a loss.
+
+
+def _step_type_key(item: dict) -> str:
+    st = item.get("stepType")
+    if isinstance(st, dict):
+        st = st.get("@id") or st.get("uuid") or st.get("name")
+    return str(st or "").rstrip("/").rsplit("/", 1)[-1]
+
+
+def _type_changed(before: Any, after: Any) -> bool:
+    if not (isinstance(before, dict) and isinstance(after, dict)):
+        return False
+    a, b = _step_type_key(before), _step_type_key(after)
+    return bool(a and b and a != b)
 
 
 def _has_duplicate_ids(items: list) -> bool:

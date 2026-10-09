@@ -74,3 +74,43 @@ def test_branches_sharing_a_label_still_report_a_dropped_one():
     out = {"data": [{"workflows": [{"name": "P", "steps": [{"name": "D", "arguments": {
         "conditions": [{"option": "Same", "step_name": "A"}]}}]}]}]}
     assert diff_losses(live, out)
+
+
+_PLACEHOLDER = """
+collection: C
+playbooks:
+  - name: Child
+    parameters: [ip]
+    steps:
+      - {name: Start, type: start, next: Note}
+      - {name: Note, type: set_variable, vars: {ip: "{{ vars.input.params.ip }}"}}
+  - name: Reputation Gate
+    steps:
+      - {name: Start, type: start_on_create, module: alerts, next: Block IP}
+      - {name: Block IP, type: set_variable, vars: {pending_note: "wire the real block later"}, next: End}
+      - {name: End, type: end}
+"""
+
+
+def _only(pb_name: str, text: str) -> dict:
+    env = _compiled(text)
+    data = env["data"][0] if "data" in env else env
+    data["workflows"] = [w for w in data["workflows"] if w["name"] == pb_name]
+    return env
+
+
+def test_replacing_a_placeholder_with_a_different_step_type_is_an_edit():
+    # Analyst sim: a set_variable placeholder "Block IP" became the reference
+    # step "Block IP"; its set_variable arguments (pending_note, message) were
+    # reported dropped and the Apply refused.
+    real = _PLACEHOLDER.replace(
+        '{name: Block IP, type: set_variable, vars: {pending_note: "wire the real block later"}, next: End}',
+        '{name: Block IP, type: workflow_reference, target: Child, ip: "{{ vars.input.records[0].sourceIp }}", next: End}')
+    verdict = check_prewrite(_only("Reputation Gate", _PLACEHOLDER), _only("Reputation Gate", real))
+    assert verdict.ok, verdict.message
+
+
+def test_same_type_step_losing_an_argument_is_still_refused():
+    lost = _PLACEHOLDER.replace('vars: {pending_note: "wire the real block later"}', 'vars: {other: 1}')
+    verdict = check_prewrite(_only("Reputation Gate", _PLACEHOLDER), _only("Reputation Gate", lost))
+    assert not verdict.ok
