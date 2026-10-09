@@ -83,7 +83,7 @@ def test_unknown_name_target_still_errors():
     """A non-UUID, non-local-name target still raises the 'not found' error."""
     r = _compile("Nonexistent Playbook")
     assert not r.ok
-    assert any("not found in this collection" in e.message for e in r.errors)
+    assert any("is not in this YAML" in e.message for e in r.errors)
 
 
 def test_uppercase_uuid_accepted():

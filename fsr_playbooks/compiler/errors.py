@@ -18,6 +18,9 @@ class ErrorCode(str, Enum):
     UNKNOWN_OPERATION = "unknown_operation"
     UNKNOWN_PARAM = "unknown_param"
     UNKNOWN_NEXT_STEP = "unknown_next_step"
+    # A workflow_reference `target:` that names no playbook in this YAML. Was
+    # reported as unknown_next_step, which named the wrong problem.
+    WORKFLOW_REFERENCE_UNRESOLVABLE = "workflow_reference_unresolvable"
     DUPLICATE_STEP_ID = "duplicate_step_id"
     NO_TRIGGER = "no_trigger"
     BAD_VALUE = "bad_value"

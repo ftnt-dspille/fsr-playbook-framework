@@ -628,3 +628,114 @@ def test_the_enhancement_card_states_the_trigger():
                                            "verified_id": res["verified_id"]})["card"]
     assert card["trigger"]["label"].startswith("Runs when an analyst")
     assert card["trigger"]["modules"] == ["alerts"]
+
+
+def test_an_error_branch_points_at_ignore_errors_and_ignore_errors_applies():
+    # Analyst sim: "if creating the incident fails, still email" -- the model
+    # tried set_route option 'on_error' / 'Error' (FortiSOAR has no error
+    # branch) and was told only "has no branch". The failure email it then
+    # wired after the create could never run: without ignore_errors a failed
+    # step halts the playbook.
+    bad = edit_playbook([{"op": "set_route", "from": "Note A", "to": "Note B",
+                          "option": "on_error"}])
+    assert not bad.get("ok")
+    assert "ignore_errors" in str(bad)
+    good = edit_playbook([{"op": "update_step", "name": "Note A",
+                           "set": {"ignore_errors": True}}])
+    assert good["ready_to_push"], good.get("required_fixes")
+    assert _steps(good["after_yaml"])["Note A"].get("ignore_errors") is True
+
+
+_CHILD_STEPS = [
+    {"name": "Start", "type": "start", "next": "Record IP"},
+    {"name": "Record IP", "type": "set_variable",
+     "vars": {"blocked": "{{ vars.input.params.ip }}"}},
+]
+
+
+def test_add_playbook_builds_a_child_the_open_playbook_calls():
+    # Analyst sim: "put the blocking in its own reusable playbook and call it"
+    # -- no op could add a playbook, so the model put everything in one.
+    res = edit_playbook([
+        {"op": "add_playbook", "name": "Block One IP", "parameters": ["ip"],
+         "steps": _CHILD_STEPS},
+        {"op": "add_step", "after": "Note A",
+         "step": {"name": "Call Block", "type": "workflow_reference",
+                  "target": "Block One IP",
+                  "ip": "{{ vars.input.records[0].sourceIp }}"}},
+    ])
+    assert res["ready_to_push"], (res.get("required_fixes"), res.get("regressions"))
+    doc = YAML(typ="safe").load(res["after_yaml"])
+    assert [p["name"] for p in doc["playbooks"]] == ["P", "Block One IP"]
+    card = emit_card("enhancement_offer", {"id": "e9", "summary": "split out the block",
+                                           "verified_id": res["verified_id"]})["card"]
+    assert card["playbooks_added"] == ["Block One IP"]
+
+
+def test_add_playbook_refuses_a_child_with_no_trigger():
+    res = edit_playbook([{"op": "add_playbook", "name": "X",
+                          "steps": [{"name": "Only", "type": "set_variable", "vars": {"a": 1}}]}])
+    assert res.get("code") == "bad_operation" and "trigger" in res["message"]
+
+
+_EMPTY_OPEN = ("collection: C\nplaybooks:\n- name: test\n"
+               "  uuid: e24a354d-a600-4c41-8299-2c7941af312c\n  steps: []\n")
+
+
+def test_add_playbook_on_an_empty_canvas_says_build_in_the_open_one():
+    # Analyst sim: "start over" on an empty designer canvas became a second
+    # playbook beside the empty open one; it verified, then Apply failed to
+    # compile on the empty one's missing trigger.
+    tok = set_grounded_yaml(_EMPTY_OPEN)
+    try:
+        res = edit_playbook([{"op": "add_playbook", "name": "Sweep",
+                              "steps": _CHILD_STEPS}])
+    finally:
+        reset_grounded_yaml(tok)
+    assert res.get("code") == "bad_operation"
+    assert "'test' is open and has no steps" in res["message"]
+
+
+def test_a_pre_existing_missing_trigger_still_blocks_because_apply_compiles():
+    after = _EMPTY_OPEN + (
+        "- name: Sweep\n  steps:\n  - {name: Start, type: start, next: Note}\n"
+        "  - {name: Note, type: set_variable, vars: {a: 1}}\n")
+    res = verify_enhancement(_EMPTY_OPEN, after)
+    assert not res["ready_to_push"]
+    assert "no_trigger" in [f["code"] for f in res["required_fixes"]]
+    assert not compile_yaml(after, DB_PATH).ok  # the reason it must block
+
+
+def test_a_call_to_a_child_dropped_from_the_list_says_keep_add_playbook():
+    # Live (box model): the second edit_playbook call re-sent the call step but
+    # not the add_playbook, and the error only said to look the child up on
+    # the box -- where it does not exist yet. The turn ended with no offer.
+    res = edit_playbook([{"op": "add_step", "after": "Note A", "step": {
+        "name": "Call child", "type": "workflow_reference",
+        "target": "ZZ Child", "note": "hello"}}])
+    msg = " ".join(f["message"] for f in res["required_fixes"])
+    assert "workflow_reference_unresolvable" in [f["code"] for f in res["required_fixes"]]
+    assert "keep its edit_playbook {op: add_playbook} in the same operations list" in msg
+
+
+def test_an_arguments_wrapper_on_a_new_step_is_hoisted():
+    # Live (box model, 2 of 3 runs): `arguments: {note: hello}` on the call
+    # step was refused, the fix-up lost the rest of the edit, no offer.
+    res = edit_playbook([
+        {"op": "add_playbook", "name": "Block One IP", "parameters": ["ip"],
+         "steps": _CHILD_STEPS},
+        {"op": "add_step", "after": "Note A",
+         "step": {"name": "Call Block", "type": "workflow_reference",
+                  "target": "Block One IP",
+                  "arguments": {"ip": "{{ vars.input.records[0].sourceIp }}"}}},
+    ])
+    assert res["ready_to_push"], (res.get("required_fixes"), res.get("regressions"))
+    call = _steps(res["after_yaml"])["Call Block"]
+    assert "arguments" not in call and call["ip"].startswith("{{")
+
+
+def test_a_missing_step_says_the_refused_call_applied_nothing():
+    res = edit_playbook([{"op": "update_step", "name": "Call Child",
+                          "set": {"note": "hello"}}])
+    assert res.get("code") == "bad_operation"
+    assert "a refused call applied nothing" in res["message"]

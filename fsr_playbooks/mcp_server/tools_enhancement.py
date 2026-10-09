@@ -773,6 +773,13 @@ def _defect_signature(f: dict[str, Any]) -> tuple:
     return (f.get("code"), _IN_STEP.sub("", str(f.get("message") or "")))
 
 
+# Errors the compiler stops on for the whole document. Apply compiles, so
+# these can never be grandfathered (`elided_document` is the verifier's own
+# check and the compiler accepts it, so it stays excusable).
+_COMPILE_FATAL = frozenset({"no_trigger", "parse_error", "duplicate_step_id",
+                            "missing_field", "unknown_step_type"})
+
+
 def _grandfather_preexisting(result: dict[str, Any],
                              before_yaml: str) -> dict[str, Any]:
     """A problem the analyst's playbook ALREADY had is theirs, not the edit's:
@@ -794,7 +801,12 @@ def _grandfather_preexisting(result: dict[str, Any],
     except Exception:  # noqa: BLE001 -- no baseline means nothing to excuse
         return result
     before_fixes = before.get("required_fixes") or []
-    already = {(f.get("code"), f.get("message")) for f in before_fixes}
+    # A structural error stops the compiler for the whole document, so it
+    # cannot be the analyst's to keep: Apply compiles. Analyst sim: an empty
+    # open playbook's `no_trigger` was excused as pre-existing, the edit
+    # verified, and Apply then failed to compile.
+    already = {(f.get("code"), f.get("message")) for f in before_fixes
+               if f.get("code") not in _COMPILE_FATAL}
     keep = [f for f in fixes if (f.get("code"), f.get("message")) not in already]
     # ...except the same defect the edit just fixed somewhere else. Live: a
     # repair fixed a bad step reference in the block step and left the
@@ -899,7 +911,7 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
 # ---------------------------------------------------------------------------
 
 _EDIT_OPS = ("add_step", "update_step", "rename_step", "remove_step",
-             "set_route", "remove_route", "add_parameter")
+             "set_route", "remove_route", "add_parameter", "add_playbook")
 # Step-level keys an update may not change: `name` has its own op because
 # routes point at it; `uuid` ties the step to its live record.
 _UPDATE_FORBIDDEN = frozenset({"name", "uuid"})
@@ -973,7 +985,11 @@ def _find(steps, ref: Any):
             f"({{op: add_step, step: {{name: Start, type: start, ...}}}}), then "
             f"add each step `after` the one before it"))
     names = ", ".join(repr(str(s.get("name"))) for s in steps)
-    raise _MissingStep(ref, f"no step named {ref!r} -- steps are: {names}")
+    raise _MissingStep(ref, (
+        f"no step named {ref!r} -- steps are: {names}. Each edit_playbook call "
+        "starts from the open playbook and a refused call applied nothing, so "
+        "send the whole operations list again, including the add_step/"
+        "add_playbook that create what you refer to."))
 
 
 def _branch_entry(step, option: str):
@@ -985,7 +1001,14 @@ def _branch_entry(step, option: str):
                       if entry.get(k) is not None}
             if option in labels or (option.lower() == "default" and entry.get("default")):
                 return entry
-    raise _EditError(f"step {step.get('name')!r} has no branch {option!r}")
+    from fsr_playbooks.compiler.resolver.catalog import (  # noqa: PLC0415
+        ERROR_BRANCH_HINT,
+        ERROR_HANDLER_KEYS,
+    )
+    hint = (" " + ERROR_BRANCH_HINT
+            if option in ERROR_HANDLER_KEYS or option.lower() in ("error", "failure", "failed")
+            else "")
+    raise _EditError(f"step {step.get('name')!r} has no branch {option!r}.{hint}")
 
 
 # Canvas placement for added steps. A step with no `top`/`left` falls to the
@@ -1054,7 +1077,49 @@ _OP_SHAPES = {
     "set_route": "{op: set_route, from: <step>, to: <step>, option: <branch>}",
     "remove_route": "{op: remove_route, from: <step>, option: <branch>}",
     "add_parameter": "{op: add_parameter, name: <parameter>}",
+    "add_playbook": "{op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [{name, type, ...}]}",
 }
+
+
+def _add_playbook(pbs: list, n: dict) -> str:
+    """Append a new playbook to the open collection.
+
+    Analyst sim: "put the blocking in its own reusable playbook and call it" --
+    no op could add a playbook, so the model put everything in one, or
+    re-typed the document and lost the open playbook (playbook_dropped)."""
+    name = str(n.get("name") or "").strip()
+    if not name:
+        raise _EditError("add_playbook needs name=<the new playbook's name>")
+    if any(str(p.get("name")) == name for p in pbs if isinstance(p, dict)):
+        raise _EditError(f"a playbook named {name!r} already exists in the collection")
+    empty = [str(p.get("name")) for p in pbs
+             if isinstance(p, dict) and not p.get("steps")]
+    if empty:
+        # Analyst sim: on an empty designer canvas, "start over" became a
+        # second playbook beside the empty open one -- which verified, then
+        # failed to compile (`no_trigger`) on Apply.
+        raise _EditError(
+            f"playbook {empty[0]!r} is open and has no steps -- build in it "
+            "instead: add_step the trigger with no `after` "
+            "({name: Start, type: start, ...}), then the rest after it. "
+            "add_playbook is for a second playbook the open one calls.")
+    steps = n.get("steps")
+    if not isinstance(steps, list) or not steps or not all(isinstance(x, dict) for x in steps):
+        raise _EditError("add_playbook needs steps=[{name, type, ...}, ...] -- its whole step list")
+    if not any(str(x.get("type") or "").startswith("start") for x in steps):
+        raise _EditError("add_playbook: the new playbook needs a trigger step first "
+                         "({name: Start, type: start, next: <first step>}) -- "
+                         "`type: start` with no module makes it callable from other playbooks")
+    params = n.get("parameters") or []
+    if not isinstance(params, list) or not all(
+            isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in params):
+        raise _EditError("add_playbook: parameters must be a list of identifiers")
+    pb: dict[str, Any] = {"name": name}
+    if params:
+        pb["parameters"] = list(params)
+    pb["steps"] = [dict(x) for x in steps]
+    pbs.append(pb)
+    return f"added playbook {name!r} ({len(steps)} steps)"
 
 
 def _normalize_op(op: dict) -> dict:
@@ -1084,7 +1149,34 @@ def _normalize_op(op: dict) -> dict:
         step = {k: v for k, v in op.items() if k not in ("op", "after")}
         op = {"op": "add_step", "step": step,
               **({"after": op["after"]} if "after" in op else {})}
+    if op.get("op") == "add_step" and isinstance(op.get("step"), dict):
+        op = {**op, "step": _hoist_arguments(op["step"])}
+    if op.get("op") == "add_playbook" and isinstance(op.get("steps"), list):
+        op = {**op, "steps": [_hoist_arguments(x) if isinstance(x, dict) else x
+                              for x in op["steps"]]}
     return op
+
+
+def _hoist_arguments(step: dict) -> dict:
+    """Step keys sent under an `arguments:` mapping move to the step's top
+    level, the only shape the compiler takes. Live (box model, 2 of 3 runs): a
+    workflow_reference step came as `arguments: {note: hello}`, the fix-up call
+    lost the rest of the edit, and the turn ended with no offer. A key already
+    set at the top level wins, and a colliding one stays put for the compiler
+    to report."""
+    args = step.get("arguments")
+    if not isinstance(args, dict):
+        return step
+    out = {k: v for k, v in step.items() if k != "arguments"}
+    left = {}
+    for k, v in args.items():
+        if k in out:
+            left[k] = v
+        else:
+            out[k] = v
+    if left:
+        out["arguments"] = left
+    return out
 
 
 def _set_path(step, key: str, value) -> None:
@@ -1307,6 +1399,13 @@ def edit_playbook(
       - {op: remove_route, from: <step>, option: <branch label>}
       - {op: add_parameter, name: <parameter>}
           declares a playbook parameter, so `vars.input.params.<name>` resolves.
+      - {op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [...]}
+          adds a NEW playbook beside the open one -- a reusable child the open
+          playbook calls with a workflow_reference step (`target: <its name>`,
+          one key per parameter). Give it its whole step list, starting with
+          `{name: Start, type: start, next: ...}`. Add the reference step to the
+          open playbook in the SAME call. Apply saves the new playbook and puts
+          the open one's change on the canvas.
 
     `playbook`: which playbook, when the open collection holds several.
     Returns the verify_enhancement envelope plus `applied` (one line per op) and
@@ -1381,6 +1480,8 @@ def edit_playbook(
 
     def _apply(op: dict) -> str:
         n = _normalize_op(op)
+        if n.get("op") == "add_playbook":
+            return _add_playbook(pbs, n)
         if n.get("op") == "add_parameter":
             # Playbook-level, not a step: live, a step read
             # `vars.input.params.servicenow_caller_id`, the gate said "add it

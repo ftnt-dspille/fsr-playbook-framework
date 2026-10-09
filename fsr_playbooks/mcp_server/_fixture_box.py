@@ -411,10 +411,28 @@ class _PlaybooksAPI:
         rows = self._rows
         if active is not None:
             rows = [r for r in rows if bool(r.get("isActive")) is bool(active)]
+        needle = (_kw.get("name_contains") or "").lower()
+        if needle:
+            # pyfsr: `name$like %x%`, case-insensitive. Ignored before, so a
+            # name search returned every playbook in the bundle.
+            rows = [r for r in rows if needle in str(r.get("name") or "").lower()]
         if trigger_type and trigger_type != "manual":
             # Only the manual/record-action surface is captured. Say so rather
             # than returning the manual rows under another trigger's name.
             return []
+        return [dict(r) for r in rows[:max(1, int(limit))]]
+
+    def list(self, *, name: str | None = None, collection: str | None = None,
+             limit: int = 50, **_kw: Any) -> list[dict]:
+        """pyfsr's `playbooks.list`: `name` is an exact match, as on the box.
+        Without it `list_playbook_runs` raised AttributeError offline."""
+        rows = self._rows
+        if name is not None:
+            rows = [r for r in rows if r.get("name") == name]
+        if collection is not None:
+            want = collection.rstrip("/").rsplit("/", 1)[-1]
+            rows = [r for r in rows
+                    if str(r.get("collection") or "").rstrip("/").rsplit("/", 1)[-1] == want]
         return [dict(r) for r in rows[:max(1, int(limit))]]
 
 

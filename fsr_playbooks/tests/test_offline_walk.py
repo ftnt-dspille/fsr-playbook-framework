@@ -126,3 +126,35 @@ def test_unknown_data_is_unverified_not_empty():
 def test_a_filter_the_sandbox_lacks_is_unrendered_not_failed():
     r = local_render.render("{{ '1.2.3.4' | ipaddr }}", {"vars": {}})
     assert r["unrendered"] and r["empty"] == []
+
+
+_NESTED = """
+collection: C
+playbooks:
+  - name: Router
+    steps:
+      - {name: Start, type: start_on_create, module: alerts, next: Route}
+      - name: Route
+        type: decision
+        conditions:
+          - {display: Critical, when: "{{ vars.input.records[0].name == 'never on sample data' }}", next: Make}
+          - {display: Else, default: true, next: Done}
+      - {name: Make, type: set_variable, vars: {made: true}, next: Check}
+      - name: Check
+        type: decision
+        conditions:
+          - {display: Success, when: "{{ vars.made }}", next: Done}
+          - {display: Failed, default: true, next: Tell}
+        next: Done
+      - {name: Tell, type: set_variable, vars: {told: true}, next: Done}
+      - {name: Done, type: end}
+"""
+
+
+def test_a_branch_behind_another_branch_is_walked():
+    # Analyst sim: "Email Incident Failure" sat behind the Critical arm AND its
+    # decision carried a stray step-level `next`. Pinning "Failed" alone never
+    # reached the decision, and the stepper then followed the stray `next`.
+    from fsr_playbooks.mcp_server.tools_analysis import walk_paths
+    w = walk_paths(_NESTED)
+    assert w["never_reached"] == [], w["never_reached"]

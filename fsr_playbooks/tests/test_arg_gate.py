@@ -227,3 +227,15 @@ def test_a_misspelled_nested_key_gets_a_rename_hint():
 
 def test_no_hint_when_nothing_points_at_the_missing_key():
     assert _edit_problems({"name": "A"}) == ["operations[0]: 'op' is a required property"]
+
+
+def test_an_array_sent_as_broken_json_text_says_where_it_breaks():
+    # Analyst sim: edit_playbook `operations` arrived as JSON text with an
+    # unbalanced brace, twice, and the refusal said only "expected array, got
+    # str" -- nothing about the text failing to parse, so the model resent it.
+    spec = T.REGISTRY["edit_playbook"]
+    broken = '[{"op": "add_step", "step": {"name": "A", "type": "end"}}}, {"op": "x"}]'
+    r = arg_gate.check("edit_playbook", spec.input_schema, spec.fn, {"operations": broken})
+    assert r is not None
+    assert "does not parse" in r["error"] and "char" in r["error"]
+    assert "not a string" in r["error"]

@@ -163,6 +163,13 @@ def step_through_playbook(yaml_text: str = "",
             if _alias:
                 by_id.setdefault(_alias, _s)
     if not by_id:
+        if not steps:
+            # An empty designer playbook: nothing is wrong with it, there is
+            # nothing in it yet. "no steps with id or name" read as a defect.
+            return {"ok": False, "code": "empty_playbook", "error":
+                    f"playbook {pb.get('name')!r} has no steps yet, so there is "
+                    "nothing to walk. Build the steps first (edit_playbook), then "
+                    "analyze the result."}
         return {"ok": False, "error":
                 "no steps with id or name in playbook"}
 
@@ -235,13 +242,25 @@ def step_through_playbook(yaml_text: str = "",
         raw_args = cur.get("arguments") or cur.get("args") or {}
         client = _client_or_none()
         render_errors: list[str] = []
+        rendered_locally: list[str] = []
         step_empty: list[dict[str, Any]] = []
         step_unrendered: list[str] = []
 
         def _record(rec: dict[str, Any], _cur=cur, _sid=sid,
-                    _empty=step_empty, _unrendered=step_unrendered) -> None:
+                    _empty=step_empty, _unrendered=step_unrendered,
+                    _errs=render_errors, _local=rendered_locally) -> None:
             # Every render of this step is done by now (set_variable values
             # render in the execute phase, after the arguments).
+            nonlocal first_error
+            if _local:
+                rec["rendered_locally"] = list(_local)
+            if _errs and not str(rec.get("note") or "").startswith("jinja render failed"):
+                # A render that failed in the execute phase (a set_variable
+                # value) was never reported: the argument-phase check below
+                # had already run.
+                rec["note"] = "jinja render failed: " + "; ".join(_errs[:3])
+                if first_error is None:
+                    first_error = {"step_id": _sid, "message": _errs[0]}
             if _empty:
                 rec["renders_empty"] = list(_empty)
                 renders_empty.extend({"step": _cur.get("name") or _sid, **e}
@@ -250,20 +269,23 @@ def step_through_playbook(yaml_text: str = "",
                 rec["unrendered"] = list(_unrendered)
             trace.append(rec)
 
+        def _render_local(value: str, path: str) -> dict[str, Any]:
+            from fsr_playbooks.compiler import local_render  # noqa: PLC0415
+            r = local_render.render(value, {"vars": vars_ctx})
+            if r["unrendered"]:
+                step_unrendered.append(f"{path}: {r['unrendered']}")
+            elif r["empty"] or r["defaulted"]:
+                step_empty.append({"path": path, "template": value[:240],
+                                   "empty": r["empty"],
+                                   "defaulted": r["defaulted"],
+                                   "certain": not set(r["empty"] + r["defaulted"])
+                                   <= set(r["unconfirmed"])})
+            return r
+
         def _render_walk(value: Any, path: str = "") -> Any:
             if isinstance(value, str):
                 if client is None and ("{{" in value or "{%" in value):
-                    from fsr_playbooks.compiler import local_render  # noqa: PLC0415
-                    r = local_render.render(value, {"vars": vars_ctx})
-                    if r["unrendered"]:
-                        step_unrendered.append(f"{path}: {r['unrendered']}")
-                    elif r["empty"] or r["defaulted"]:
-                        step_empty.append({"path": path, "template": value[:240],
-                                           "empty": r["empty"],
-                                           "defaulted": r["defaulted"],
-                                           "certain": not set(r["empty"] + r["defaulted"])
-                                           <= set(r["unconfirmed"])})
-                    return r["value"]
+                    return _render_local(value, path)["value"]
                 if "{{" not in value or client is None:
                     return value
                 try:
@@ -279,8 +301,19 @@ def step_through_playbook(yaml_text: str = "",
                         return out
                     return out if out is not None else value
                 except Exception as exc:  # noqa: BLE001
-                    render_errors.append(f"{path}: {exc}")
-                    return value
+                    # The box's renderer failed. A broken template fails the
+                    # local renderer too and stays an error; a renderer that
+                    # could not be reached (a transport fault, a client with
+                    # no render endpoint) must not read as a broken playbook.
+                    # Live (analyst sim): every analyze of a connector step
+                    # came back ok:false "params.ip: ... has no attribute
+                    # 'post'" and the model chased a defect that was not there.
+                    r = _render_local(value, path)
+                    if r["unrendered"]:
+                        render_errors.append(f"{path}: {exc}")
+                        return value
+                    rendered_locally.append(path)
+                    return r["value"]
             if isinstance(value, dict):
                 return {k: _render_walk(v, f"{path}.{k}" if path else k)
                         for k, v in value.items()}
@@ -687,6 +720,8 @@ def step_through_playbook(yaml_text: str = "",
 
     return {
         "ok": first_error is None,
+        **({"error": f"step {first_error['step_id']!r}: {first_error['message']}"}
+           if first_error else {}),
         "playbook": pb.get("name"),
         "trace": trace,
         "first_error": first_error,
@@ -727,9 +762,18 @@ def walk_paths(yaml_text: str, playbook: str | None = None, *,
             for o in st.get("options") or []:
                 if isinstance(o, dict) and (o.get("display") or o.get("option")):
                     pins.append(("manual", sid, str(o.get("display") or o.get("option"))))
-    runs: list[dict[str, Any]] = [{}] + [
-        {("branch_choices" if k == "branch" else "manual_choices"): {sid: lab}}
-        for k, sid, lab in pins][: max(0, max_walks - 1)]
+    # A pin only matters if the walk reaches its step: a decision behind
+    # another decision's non-default branch is never entered on sample data
+    # (live: the "Failed" branch after "Create Incident", which sits behind
+    # the Critical arm, was reported never reached). Pin the way there too.
+    approach = _approach_choices(pb)
+    runs: list[dict[str, Any]] = [{}]
+    for k, sid, lab in pins:
+        bc, mc = dict(approach.get(sid, ({}, {}))[0]), dict(approach.get(sid, ({}, {}))[1])
+        (bc if k == "branch" else mc)[sid] = lab
+        runs.append({**({"branch_choices": bc} if bc else {}),
+                     **({"manual_choices": mc} if mc else {})})
+    runs = runs[: max(1, max_walks)]
     token = _FORCE_OFFLINE.set(True)
     seen: set[tuple[str, str]] = set()
     empty: list[dict[str, Any]] = []
@@ -759,6 +803,59 @@ def walk_paths(yaml_text: str, playbook: str | None = None, *,
             "steps_reached": len(reached & set(total)), "steps_total": len(total),
             "never_reached": [n for n in total if n not in reached],
             "renders_empty": empty, "unrendered": sorted(unrendered)}
+
+
+def _approach_choices(pb: dict[str, Any]) -> dict[str, tuple[dict, dict]]:
+    """For each step, the decision branches / manual options on one route from
+    the trigger to it: ({decision: label}, {manual_input: label})."""
+    from fsr_playbooks.compiler.parser import _slugify  # noqa: PLC0415
+    steps = [s for s in pb.get("steps") or [] if isinstance(s, dict)]
+    alias: dict[str, str] = {}
+    for st in steps:
+        name = str(st.get("name") or st.get("id") or "")
+        for a in (name, str(st.get("id") or ""), _slugify(name)):
+            if a:
+                alias.setdefault(a, name)
+
+    def _to(ref: Any) -> str | None:
+        return alias.get(str(ref)) if ref else None
+
+    edges: dict[str, list[tuple[str, str | None, str | None]]] = {}
+    for st in steps:
+        name = str(st.get("name") or st.get("id") or "")
+        out: list[tuple[str, str | None, str | None]] = []
+        if st.get("type") == "decision":
+            for c in st.get("conditions") or []:
+                if isinstance(c, dict) and _to(c.get("next")):
+                    out.append((_to(c.get("next")), "branch", str(c.get("display") or "")))
+        elif st.get("type") == "manual_input":
+            for o in st.get("options") or []:
+                if isinstance(o, dict) and _to(o.get("next")):
+                    out.append((_to(o.get("next")), "manual",
+                                str(o.get("display") or o.get("option") or "")))
+        if _to(st.get("next")):
+            out.append((_to(st.get("next")), None, None))
+        edges[name] = out
+    start = next((str(s.get("name") or s.get("id")) for s in steps
+                  if str(s.get("type") or "").startswith("start")), None)
+    if not start:
+        return {}
+    found: dict[str, tuple[dict, dict]] = {start: ({}, {})}
+    queue = [start]
+    while queue:
+        cur = queue.pop(0)
+        bc, mc = found[cur]
+        for nxt, kind, label in edges.get(cur, []):
+            if nxt in found:
+                continue
+            nbc, nmc = dict(bc), dict(mc)
+            if kind == "branch" and label:
+                nbc[cur] = label
+            elif kind == "manual" and label:
+                nmc[cur] = label
+            found[nxt] = (nbc, nmc)
+            queue.append(nxt)
+    return found
 
 
 def _loop_item_placeholder():
@@ -897,9 +994,15 @@ def analyze_playbook(yaml_text: str = "",
           else None)
     diagnostics = diagnostics_dict(sim["trace"], pb_node,
                                    picklist_validator=pv)
+    errs = [d for d in diagnostics if d["severity"] == "error"]
+    ok = sim["ok"] and not errs
+    # ok:false with no `error` read as a blank failure in every session report
+    # (and to the model): name the cause.
+    why = (sim.get("error") if not sim["ok"] else
+           f"step {errs[0].get('step_id')!r}: {errs[0].get('message')}" if errs else None)
     return {
-        "ok": sim["ok"] and not any(
-            d["severity"] == "error" for d in diagnostics),
+        "ok": ok,
+        **({"error": why} if not ok and why else {}),
         "playbook": sim.get("playbook"),
         "trace": sim["trace"],
         "diagnostics": diagnostics,
@@ -1156,8 +1259,14 @@ def step_test(yaml_text: str,
                     return out
                 return out if out is not None else value
             except Exception as exc:  # noqa: BLE001
-                render_errors.append(f"{path}: {exc}")
-                return value
+                # Same rule as step_through: an unreachable renderer is not a
+                # broken template, which fails locally too.
+                from fsr_playbooks.compiler import local_render  # noqa: PLC0415
+                r = local_render.render(value, {"vars": vars_ctx})
+                if r["unrendered"]:
+                    render_errors.append(f"{path}: {exc}")
+                    return value
+                return r["value"]
         if isinstance(value, dict):
             return {k: _render(v, f"{path}.{k}" if path else k)
                     for k, v in value.items()}
@@ -1358,14 +1467,18 @@ def _next_step(step: dict, taken_branch: str | None,
     provided, else the first branch (deterministic default -- agent can
     pin a path with branch_choices).
     """
+    branches = step.get("branches") or {}
+    # A taken branch beats a step-level `next`: the compiler drops a decision's
+    # stray `next` when a default condition exists, so following it walked a
+    # route the playbook does not have (live: a pinned "Failed" branch went to
+    # the success email, and its target was reported never reached).
+    if taken_branch and taken_branch in branches:
+        return branches[taken_branch]
     nxt = step.get("next")
     if nxt:
         return nxt
-    branches = step.get("branches") or {}
     if not branches:
         return None
-    if taken_branch and taken_branch in branches:
-        return branches[taken_branch]
     # Deterministic default: lowest-key branch.
     first_key = sorted(branches.keys())[0]
     return branches[first_key]
