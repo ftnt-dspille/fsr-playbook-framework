@@ -20,7 +20,7 @@ def _call(name, args, internal=False):
 
 def test_refusals_run_before_any_argument_rewrite():
     names = [s.__name__ for s in T._DISPATCH_STAGES]
-    assert names[:2] == ["_refuse_read_only", "_refuse_by_turn_plan"]
+    assert names[0] == "_refuse_for_turn"
     assert names.index("_coerce_args") < names.index("_check_args")
 
 

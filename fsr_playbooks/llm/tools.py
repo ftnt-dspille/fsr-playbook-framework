@@ -591,6 +591,18 @@ WRITE_FRONTIER_TOOLS = frozenset({
 # without a second confirmation of its own.
 CHANGE_GATED_TOOLS: frozenset[str] = frozenset()
 
+# What a read-only turn (an explain / find-issues chip, or a scheduled task
+# that may not mutate) withholds: the playbook write frontier, plus the
+# authoring, run and record-write tools. The host's advertised list and the
+# dispatch refusal both read this set (via `turn_refusal`); they used to be two
+# lists, and eight of these names were hidden from the model on a read-only
+# turn but still accepted by dispatch if it called them anyway.
+READ_ONLY_WITHHELD_TOOLS = WRITE_FRONTIER_TOOLS | frozenset({
+    "compile_yaml", "verify_playbook", "build_playbook_from_trace",
+    "run_playbook", "resume_playbook",
+    "create_record", "update_record", "delete_record",
+})
+
 # The consolidated `emit_card` routes to the specialized emitters by
 # `card_type`, so a name-keyed frontier check alone would let
 # emit_card(card_type='enhancement_offer', ...) sail through a read-only turn
@@ -605,7 +617,7 @@ _FRONTIER_CARD_TYPES = frozenset({
 def _is_write_frontier(name: str, args: dict[str, Any]) -> bool:
     """Frontier membership for the read-only-turn refusal: the tool NAME, or
     `emit_card` carrying a frontier card_type."""
-    if name in WRITE_FRONTIER_TOOLS:
+    if name in READ_ONLY_WITHHELD_TOOLS:
         return True
     if name != "emit_card":
         return False
@@ -1747,33 +1759,50 @@ def _accept(name: str, spec: ToolSpec, arguments: dict[str, Any] | None, *,
                  summary=summary)
 
 
-def _refuse_read_only(c: _Call) -> Any:
-    """A read-only turn (explain / find-issues chip) refuses the write
-    frontier here, not only in the advertised list: a hallucinated call would
-    otherwise reach the change-affordance gate and card an offer the analyst
-    never asked for, which, approved, could delete the open playbook's steps
-    (tracker #117)."""
-    if c.internal or not (_is_read_only_turn() and _is_write_frontier(c.name, c.args)):
-        return None
-    return {
-        "ok": False,
-        "code": "read_only_turn",
-        "error": ("This is a read-only turn (explain / find issues). "
-                  "Write and offer tools are not available. Describe what "
-                  "you found in prose; the analyst can ask for a change "
-                  "if they want one."),
-    }
+def turn_refusal(name: str, args: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Whether THIS turn refuses the call, from what the host bound for it:
+    a read-only turn withholds `READ_ONLY_WITHHELD_TOOLS`; the turn plan
+    refuses what the page state does not afford (patching a playbook that is
+    not open, connector calls on a playbook turn). None: not refused.
 
-
-def _refuse_by_turn_plan(c: _Call) -> Any:
-    """A call the page state does not afford (patching a playbook that is not
-    open) is refused with a path forward (the capability_gap card) instead of
-    the tool silently missing. No plan installed: no gate."""
-    if c.internal:
-        return None
+    The one predicate behind both the dispatch refusal and `advertised_for_turn`,
+    so the model is never shown a tool its call would be refused.
+    """
+    args = args or {}
+    if _is_read_only_turn() and _is_write_frontier(name, args):
+        # Refused rather than carded: a card here is an offer the analyst
+        # never asked for, which, approved, could delete the open
+        # playbook's steps (tracker #117).
+        return {
+            "ok": False,
+            "code": "read_only_turn",
+            "error": ("This is a read-only turn (explain / find issues). "
+                      "Write and offer tools are not available. Describe what "
+                      "you found in prose; the analyst can ask for a change "
+                      "if they want one."),
+        }
     from .turn_plan import active_turn_plan
     plan = active_turn_plan()
-    return plan.gate_refusal(c.name, c.args) if plan is not None else None
+    return plan.gate_refusal(name, args) if plan is not None else None
+
+
+def _tool_name(tool: dict[str, Any]) -> str:
+    fn = tool.get("function")
+    return str((fn or {}).get("name") if isinstance(fn, dict) else tool.get("name") or "")
+
+
+def advertised_for_turn(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`tools` minus every tool this turn refuses whatever its arguments.
+    `emit_card` stays: whether it is refused depends on its card_type.
+    Accepts Anthropic- or OpenAI-shaped tool dicts."""
+    return [t for t in tools
+            if _tool_name(t) == "emit_card" or turn_refusal(_tool_name(t), {}) is None]
+
+
+def _refuse_for_turn(c: _Call) -> Any:
+    """`turn_refusal`, for a call the model made. A host's own re-dispatch of
+    an approved call is not refused."""
+    return None if c.internal else turn_refusal(c.name, c.args)
 
 
 def _fold_emit_card_payload(c: _Call) -> Any:
@@ -1876,11 +1905,10 @@ def _default_live_probe(c: _Call) -> Any:
     return None
 
 
-#: In order. Refusals first (they read the arguments as the model sent them),
+#: In order. The refusal first (they read the arguments as the model sent them),
 #: then shape fixes, then the gate, then defaults.
 _DISPATCH_STAGES: tuple[Callable[[_Call], Any], ...] = (
-    _refuse_read_only,
-    _refuse_by_turn_plan,
+    _refuse_for_turn,
     _fold_emit_card_payload,
     _redirect_run_not_author,
     _coerce_args,
