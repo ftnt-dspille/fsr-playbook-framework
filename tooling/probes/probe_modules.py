@@ -83,13 +83,6 @@ def _is_required(validation: Any) -> bool:
     return isinstance(validation, dict) and validation.get("required") is True
 
 
-def _resolve_default(raw: Any, picklist_items: dict[str, str]) -> Any:
-    """If defaultValue is a `/api/3/picklists/{uuid}` ref, swap in itemValue."""
-    if isinstance(raw, str) and raw.startswith("/api/3/picklists/"):
-        return picklist_items.get(raw, raw)
-    return raw
-
-
 def _picklist_list_name(attr: dict) -> str | None:
     """Return the listName the attribute binds to (e.g. 'AlertStatus'),
     or None if it isn't picklist-backed."""

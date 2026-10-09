@@ -178,24 +178,6 @@ def workflow_by_name(coll: dict, name: str) -> dict | None:
     return None
 
 
-def step_by_type(wf: dict, step_type_uuid_or_name: str) -> dict | None:
-    """Find the first step in the workflow whose stepType matches
-    either the literal UUID or the resolved name (e.g. 'Decision')."""
-    for st in wf.get("steps", []):
-        if not isinstance(st, dict):
-            continue
-        stype = st.get("stepType")
-        if isinstance(stype, dict):
-            if (stype.get("name") == step_type_uuid_or_name
-                or stype.get("uuid") == step_type_uuid_or_name):
-                return st
-        elif isinstance(stype, str):
-            # IRI form: /api/3/workflow_step_types/<uuid>
-            if step_type_uuid_or_name in stype:
-                return st
-    return None
-
-
 def first_filter_leaf(args: dict, key: str = "fieldbasedtrigger") -> dict | None:
     """Return the first leaf in the filter tree under `key`, walking
     into nested groups depth-first."""
@@ -1037,11 +1019,6 @@ def _yaml_neg_unknown_picklist(coll: str) -> str:
                 resource:
                   status: "Klosed"
         """)
-
-
-def _yaml_neg_decision_three_way(coll: str) -> str:
-    # Kept for parity with the positive scenario; sanity.
-    return _yaml_decision_branches(coll)
 
 
 def _check_decision_branches(coll: dict) -> bool | str:

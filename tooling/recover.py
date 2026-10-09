@@ -140,45 +140,6 @@ def _hydrate(client, uuid: str) -> dict | None:
     return r.json() if r.status_code == 200 else None
 
 
-def _fetch_live_workflow(client, *, uuid: str | None = None,
-                         name: str | None = None) -> dict | None:
-    """Return the live workflow body (with steps[]) matching uuid or
-    name, or None. Tries uuid first (fast 200/404), falls back to name."""
-    if uuid:
-        r = client.session.get(
-            client.base_url + f"/api/3/workflows/{uuid}"
-            f"?$relationships=true",
-            verify=client.verify_ssl, timeout=20,
-        )
-        if r.status_code == 200:
-            return r.json()
-    if name:
-        r = client.session.get(
-            client.base_url + "/api/3/workflows",
-            params={"name": name, "$limit": 5},
-            verify=client.verify_ssl, timeout=20,
-        )
-        if r.status_code == 200:
-            members = r.json().get("hydra:member") or []
-            for m in members:
-                if m.get("name") != name:
-                    continue
-                # Listing endpoint returns shallow steps[]; re-fetch the
-                # single record so steps are fully hydrated for the
-                # equivalence comparator.
-                live_uuid = m.get("uuid")
-                if live_uuid:
-                    r2 = client.session.get(
-                        client.base_url + f"/api/3/workflows/{live_uuid}"
-                        f"?$relationships=true",
-                        verify=client.verify_ssl, timeout=20,
-                    )
-                    if r2.status_code == 200:
-                        return r2.json()
-                return m
-    return None
-
-
 def _step_signature(step: dict) -> tuple[str, str]:
     """Loose fingerprint of one step: (name, stepType identifier).
 

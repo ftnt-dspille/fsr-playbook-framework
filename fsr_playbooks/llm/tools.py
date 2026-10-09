@@ -776,15 +776,10 @@ def _default_approval_summary(name: str, args: dict[str, Any]) -> str | None:
 # Tier policy, grants, the eval policy and the audit log live in
 # `authorization`; re-exported here for existing callers.
 from .authorization import (  # noqa: E402,F401
-    _APPROVAL_GRANTS,
     AUDIT_LOG,
     HUMAN,
-    _active_eval_policy,
-    _apply_eval_policy,
     _approval_floor,
     _args_hash,
-    _consume_grant,
-    _readonly_auto_approve,
     authorize,
     clear_audit_log,
     clear_session_grants,

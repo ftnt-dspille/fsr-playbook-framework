@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import Any
 
 from fsr_playbooks.llm._loop_helpers import _ENHANCE_VERIFY_TOOLS, MAX_TOOL_TURNS
@@ -647,5 +647,3 @@ def get_provider(name: str, *, gold_lookup=None) -> ProviderFn:
         + ", ".join(_LAZY_FACTORIES))
 
 
-def available_providers() -> Iterable[str]:
-    return ["gold", "echo", *_LAZY_FACTORIES.keys()]

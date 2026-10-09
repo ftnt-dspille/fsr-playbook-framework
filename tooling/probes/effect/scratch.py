@@ -14,7 +14,6 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT / "tooling") not in sys.path:
@@ -108,28 +107,6 @@ def step_by_name(wf: dict | None, name: str) -> dict | None:
         if isinstance(s, dict) and s.get("name") == name:
             return s
     return None
-
-
-def step_arg(wf: dict | None, step: str, key: str) -> Any:
-    """One rendered argument off a named step.
-
-    Connector-step args nest under `arguments.params`; native steps put them
-    at `arguments` top level. Look in both rather than assuming, because a
-    probe that reads the wrong level reports "unchanged" for a write that
-    landed (the exact false negative this suite must not produce).
-    """
-    st = step_by_name(wf, step)
-    args = st.get("arguments") if isinstance(st, dict) else None
-    if not isinstance(args, dict):
-        return None
-    params = args.get("params")
-    if isinstance(params, dict) and key in params:
-        return params[key]
-    return args.get(key)
-
-
-def route_count(wf: dict | None) -> int:
-    return len([r for r in (wf or {}).get("routes", []) if isinstance(r, dict)])
 
 
 # ── purge ─────────────────────────────────────────────────────────────

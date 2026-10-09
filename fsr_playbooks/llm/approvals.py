@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .authorization import needs_approval
+from .authorization import args_digest, needs_approval
 
 # The result a skipped call gets. One definition, used by run_turn and every
 # provider's resume. It used to be the bare `{"ok": false, "code":
@@ -155,15 +155,6 @@ def _secret() -> bytes:
     return _persistent_secret()
 
 
-def _canonical_args_hash(tool: str, args: dict[str, Any] | None) -> str:
-    # Same canonical serialization as tools._args_hash, kept local to avoid
-    # a tools→approvals import cycle. Full digest (not truncated) here since
-    # this is a tamper check, not a log key.
-    payload = json.dumps(
-        {"tool": tool, "args": args or {}}, sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def _batch_hash(batch: list[Any] | None) -> str:
     """The batched calls, in order, as one digest. Empty for a single-call
     approval, so a token minted before batches existed still verifies."""
@@ -177,7 +168,7 @@ def _batch_hash(batch: list[Any] | None) -> str:
 def _bind_token(approval_id: str, tool: str,
                 args: dict[str, Any] | None, created_at: float,
                 batch: list[Any] | None = None) -> str:
-    parts = [approval_id, tool, _canonical_args_hash(tool, args), repr(created_at)]
+    parts = [approval_id, tool, args_digest(tool, args), repr(created_at)]
     bh = _batch_hash(batch)
     if bh:
         # The analyst approves every call the card lists, so every one of

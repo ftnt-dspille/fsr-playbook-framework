@@ -174,9 +174,15 @@ def _op_key(name: str, args: dict[str, Any]) -> str | None:
 AUDIT_LOG: list[dict[str, Any]] = []
 
 
-def _args_hash(name: str, args: dict[str, Any]) -> str:
+def args_digest(name: str, args: dict[str, Any] | None) -> str:
+    """SHA-256 of the call's canonical serialization. The approval token binds
+    the full digest (a tamper check); logs and envelopes carry `_args_hash`."""
     payload = json.dumps({"tool": name, "args": args or {}}, sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _args_hash(name: str, args: dict[str, Any]) -> str:
+    return args_digest(name, args)[:16]
 
 
 def record_audit(name: str, args: dict[str, Any], tier: int, decision: str, *,

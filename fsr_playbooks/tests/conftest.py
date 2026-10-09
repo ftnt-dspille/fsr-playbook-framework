@@ -15,7 +15,7 @@ import pytest
 def _clear_approval_grants():
     """Empty the process-global approval-grant table around every test.
 
-    `fsr_playbooks.llm.tools._APPROVAL_GRANTS` is module state keyed by
+    `fsr_playbooks.llm.authorization._APPROVAL_GRANTS` is module state keyed by
     (session, tool, op_key) and nothing in the suite cleaned it up, so grants
     accumulated across tests. `test_clear_session_grants_removes_all_grants_for
     _session` counts the table's absolute size, and under a randomized order it
@@ -26,10 +26,10 @@ def _clear_approval_grants():
     worst possible thing to leave dirty: a P2-gating test could pass because
     some earlier test had already granted the approval it means to require.
     """
-    from fsr_playbooks.llm import tools as tools_mod
+    from fsr_playbooks.llm import authorization
 
-    tools_mod._APPROVAL_GRANTS.clear()
+    authorization._APPROVAL_GRANTS.clear()
     try:
         yield
     finally:
-        tools_mod._APPROVAL_GRANTS.clear()
+        authorization._APPROVAL_GRANTS.clear()

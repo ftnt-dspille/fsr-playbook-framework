@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import pytest
 
+from fsr_playbooks.llm import authorization
 from fsr_playbooks.llm import tools as tools_mod
+from fsr_playbooks.llm.authorization import _consume_grant
 from fsr_playbooks.llm.tools import (
     REGISTRY,
     ToolSpec,
-    _consume_grant,
     clear_session_grants,
     dispatch,
     grant_tool_approval,
@@ -44,7 +45,7 @@ def tier3_tool(monkeypatch):
     monkeypatch.delenv("EVAL_APPROVAL_POLICY", raising=False)
     yield calls
     # Cleanup
-    tools_mod._APPROVAL_GRANTS.clear()
+    authorization._APPROVAL_GRANTS.clear()
 
 
 @pytest.fixture
@@ -198,14 +199,14 @@ def test_clear_session_grants_removes_all_grants_for_session(session_id):
     grant_tool_approval(other_session, "_grant_probe", mode="once")
 
     # Before clear: 3 grants total.
-    assert len(tools_mod._APPROVAL_GRANTS) == 3
+    assert len(authorization._APPROVAL_GRANTS) == 3
 
     # Clear only session_id's grants.
     clear_session_grants(session_id)
 
     # After clear: only other_session's grant remains.
-    assert len(tools_mod._APPROVAL_GRANTS) == 1
-    remaining_key = list(tools_mod._APPROVAL_GRANTS.keys())[0]
+    assert len(authorization._APPROVAL_GRANTS) == 1
+    remaining_key = list(authorization._APPROVAL_GRANTS.keys())[0]
     assert remaining_key[0] == other_session
 
 

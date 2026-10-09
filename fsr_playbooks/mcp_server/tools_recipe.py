@@ -22,24 +22,6 @@ from ._shared import (
 DB_PATH = _shared.DB_PATH
 
 
-def _tools_triage_or_err():
-    """Lazy handle to the investigation tools (``tools_triage``), which are
-    connector-owned and NOT part of the authoring library (REORG_PLAN: "library
-    makes playbooks; connector investigates incidents"). Returns the module, or
-    an error envelope when it's absent so live-run diagnostics degrade cleanly
-    instead of raising at import. Present whenever these tools run in the
-    connector runtime."""
-    try:
-        from . import tools_triage
-    except ImportError:
-        return None, _err(
-            "no_investigation_tools",
-            "this live-run diagnostic requires the investigation tools "
-            "(tools_triage), which are not part of the authoring library",
-        )
-    return tools_triage, None
-
-
 # --- failed-run provider hook ---------------------------------------------
 # Finding a recent FAILED run is connector-owned: it queries the live
 # workflow-run tables through the connector's FSR client, and different

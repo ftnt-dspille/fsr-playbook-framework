@@ -11,6 +11,7 @@ import os
 
 import pytest
 
+from fsr_playbooks.llm import authorization as _auth
 from fsr_playbooks.llm import tools as _tools
 from fsr_playbooks.llm.tools import ToolSpec
 
@@ -28,31 +29,31 @@ def _reset_state():
 
 
 def test_default_is_auto_approve_on():
-    assert _tools._readonly_auto_approve() is True
+    assert _auth._readonly_auto_approve() is True
     assert _tools._approval_floor() == 3
 
 
 @pytest.mark.parametrize("val", ["0", "false", "False", "no", "off", ""])
 def test_env_disables(val):
     os.environ["FSR_AUTO_APPROVE_READONLY"] = val
-    assert _tools._readonly_auto_approve() is False
+    assert _auth._readonly_auto_approve() is False
     assert _tools._approval_floor() == 1
 
 
 @pytest.mark.parametrize("val", ["1", "true", "yes", "on", "anything"])
 def test_env_enables(val):
     os.environ["FSR_AUTO_APPROVE_READONLY"] = val
-    assert _tools._readonly_auto_approve() is True
+    assert _auth._readonly_auto_approve() is True
     assert _tools._approval_floor() == 3
 
 
 def test_override_takes_precedence_over_env():
     os.environ["FSR_AUTO_APPROVE_READONLY"] = "1"
     _tools.set_readonly_auto_approve(False)
-    assert _tools._readonly_auto_approve() is False
+    assert _auth._readonly_auto_approve() is False
     _tools.set_readonly_auto_approve(True)
     os.environ["FSR_AUTO_APPROVE_READONLY"] = "0"
-    assert _tools._readonly_auto_approve() is True
+    assert _auth._readonly_auto_approve() is True
 
 
 # --- dispatch integration: a synthetic tier-2 read-only tool --------------

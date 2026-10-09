@@ -246,57 +246,6 @@ def find_foreign_workflows(
     return foreign
 
 
-def find_children_of_workflows(
-    client, workflow_uuids: list[str],
-) -> dict[str, list[str]]:
-    """For each workflow uuid, find every step + route uuid that lives
-    server-side under it. Returns ``{"workflow_steps": […], "workflow_routes": […]}``.
-
-    Used by the purge path to clean up orphan child rows that don't
-    appear in the new YAML (e.g. when the playbook's step structure
-    changed between pushes). FK-bound discovery -- we only follow uuids
-    that belong to workflows we already own, so the scope cannot leak
-    across collections.
-    """
-    out: dict[str, list[str]] = {"workflow_steps": [], "workflow_routes": []}
-    if not workflow_uuids:
-        return out
-    for wf_uuid in workflow_uuids:
-        try:
-            r = client.session.get(
-                f"{client.base_url}/api/3/workflows/{wf_uuid}"
-                f"?$relationships=true&$showDeleted=true",
-                verify=client.verify_ssl, timeout=20,
-            )
-        except Exception as e:  # noqa: BLE001
-            raise RuntimeError(
-                f"child discovery: GET workflow {wf_uuid} raised {e!r}"
-            )
-        if r.status_code == 404:
-            continue
-        if r.status_code != 200:
-            raise RuntimeError(
-                f"child discovery: GET workflow {wf_uuid} HTTP {r.status_code}"
-            )
-        body = r.json() or {}
-        # Belt-and-suspenders: verify the returned uuid matches what we
-        # asked for. If FSR ever misroutes, fail closed.
-        if body.get("uuid") and body["uuid"] != wf_uuid:
-            raise RuntimeError(
-                f"child discovery: response uuid {body.get('uuid')!r} != "
-                f"requested {wf_uuid!r}"
-            )
-        for s in body.get("steps") or []:
-            if isinstance(s, dict) and s.get("uuid"):
-                if s["uuid"] not in out["workflow_steps"]:
-                    out["workflow_steps"].append(s["uuid"])
-        for rt in body.get("routes") or []:
-            if isinstance(rt, dict) and rt.get("uuid"):
-                if rt["uuid"] not in out["workflow_routes"]:
-                    out["workflow_routes"].append(rt["uuid"])
-    return out
-
-
 def recycled_uuids(cls: dict[str, dict[str, _Row]]) -> dict[str, list[str]]:
     """Return ``{entity: [uuid, …]}`` for everything classified recycled."""
     return {

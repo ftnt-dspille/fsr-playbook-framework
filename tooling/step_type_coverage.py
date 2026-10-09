@@ -382,20 +382,6 @@ def _build_canonical_to_friendly() -> None:
     _CANONICAL_TO_FRIENDLY.setdefault("CyopsUtilites", "utilities")
 
 
-def friendly_for_editor(label: str) -> str | None:
-    """The friendly short type covering an editor palette entry, or None.
-
-    None means: this editor step type has NO friendly YAML surface -- an agent
-    cannot create it through the YAML language at all. That is a palette gap.
-    """
-    if not _CANONICAL_TO_FRIENDLY:
-        _build_canonical_to_friendly()
-    canonical = EDITOR_PALETTE.get(label)
-    if canonical is None:
-        return None
-    return _CANONICAL_TO_FRIENDLY.get(canonical)
-
-
 def palette_gaps() -> list[tuple[str, str]]:
     """Editor palette entries with no friendly YAML surface, sorted.
 
@@ -443,11 +429,6 @@ def trigger_coverage() -> list[tuple[str, str, bool]]:
         c = COVERAGE.get(friendly)
         out.append((name, friendly, bool(c and c.typed)))
     return out
-
-
-def trigger_gaps() -> list[str]:
-    """Trigger variants whose friendly type is unmodeled, sorted."""
-    return sorted(name for name, _f, typed in trigger_coverage() if not typed)
 
 
 def prioritized(priority: str) -> list[str]:

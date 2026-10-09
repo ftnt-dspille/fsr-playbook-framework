@@ -93,12 +93,6 @@ def registered_names() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def reset_registry() -> None:
-    """Test helper -- wipes the registry. Production code should never
-    call this."""
-    _REGISTRY.clear()
-
-
 def _register_builtins() -> None:
     try:
         from .anthropic_provider import AnthropicProvider

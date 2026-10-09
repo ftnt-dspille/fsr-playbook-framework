@@ -63,32 +63,6 @@ def _signature(fn: ast.FunctionDef) -> str:
     return f"{fn.name}({', '.join(parts)}){ret}"
 
 
-def _section_for(line: int, banners: list[tuple[int, str]]) -> str:
-    """Find the most recent `# ---` banner above `line`."""
-    current = "Misc"
-    for ln, label in banners:
-        if ln > line:
-            break
-        current = label
-    return current
-
-
-def _extract_banners(source: str) -> list[tuple[int, str]]:
-    """Return [(lineno, label), ...] for the section banners in mcp_server.py.
-
-    Banner pattern is two `# ---...` lines bracketing a `# Label` line.
-    """
-    out: list[tuple[int, str]] = []
-    lines = source.splitlines()
-    for i, ln in enumerate(lines):
-        if ln.startswith("# --") and i + 2 < len(lines):
-            mid = lines[i + 1]
-            if mid.startswith("# ") and not mid.startswith("# --"):
-                label = mid[2:].strip()
-                out.append((i + 1, label))
-    return out
-
-
 # Hand-curated mapping of tool name → category. Keeps the doc structured
 # without depending on file ordering or comment-banner heuristics.
 CATEGORIES: dict[str, str] = {

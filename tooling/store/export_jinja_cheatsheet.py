@@ -97,10 +97,6 @@ def _section(
     return lines
 
 
-def _row_keys(cursor) -> list[str]:
-    return [c[0] for c in cursor.description]
-
-
 def build_cheatsheet(db_path: Path = DB_PATH, out_path: Path = OUT_PATH) -> Path:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

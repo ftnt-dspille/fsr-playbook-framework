@@ -117,5 +117,5 @@ def test_paranoid_mode_cards_a_tier_one_call():
 
 
 def test_tools_reexports_the_same_state():
-    assert T._APPROVAL_GRANTS is authorization._APPROVAL_GRANTS
+    assert T.grant_tool_approval is authorization.grant_tool_approval
     assert T.AUDIT_LOG is authorization.AUDIT_LOG
