@@ -166,8 +166,11 @@ def test_forced_create_delivery_fires_at_most_once():
             system="s", messages=[Message(role="user", content="build one")],
             tools=_BUILD_TOOLS, tags={})))
     assert isinstance(events[-1], DoneEvent)
-    # turn1, turn2, ONE forced round.
-    assert create.await_count == 3
+    # The loop delivers the verified bytes itself: no third, forced model
+    # round, and exactly one card.
+    assert create.await_count == 2
+    emits = [e for e in events if isinstance(e, ToolUseEvent) and e.name == "emit_card"]
+    assert len(emits) == 1
 
 
 def test_offer_already_delivered_is_not_forced():

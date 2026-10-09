@@ -211,3 +211,72 @@ def test_a_build_turn_that_only_researched_is_still_nudged():
         guard = BuildProgressGuard()
         guard.note_result(name, args, {"ok": True})
         assert guard.outstanding(_FULL), name
+
+
+# --- a CLEAN draft: the loop verifies it itself -----------------------------
+# A draft that validated clean and has action steps is not sent back to the
+# model with "now verify it": the loop runs verify_playbook and, on a pass,
+# delivers the offer. No extra model round either way.
+CLEAN_YAML = """playbooks:
+  - name: Block IP
+    trigger: {type: manual}
+    steps:
+      - id: block
+        type: connector
+        connector: fortigate
+        operation: block_ip
+"""
+_VALIDATE_CLEAN = _call_round("c2", "validate_yaml", {"yaml_text": CLEAN_YAML})
+
+
+def _run_with(rounds, verify_result):
+    def dispatch(name, args):
+        if name == "verify_playbook":
+            return verify_result
+        if name == "validate_yaml":
+            return {"ok": True, "errors": []}
+        return _dispatch(name, args)
+    queue = [_FakeStream(r) for r in rounds]
+    sent: list = []
+
+    def _create(*_a, **kw):
+        sent.append(copy.deepcopy(kw["messages"]))
+        return queue.pop(0)
+
+    client = MagicMock()
+    client.chat = MagicMock()
+    client.chat.completions = MagicMock(create=AsyncMock(side_effect=_create))
+    p = OpenAIProvider(model="gpt-5.4-mini", base_url="http://x/v1", api_key="x",
+                       client=client)
+    disp = MagicMock(side_effect=dispatch)
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", disp), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
+        events = asyncio.run(_drain(p.stream(
+            system="s", messages=[Message(role="user", content="build a playbook")],
+            tools=_OPENAI_TOOLS, tags={})))
+    return events, sent, disp
+
+
+def test_a_clean_draft_is_verified_and_delivered_by_the_loop():
+    events, sent, disp = _run_with(
+        [_RESEARCH, _VALIDATE_CLEAN, _STOP_WITH_PROSE],
+        {"ready_to_push": True, "summary": "Blocks the IP on FortiGate."})
+    assert len(sent) == 3, "the loop asked the model again"
+    assert _names(events)[-2:] == ["verify_playbook", "emit_card"]
+    offer = next(c.args[1] for c in disp.call_args_list if c.args[0] == "emit_card")
+    assert offer["card_type"] == "playbook_offer"
+    assert offer["payload"]["yaml"] == CLEAN_YAML
+    assert offer["payload"]["summary"] == "Blocks the IP on FortiGate."
+    assert isinstance(events[-1], DoneEvent)
+
+
+def test_a_clean_draft_that_fails_verify_goes_back_with_its_fixes():
+    events, sent, _ = _run_with(
+        [_RESEARCH, _VALIDATE_CLEAN, _STOP_WITH_PROSE, _CLOSE],
+        {"ok": False, "ready_to_push": False,
+         "required_fixes": [{"path": "steps[block]", "fix": "add ip"}]})
+    assert len(sent) == 4
+    last = sent[-1]
+    assert any(m.get("role") == "tool" and "required_fixes" in str(m.get("content"))
+               for m in last), "the verify result is not in history"
+    assert "emit_card" not in _names(events)

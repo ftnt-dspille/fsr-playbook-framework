@@ -117,6 +117,14 @@ BUILD_PROGRESS_DIRECTIVE = (
     "deliver it with `emit_card(card_type='playbook_offer', ...)`. Do not end the turn with a plan."
 )
 
+UNVERIFIED_DRAFT_FAILED_DIRECTIVE = (
+    "Your draft was checked but never verified, so it was verified for you and "
+    "the result is above: it still has required fixes. Fix them and call "
+    "`verify_playbook` with the corrected YAML; a passing verify is delivered "
+    "to the analyst as a card. If something outside the playbook blocks it, "
+    "emit_card(card_type='capability_gap', ...) naming it."
+)
+
 _SELF_REPAIR_PREFIX = (
     "The YAML you just produced doesn't compile. Fix the errors and emit a "
     "corrected fenced ```yaml block.\n\nErrors:\n"
@@ -231,6 +239,15 @@ def parse_tool_arguments(raw: str) -> dict[str, Any]:
         return {BAD_ARGS_KEY: ("arguments must be a JSON object, got "
                                f"{type(parsed).__name__}")}
     return parsed
+
+
+def _offer_summary(hint: str, said: str, default: str) -> str:
+    """The card's summary: the verify's own description when it gave one,
+    else the first paragraph of what the model told the analyst."""
+    if (hint or "").strip():
+        return hint.strip()
+    first = (said or "").strip().split("\n\n", 1)[0].strip()
+    return first[:400] if first else default
 
 
 def _call_signature(name: str, args: dict[str, Any]) -> str:
@@ -376,6 +393,38 @@ async def run_loop(
             log.exception("%s call failed", label)
             yield ErrorEvent(message="hit max tool budget; summary failed -- see history above")
 
+    async def loop_call(name: str, args: dict[str, Any], out: list[Any],
+                        tcu: list[ToolCallUsage]) -> AsyncIterator[Event]:
+        """A call the LOOP makes, not the model: delivering what a verify
+        already blessed, or verifying a draft the model checked and left.
+        Runs through the same dispatch and observers as a model call, so the
+        transcript, the cards and the guards cannot tell the difference.
+        Appends `(call, result, outcome)` to `out`."""
+        call = ToolCall(f"loop_{_uuid.uuid4().hex[:8]}", name, args)
+        yield ToolUseEvent(name=name, arguments=args, call_id=call.call_id,
+                           tier=_tier_for(name, args))
+        t0 = time.perf_counter()
+        result = await asyncio.to_thread(guarded_dispatch, name, args)
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
+        out.append((call, result, record(call, result, dur_ms, tcu)))
+
+    def record(call: ToolCall, result: Any, duration_ms: int | None,
+               tcu: list[ToolCallUsage]) -> ToolOutcome:
+        success = not is_error_result(result)
+        register_tool_result(call.call_id, call.name, success, call.args, result)
+        content = (evidence_id_line(call.call_id, call.name, call.args, success)
+                   + stringify(model_view(call.name, result)))
+        try:
+            args_chars = len(json.dumps(call.args, default=str))
+        except Exception:
+            args_chars = 0
+        tcu.append(ToolCallUsage(name=call.name, args_chars=args_chars,
+                                 result_chars=len(content), duration_ms=duration_ms))
+        for o in observers:
+            o.note_result(call.name, call.args, result)
+        return ToolOutcome(call.call_id, content, not success, call.name, call.args)
+
     async def force_emit_card(default_type: str, fix: Callable[[dict[str, Any]], None],
                               out: list[Any]) -> AsyncIterator[Event]:
         """One round pinned to `emit_card`, so a delivery is a real tool call
@@ -455,10 +504,30 @@ async def run_loop(
                     yield usage_event(rnd.stop_reason or "", repair_delta=1)
                     continue
 
-            # Nudges: each appends ONE directive and lets the loop run on.
+            # A draft the model checked (validate/compile) and then left: the
+            # loop runs the verify itself. A pass is delivered below with no
+            # model round; a fail goes back to the model with its fixes.
             nudge: tuple[str, str] | None = None
-            said = promise.outstanding(rnd.text)
-            if said:
+            verified_by_loop = False
+            if build.unverified_draft(allowed) and build.clean_draft and "verify_playbook" in allowed:
+                build.mark_verify_forced()
+                yield usage_event("unverified_draft_verified")
+                out: list[Any] = []
+                async for ev in loop_call("verify_playbook", {"yaml_text": build.clean_draft},
+                                          out, tool_call_usage):
+                    yield ev
+                call, result, outcome = out[0]
+                verified_by_loop = bool(isinstance(result, dict) and result.get("ready_to_push"))
+                if not verified_by_loop:
+                    w.append_tool_call(call)
+                    w.append_tool_results([outcome])
+                    nudge = ("unverified_draft_failed", UNVERIFIED_DRAFT_FAILED_DIRECTIVE)
+
+            # Nudges: each appends ONE directive and lets the loop run on.
+            said = None if (nudge or verified_by_loop) else promise.outstanding(rnd.text)
+            if nudge or verified_by_loop:
+                pass
+            elif said:
                 promise.mark_forced()
                 nudge = ("promised_action_forced", promise.directive(said))
             elif build.outstanding(allowed):
@@ -478,47 +547,33 @@ async def run_loop(
                 w.append_user(nudge[1])
                 continue
 
-            # Enhance delivery: a verify passed but no offer followed.
+            # Delivery. A verify passed and the turn is ending without the offer
+            # card: the loop delivers it with the bytes the verify blessed. No
+            # model round -- there is nothing left for the model to decide, and
+            # asking it to make the call only gave it another chance to narrate.
             vid = delivery.outstanding(allowed)
-            if vid is not None:
+            offer: dict[str, Any] | None = None
+            if vid is not None and w.has_tool("emit_card"):
                 delivery.mark_forced()
                 yield usage_event("enhance_delivery_forced")
-                if w.has_tool("emit_card"):
-                    turn_idx += 1
-                    w.append_user(DELIVERY_DIRECTIVE.format(vid=vid))
-
-                    def _bless_edit(args: dict[str, Any], _vid: str = vid) -> None:
-                        if args.get("card_type") == "enhancement_offer":
-                            args["payload"]["verified_id"] = _vid
-                    try:
-                        async for ev in force_emit_card("enhancement_offer", _bless_edit, []):
-                            yield ev
-                    except Exception:
-                        log.exception("forced enhance delivery failed")
-                yield DoneEvent(stop_reason="end_turn")
-                return
-
-            # Create delivery: verify_playbook passed but no offer card followed.
-            if create.outstanding(allowed) is not None:
+                offer = {"card_type": "enhancement_offer", "payload": {
+                    "id": f"offer-{_uuid.uuid4().hex[:8]}", "verified_id": vid,
+                    "summary": _offer_summary(delivery.summary_hint, rnd.text,
+                                              "The edit is verified and ready to apply.")}}
+            elif create.outstanding(allowed) is not None and w.has_tool("emit_card"):
                 create.mark_forced()
                 yield usage_event("create_delivery_forced")
-                if w.has_tool("emit_card"):
-                    turn_idx += 1
-                    w.append_user(create.directive)
-
-                    def _bless_create(args: dict[str, Any]) -> None:
-                        payload = args["payload"]
-                        create.apply_bytes(payload)
-                        if not str(payload.get("id") or "").strip():
-                            payload["id"] = f"offer-{_uuid.uuid4().hex[:8]}"
-                        if not str(payload.get("summary") or "").strip():
-                            payload["summary"] = (create.summary_hint
-                                                  or "Playbook drafted and verified.")
-                    try:
-                        async for ev in force_emit_card("playbook_offer", _bless_create, []):
-                            yield ev
-                    except Exception:
-                        log.exception("forced create delivery failed")
+                payload = {"id": f"offer-{_uuid.uuid4().hex[:8]}",
+                           "summary": _offer_summary(create.summary_hint, rnd.text,
+                                                     "Playbook drafted and verified.")}
+                create.apply_bytes(payload)
+                offer = {"card_type": "playbook_offer", "payload": payload}
+            if offer is not None:
+                try:
+                    async for ev in loop_call("emit_card", offer, [], tool_call_usage):
+                        yield ev
+                except Exception:
+                    log.exception("loop delivery failed")
                 yield DoneEvent(stop_reason="end_turn")
                 return
 
@@ -612,22 +667,6 @@ async def run_loop(
         parallel = calls[:batch_end]
         outcomes: list[ToolOutcome] = []
 
-        def record(call: ToolCall, result: Any, duration_ms: int | None,
-                   _tcu: list[ToolCallUsage] = tool_call_usage) -> ToolOutcome:
-            success = not is_error_result(result)
-            register_tool_result(call.call_id, call.name, success, call.args, result)
-            content = (evidence_id_line(call.call_id, call.name, call.args, success)
-                       + stringify(model_view(call.name, result)))
-            try:
-                args_chars = len(json.dumps(call.args, default=str))
-            except Exception:
-                args_chars = 0
-            _tcu.append(ToolCallUsage(name=call.name, args_chars=args_chars,
-                                      result_chars=len(content), duration_ms=duration_ms))
-            for o in observers:
-                o.note_result(call.name, call.args, result)
-            return ToolOutcome(call.call_id, content, not success, call.name, call.args)
-
         for call, tier in zip(parallel, tiers):
             yield ToolUseEvent(name=call.name, arguments=call.args,
                                call_id=call.call_id, tier=tier)
@@ -643,7 +682,7 @@ async def run_loop(
             results = await asyncio.gather(*[run_one(c) for c in parallel])
             for call, (result, dur_ms) in zip(parallel, results):
                 yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
-                outcomes.append(record(call, result, dur_ms))
+                outcomes.append(record(call, result, dur_ms, tool_call_usage))
 
         pending: ApprovalRequestEvent | None = None
         for i in range(batch_end, len(calls)):
@@ -659,7 +698,7 @@ async def run_loop(
                                    get_turn_evidence)
                 break
             yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
-            outcomes.append(record(call, result, dur_ms))
+            outcomes.append(record(call, result, dur_ms, tool_call_usage))
 
         if pending is not None:
             yield pending

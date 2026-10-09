@@ -1994,6 +1994,9 @@ class BuildProgressGuard:
         self._build_research = False
         # Second stage -- see `unverified_draft`.
         self._drafted = False
+        # The last draft a check passed clean, with action steps -- what the
+        # loop verifies itself when the turn ends on it (see agent_loop).
+        self.clean_draft: str | None = None
         self._closed = False
         self._verify_forced = False
         self._asked = False
@@ -2012,6 +2015,11 @@ class BuildProgressGuard:
             self._build_research = True
         if name in _DRAFT_CHECK_TOOLS:
             self._drafted = True
+            text = args.get("yaml_text") if isinstance(args, dict) else None
+            if (isinstance(result, dict) and result.get("ok") is True
+                    and not result.get("errors") and isinstance(text, str)
+                    and text.strip() and _has_action_steps(text)):
+                self.clean_draft = text
         if name in _DRAFT_CLOSING_TOOLS or (
                 name == "emit_card" and isinstance(args, dict)
                 and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES):
@@ -2337,37 +2345,14 @@ def today_line(now: Any = None) -> str:
 
 
 # --------------------------------------------------------------------------
-# PromisedActionGuard -- "please approve the card" with no card
+# PromisedActionGuard -- a tool call written as text instead of made
 # --------------------------------------------------------------------------
-# Live on Frank the model closed turns with "I'll proceed with the update now
-# -- please approve the card" (and "Once you approve the card, block_ip_new
-# runs ...") having made NO call: nothing ran and no card existed. Measured
-# over 362 sweep turns: 7 such closes, every one hollow, and the promise
-# pattern matched no legitimate close. A close that ASKS ("Shall I
-# proceed?") is fine and is not matched.
-_PROMISE_VERBS = (r"proceed|go ahead|update|set|create|block|isolate|stage|raise|"
-                  r"run|apply|mark|change|close|assign|add|submit|execute|push|"
-                  r"deploy|save")
-_PROMISE = re.compile(
-    r"(?:approv(?:e|ing) (?:the|this) (?:card|action|request|change)"
-    r"|(?:the|an?) (?:approval |action )?card (?:below|above|is (?:ready|staged|coming))"
-    r"|\bi(?:'ll| will| am going to|'m going to) (?:now )?(?:" + _PROMISE_VERBS
-    + r")\b[^.?!\n]{0,100}\bnow\b"
-    r"|\bi(?:'m| am) (?:now )?(?:updating|setting|creating|blocking|staging|"
-    r"applying|running|marking|submitting)\b)",
-    re.I)
-
-
-def promised_action(text: str) -> str | None:
-    """The sentence in a turn's closing text that promises an action or a card,
-    or None. A sentence ending in '?' asks permission -- a legitimate stop."""
-    tail = (text or "")[-600:]
-    for sent in re.split(r"(?<=[.!?])\s+|\n+", tail):
-        s = sent.strip()
-        if s and not s.endswith("?") and _PROMISE.search(s):
-            return s[:200]
-    return None
-
+# This guard used to also match PROMISES in the closing prose ("I'll proceed
+# with the update now -- please approve the card") with a phrase regex. That
+# was intent detection over wording, which this codebase does not do: a phrase
+# list misses every phrasing nobody wrote down and fires on ones it should
+# not. What remains is structural -- our own call-marker syntax copied into
+# prose -- and the prompt's rule that a card is raised BY the call.
 
 # The history a later turn replays renders earlier tool calls as text markers
 # (`[called name(args)]`, `[tool result: ...]` -- the connector's `_text_of`).
@@ -2393,24 +2378,13 @@ FABRICATED_CALL_DIRECTIVE = (
 )
 
 
-PROMISED_ACTION_DIRECTIVE = (
-    'You told the analyst: "{said}" -- but this turn made no call, so nothing '
-    "ran and there is no card for them to approve. If you mean to do it, make "
-    "the call now: the approval card is raised BY the call. If you are not "
-    "doing it -- it needs the analyst's choice first, or you cannot from here "
-    "-- say that plainly instead. Never describe a card or an action that does "
-    "not exist."
-)
-
-
 class PromisedActionGuard:
-    """Fires once when a turn ends promising an action/card it never produced,
-    or writing a tool call as text instead of making it."""
+    """Fires once when a turn ends having written a tool call as text instead
+    of making it."""
 
     def __init__(self) -> None:
         self._delivered = False
         self._forced = False
-        self._fabricated = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         if not isinstance(result, dict):
@@ -2424,17 +2398,10 @@ class PromisedActionGuard:
     def outstanding(self, text: str) -> str | None:
         if self._forced or self._delivered:
             return None
-        fake = fabricated_call(text)
-        if fake:
-            self._fabricated = True
-            return fake
-        return promised_action(text)
+        return fabricated_call(text)
 
     def directive(self, said: str) -> str:
-        template = (FABRICATED_CALL_DIRECTIVE
-                    if getattr(self, "_fabricated", False)
-                    else PROMISED_ACTION_DIRECTIVE)
-        return template.format(said=said.replace('"', "'"))
+        return FABRICATED_CALL_DIRECTIVE.format(said=said.replace('"', "'"))
 
     def mark_forced(self) -> None:
         self._forced = True

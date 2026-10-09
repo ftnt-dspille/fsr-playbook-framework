@@ -158,7 +158,9 @@ def test_forced_delivery_fires_at_most_once():
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="rewire")],
             tools=_ENHANCE_TOOLS, tags={})))
-    # Terminates (no infinite loop) even when the forced round is empty.
     assert isinstance(events[-1], DoneEvent)
-    # create called exactly 3×: turn1, turn2, ONE forced round.
-    assert create.await_count == 3
+    # The loop delivers the verified bytes itself: no third, forced model
+    # round, and exactly one card.
+    assert create.await_count == 2
+    emits = [e for e in events if isinstance(e, ToolUseEvent) and e.name == "emit_card"]
+    assert len(emits) == 1
