@@ -244,7 +244,7 @@ def _build_provider(kind: str, model: str):
     a run measures a model nobody chose.
     """
     if kind == "frank":
-        from harness.llm import LLMConfigError, resolve_llm
+        from fsr_playbooks.harness.llm import LLMConfigError, resolve_llm
         try:
             return resolve_llm("frank", model).provider_instance()
         except LLMConfigError as e:
@@ -262,9 +262,11 @@ def _build_provider(kind: str, model: str):
 
 
 # Only TRANSPORT failures make a run unscoreable; a provider rejection is a
-# result. The classification is shared with every harness (tooling/harness).
-from harness.classify import _TRANSPORT_FAILURE_MARKERS  # noqa: E402,F401
-from harness.classify import is_transport_failure as _is_transport_failure  # noqa: E402
+# result. The classification is shared with every harness (fsr_playbooks/harness).
+from fsr_playbooks.harness.classify import _TRANSPORT_FAILURE_MARKERS  # noqa: E402,F401
+from fsr_playbooks.harness.classify import (
+    is_transport_failure as _is_transport_failure,  # noqa: E402
+)
 
 # Backoff between retries of a turn whose transport died (#142). Indexed by
 # attempt, last value repeats. Longer than a request timeout on purpose: the

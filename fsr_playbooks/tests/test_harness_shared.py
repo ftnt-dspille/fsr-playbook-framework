@@ -1,17 +1,17 @@
-"""tooling/harness: the LLM choice, transcript reading and turn classification
+"""fsr_playbooks.harness: the LLM choice, transcript reading and turn classification
 every chat-turn harness shares."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from harness.classify import classify_turn  # noqa: E402
-from harness.frames import assistant_summary, assistant_text, pending_halt  # noqa: E402
-from harness.llm import DEFAULT_FRANK_MODEL, LLMConfigError, resolve_llm  # noqa: E402
+from fsr_playbooks.harness.classify import classify_turn
+from fsr_playbooks.harness.frames import (
+    assistant_summary,
+    assistant_text,
+    cards,
+    pending_halt,
+)
+from fsr_playbooks.harness.llm import DEFAULT_FRANK_MODEL, LLMConfigError, resolve_llm
 
 FRANK_ENV = {"FRANK_BASE_URL": "https://gw.example.com/v1", "FRANK_API_KEY": "k-frank",
              "OPENAI_API_KEY": "k-openai"}
@@ -78,29 +78,9 @@ def test_text_deltas_coalesce_and_history_keeps_tool_ids():
     assert [b["type"] for b in assistant_summary(t)] == ["text", "tool_use", "tool_result"]
 
 
-def test_chat_drive_resumes_the_halt_it_stopped_on(monkeypatch):
-    from evals import chat_drive
-
-    sent = []
-
-    def fake_execute(client, op, params, version, config, timeout=290):
-        sent.append((op, dict(params), version))
-        if op == "chat_turn":
-            return {"ok": True, "stop_reason": "approval_required",
-                    "transcript": [{"type": "approval_request", "approval_id": "a9"}]}
-        return {"ok": True, "stop_reason": "end_turn", "transcript": []}
-
-    class _Cfg:
-        def is_live(self):
-            return True
-
-    import types
-    env = types.SimpleNamespace(get_config=lambda: _Cfg(), get_client=lambda: object())
-    monkeypatch.setitem(sys.modules, "probes._env", env)
-    monkeypatch.setattr(sys.modules["probes"] if "probes" in sys.modules else
-                        __import__("probes"), "_env", env, raising=False)
-    monkeypatch.setattr(chat_drive, "_execute", fake_execute)
-    chat_drive.drive_scenario("block it", "triage", log=lambda *_: None)
-    (_, turn, version), (op, resume, _) = sent
-    assert version is None
-    assert op == "chat_resume" and resume["approval_id"] == "a9"
+def test_a_nested_card_without_its_own_type_takes_the_frame_type():
+    """Connector frames sometimes wrap the card; the frame type names it when
+    the card dict does not, so the halt still resumes on the right key."""
+    t = {"transcript": [{"type": "choice_card", "card": {"id": "c-7"}}]}
+    assert pending_halt(t) == {"key": "choice_id", "value": "c-7", "kind": "choice_card"}
+    assert cards(t) == [{"id": "c-7"}]

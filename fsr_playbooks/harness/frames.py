@@ -88,16 +88,22 @@ def guards_fired(transcript: Any) -> list[str]:
             if isinstance(g, str)]
 
 
-def cards(transcript: Any) -> list[dict]:
-    """Every card the turn produced, as its card dict."""
+def _card_blobs(transcript: Any) -> list[tuple[Any, dict]]:
+    """(frame type, card dict) for every card frame. A card is either a frame
+    of a card type itself, or a frame carrying a nested `card` dict."""
     out = []
     for f in frames(transcript):
         blob = f.get("card") if isinstance(f.get("card"), dict) else None
         if blob is None and f.get("type") in CARD_RESUME_KEY:
             blob = f
         if isinstance(blob, dict):
-            out.append(blob)
+            out.append((f.get("type"), blob))
     return out
+
+
+def cards(transcript: Any) -> list[dict]:
+    """Every card the turn produced, as its card dict."""
+    return [blob for _, blob in _card_blobs(transcript)]
 
 
 def pending_halt(transcript: Any) -> dict | None:
@@ -115,8 +121,9 @@ def pending_halt(transcript: Any) -> dict | None:
             approval_id = f["approval"]["approval_id"]
         if f.get("pending_approval") and f.get("approval_id"):
             approval_id = f["approval_id"]
-    for blob in cards(transcript):
-        ctype = blob.get("type")
+    for ftype, blob in _card_blobs(transcript):
+        # A nested card may omit its own type; the frame's type then names it.
+        ctype = blob.get("type") or ftype
         if ctype in CARD_RESUME_KEY and blob.get("id"):
             card = (ctype, blob["id"])
     if approval_id:

@@ -41,9 +41,8 @@ if str(REPO_ROOT / "tooling") not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from harness.frames import assistant_text, pending_halt  # noqa: E402
-
 from evals.levers import lever_for  # noqa: E402
+from fsr_playbooks.harness.frames import assistant_text, pending_halt  # noqa: E402
 
 # The deployed connector's `name` (info.json), NOT the repo/dir name. It was
 # renamed fsr-playbook-builder -> connector-fsr-soc-assistant; env-overridable so

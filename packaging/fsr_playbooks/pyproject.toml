@@ -120,5 +120,6 @@ bypass-selection = true
 "../../fsr_playbooks/agent" = "fsr_playbooks/agent"
 "../../fsr_playbooks/llm" = "fsr_playbooks/llm"
 "../../fsr_playbooks/helpers" = "fsr_playbooks/helpers"
+"../../fsr_playbooks/harness" = "fsr_playbooks/harness"
 "../../fsr_playbooks/mcp_server" = "fsr_playbooks/mcp_server"
 "../../fsr_playbooks/_data" = "fsr_playbooks/_data"
