@@ -12,6 +12,7 @@ copy of the same three things, and the copies disagreed:
 - `classify`: whether a turn answered at all. Six policies -- a dead gateway
   graded as a model failure in one harness and as an answer in another.
 
-Importable as `tooling.harness` (repo root on sys.path) or `harness`
-(tooling/ on sys.path), like the other tooling packages.
+Lives in the shipped package (`fsr_playbooks.harness`) so the connector's CI,
+which installs the wheel, can import it. Dependency-free by design: stdlib
+only, no tooling/ imports.
 """

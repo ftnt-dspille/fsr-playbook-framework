@@ -25,8 +25,8 @@ if str(ROOT / "tooling") not in sys.path:
     sys.path.insert(0, str(ROOT / "tooling"))
 
 from evals.chat_drive import _execute, _unwrap  # noqa: E402
-from harness import frames  # noqa: E402
 
+from fsr_playbooks.harness import frames  # noqa: E402
 from probes._env import get_client  # noqa: E402
 
 CONFIG = ""      # empty = the box's default config, the analyst's real surface

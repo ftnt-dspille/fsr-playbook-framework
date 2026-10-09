@@ -73,6 +73,7 @@ packages = [
     "fsr_playbooks.llm",
     "fsr_playbooks.agent",
     "fsr_playbooks.helpers",
+    "fsr_playbooks.harness",
 ]
 
 [tool.ruff]
