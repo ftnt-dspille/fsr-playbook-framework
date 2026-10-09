@@ -89,7 +89,7 @@ def find(kind: str, query: str = "", connector: str = "",
         else:
             out = search_api_examples(query, limit=limit)
     elif k == "recipe":
-        out = find_recipe(query, limit=limit)
+        out = _trim_recipe_templates(find_recipe(query, limit=limit))
     elif k == "api":
         out = find_api_product(query, limit=limit)
     elif k == "jinja":
@@ -112,6 +112,28 @@ def find(kind: str, query: str = "", connector: str = "",
         return out
     # A few catalogs (e.g. the jinja filter search) return a bare list.
     return {"kind": k, "results": out}
+
+
+# Full YAML for the best matches only. Each template is up to ~6KB, and with
+# find's default limit of 10 one recipe search put ~50KB into the context --
+# re-sent on every later call of the turn (analyst-sim: 17 recipe searches
+# were 38% of all tool-result text). The rest keep name + when_to_use.
+RECIPE_TEMPLATES_SHOWN = 2
+
+
+def _trim_recipe_templates(out: Any) -> Any:
+    rows = out.get("recipes") if isinstance(out, dict) else None
+    if not isinstance(rows, list) or len(rows) <= RECIPE_TEMPLATES_SHOWN:
+        return out
+    trimmed = 0
+    for r in rows[RECIPE_TEMPLATES_SHOWN:]:
+        if isinstance(r, dict) and r.pop("yaml_template", None):
+            trimmed += 1
+    if trimmed:
+        out["note"] = (
+            f"YAML shown for the top {RECIPE_TEMPLATES_SHOWN} only; for "
+            "another, find(kind='recipe', query=<its name>, limit=1).")
+    return out
 
 
 def _box_playbook_row(r: dict[str, Any]) -> dict[str, Any]:
