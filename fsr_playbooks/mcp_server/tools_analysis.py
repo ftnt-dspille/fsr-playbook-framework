@@ -1,11 +1,20 @@
 """MCP tools: Tools Analysis"""
 from __future__ import annotations
 
+import contextvars
 import json
 import sqlite3
 from typing import Any
 
 from . import _shared, tools_discovery, tools_execution
+
+# Set by `walk_paths`: render locally and run nothing, even with a box.
+_FORCE_OFFLINE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_step_through_force_offline", default=False)
+
+
+def _client_or_none():
+    return None if _FORCE_OFFLINE.get() else _shared._live_client()
 from ._shared import (
     _db,
     load_yaml_text,
@@ -73,7 +82,8 @@ def step_through_playbook(yaml_text: str = "",
                           manual_choices: dict[str, str] | None = None,
                           execute_safe_ops: bool = True,
                           execute_unsafe_ops: bool = False,
-                          max_steps: int = 30) -> dict[str, Any]:
+                          max_steps: int = 30,
+                          record: dict[str, Any] | None = None) -> dict[str, Any]:
     """Pre-push debugger: walk a playbook step by step WITHOUT pushing it,
     rendering each step's arguments against the accumulated context with the
     live Jinja engine so you can see exactly where a template or a shape
@@ -144,6 +154,14 @@ def step_through_playbook(yaml_text: str = "",
             s["id"] = s["name"]
     _normalize_friendly_steps(steps)
     by_id = {s["id"]: s for s in steps if isinstance(s, dict) and "id" in s}
+    # Routes may name a step by its slug (`next: generate_report`) -- every
+    # decompiled / designer-mounted playbook does -- so index those too, or
+    # the walk stops at the trigger and reports a one-step playbook as clean.
+    from fsr_playbooks.compiler.parser import _slugify  # noqa: PLC0415
+    for _s in list(by_id.values()):
+        for _alias in (_slugify(str(_s.get("name") or "")), _slugify(str(_s["id"]))):
+            if _alias:
+                by_id.setdefault(_alias, _s)
     if not by_id:
         return {"ok": False, "error":
                 "no steps with id or name in playbook"}
@@ -157,6 +175,18 @@ def step_through_playbook(yaml_text: str = "",
         "input": {"params": dict(input or {})},
         "steps": {},
     }
+    # No box: render locally against sample data (compiler.local_render) and
+    # report every read that comes out empty, instead of handing back raw
+    # templates and calling the walk clean.
+    offline = _client_or_none() is None
+    renders_empty: list[dict[str, Any]] = []
+    if offline:
+        # A step body is rendered once before its loop binds `vars.item`.
+        vars_ctx["item"] = _loop_item_placeholder()
+    if record is not None:
+        vars_ctx["input"]["records"] = [record]
+    elif offline:
+        vars_ctx["input"]["records"] = [_offline_trigger_record(start)]
 
     trace: list[dict[str, Any]] = []
     first_error: dict[str, Any] | None = None
@@ -203,11 +233,37 @@ def step_through_playbook(yaml_text: str = "",
         # nested dicts/lists. Falls back to raw values if no live FSR
         # (so the trace still shows what the agent wrote).
         raw_args = cur.get("arguments") or cur.get("args") or {}
-        client = _shared._live_client()
+        client = _client_or_none()
         render_errors: list[str] = []
+        step_empty: list[dict[str, Any]] = []
+        step_unrendered: list[str] = []
+
+        def _record(rec: dict[str, Any], _cur=cur, _sid=sid,
+                    _empty=step_empty, _unrendered=step_unrendered) -> None:
+            # Every render of this step is done by now (set_variable values
+            # render in the execute phase, after the arguments).
+            if _empty:
+                rec["renders_empty"] = list(_empty)
+                renders_empty.extend({"step": _cur.get("name") or _sid, **e}
+                                     for e in _empty)
+            if _unrendered:
+                rec["unrendered"] = list(_unrendered)
+            trace.append(rec)
 
         def _render_walk(value: Any, path: str = "") -> Any:
             if isinstance(value, str):
+                if client is None and ("{{" in value or "{%" in value):
+                    from fsr_playbooks.compiler import local_render  # noqa: PLC0415
+                    r = local_render.render(value, {"vars": vars_ctx})
+                    if r["unrendered"]:
+                        step_unrendered.append(f"{path}: {r['unrendered']}")
+                    elif r["empty"] or r["defaulted"]:
+                        step_empty.append({"path": path, "template": value[:240],
+                                           "empty": r["empty"],
+                                           "defaulted": r["defaulted"],
+                                           "certain": not set(r["empty"] + r["defaulted"])
+                                           <= set(r["unconfirmed"])})
+                    return r["value"]
                 if "{{" not in value or client is None:
                     return value
                 try:
@@ -275,6 +331,8 @@ def step_through_playbook(yaml_text: str = "",
                 if break_tpl and _truthy(_render_walk(break_tpl)):
                     break
             vars_ctx.pop("item", None)
+            if offline:
+                vars_ctx["item"] = _loop_item_placeholder()
             step_record["rendered_args"] = rendered
             step_record["status"] = "simulated"
             step_record["simulated_from"] = "computed"
@@ -283,7 +341,7 @@ def step_through_playbook(yaml_text: str = "",
             step_record["output_shape"] = _infer_output_shape(iterations)
             jkey = (cur.get("name") or sid).replace(" ", "_")
             vars_ctx["steps"][jkey] = iterations
-            trace.append(step_record)
+            _record(step_record)
             nxt_id = cur.get("next")
             if not nxt_id or nxt_id not in by_id:
                 break
@@ -318,7 +376,7 @@ def step_through_playbook(yaml_text: str = "",
             step_record["output_shape"] = _infer_output_shape({})
             jkey = (cur.get("name") or sid).replace(" ", "_")
             vars_ctx["steps"][jkey] = {}
-            trace.append(step_record)
+            _record(step_record)
             nxt_id = cur.get("next")
             if not nxt_id or nxt_id not in by_id:
                 break
@@ -331,7 +389,6 @@ def step_through_playbook(yaml_text: str = "",
                 first_error = {"step_id": sid,
                                "message": render_errors[0]}
         step_record["rendered_args"] = rendered
-
         # 2) Execute or simulate. Order of precedence for the simulated
         # output (see RENDER_PATH_VALIDATOR_PLAN.md):
         #   1. arguments.mock_result (any step type that has one)
@@ -352,6 +409,22 @@ def step_through_playbook(yaml_text: str = "",
             sim_output = mock_out
             step_record["status"] = "simulated"
             step_record["simulated_from"] = "mock_result"
+        elif stype == "connector" and offline and _offline_output_known(
+                rendered.get("connector") or cur.get("connector") or "",
+                rendered.get("operation") or cur.get("operation") or ""):
+            # A recorded run, or a read-only op with none: no box to run it
+            # on. An unsafe op with no recording keeps the would_have_run
+            # placeholder below, which shows what would fire.
+            cn = rendered.get("connector") or cur.get("connector")
+            opn = rendered.get("operation") or cur.get("operation")
+            sim_output, src = _offline_connector_output(cn or "", opn or "")
+            step_record["status"] = "simulated"
+            step_record["simulated_from"] = src
+        elif offline and stype in ("find_record", "create_record", "update_record"):
+            rec = _offline_module_record(_step_module_name(cur, rendered))
+            sim_output = [rec] if stype == "find_record" else rec
+            step_record["status"] = "simulated"
+            step_record["simulated_from"] = "catalog_sample_record"
         elif stype == "connector" and execute_safe_ops:
             cn = rendered.get("connector") or cur.get("connector")
             opn = rendered.get("operation") or cur.get("operation")
@@ -538,10 +611,15 @@ def step_through_playbook(yaml_text: str = "",
             step_record["note"] = "terminal"
             step_record["output"] = {}
             step_record["output_shape"] = _infer_output_shape({})
-            trace.append(step_record)
+            _record(step_record)
             break
         else:
             sim_output = {}
+            if offline:
+                # Nothing knows this step's output offline; reads through it
+                # are unverified, not empty.
+                from fsr_playbooks.compiler.local_render import Opaque  # noqa: PLC0415
+                sim_output = Opaque(f"{stype} output")
             step_record["status"] = "simulated"
             step_record["simulated_from"] = "default_empty"
             step_record["note"] = (
@@ -595,7 +673,7 @@ def step_through_playbook(yaml_text: str = "",
                      "condition not met and no retries remaining")),
             }
 
-        trace.append(step_record)
+        _record(step_record)
 
         # 3) Advance. For Decision steps, use the auto-evaluated branch
         # when the caller didn't pin one -- otherwise the stepper would
@@ -613,8 +691,143 @@ def step_through_playbook(yaml_text: str = "",
         "trace": trace,
         "first_error": first_error,
         "steps_executed": len(trace),
+        **({"offline": True, "renders_empty": renders_empty} if offline else {}),
         **_load_note,
     }
+
+
+def walk_paths(yaml_text: str, playbook: str | None = None, *,
+               record: dict[str, Any] | None = None,
+               max_walks: int = 12) -> dict[str, Any]:
+    """Walk a draft OFFLINE down every branch: the default path, then once per
+    decision condition / manual-input option pinned. Nothing runs. Returns the
+    distinct empty reads across all walks.
+
+    The stepper follows one path per call, and on sample data a decision takes
+    whichever branch the sample favours -- so a broken read on the other
+    branch would never render. Pinning each option in turn covers them."""
+    try:
+        doc, _ = load_yaml_text(yaml_text)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"yaml parse failed: {exc}"}
+    pbs = (doc or {}).get("playbooks") or []
+    pb = next((p for p in pbs if p.get("name") == playbook), pbs[0] if pbs else None)
+    if not isinstance(pb, dict):
+        return {"ok": False, "error": "no playbooks in YAML"}
+    pins: list[tuple[str, str, str]] = []  # (kind, step id, label)
+    for st in pb.get("steps") or []:
+        if not isinstance(st, dict):
+            continue
+        sid = st.get("id") or st.get("name")
+        if st.get("type") == "decision":
+            for c in st.get("conditions") or []:
+                if isinstance(c, dict) and c.get("display"):
+                    pins.append(("branch", sid, str(c["display"])))
+        elif st.get("type") == "manual_input":
+            for o in st.get("options") or []:
+                if isinstance(o, dict) and (o.get("display") or o.get("option")):
+                    pins.append(("manual", sid, str(o.get("display") or o.get("option"))))
+    runs: list[dict[str, Any]] = [{}] + [
+        {("branch_choices" if k == "branch" else "manual_choices"): {sid: lab}}
+        for k, sid, lab in pins][: max(0, max_walks - 1)]
+    token = _FORCE_OFFLINE.set(True)
+    seen: set[tuple[str, str]] = set()
+    empty: list[dict[str, Any]] = []
+    unrendered: set[str] = set()
+    reached: set[str] = set()
+    walked = 0
+    try:
+        for kw in runs:
+            r = step_through_playbook(yaml_text=yaml_text, playbook=pb.get("name"),
+                                      record=record, execute_safe_ops=False, **kw)
+            if r.get("ok") is False and not r.get("trace"):
+                return {"ok": False, "error": r.get("error")}
+            walked += 1
+            for e in r.get("renders_empty") or []:
+                key = (e["step"], e["template"])
+                if key not in seen:
+                    seen.add(key)
+                    empty.append(e)
+            for t in r.get("trace") or []:
+                unrendered.update(t.get("unrendered") or [])
+                reached.add(str(t.get("name") or t.get("step_id")))
+    finally:
+        _FORCE_OFFLINE.reset(token)
+    total = [str(st.get("name") or st.get("id")) for st in pb.get("steps") or []
+             if isinstance(st, dict)]
+    return {"ok": True, "walks": walked, "paths_pinned": len(pins),
+            "steps_reached": len(reached & set(total)), "steps_total": len(total),
+            "never_reached": [n for n in total if n not in reached],
+            "renders_empty": empty, "unrendered": sorted(unrendered)}
+
+
+def _loop_item_placeholder():
+    from fsr_playbooks.compiler.local_render import Opaque  # noqa: PLC0415
+    return Opaque("loop item")
+
+
+def _step_module_name(step: dict[str, Any], rendered: dict[str, Any]) -> str | None:
+    from fsr_playbooks.module_schema import module_name  # noqa: PLC0415
+    a = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
+    for src in (step, rendered, a):
+        for k in ("module", "resource"):
+            m = module_name(src.get(k)) if isinstance(src, dict) else None
+            if m:
+                return m
+    return None
+
+
+def _offline_module_record(module: str | None) -> Any:
+    """A sample record of `module` with every catalog field filled; an
+    unverifiable placeholder when the catalog does not know the module."""
+    from fsr_playbooks.compiler.local_render import (  # noqa: PLC0415
+        Opaque,
+        sample_record,
+    )
+    if not module:
+        return Opaque("record of an unknown module")
+    try:
+        conn = _shared._db()
+        try:
+            rows = conn.execute(
+                "SELECT field_name, type, picklist_name FROM module_fields "
+                "WHERE module_name=?", (module,)).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        rows = []
+    if not rows:
+        return Opaque(f"{module} record (fields not in the catalog)")
+    return sample_record([(r[0], r[1], r[2]) for r in rows], module)
+
+
+def _offline_trigger_record(start: dict[str, Any] | None) -> Any:
+    return _offline_module_record(
+        _step_module_name(start or {}, {}) if isinstance(start, dict) else None)
+
+
+def _offline_output_known(connector: str, op: str) -> bool:
+    from .tools_verify import _grounded_store  # noqa: PLC0415
+    if connector and op and _grounded_store().shape_for(connector, op) is not None:
+        return True
+    cat = _shared._safe_op_category(connector, op)
+    return tools_discovery._op_risk(op, cat) == "safe"
+
+
+def _offline_connector_output(connector: str, op: str) -> tuple[Any, str]:
+    """A connector step's output offline: built from the shape recorded on a
+    real run when there is one, otherwise an unverifiable placeholder."""
+    from fsr_playbooks.compiler.local_render import (  # noqa: PLC0415
+        Opaque,
+        sample_from_shape,
+    )
+
+    from .tools_verify import _grounded_store  # noqa: PLC0415
+    shape = _grounded_store().shape_for(connector, op) if connector and op else None
+    if shape is not None:
+        return sample_from_shape(shape), "recorded_shape"
+    return Opaque(f"{connector}.{op} output (no run recorded)"), "unknown_shape"
+
 
 @mcp.tool()
 def analyze_playbook(yaml_text: str = "",

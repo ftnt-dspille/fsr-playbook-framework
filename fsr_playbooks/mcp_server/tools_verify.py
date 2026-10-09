@@ -841,11 +841,51 @@ def verify_playbook(
                          for b in walk.branches],
         }
 
+    # Phase 6 -- walk the draft offline down every branch: render each step
+    # against a catalog sample record and recorded connector outputs, and
+    # report reads that come out empty. Warnings, not blockers: the static
+    # checks above block the certain cases; this shows the runtime effect
+    # (a `| default(0)` gate that is always 0) and catches what they miss.
+    walk_warnings, walk_evidence = _offline_walk(yaml_text, playbook)
+    warnings.extend(walk_warnings)
+    if walk_evidence:
+        evidence["offline_walk"] = walk_evidence
+
     result = _finalize(checks_run, required_fixes, warnings, evidence,
                        disabled_codes, unknown_tokens)
     _record_history(yaml_text, playbook, result["ready_to_push"],
                     result["required_fixes"], result["warnings"], live_probe)
     return result
+
+
+def _offline_walk(yaml_text: str, playbook: str | None
+                  ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    try:
+        from .tools_analysis import walk_paths  # noqa: PLC0415
+        r = walk_paths(yaml_text, playbook)
+    except Exception:  # noqa: BLE001 -- the walk never fails a verify
+        return [], None
+    if not r.get("ok"):
+        return [], None
+    out: list[dict[str, Any]] = []
+    for e in r.get("renders_empty") or []:
+        refs = ", ".join(e.get("empty", []) + e.get("defaulted", []))
+        how = ("comes out empty" if e.get("empty") else
+               "is missing, so it silently falls back to the default")
+        out.append({
+            "code": "renders_empty",
+            "message": (f"step {e['step']!r}: {refs!r} {how} when the playbook "
+                        f"runs -- {e['template'][:160]}"
+                        + ("" if e.get("certain") else
+                           " (not in the recorded run of that op; confirm the "
+                           "key exists)")),
+            "path": e.get("path"),
+            "suggestion": ("look the field up with find(kind='field') or take "
+                           "the path from get_op_schema's output_paths"),
+        })
+    evidence = {k: r[k] for k in ("walks", "steps_reached", "steps_total",
+                                  "never_reached") if k in r}
+    return out, evidence
 
 
 def _write_type_trace(yaml_text: str, playbook: str | None, walk) -> str | None:
