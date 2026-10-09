@@ -753,3 +753,15 @@ def test_an_extra_vars_hop_names_the_exact_path():
     ])
     msgs = " ".join(f["message"] for f in res["required_fixes"])
     assert "Use vars.steps.Stash.ip" in msgs, msgs
+
+
+def test_yes_no_labels_sent_as_json_strings_pass():
+    # Live (malware build): `display: "Yes"` from JSON was written bare, the
+    # linter demanded quotes, and no JSON value could satisfy it.
+    res = edit_playbook([{"op": "add_step", "after": "Note A", "step": {
+        "name": "Approve", "type": "manual_input", "title": "Block it?",
+        "options": [{"display": "Yes", "primary": True},
+                    {"display": "No"}]}}])
+    codes = [f["code"] for f in res.get("required_fixes") or []]
+    assert "bad_value" not in codes, res.get("required_fixes")
+    assert 'display: "Yes"' in res["after_yaml"]

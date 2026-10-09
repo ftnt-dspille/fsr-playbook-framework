@@ -379,7 +379,10 @@ def _diff_collections(before, after, user_message: str | None,
                     "need updating"
                     if requested else
                     f"step {n!r} (type={b_steps[n].type}) was present "
-                    "before and is now missing"),
+                    "before and is now missing -- the analyst did not ask to "
+                    "remove it. Keep it, or ask them first with "
+                    "emit_card(card_type='choice', ...) whether to replace "
+                    "the existing steps; their answer is what allows it"),
             })
 
         for n in added:
@@ -1157,6 +1160,27 @@ def _normalize_op(op: dict) -> dict:
     return op
 
 
+_YAML11_BOOLS = frozenset({"yes", "no", "on", "off", "y", "n", "true", "false"})
+
+
+def _quote_bool_like(node) -> None:
+    """Quote every string a YAML 1.1 reader would take for a boolean.
+
+    Ops arrive as JSON, so `display: "Yes"` is already a string -- but the
+    round-trip dumper (YAML 1.2) writes it bare, and the linter (YAML 1.1, as
+    FortiSOAR parses) then demands it be quoted. Live (malware build): the
+    model could not satisfy that from JSON, tried `"\"Yes\""`, and the
+    turn ended with no offer. Quoting a string never changes its value."""
+    from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+    items = (node.items() if isinstance(node, dict)
+             else enumerate(node) if isinstance(node, list) else ())
+    for k, v in list(items):
+        if isinstance(v, str) and v.strip().lower() in _YAML11_BOOLS:
+            node[k] = DoubleQuotedScalarString(v)
+        elif isinstance(v, (dict, list)):
+            _quote_bool_like(v)
+
+
 def _hoist_arguments(step: dict) -> dict:
     """Step keys sent under an `arguments:` mapping move to the step's top
     level, the only shape the compiler takes. Live (box model, 2 of 3 runs): a
@@ -1536,6 +1560,7 @@ def edit_playbook(
         except _EditError as exc:
             return _refused(i, op, exc)
 
+    _quote_bool_like(doc)
     buf = io.StringIO()
     y.dump(doc, buf)
     after = buf.getvalue()

@@ -520,6 +520,7 @@ def _connectors_that_could_contain(
 # (fail open, listing status) for a short window; the run_op health cache is
 # untouched, because a hung healthcheck says nothing about the ops.
 _PROBE_STRAGGLERS: dict[str, float] = {}
+_LISTING_PROBE_DEADLINE_S = 8.0
 _STRAGGLER_SKIP_S = 10 * 60
 
 
@@ -1231,7 +1232,10 @@ def list_configured_connectors(probe: bool = False,
     if probe:
         targets = [(n, v, name_agent.get(n, "")) for n, v in name_version.items()
                    if only is None or n in only]
-        health = _healthcheck_many(client, targets)
+        # A listing is a lookup, not a wait: live on .159 this call took 13s
+        # (85 connectors, the disconnected ones re-probed every 5 min, each
+        # slow to fail). Anything slower than this keeps its listing status.
+        health = _healthcheck_many(client, targets, deadline_s=_LISTING_PROBE_DEADLINE_S)
         for item in out:
             if item["name"] in health:
                 item["status"] = health[item["name"]]
