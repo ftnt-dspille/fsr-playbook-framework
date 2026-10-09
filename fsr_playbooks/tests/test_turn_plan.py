@@ -78,13 +78,15 @@ def test_registered_intent_prompt_loader_wins():
 
 
 def test_disposition_prompt_states_focus_per_prior():
-    """Phase 3: with the full surface advertised, focus comes from the stated
-    disposition, not tool absence. Each prior names its posture, what the
-    out-of-posture surface is FOR, and that approval gating is unchanged."""
+    """Each prior names its posture. The build prior says what the turn
+    cannot reach and what to ground with instead: dispatch refuses the
+    investigation surface on a playbook turn and the host no longer
+    advertises it, so a prompt inviting it would spend a round per call."""
     build = plan_turn("build").prompt
     assert "Disposition: you are authoring a playbook" in build
-    assert "GROUND your steps" in build
-    assert "approval card" in build
+    assert "playbook tools only" in build
+    assert "get_op_schema" in build and "find(kind='field'" in build
+    assert "GROUND your steps" not in build
     triage = plan_turn("triage").prompt
     assert "Disposition: you are working a live record" in triage
     assert "OFFERING to bottle" in triage

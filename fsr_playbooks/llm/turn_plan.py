@@ -348,14 +348,14 @@ class TurnPlan:
 # tier-3 approval gate at dispatch regardless of what the prose says.
 _DISPOSITIONS = {
     "build": (
-        "Disposition: you are authoring a playbook. The live investigation "
-        "surface (record reads, hunts, run_op, action cards) is available to "
-        "GROUND your steps -- confirm a field exists, sample a real record, "
-        "sanity-check an operation's output shape -- not to open an "
-        "investigation. Do not stage a live containment action-card from the "
-        "editor unless the analyst explicitly asks for a live action now; "
-        "otherwise propose it as a playbook step. Any live state-changing "
-        "call still routes through the approval card."
+        "Disposition: you are authoring a playbook. This turn uses the "
+        "playbook tools only: the live investigation surface (record reads, "
+        "hunts, run_op, action cards) is not available here. Ground your "
+        "steps with the playbook tools -- find(kind='field', module=...) for "
+        "a record's fields, get_op_schema for an operation's inputs and "
+        "output, why_did_playbook_fail / list_playbook_runs for what a run "
+        "did, verify_playbook to check a draft. A live action the analyst "
+        "wants becomes a step in the playbook, not a call now."
     ),
     "triage": (
         "Disposition: you are working a live record. The authoring surface "
