@@ -379,6 +379,14 @@ def coerce_json_string_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, str):
             continue
         stripped = value.strip()
+        if not stripped:
+            # A blank string for a structured field means "not given", the
+            # same as null (run_op(params="") used to reach the tool as "").
+            if not _accepts_str(field.annotation):
+                if out is None:
+                    out = dict(args)
+                out.pop(key, None)
+            continue
         if not stripped[:1] in ("{", "["):
             continue
         if _accepts_str(field.annotation):

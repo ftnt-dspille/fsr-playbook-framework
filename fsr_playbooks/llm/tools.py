@@ -12,7 +12,6 @@ beyond what we cover, add the case here rather than papering over it.
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 import re
 import sqlite3
@@ -1681,336 +1680,303 @@ def _is_invoke_failure(result: Any) -> bool:
     return False
 
 
+# --- dispatch ---------------------------------------------------------------
+#
+# A call goes through a fixed sequence:
+#
+#   1. look the tool up (materializing native-MCP tools on a miss);
+#   2. accept the arguments: reject a wire-supplied `_approved`, take the
+#      internal `_approved` / model `_summary` sentinels off;
+#   3. the stages in `_DISPATCH_STAGES`, in order -- each either fixes the
+#      arguments in place or returns a result that ends the call;
+#   4. `authorization.authorize`: run, card, or deny;
+#   5. card: the approval envelope; run: invoke, audit, finalize.
+#
+# A new rule is a new stage with its own test, not another branch in dispatch.
+
+
+@dataclass
+class _Call:
+    name: str
+    spec: ToolSpec
+    args: dict[str, Any]
+    internal: bool
+    session_id: str | None
+    #: Who approved it, for a re-dispatch of an approved call.
+    approved_by: str | None
+    #: The model's optional plain-language line for the approval card.
+    summary: str | None
+
+
+def _lookup(name: str) -> ToolSpec | None:
+    spec = REGISTRY.get(name)
+    if spec is None:
+        # Native-MCP tools are materialized lazily, and the hooks that do it
+        # are the tool-list builders. The approval-resume path never builds a
+        # list -- it calls dispatch() directly -- so an approved MCP action
+        # (e.g. `mcp_soc__block_indicator`) came back "unknown tool" and never
+        # ran. Materialize on the miss (cheap once initialized) and look again.
+        _ensure_mcp_materialized()
+        spec = REGISTRY.get(name)
+    return spec
+
+
+def _accept(name: str, spec: ToolSpec, arguments: dict[str, Any] | None, *,
+            internal: bool, session_id: str | None,
+            approved_by: str | None) -> _Call | dict[str, Any]:
+    args = dict(arguments or {})
+    # `_approved` bypasses the approval gate and may ONLY be set by the resume
+    # path (post human-approval), which dispatches with `_internal=True`. On a
+    # normal dispatch it came from the model's arguments or a tampered wire
+    # frame: a gate-bypass attempt (S1). Reject it loudly rather than honor it.
+    if "_approved" in args and not internal:
+        logging.getLogger(__name__).error(
+            "rejected wire-supplied _approved on tool '%s' (tier-gate bypass attempt)",
+            name)
+        return {
+            "ok": False,
+            "code": "reserved_key_rejected",
+            "error": ("The '_approved' flag is internal-only and cannot be supplied "
+                      "in tool arguments. The action was NOT executed."),
+        }
+    approved = bool(args.pop("_approved", False)) if internal else False
+    summary = args.pop("_summary", None)
+    return _Call(name=name, spec=spec, args=args, internal=internal,
+                 session_id=session_id,
+                 approved_by=(approved_by or HUMAN) if approved else None,
+                 summary=summary)
+
+
+def _refuse_read_only(c: _Call) -> Any:
+    """A read-only turn (explain / find-issues chip) refuses the write
+    frontier here, not only in the advertised list: a hallucinated call would
+    otherwise reach the change-affordance gate and card an offer the analyst
+    never asked for, which, approved, could delete the open playbook's steps
+    (tracker #117)."""
+    if c.internal or not (_is_read_only_turn() and _is_write_frontier(c.name, c.args)):
+        return None
+    return {
+        "ok": False,
+        "code": "read_only_turn",
+        "error": ("This is a read-only turn (explain / find issues). "
+                  "Write and offer tools are not available. Describe what "
+                  "you found in prose; the analyst can ask for a change "
+                  "if they want one."),
+    }
+
+
+def _refuse_by_turn_plan(c: _Call) -> Any:
+    """A call the page state does not afford (patching a playbook that is not
+    open) is refused with a path forward (the capability_gap card) instead of
+    the tool silently missing. No plan installed: no gate."""
+    if c.internal:
+        return None
+    from .turn_plan import active_turn_plan
+    plan = active_turn_plan()
+    return plan.gate_refusal(c.name, c.args) if plan is not None else None
+
+
+def _fold_emit_card_payload(c: _Call) -> Any:
+    """emit_card takes (card_type, payload), but models put the card's fields
+    at the top level (emit_card(card_type='playbook_offer', id=..., ...)).
+    Each bounce cost a model round. Fold stray keys into `payload` when there
+    is no payload dict; a missing/unknown card_type still errors."""
+    if c.name != "emit_card":
+        return None
+    extras = {k: v for k, v in c.args.items()
+              if k not in ("card_type", "payload") and not k.startswith("_")}
+    if extras and not isinstance(c.args.get("payload"), dict):
+        c.args["payload"] = extras
+        for k in extras:
+            c.args.pop(k, None)
+    return None
+
+
+def _redirect_run_not_author(c: _Call) -> Any:
+    """verify_playbook / validate_yaml / compile_yaml with a playbook NAME and
+    no YAML is a request to RUN that playbook (models reach for the authoring
+    tools because they also take `playbook`). Keyed on the call's shape, not
+    the analyst's words. Re-dispatches run_playbook through the same gate --
+    it still cards -- rather than asking the model to, which it ignored."""
+    if c.name not in _AUTHORING_YAML_TOOLS:
+        return None
+    pb, yaml_text = c.args.get("playbook"), c.args.get("yaml_text")
+    if not (isinstance(pb, str) and pb.strip()) or (isinstance(yaml_text, str)
+                                                     and yaml_text.strip()):
+        return None
+    pbname = pb.strip()
+    if REGISTRY.get("run_playbook") is not None:
+        res = dispatch("run_playbook", {"playbook": pbname},
+                       _internal=c.internal, session_id=c.session_id)
+        if isinstance(res, dict):
+            res.setdefault("_redirected_from", c.name)
+        return res
+    return {
+        "ok": False,
+        "code": "run_not_author",
+        "error": (f"No YAML was provided to {c.name}, so there is nothing to "
+                  f"author or verify. It looks like you want to RUN the "
+                  f"already-deployed playbook '{pbname}'. Call "
+                  f"run_playbook(playbook='{pbname}') to execute it."),
+        "redirect_tool": "run_playbook",
+        "playbook": pbname,
+    }
+
+
+def _coerce_args(c: _Call) -> Any:
+    """Lossless shape fixes, before the gate AND before the tool runs:
+    structured arguments sent as JSON strings (run_op params='{...}'), and
+    scalars sent as strings by providers that stringify everything. Before
+    tier resolution too, so the approval card previews -- and its hash binds --
+    the values that will execute: coercing later would let a human approve
+    `probe="False"` and the tool then run with probe=True."""
+    from .tool_models import coerce_json_string_args, coerce_scalar_args
+    c.args = coerce_json_string_args(c.name, c.args)
+    c.args = coerce_scalar_args(getattr(c.spec, "input_schema", None), c.args)
+    return None
+
+
+def _check_args(c: _Call) -> Any:
+    """One argument gate for every tool (`arg_gate`: unknown keys, required
+    keys, types/enums/nested shape against input_schema), then the pydantic
+    model where a tool has one (cross-field rules). Before authorization, so
+    a call that cannot run never raises a card. `null` means "not given"."""
+    from . import arg_gate
+    from .tool_models import TOOL_MODELS
+    c.args = arg_gate.normalize_nulls(c.spec.input_schema, c.spec.fn, c.args)
+    refusal = arg_gate.check(c.name, c.spec.input_schema, c.spec.fn, c.args)
+    if refusal is not None:
+        return refusal
+    model = TOOL_MODELS.get(c.name)
+    if model is None:
+        return None
+    from pydantic import ValidationError
+    try:
+        model(**c.args)
+    except ValidationError as e:
+        problems = [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
+                    for err in e.errors()]
+        return {
+            "ok": False, "code": arg_gate.CODE, "tool": c.name,
+            "error": (f"invalid arguments for {c.name} -- the call was NOT "
+                      f"run. {'; '.join(problems)}"),
+            "problems": problems,
+            "suggestions": [f"resend {c.name} with the arguments fixed"],
+        }
+    return None
+
+
+def _default_live_probe(c: _Call) -> Any:
+    """verify_playbook grounds op output shapes from a real execution of the
+    op_safety=='safe' steps only (run_op refuses anything else without
+    confirm=True, which the probe never sets). On by default so the model
+    needn't know; an explicit live_probe still wins."""
+    if c.name == "verify_playbook" and "live_probe" not in c.args:
+        c.args["live_probe"] = True
+    return None
+
+
+#: In order. Refusals first (they read the arguments as the model sent them),
+#: then shape fixes, then the gate, then defaults.
+_DISPATCH_STAGES: tuple[Callable[[_Call], Any], ...] = (
+    _refuse_read_only,
+    _refuse_by_turn_plan,
+    _fold_emit_card_payload,
+    _redirect_run_not_author,
+    _coerce_args,
+    _check_args,
+    _default_live_probe,
+)
+
+
+def _approval_envelope(c: _Call, tier: int) -> dict[str, Any]:
+    """The card for a call that needs approval."""
+    name, args, summary = c.name, c.args, c.summary
+    # An argument that cannot possibly work (a run_op on a connector that
+    # exists nowhere, a run_playbook on an invented name) bounces a clean,
+    # self-correctable error instead of a misleading card. Only here, after
+    # grants/policy: a granted call still runs and surfaces its own error.
+    precard = _precard_error(name, args)
+    if precard is not None:
+        _record_audit(name, args, tier, str(precard.get("code") or "precard_rejected"))
+        return precard
+
+    # Only a tool the change-affordance gate raised gets the "shall I draft
+    # it?" framing. CHANGE_GATED_TOOLS is empty today: dormant, not dead.
+    gated_change = name in CHANGE_GATED_TOOLS and not _change_affordance_present()
+    if gated_change and not summary:
+        summary = ("I found something worth changing while working on your "
+                   "playbook, but you didn't ask me to change anything. "
+                   "Want me to draft the edit for you to review?")
+    if not summary:
+        # Most calls arrive without the model's optional `_summary`, and a card
+        # headed by the bare tool name says nothing about WHAT will run.
+        summary = _default_approval_summary(name, args)
+    envelope: dict[str, Any] = {
+        "pending_approval": True,
+        "approval_id": uuid.uuid4().hex,
+        "tier": tier,
+        "tool": name,
+        "preview": ({"tool": name, "args": {}} if gated_change
+                    else _build_preview(name, args)),
+        "args_hash": _args_hash(name, args),
+        "summary": summary,
+        "requires_step_up": tier >= 4,
+        # A "shall I?" choice rather than a destructive-action approval.
+        "reason": "unrequested_change" if gated_change else None,
+    }
+    # Autonomy policy, SHADOW: the call still suspends; the decision rides
+    # the envelope and the audit log.
+    from .autonomy import shadow_decision
+    if name == "run_op":
+        pcall = {"tool": name, "connector": args.get("connector"),
+                 "op": args.get("op"), "args": args.get("params") or {}}
+    else:
+        pcall = {"tool": name, "module": args.get("module"), "args": args}
+    policy = shadow_decision(pcall)
+    if policy is not None:
+        envelope["policy"] = policy
+    _record_audit(name, args, tier, "pending", result_preview=envelope)
+    if policy is not None:
+        _record_audit(name, args, tier, f"shadow:{policy['rule']}:{policy['outcome']}",
+                      result_preview=policy)
+    return envelope
+
+
 def dispatch(
     name: str, arguments: dict[str, Any], *, _internal: bool = False,
     session_id: str | None = None, approved_by: str | None = None,
 ) -> Any:
-    """Tier-aware dispatch (HITL_GUARDRAILS_PLAN Phase 0).
+    """Run one tool call through the gate (see the sequence above).
 
-    Tier 0-2: execute immediately, append an audit row.
-    Tier 3+:  if `arguments` lacks a valid `_approval_token`, return a
-              `{pending_approval: true, …}` envelope without calling the
-              underlying tool. The chat-app loop (Phase 1) suspends on
-              this envelope and renders the approval card; on approve,
-              the loop re-dispatches with `_approval_token` set.
-
-    Approval grants: if a matching grant exists for (session_id, tool_name),
-    the pending_approval envelope is skipped and the action auto-runs,
-    audited as 'auto_allow_grant'. Grants can be 'once' (consumed on match)
-    or 'always' (persistent until session ends).
-
-    Whether the call runs, cards or is denied is `authorization.authorize`.
-    An internal caller re-dispatching an approved call passes `_approved` in
-    the arguments and names who approved it in `approved_by` ("human" when
-    omitted; "system:autonomy" for an autonomy rule acting unattended).
+    A call that needs approval returns a `{pending_approval: true, ...}`
+    envelope without running; the host shows the card and, on approve,
+    re-dispatches with `_approved` in the arguments, `_internal=True`, and
+    `approved_by` naming who approved ("human" when omitted;
+    "system:autonomy" for an autonomy rule acting unattended).
     """
-    spec = REGISTRY.get(name)
-    if spec is None:
-        # Native-MCP tools are materialized lazily, and the ONLY hooks that used
-        # to trigger it were `anthropic_tools()` / `openai_tools()` -- i.e. a
-        # tool list being built for the model. The approval-resume path never
-        # builds one: `resume_agent_turn` → `provider.resume()` calls dispatch()
-        # directly. So an approved tier-3+ MCP action (e.g.
-        # `mcp_soc__block_indicator`) resolved to None here and came back
-        # "unknown tool", silently never executing -- the approve→execute
-        # dead-end. Materialize on the miss (cheap: a bool check once
-        # initialized) and re-look-up before declaring a tool unknown.
-        _ensure_mcp_materialized()
-        spec = REGISTRY.get(name)
+    spec = _lookup(name)
     if spec is None:
         return {"error": f"unknown tool: {name}"}
+    c = _accept(name, spec, arguments, internal=_internal,
+                session_id=session_id, approved_by=approved_by)
+    if not isinstance(c, _Call):
+        return c
+    for stage in _DISPATCH_STAGES:
+        out = stage(c)
+        if out is not None:
+            return out
 
-    raw_args = dict(arguments or {})
-    # `_approved` is an internal-only sentinel: it bypasses the HITL tier
-    # gate and may ONLY be set by the resume path (post human-approval),
-    # which calls dispatch with `_internal=True`. Any `_approved` arriving
-    # on a normal dispatch originates from untrusted input -- the LLM's
-    # tool-use args or a compromised/MITM'd wire frame -- and is a gate-
-    # bypass injection attempt (S1). Reject it loudly rather than honor it.
-    if "_approved" in raw_args and not _internal:
-        logging.getLogger(__name__).error(
-            "rejected wire-supplied _approved on tool '%s' "
-            "(tier-gate bypass attempt)",
-            name,
-        )
-        return {
-            "ok": False,
-            "code": "reserved_key_rejected",
-            "error": (
-                "The '_approved' flag is internal-only and cannot be supplied "
-                "in tool arguments. The action was NOT executed."
-            ),
-        }
-    approved = bool(raw_args.pop("_approved", False)) if _internal else False
-    actor = (approved_by or HUMAN) if approved else None
-    summary = raw_args.pop("_summary", None)
-
-    # A read-only turn (explain / find_issues chip): refuse the write frontier
-    # at dispatch, not just at advertisement.  The advertised-list gate
-    # removes these tools from the model's tool list, but a hallucinated call
-    # still reaches dispatch -- and the change-affordance gate bumps it to
-    # tier 3, producing an unrequested "shall I?" approval card.  That card IS
-    # the offer the analyst never asked for; if approved, it can delete the
-    # open playbook's steps (tracker #117).  Refuse with a clean error the
-    # model can narrate ("this is a read-only turn") instead of staging a card.
-    if _is_read_only_turn() and _is_write_frontier(name, raw_args) and not _internal:
-        return {
-            "ok": False,
-            "code": "read_only_turn",
-            "error": (
-                "This is a read-only turn (explain / find issues). "
-                "Write and offer tools are not available. Describe what "
-                "you found in prose; the analyst can ask for a change "
-                "if they want one."
-            ),
-        }
-
-    # TurnPlan affordance gate (redesign Phase 2): when a host installed a
-    # plan for this turn, calls the page state does not afford (e.g. patching
-    # a playbook that isn't open) are refused HERE -- fail closed with a
-    # visible path forward (the refusal points at the capability_gap card) --
-    # instead of being silently removed from the advertised list. No plan
-    # installed => no gate (fail-open, like every turn-scoped gate above).
-    if not _internal:
-        from .turn_plan import active_turn_plan
-        _plan = active_turn_plan()
-        if _plan is not None:
-            _refusal = _plan.gate_refusal(name, raw_args)
-            if _refusal is not None:
-                return _refusal
-
-    # Models frequently STRINGIFY object-valued args -- `params` is shown as JSON
-    # in the tool docs, so they send run_op(params='{"indicator":"1.2.3.4"}')
-    # instead of a dict. Neither the arg gate (Optional[dict]) nor the tool fn
-    # accepts a string: the gate bounced it ("params: Input should be a valid
-    # dictionary") and, when it slipped past, the op ran with NO params and the
-    # connector rejected it ("IOC/ID Value not Provided"). A live enrich-then-
-    # block turn burned ~10 calls on this and never enriched. Parse a JSON-string
-    # object back to a dict HERE -- before validation and tier-resolution, both of
-    # which read `params`. Same "accept the shape the model emits" class as the
-    # GetRecordArgs / SearchModuleRecordsArgs gates.
-    # Same "accept the shape the model emits" class: emit_card takes
-    # (card_type, payload) but models regularly put the card's fields at the
-    # TOP level (emit_card(card_type='playbook_offer', id=..., summary=...)).
-    # That cost a bad_payload round-trip on most bottle-from-triage runs --
-    # the model always self-repairs, but each repair is a full LLM turn.
-    # Fold stray top-level keys into `payload` when payload isn't a dict;
-    # a missing/unknown card_type still errors (correctly).
-    if name == "emit_card":
-        _known = {"card_type", "payload"}
-        _extras = {k: v for k, v in raw_args.items()
-                   if k not in _known and not k.startswith("_")}
-        if _extras and not isinstance(raw_args.get("payload"), dict):
-            raw_args["payload"] = _extras
-            for k in _extras:
-                raw_args.pop(k, None)
-
-    if name == "run_op":
-        _p = raw_args.get("params")
-        if isinstance(_p, str):
-            _s = _p.strip()
-            if not _s:
-                raw_args.pop("params", None)  # empty string ⇒ no params
-            else:
-                try:
-                    _parsed = json.loads(_s)
-                except (ValueError, TypeError):
-                    _parsed = None
-                if isinstance(_parsed, dict):
-                    raw_args["params"] = _parsed
-
-    # Run-vs-author redirect (language-agnostic, keyed on the CALL SHAPE, not
-    # the analyst's words). When the analyst asks to *run* an already-deployed
-    # playbook by name, models (esp. gpt-4.1-mini) reliably mis-route to an
-    # authoring tool -- they call verify_playbook/validate_yaml/compile_yaml with
-    # a `playbook` NAME but no YAML to work on, because those tools also take a
-    # `playbook` arg. There is nothing to author (yaml_text is blank), so this
-    # shape is nonsensical for authoring and unambiguous for "run it". Short-
-    # circuit with a tool_result that names the right tool, so the model self-
-    # corrects to run_playbook in the next step. No natural-language parsing --
-    # works regardless of the language the request was phrased in.
-    if name in _AUTHORING_YAML_TOOLS:
-        _pb = raw_args.get("playbook")
-        _yaml = raw_args.get("yaml_text")
-        if (isinstance(_pb, str) and _pb.strip()
-                and not (isinstance(_yaml, str) and _yaml.strip())):
-            _pbname = _pb.strip()
-            # FORCING redirect (Lever 1). A passive tool_result telling the model
-            # to "call run_playbook instead" is unreliable -- gpt-4.1-mini gets the
-            # message and wanders into authoring/investigation anyway. So we don't
-            # ask: re-dispatch run_playbook ourselves, through the SAME tier gate
-            # (tier-3 still yields the approval envelope, so nothing runs
-            # un-approved). The mis-call becomes the run; model compliance is
-            # irrelevant. run_playbook isn't in _AUTHORING_YAML_TOOLS, so this
-            # recursion can't re-trip the guard.
-            if REGISTRY.get("run_playbook") is not None:
-                res = dispatch("run_playbook", {"playbook": _pbname},
-                               _internal=_internal, session_id=session_id)
-                if isinstance(res, dict):
-                    res.setdefault("_redirected_from", name)
-                return res
-            # No run_playbook in the registry (shouldn't happen in the build
-            # slice): fall back to an advisory so the turn still explains itself.
-            return {
-                "ok": False,
-                "code": "run_not_author",
-                "error": (
-                    f"No YAML was provided to {name}, so there is nothing to "
-                    f"author or verify. It looks like you want to RUN the "
-                    f"already-deployed playbook '{_pbname}'. Call "
-                    f"run_playbook(playbook='{_pbname}') to execute it."
-                ),
-                "redirect_tool": "run_playbook",
-                "playbook": _pbname,
-            }
-
-    # Validate tool arguments using pydantic models if available.
-    # Validation errors don't fail the dispatch -- they're surfaced as
-    # tool results so the model can see and potentially fix bad args.
-    try:
-        from .tool_models import (
-            TOOL_MODELS,
-            coerce_json_string_args,
-            coerce_scalar_args,
-        )
-        # A structured argument emitted as a JSON *string* is decoded here,
-        # before the gate AND before the tool runs -- coercing only for the gate
-        # would hand the tool body a string, trading a loud rejection for a
-        # silent wrong answer. See `coerce_json_string_args` for why this is
-        # generic rather than another per-model widening.
-        raw_args = coerce_json_string_args(name, raw_args)
-        # Same argument, one layer wider: some providers emit EVERY argument as
-        # a string, and `coerce_json_string_args` is keyed on TOOL_MODELS (11
-        # tools). This is keyed on the tool's own `input_schema`, so all ~100
-        # get it. Placed HERE, before `_resolve_tier` / `_build_preview` /
-        # `_args_hash`, so the approval card previews and the hash binds the
-        # values that will actually execute -- coercing later would let a
-        # human approve `probe="False"` and a tool then run with probe=True.
-        raw_args = coerce_scalar_args(getattr(spec, "input_schema", None), raw_args)
-    except ImportError:
-        pass  # tool_models not available; skip coercion
-
-    # One argument gate for EVERY tool (see `arg_gate`): unknown keys against
-    # the real signature, required keys, and types/enums/nested shape against
-    # the tool's own input_schema. Runs after the lossless coercions above and
-    # before tier resolution, so an approval card is never raised for a call
-    # that cannot run. `null` for an optional arg means "not given".
-    from . import arg_gate
-    raw_args = arg_gate.normalize_nulls(spec.input_schema, spec.fn, raw_args)
-    _refusal = arg_gate.check(name, spec.input_schema, spec.fn, raw_args)
-    if _refusal is not None:
-        return _refusal
-
-    # The pydantic models add what a JSON schema can't say (cross-field
-    # rules, custom validators) for the tools that have one.
-    try:
-        from .tool_models import TOOL_MODELS
-    except ImportError:
-        TOOL_MODELS = {}
-    if name in TOOL_MODELS:
-        from pydantic import ValidationError
-        try:
-            TOOL_MODELS[name](**raw_args)
-        except ValidationError as e:
-            problems = [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
-                        for err in e.errors()]
-            return {
-                "ok": False, "code": arg_gate.CODE, "tool": name,
-                "error": (f"invalid arguments for {name} -- the call was NOT "
-                          f"run. {'; '.join(problems)}"),
-                "problems": problems,
-                "suggestions": [f"resend {name} with the arguments fixed"],
-            }
-
-    # Build-persona verify grounds connector-op output shapes from a real
-    # execution so `vars.steps.<step>.data.<field>` is validated against the
-    # MEASURED envelope (static output_schema is often incomplete). Safe by
-    # construction: the walker probes ONLY op_safety=='safe' steps, and run_op
-    # independently refuses non-safe categories unless confirm=True (the probe
-    # never sets it) -- so no mutating op can execute. verify_playbook is a
-    # build-only tool; default the flag on so the model needn't know it. An
-    # explicit live_probe in the LLM's args still wins.
-    if name == "verify_playbook" and "live_probe" not in raw_args:
-        raw_args["live_probe"] = True
-
-    decision = authorize(name, raw_args, approved_by=actor, session_id=session_id)
-    tier = decision.tier
+    decision = authorize(c.name, c.args, approved_by=c.approved_by,
+                         session_id=c.session_id)
     if decision.outcome == "deny":
-        _record_audit(name, raw_args, tier, decision.label, actor=decision.actor)
+        _record_audit(c.name, c.args, decision.tier, decision.label, actor=decision.actor)
         return {"ok": False, "code": "user_denied", "reason": decision.reason}
     if decision.outcome == "card":
-        # About to card this call. An argument that cannot possibly work must
-        # bounce a clean, self-correctable error instead of a misleading approval
-        # card -- a `run_op` on a connector that exists nowhere, a `run_playbook`
-        # on a name the model invented. Only HERE, after grants/policy: a granted
-        # or eval-approved call still executes and surfaces its own store error.
-        precard = _precard_error(name, raw_args)
-        if precard is not None:
-            _record_audit(name, raw_args, tier,
-                          str(precard.get("code") or "precard_rejected"))
-            return precard
+        return _approval_envelope(c, decision.tier)
 
-        approval_id = uuid.uuid4().hex
-        # Only a tool the affordance gate actually raised gets the "shall I
-        # draft it?" framing. CHANGE_GATED_TOOLS is empty today, so this is
-        # dormant rather than dead: it is the branch that comes back the moment
-        # a genuinely-writing tool is added to that set.
-        gated_change = (name in CHANGE_GATED_TOOLS
-                        and not _change_affordance_present())
-        if gated_change and not summary:
-            # This card is not "approve this tool call" -- the analyst never
-            # asked for a change, so the honest question is whether they want
-            # one drafted at all. Say that in their terms; the raw args (two
-            # whole YAML documents, for verify_enhancement) are noise here.
-            summary = ("I found something worth changing while working on your "
-                       "playbook, but you didn't ask me to change anything. "
-                       "Want me to draft the edit for you to review?")
-        if not summary:
-            # `_summary` is the MODEL's optional argument, so most approvals
-            # arrive with none -- and the host then heads the card with the bare
-            # tool name ("Approval required: run_playbook") and nothing that
-            # says WHAT is about to run. Worse, a host that falls back to
-            # rendering the raw args when there is no summary shows the analyst
-            # a JSON dump. Derive a plain-language default from the call itself
-            # so an approval always states its subject. Never overrides a
-            # model-supplied summary.
-            summary = _default_approval_summary(name, raw_args)
-        envelope = {
-            "pending_approval": True,
-            "approval_id": approval_id,
-            "tier": tier,
-            "tool": name,
-            "preview": ({"tool": name, "args": {}} if gated_change
-                        else _build_preview(name, raw_args)),
-            "args_hash": _args_hash(name, raw_args),
-            "summary": summary,
-            "requires_step_up": tier >= 4,
-            # Lets the host render this as a "shall I?" choice rather than a
-            # destructive-action approval, and lets a grant scope to it.
-            "reason": "unrequested_change" if gated_change else None,
-        }
-        # Autonomy policy, SHADOW only: the call still suspends; the decision
-        # rides the envelope and the audit log for the shadow table.
-        from .autonomy import shadow_decision
-        if name == "run_op":
-            _pcall = {"tool": name, "connector": raw_args.get("connector"),
-                      "op": raw_args.get("op"),
-                      "args": raw_args.get("params") or {}}
-        else:
-            _pcall = {"tool": name, "module": raw_args.get("module"),
-                      "args": raw_args}
-        _policy = shadow_decision(_pcall)
-        if _policy is not None:
-            envelope["policy"] = _policy
-        _record_audit(name, raw_args, tier, "pending", result_preview=envelope)
-        if _policy is not None:
-            _record_audit(name, raw_args, tier,
-                          f"shadow:{_policy['rule']}:{_policy['outcome']}",
-                          result_preview=_policy)
-        return envelope
-
-    result = _invoke(spec, name, raw_args)
+    result = _invoke(spec, c.name, c.args)
     if _is_invoke_failure(result):
         return result
-    _record_audit(name, raw_args, tier, decision.label, actor=decision.actor)
-    return _finalize_tool_output(name, result)
+    _record_audit(c.name, c.args, decision.tier, decision.label, actor=decision.actor)
+    return _finalize_tool_output(c.name, result)

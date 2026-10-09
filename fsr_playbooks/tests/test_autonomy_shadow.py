@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsr_playbooks.llm import autonomy
+from fsr_playbooks.llm import authorization, autonomy
 from fsr_playbooks.llm.autonomy import (
     evaluate,
     parse_policy,
@@ -244,7 +244,7 @@ def test_a_refused_verdict_is_not_recorded(turn):
 def test_the_dispatch_envelope_carries_the_shadow_decision_and_still_suspends(turn, monkeypatch):
     from fsr_playbooks.llm import tools as T
     monkeypatch.setattr(T, "_precard_error", lambda n, a: None)
-    monkeypatch.setattr(T, "_active_eval_policy", lambda: None)
+    monkeypatch.setattr(authorization, "_active_eval_policy", lambda: None)
     cv.register_tool_result("tu1", "run_op", True,
                             {"connector": "virustotal",
                              "op": "query_ip", "params": {"value": EXT}}, _MAL_RESULT)
