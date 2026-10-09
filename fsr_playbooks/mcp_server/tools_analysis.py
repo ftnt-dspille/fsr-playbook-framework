@@ -163,6 +163,13 @@ def step_through_playbook(yaml_text: str = "",
             if _alias:
                 by_id.setdefault(_alias, _s)
     if not by_id:
+        if not steps:
+            # An empty designer playbook: nothing is wrong with it, there is
+            # nothing in it yet. "no steps with id or name" read as a defect.
+            return {"ok": False, "code": "empty_playbook", "error":
+                    f"playbook {pb.get('name')!r} has no steps yet, so there is "
+                    "nothing to walk. Build the steps first (edit_playbook), then "
+                    "analyze the result."}
         return {"ok": False, "error":
                 "no steps with id or name in playbook"}
 
@@ -235,13 +242,25 @@ def step_through_playbook(yaml_text: str = "",
         raw_args = cur.get("arguments") or cur.get("args") or {}
         client = _client_or_none()
         render_errors: list[str] = []
+        rendered_locally: list[str] = []
         step_empty: list[dict[str, Any]] = []
         step_unrendered: list[str] = []
 
         def _record(rec: dict[str, Any], _cur=cur, _sid=sid,
-                    _empty=step_empty, _unrendered=step_unrendered) -> None:
+                    _empty=step_empty, _unrendered=step_unrendered,
+                    _errs=render_errors, _local=rendered_locally) -> None:
             # Every render of this step is done by now (set_variable values
             # render in the execute phase, after the arguments).
+            nonlocal first_error
+            if _local:
+                rec["rendered_locally"] = list(_local)
+            if _errs and not str(rec.get("note") or "").startswith("jinja render failed"):
+                # A render that failed in the execute phase (a set_variable
+                # value) was never reported: the argument-phase check below
+                # had already run.
+                rec["note"] = "jinja render failed: " + "; ".join(_errs[:3])
+                if first_error is None:
+                    first_error = {"step_id": _sid, "message": _errs[0]}
             if _empty:
                 rec["renders_empty"] = list(_empty)
                 renders_empty.extend({"step": _cur.get("name") or _sid, **e}
@@ -250,20 +269,23 @@ def step_through_playbook(yaml_text: str = "",
                 rec["unrendered"] = list(_unrendered)
             trace.append(rec)
 
+        def _render_local(value: str, path: str) -> dict[str, Any]:
+            from fsr_playbooks.compiler import local_render  # noqa: PLC0415
+            r = local_render.render(value, {"vars": vars_ctx})
+            if r["unrendered"]:
+                step_unrendered.append(f"{path}: {r['unrendered']}")
+            elif r["empty"] or r["defaulted"]:
+                step_empty.append({"path": path, "template": value[:240],
+                                   "empty": r["empty"],
+                                   "defaulted": r["defaulted"],
+                                   "certain": not set(r["empty"] + r["defaulted"])
+                                   <= set(r["unconfirmed"])})
+            return r
+
         def _render_walk(value: Any, path: str = "") -> Any:
             if isinstance(value, str):
                 if client is None and ("{{" in value or "{%" in value):
-                    from fsr_playbooks.compiler import local_render  # noqa: PLC0415
-                    r = local_render.render(value, {"vars": vars_ctx})
-                    if r["unrendered"]:
-                        step_unrendered.append(f"{path}: {r['unrendered']}")
-                    elif r["empty"] or r["defaulted"]:
-                        step_empty.append({"path": path, "template": value[:240],
-                                           "empty": r["empty"],
-                                           "defaulted": r["defaulted"],
-                                           "certain": not set(r["empty"] + r["defaulted"])
-                                           <= set(r["unconfirmed"])})
-                    return r["value"]
+                    return _render_local(value, path)["value"]
                 if "{{" not in value or client is None:
                     return value
                 try:
@@ -279,8 +301,19 @@ def step_through_playbook(yaml_text: str = "",
                         return out
                     return out if out is not None else value
                 except Exception as exc:  # noqa: BLE001
-                    render_errors.append(f"{path}: {exc}")
-                    return value
+                    # The box's renderer failed. A broken template fails the
+                    # local renderer too and stays an error; a renderer that
+                    # could not be reached (a transport fault, a client with
+                    # no render endpoint) must not read as a broken playbook.
+                    # Live (analyst sim): every analyze of a connector step
+                    # came back ok:false "params.ip: ... has no attribute
+                    # 'post'" and the model chased a defect that was not there.
+                    r = _render_local(value, path)
+                    if r["unrendered"]:
+                        render_errors.append(f"{path}: {exc}")
+                        return value
+                    rendered_locally.append(path)
+                    return r["value"]
             if isinstance(value, dict):
                 return {k: _render_walk(v, f"{path}.{k}" if path else k)
                         for k, v in value.items()}
@@ -687,6 +720,8 @@ def step_through_playbook(yaml_text: str = "",
 
     return {
         "ok": first_error is None,
+        **({"error": f"step {first_error['step_id']!r}: {first_error['message']}"}
+           if first_error else {}),
         "playbook": pb.get("name"),
         "trace": trace,
         "first_error": first_error,
@@ -897,9 +932,15 @@ def analyze_playbook(yaml_text: str = "",
           else None)
     diagnostics = diagnostics_dict(sim["trace"], pb_node,
                                    picklist_validator=pv)
+    errs = [d for d in diagnostics if d["severity"] == "error"]
+    ok = sim["ok"] and not errs
+    # ok:false with no `error` read as a blank failure in every session report
+    # (and to the model): name the cause.
+    why = (sim.get("error") if not sim["ok"] else
+           f"step {errs[0].get('step_id')!r}: {errs[0].get('message')}" if errs else None)
     return {
-        "ok": sim["ok"] and not any(
-            d["severity"] == "error" for d in diagnostics),
+        "ok": ok,
+        **({"error": why} if not ok and why else {}),
         "playbook": sim.get("playbook"),
         "trace": sim["trace"],
         "diagnostics": diagnostics,
@@ -1156,8 +1197,14 @@ def step_test(yaml_text: str,
                     return out
                 return out if out is not None else value
             except Exception as exc:  # noqa: BLE001
-                render_errors.append(f"{path}: {exc}")
-                return value
+                # Same rule as step_through: an unreachable renderer is not a
+                # broken template, which fails locally too.
+                from fsr_playbooks.compiler import local_render  # noqa: PLC0415
+                r = local_render.render(value, {"vars": vars_ctx})
+                if r["unrendered"]:
+                    render_errors.append(f"{path}: {exc}")
+                    return value
+                return r["value"]
         if isinstance(value, dict):
             return {k: _render(v, f"{path}.{k}" if path else k)
                     for k, v in value.items()}
