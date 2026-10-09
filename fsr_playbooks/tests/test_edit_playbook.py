@@ -716,3 +716,26 @@ def test_a_call_to_a_child_dropped_from_the_list_says_keep_add_playbook():
     msg = " ".join(f["message"] for f in res["required_fixes"])
     assert "workflow_reference_unresolvable" in [f["code"] for f in res["required_fixes"]]
     assert "keep its edit_playbook {op: add_playbook} in the same operations list" in msg
+
+
+def test_an_arguments_wrapper_on_a_new_step_is_hoisted():
+    # Live (box model, 2 of 3 runs): `arguments: {note: hello}` on the call
+    # step was refused, the fix-up lost the rest of the edit, no offer.
+    res = edit_playbook([
+        {"op": "add_playbook", "name": "Block One IP", "parameters": ["ip"],
+         "steps": _CHILD_STEPS},
+        {"op": "add_step", "after": "Note A",
+         "step": {"name": "Call Block", "type": "workflow_reference",
+                  "target": "Block One IP",
+                  "arguments": {"ip": "{{ vars.input.records[0].sourceIp }}"}}},
+    ])
+    assert res["ready_to_push"], (res.get("required_fixes"), res.get("regressions"))
+    call = _steps(res["after_yaml"])["Call Block"]
+    assert "arguments" not in call and call["ip"].startswith("{{")
+
+
+def test_a_missing_step_says_the_refused_call_applied_nothing():
+    res = edit_playbook([{"op": "update_step", "name": "Call Child",
+                          "set": {"note": "hello"}}])
+    assert res.get("code") == "bad_operation"
+    assert "a refused call applied nothing" in res["message"]

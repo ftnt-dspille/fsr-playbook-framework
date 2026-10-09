@@ -985,7 +985,11 @@ def _find(steps, ref: Any):
             f"({{op: add_step, step: {{name: Start, type: start, ...}}}}), then "
             f"add each step `after` the one before it"))
     names = ", ".join(repr(str(s.get("name"))) for s in steps)
-    raise _MissingStep(ref, f"no step named {ref!r} -- steps are: {names}")
+    raise _MissingStep(ref, (
+        f"no step named {ref!r} -- steps are: {names}. Each edit_playbook call "
+        "starts from the open playbook and a refused call applied nothing, so "
+        "send the whole operations list again, including the add_step/"
+        "add_playbook that create what you refer to."))
 
 
 def _branch_entry(step, option: str):
@@ -1145,7 +1149,34 @@ def _normalize_op(op: dict) -> dict:
         step = {k: v for k, v in op.items() if k not in ("op", "after")}
         op = {"op": "add_step", "step": step,
               **({"after": op["after"]} if "after" in op else {})}
+    if op.get("op") == "add_step" and isinstance(op.get("step"), dict):
+        op = {**op, "step": _hoist_arguments(op["step"])}
+    if op.get("op") == "add_playbook" and isinstance(op.get("steps"), list):
+        op = {**op, "steps": [_hoist_arguments(x) if isinstance(x, dict) else x
+                              for x in op["steps"]]}
     return op
+
+
+def _hoist_arguments(step: dict) -> dict:
+    """Step keys sent under an `arguments:` mapping move to the step's top
+    level, the only shape the compiler takes. Live (box model, 2 of 3 runs): a
+    workflow_reference step came as `arguments: {note: hello}`, the fix-up call
+    lost the rest of the edit, and the turn ended with no offer. A key already
+    set at the top level wins, and a colliding one stays put for the compiler
+    to report."""
+    args = step.get("arguments")
+    if not isinstance(args, dict):
+        return step
+    out = {k: v for k, v in step.items() if k != "arguments"}
+    left = {}
+    for k, v in args.items():
+        if k in out:
+            left[k] = v
+        else:
+            out[k] = v
+    if left:
+        out["arguments"] = left
+    return out
 
 
 def _set_path(step, key: str, value) -> None:
