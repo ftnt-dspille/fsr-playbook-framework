@@ -18,7 +18,12 @@ from fsr_playbooks.llm import agent_loop, approvals, authorization
 from fsr_playbooks.llm import tools as T
 from fsr_playbooks.llm.approvals import InMemoryApprovalGateway
 from fsr_playbooks.llm.authorization import authorize, needs_approval
-from fsr_playbooks.llm.provider import ApprovalRequestEvent, DoneEvent, Message, ToolResultEvent
+from fsr_playbooks.llm.provider import (
+    ApprovalRequestEvent,
+    DoneEvent,
+    Message,
+    ToolResultEvent,
+)
 from fsr_playbooks.tests.test_openai_provider import (
     _delta_chunk,
     _drain,
