@@ -93,6 +93,27 @@ def _nested_rename(err: Any) -> str:
     return ""
 
 
+def _json_text_hint(value: Any, want: Any) -> str:
+    """A container sent as JSON text that would not parse (a well-formed one
+    is decoded before the gate). Say where it breaks: live, edit_playbook got
+    the same unbalanced string twice, told only "expected array, got str"."""
+    if want not in ("array", "object") or not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if text[:1] not in ("[", "{"):
+        return ""
+    import json  # noqa: PLC0415
+    try:
+        json.loads(text)
+    except ValueError as exc:
+        pos = getattr(exc, "pos", None)
+        near = f" near {text[max(0, pos - 40):pos + 20]!r}" if isinstance(pos, int) else ""
+        return (f" -- it was sent as JSON text that does not parse "
+                f"({getattr(exc, 'msg', exc)} at char {pos}{near}). Send the "
+                f"{want} itself as the argument value, not a string")
+    return ""
+
+
 def _describe(err: Any) -> str:
     """One line per schema violation, phrased as what to send instead."""
     where = _path(err.absolute_path)
@@ -106,7 +127,8 @@ def _describe(err: Any) -> str:
         want = err.validator_value
         want = " or ".join(want) if isinstance(want, list) else want
         return (f"{where}: expected {want}, got "
-                f"{type(err.instance).__name__} {_short(err.instance)}")
+                f"{type(err.instance).__name__} {_short(err.instance)}"
+                + _json_text_hint(err.instance, want))
     if v == "required":
         hint = _nested_rename(err)
         return f"{where}: {err.message}" + (f" -- {hint}" if hint else "")
