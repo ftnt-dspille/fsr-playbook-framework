@@ -33,11 +33,31 @@ playbooks:
 """
 
 
+def _scrub_generic(c: sqlite3.Connection) -> None:
+    """Reduce a catalog copy to the *packaged/generic* state these tests mean.
+
+    ``DB_PATH`` is the dev warm cache in real life: on any machine where a
+    Tier-1 warm ran, it carries a box's ``base_url_hash`` + ``module_fields``
+    -- and this exact drift is why the tooling suite stopped reading the live
+    cache (its conftest; *"gets clobbered whenever a local connector-op probe
+    fires warmup"*). Strip provenance and module fields so the fixture means
+    "a shipped snapshot, never warmed from a box" no matter the machine state.
+    """
+    c.execute("DELETE FROM module_fields")
+    _catalog_meta.ensure_table(c)
+    for key in (
+        "base_url", "base_url_hash", "instance_label", "fsr_version",
+        "last_publish_time", "structural_warmed_at", "data_warmed_at",
+        "modules_warmed_at",
+    ):
+        c.execute("DELETE FROM _catalog_meta WHERE key = ?", (key,))
+
+
 def _catalog(tmp_path, *, box: bool):
     db = tmp_path / "ref.db"
     shutil.copy(DB_PATH, db)
     with sqlite3.connect(db) as c:
-        c.execute("DELETE FROM module_fields WHERE module_name='alerts'")
+        _scrub_generic(c)
         c.executemany(
             "INSERT INTO module_fields (module_name, field_name, type) VALUES ('alerts', ?, 'text')",
             [("destinationIp",), ("sourceIp",), ("name",)])
@@ -76,6 +96,13 @@ def test_the_subscript_form_is_checked_too(tmp_path):
                for e in res.errors)
 
 
-def test_an_unwarmed_module_is_not_checked():
-    # The packaged catalog has no module fields: nothing to check against.
-    assert _found(DB_PATH, "destIp") == []
+def test_an_unwarmed_module_is_not_checked(tmp_path):
+    # The packaged/generic catalog -- no module fields, no warm stamp -- yields
+    # no facts to check against. (Against the RAW DB_PATH this rotted with the
+    # dev cache: a real Tier-1 warm leaves 132 'alerts' fields + a base_url
+    # stamp in it, which is a box catalog, not a packaged one.)
+    db = tmp_path / "packaged.db"
+    shutil.copy(DB_PATH, db)
+    with sqlite3.connect(db) as c:
+        _scrub_generic(c)
+    assert _found(db, "destIp") == []
