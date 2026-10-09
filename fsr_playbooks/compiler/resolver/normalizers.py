@@ -59,6 +59,7 @@ from ..typed_args.steps import expand_set_api_keys as _expand_set_api_keys_typed
 # first per-step-type model). The reserved-key rename still runs earlier in
 # the RewriterMixin; this only owns the arg_list → flat-dict unwrap.
 from ..typed_args.steps import expand_set_variable as _expand_set_variable_typed
+from ._constants import SHORT_TYPE_TO_FSR
 
 # Field-based-trigger `when:` typing now lives in the typed-args layer. The
 # operator tables + `_wrap_like_value` are re-exported here for backward
@@ -270,6 +271,22 @@ class NormalizerMixin:
                 path=f"{path}.type",
                 near=sug,
                 suggestion=f"did you mean {sug!r}?" if sug else None,
+            ))
+            return
+        if _unauthorable(step.type, st):
+            near = _UNAUTHORABLE_NEAR.get(st["name"])
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_STEP_TYPE,
+                message=(
+                    f"`{step.type}` is not a step type this compiler can build: no "
+                    "playbook in the library uses it and its arguments are not "
+                    "known, so whatever it is given compiles to a step that does "
+                    "nothing at runtime."
+                    + (f" Use `type: {near}`." if near else
+                       " Use one of the documented step types (step_help).")),
+                path=f"{path}.type",
+                near=near,
+                suggestion=f"did you mean {near!r}?" if near else None,
             ))
             return
         step.step_type_uuid = st["uuid"]
@@ -2566,3 +2583,29 @@ class NormalizerMixin:
                 severity="error" if pure_top_level else "warning",
             ))
 
+
+# Catalog step types written by their raw FSR name that have no short alias
+# (so no typed argument contract) and appear in no playbook of the library.
+# Live (analyst sim): asked to call an existing playbook, the model wrote
+# `type: MapPlaybook, playbook: <name>` -- a real catalog row, zero uses -- and
+# it compiled, verified, staged and walked clean while calling nothing.
+_UNAUTHORABLE_NEAR = {
+    "MapPlaybook": "workflow_reference",
+    "ReferenceBlock": "workflow_reference",
+    "action.reference.block": "workflow_reference",
+    "SendEmail": "send_email",
+    "ManualDecision": "manual_input",
+}
+
+
+def _unauthorable(written: str, row: Any) -> bool:
+    if written in SHORT_TYPE_TO_FSR or row["name"] in _ALIASED:
+        return False
+    try:
+        uses = row["occurrences"]
+    except (IndexError, KeyError):
+        return False  # an older catalog cannot say; do not guess
+    return not uses
+
+
+_ALIASED = frozenset(SHORT_TYPE_TO_FSR.values())
