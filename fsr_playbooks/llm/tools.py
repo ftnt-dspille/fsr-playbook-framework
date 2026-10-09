@@ -496,43 +496,16 @@ def set_run_playbook_auto_resolver(fn: Callable[[dict], bool] | None) -> None:
     _RUN_PLAYBOOK_AUTO_RESOLVER = fn
 
 
-# ── The change affordance ────────────────────────────────────────────────────
+# ── Read-only turns and the write frontier ───────────────────────────────────
 #
-# A turn may only PROPOSE a change to the analyst's playbook if the analyst
-# reached for a change. Live in a chat session the analyst asked, in prose, only
-# for an explanation; the model explained, then -- having noticed a real defect
-# while explaining -- authored a fix and ended the turn on an enhancement offer.
-# Two symptoms from that one overrun: a change proposed to someone who never
-# asked for one, and a composer locked behind the typing indicator for five
-# extra model round-trips after the prose had visibly finished.
-#
-# The obvious fix is to detect "they only asked me to explain" from the message.
-# We deliberately do NOT: that is a natural-language judgement, and any lexical
-# form of it works in English and silently fails everywhere else, while a model
-# call to decide a gate makes the gate itself probabilistic -- the thing the
-# tier gate exists to avoid.
-#
-# So this gates the TRANSITION, not the request. The host declares whether this
-# turn carries a change affordance -- something the analyst did through a
-# control we own (a change quick-action chip, or approving a card) rather than
-# something they might have meant. Without one, the write frontier escalates to
-# tier 3: the existing HITL machinery suspends the turn into a card and asks. It
-# costs one extra click on a free-typed change request, and it is language-
-# independent because it never reads the analyst's words at all.
-#
-# Default True (fail-open): a host that never calls `set_change_affordance`
-# behaves exactly as before.
-# Held on SessionState (llm.session_state) as `change_affordance`.
-
 # A read-only turn (explain / find_issues chip): the write frontier is REFUSED
 # at dispatch, not just hidden from the tool list.  The advertised-list gate
 # (`_READ_ONLY_DROP_TOOLS` in the connector) is not enough -- a model that
 # hallucinates a call to `emit_enhancement_offer` reaches dispatch anyway,
-# the change-affordance gate bumps it to tier 3, and the analyst gets an
-# unrequested "shall I?" approval card on an explain turn.  That card IS the
-# "tier-3 offer" -- if approved, the enhancement runs and can delete the open
-# playbook's steps (tracker #117).  Refusing at dispatch returns a clean
-# error the model can narrate, not a card the analyst must dismiss.
+# and would card the analyst on an explain turn.  That card IS the "tier-3
+# offer" -- if approved, the enhancement runs and can delete the open playbook's
+# steps (tracker #117).  Refusing at dispatch returns a clean error the model
+# can narrate, not a card the analyst must dismiss.
 #
 # Default False (fail-open): a host that never calls `set_read_only_turn`
 # behaves exactly as before.
@@ -554,42 +527,6 @@ WRITE_FRONTIER_TOOLS = frozenset({
     "verify_enhancement", "edit_playbook",
     "emit_enhancement_offer", "emit_playbook_offer", "push_playbook",
 })
-
-# The subset of the frontier whose TIER the change-affordance gate may raise.
-#
-# It is empty, and that is the point. The gate used to bump the whole frontier
-# to tier 3, so a free-typed "fix this field" against an open playbook stopped
-# on an approval card that asked "want me to draft the edit?" -- and then, on
-# approval, produced a patch_proposal card with its own Apply/Dismiss. Two
-# approvals for one change.
-#
-# The first one gated nothing. Every emit_* on this frontier is PURE: it
-# validates its arguments and returns `{ok, card}`. Nothing is written, and the
-# card it returns is itself the gate for the edit -- Apply is what resumes into
-# `reply_tool` / `update_playbook`. `verify_enhancement` only verifies. The one
-# member that really writes, `push_playbook`, is unconditional tier 3 in
-# TOOL_TIERS and never needed the bump. So the bump could only ever add a
-# confirmation in front of a confirmation.
-#
-# What the gate cost was paid on the COMMON path: a free-typed change request
-# is the ordinary way analysts ask, and it is the case with no affordance, so
-# the tax landed on the legitimate ask while the thing it prevented -- an
-# unrequested proposal -- costs one Dismiss.
-#
-# What survives, because neither depends on the tier bump:
-#
-#   * the read-only-turn REFUSAL at dispatch (see `_is_read_only_turn` below).
-#     That is the actual #117 fix: an explain/find-issues turn refuses the
-#     write frontier outright rather than carding it, and it keys off
-#     WRITE_FRONTIER_TOOLS, which is unchanged.
-#   * the affordance machinery itself (`set_change_affordance`, and the
-#     connector's grant on an approved frontier card). Kept so a host can still
-#     declare intent, and so re-tightening a specific tool is a one-line edit
-#     here rather than a redesign.
-#
-# Add a name here only if running the tool CHANGES the analyst's playbook
-# without a second confirmation of its own.
-CHANGE_GATED_TOOLS: frozenset[str] = frozenset()
 
 # What a read-only turn (an explain / find-issues chip, or a scheduled task
 # that may not mutate) withholds: the playbook write frontier, plus the
@@ -625,37 +562,17 @@ def _is_write_frontier(name: str, args: dict[str, Any]) -> bool:
     return ct in _FRONTIER_CARD_TYPES
 
 
-def set_change_affordance(present: bool) -> Any:
-    """Declare whether THIS turn carries an analyst-made change affordance.
-    Returns a token for ``reset_change_affordance``. A ContextVar because the
-    turn runs on its own thread/task, same as the grounded-YAML bind."""
-    from . import session_state
-    return session_state.update(change_affordance=bool(present))
-
-
-def reset_change_affordance(token: Any) -> None:
-    """Undo ``set_change_affordance``. Never raises -- an un-reset bind would
-    leak the gate into the next turn on this worker, so callers put it in a
-    ``finally`` and we swallow the token-mismatch that a re-entrant bind
-    would otherwise raise."""
-    # Fail OPEN on an unusable token -- a gate latched on by a leaked token
-    # would card a legitimate flow with nothing to tell the analyst why.
-    from . import session_state
-    session_state.reset_or(token, change_affordance=True)
-
-
 def set_read_only_turn(read_only: bool) -> Any:
     """Declare whether THIS turn is read-only (explain / find_issues chip).
 
     Returns a token for ``reset_read_only_turn``.  A ContextVar because the
-    turn runs on its own thread/task, same as ``set_change_affordance``."""
+    turn runs on its own thread/task."""
     from . import session_state
     return session_state.update(read_only=bool(read_only))
 
 
 def reset_read_only_turn(token: Any) -> None:
-    """Undo ``set_read_only_turn``. Never raises -- same fail-open reasoning
-    as ``reset_change_affordance``."""
+    """Undo ``set_read_only_turn``. Never raises: an unusable token fails open."""
     from . import session_state
     session_state.reset_or(token, read_only=False)
 
@@ -665,17 +582,7 @@ def _is_read_only_turn() -> bool:
     return bool(session_state.current().read_only)
 
 
-def _change_affordance_present() -> bool:
-    from . import session_state
-    return bool(session_state.current().change_affordance)
-
-
 def _resolve_tier(name: str, args: dict[str, Any]) -> int:
-    # BEFORE the static table: the write frontier is mostly tier 0 (authoring is
-    # local shaping), so a static-tier early return would skip the gate entirely
-    # -- exactly the "gate that selects nothing" shape.
-    if name in CHANGE_GATED_TOOLS and not _change_affordance_present():
-        return max(TOOL_TIERS.get(name, 0), 3)
     static = TOOL_TIERS.get(name, 0)
     if static >= 0:
         return static
@@ -1554,10 +1461,10 @@ RETIRED_TO_UNION: dict[str, str] = {
     # → picklist(...)
     "list_picklists": "picklist", "picklist_for_field": "picklist",
     "resolve_picklist_value": "picklist",
-    # → emit_card(card_type=...) -- retired once Phase 2's dispatch-level
-    # affordance gate landed (turn_plan.gate_refusal + the read-only-turn
-    # refusal keyed on emit_card's card_type): the union can no longer reach
-    # a card family the turn's state doesn't afford.
+    # → emit_card(card_type=...) -- retired once Phase 2's dispatch-level gates
+    # landed (turn_plan.gate_refusal + the read-only-turn refusal keyed on
+    # emit_card's card_type): the union can no longer reach a card family the
+    # turn's state doesn't afford.
     "emit_choice_card": "emit_card", "emit_action_card": "emit_card",
     "emit_manual_input": "emit_card", "emit_capability_gap_card": "emit_card",
     "emit_playbook_offer": "emit_card", "emit_enhancement_offer": "emit_card",
@@ -1924,13 +1831,6 @@ def _approval_envelope(c: _Call, tier: int) -> dict[str, Any]:
         _record_audit(name, args, tier, str(precard.get("code") or "precard_rejected"))
         return precard
 
-    # Only a tool the change-affordance gate raised gets the "shall I draft
-    # it?" framing. CHANGE_GATED_TOOLS is empty today: dormant, not dead.
-    gated_change = name in CHANGE_GATED_TOOLS and not _change_affordance_present()
-    if gated_change and not summary:
-        summary = ("I found something worth changing while working on your "
-                   "playbook, but you didn't ask me to change anything. "
-                   "Want me to draft the edit for you to review?")
     if not summary:
         # Most calls arrive without the model's optional `_summary`, and a card
         # headed by the bare tool name says nothing about WHAT will run.
@@ -1940,13 +1840,10 @@ def _approval_envelope(c: _Call, tier: int) -> dict[str, Any]:
         "approval_id": uuid.uuid4().hex,
         "tier": tier,
         "tool": name,
-        "preview": ({"tool": name, "args": {}} if gated_change
-                    else _build_preview(name, args)),
+        "preview": _build_preview(name, args),
         "args_hash": _args_hash(name, args),
         "summary": summary,
         "requires_step_up": tier >= 4,
-        # A "shall I?" choice rather than a destructive-action approval.
-        "reason": "unrequested_change" if gated_change else None,
     }
     # Autonomy policy, SHADOW: the call still suspends; the decision rides
     # the envelope and the audit log.

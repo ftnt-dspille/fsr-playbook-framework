@@ -10,11 +10,8 @@ from __future__ import annotations
 from fsr_playbooks.llm import session_state
 from fsr_playbooks.llm.session_state import SessionState
 from fsr_playbooks.llm.tools import (
-    _change_affordance_present,
     _is_read_only_turn,
-    reset_change_affordance,
     reset_read_only_turn,
-    set_change_affordance,
     set_read_only_turn,
 )
 from fsr_playbooks.llm.turn_plan import active_turn_plan, reset_turn_plan, set_turn_plan
@@ -30,7 +27,6 @@ from fsr_playbooks.mcp_server._shared import (
 
 def test_defaults_fail_open():
     assert session_state.current() == SessionState()
-    assert _change_affordance_present() is True
     assert _is_read_only_turn() is False
 
 
@@ -38,10 +34,9 @@ def test_tokens_reset_in_bind_order_leave_nothing_behind():
     t1 = set_grounded_yaml("playbooks: []")
     t2 = set_playbook_scope("modify")
     t3 = set_read_only_turn(True)
-    t4 = set_change_affordance(False)
     # first-in, first-out -- the order the connector resets in
     for t, reset in ((t1, reset_grounded_yaml), (t2, reset_playbook_scope),
-                     (t3, reset_read_only_turn), (t4, reset_change_affordance)):
+                     (t3, reset_read_only_turn)):
         reset(t)
     assert session_state.current() == SessionState()
 

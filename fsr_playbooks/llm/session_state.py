@@ -39,9 +39,6 @@ class SessionState:
     user_message: str | None = None
     #: Answer to the modify-or-create choice: "modify" | "create_new" | None.
     playbook_scope: str | None = None
-    #: The turn came through a control we own (a change chip, an approved
-    #: card). Default True: a host that never says otherwise is ungated.
-    change_affordance: bool = True
     #: An explain / find-issues turn: the write frontier is refused.
     read_only: bool = False
     #: The TurnPlan whose gates dispatch consults (llm.turn_plan).
