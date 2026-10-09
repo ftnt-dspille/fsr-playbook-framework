@@ -514,6 +514,15 @@ def _connectors_that_could_contain(
     return [{"connector": c, "op": o} for c, o in found.items()]
 
 
+# Connectors whose healthcheck outlived the deadline, by name -> when. Live on
+# .159 one connector's healthcheck never answers; uncached, it held EVERY
+# probe to the full deadline even with the other 84 served from cache. Skipped
+# (fail open, listing status) for a short window; the run_op health cache is
+# untouched, because a hung healthcheck says nothing about the ops.
+_PROBE_STRAGGLERS: dict[str, float] = {}
+_STRAGGLER_SKIP_S = 10 * 60
+
+
 def _healthcheck_many(
         client,
         targets: list[tuple[str, str] | tuple[str, str, str]],
@@ -564,6 +573,9 @@ def _healthcheck_many(
         name, version = target[0], target[1]
         agent_id = target[2] if len(target) > 2 else ""
         t0 = _time.perf_counter()
+        if _time.time() - _PROBE_STRAGGLERS.get(name, 0.0) < _STRAGGLER_SKIP_S:
+            per_probe[name] = {"ms": 0.0, "src": "straggler_skipped"}
+            return name, None
         # Reuse the same warm health cache run_op's preflight uses (4h healthy /
         # 5min unhealthy, pre-populated by warmup). A cache hit collapses the
         # probe to a sqlite read; on a miss we probe once and store the verdict
@@ -618,6 +630,7 @@ def _healthcheck_many(
         for fut, name in fut_to_name.items():
             if not fut.done():
                 timed_out.append(name)
+                _PROBE_STRAGGLERS[name] = _time.time()
         # Threads with in-flight on-box probes can't be cancelled; let them drain
         # in the background instead of blocking this turn on shutdown(wait=True).
         pool.shutdown(wait=False)
@@ -1137,9 +1150,19 @@ def list_configured_connectors(probe: bool = False,
     if not cfg.is_live():
         return {"error": "FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)"}
     client = get_client()
+    # The three listing reads are independent (~2-2.7s each on .159, run one
+    # after another they were ~7s before any probe started), so fetch them
+    # together. Each keeps its own fail-open handling below.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .tools_execution import _agent_configured_rows, _configured_rows
+    with ThreadPoolExecutor(max_workers=3) as _pool:
+        _f_list = _pool.submit(client.connectors.list_configured)
+        _f_active = _pool.submit(_configured_rows, client)
+        _f_agent = _pool.submit(_agent_configured_rows, client)
     try:
         # Use pyfsr wrapper for configured connectors list
-        configured_objs = client.connectors.list_configured()
+        configured_objs = _f_list.result()
         # pyfsr's list_configured() returns any connector with a config RECORD,
         # including ones whose config is INACTIVE. run_op's preflight
         # (_configured_rows → connector_details?configured=true&active=true) then
@@ -1152,8 +1175,7 @@ def list_configured_connectors(probe: bool = False,
         # the unfiltered pyfsr list rather than blanking the whole listing -- the
         # preflight itself fails open on the same lookup, so we stay consistent.
         try:
-            from .tools_execution import _configured_rows
-            _active_names = {x.get("name") for x in _configured_rows(client)}
+            _active_names = {x.get("name") for x in _f_active.result()}
             if _active_names:
                 configured_objs = [c for c in configured_objs
                                    if c.name in _active_names]
@@ -1173,9 +1195,8 @@ def list_configured_connectors(probe: bool = False,
         return {"error": f"connector_details fetch failed: {e!r}"}
 
     try:
-        from .tools_execution import _agent_configured_rows
         already = {x.get("name") for x in rows}
-        rows += [x for x in _agent_configured_rows(client) if x.get("name") not in already]
+        rows += [x for x in _f_agent.result() if x.get("name") not in already]
     except Exception:  # noqa: BLE001
         pass
 

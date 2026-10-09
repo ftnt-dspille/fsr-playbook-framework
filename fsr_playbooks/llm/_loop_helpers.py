@@ -1545,6 +1545,11 @@ class EnhanceDeliveryGuard:
         self._summary_hint: str = ""
         self._delivered = False
         self._forced = False
+        # Second stage -- see `failed_edit`. Required fixes left by the LAST
+        # edit/verify call; 0 once one passes.
+        self._open_fixes = 0
+        self._closed_otherwise = False
+        self._fix_forced = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         """Fold one executed tool result into the delivery state."""
@@ -1562,8 +1567,16 @@ class EnhanceDeliveryGuard:
             if not (isinstance(result, dict) and result.get("ok") is False):
                 self._delivered = True
             return
+        if _is_ask(name, args) or (name == "emit_card" and isinstance(args, dict)
+                                   and args.get("card_type") == "capability_gap"):
+            # Asking the analyst, or naming the gap, is a deliberate close.
+            self._closed_otherwise = True
         if name not in _ENHANCE_VERIFY_TOOLS or not isinstance(result, dict):
             return
+        if result.get("ready_to_push") and result.get("verified_id"):
+            self._open_fixes = 0
+        elif result.get("ok") is False:
+            self._open_fixes = max(1, len(result.get("required_fixes") or []))
         if result.get("ready_to_push") and result.get("verified_id"):
             self._verified_id = str(result["verified_id"])
             diff = result.get("diff_summary")
@@ -1580,6 +1593,25 @@ class EnhanceDeliveryGuard:
         if self._forced or self._delivered or not self._verified_id:
             return None
         return self._verified_id
+
+    def failed_edit(self, allowed_names: set[str]) -> int:
+        """Required fixes the turn's LAST edit left, when it is ending on them.
+
+        Live (box model, malware build): four edit attempts, the last one
+        down to four copies of one mechanical path fix, then the turn closed
+        in prose ("very close, needs a small fix") -- no offer, no Apply. The
+        delivery guard only covers a PASSING verify. This nudges the next step
+        once: fix and re-run, or say what blocks it. 0 when not outstanding."""
+        if _ENHANCE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
+            return 0
+        if (self._fix_forced or self._delivered or self._closed_otherwise
+                or self._verified_id):
+            return 0
+        return self._open_fixes
+
+    def mark_fix_forced(self) -> None:
+        self._fix_forced = True
+        record_guard_fire("EnhanceDeliveryGuard.failed_edit")
 
     @property
     def summary_hint(self) -> str:
@@ -1839,6 +1871,17 @@ _DRAFT_CLOSING_TOOLS = frozenset({
 _DRAFT_CLOSING_CARD_TYPES = frozenset({
     "playbook_offer", "enhancement_offer",
 })
+
+FAILED_EDIT_DIRECTIVE = (
+    "Your last edit_playbook call still has {n} required fix(es), so the "
+    "analyst has nothing to apply. Each required_fixes entry names what to "
+    "change. Send the corrected, complete operations list to edit_playbook "
+    "again, and when it is ready_to_push deliver it with "
+    "emit_card(card_type='enhancement_offer', ...). If something outside the "
+    "playbook blocks it, emit_card(card_type='capability_gap', ...) naming it. "
+    "Do not end the turn describing the fix in prose."
+)
+
 
 UNVERIFIED_DRAFT_DIRECTIVE = (
     "You drafted playbook YAML and checked it, but you never ran "

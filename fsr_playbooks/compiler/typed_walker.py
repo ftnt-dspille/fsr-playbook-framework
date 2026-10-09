@@ -1138,7 +1138,22 @@ def _validate_branch_jinja(
                         case_match = next(
                             (v for v in valid if v.lower() == bad_attr.lower()
                              and v != bad_attr), None)
-                        if case_match:
+                        # `vars.steps.X.vars.ip` when X's outputs ARE `ip`:
+                        # an extra wrapper segment. Name the exact path --
+                        # live, a box model left four of these unfixed and
+                        # ended the turn without an offer.
+                        _hop = f".{bad_attr}."
+                        _after = (rest.split(_hop, 1)[1].split(".", 1)[0]
+                                  .split("[", 1)[0] if _hop in rest else "")
+                        if _after and _after in valid and bad_attr not in valid:
+                            fixed = rest.replace(f".{bad_attr}", "", 1)
+                            msg = (f"vars.steps.{key}{rest} in step "
+                                   f"{s.id!r}: {bad_attr!r} not in known "
+                                   f"shape of "
+                                   f"{target.id if target else key!r} -- "
+                                   f"{_after!r} is a direct output of that "
+                                   f"step. Use vars.steps.{key}{fixed}")
+                        elif case_match:
                             msg = (f"vars.steps.{key}{rest} in step "
                                    f"{s.id!r}: {bad_attr!r} not in known "
                                    f"shape of "

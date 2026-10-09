@@ -52,6 +52,7 @@ from . import approvals as _approvals
 from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     EMPTY_WRAPUP_TEXT,
+    FAILED_EDIT_DIRECTIVE,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
@@ -858,6 +859,19 @@ class OpenAIProvider(CapabilityMixin):
                     turn_idx += 1
                     history.append({
                         "role": "user", "content": UNVERIFIED_DRAFT_DIRECTIVE,
+                    })
+                    continue
+
+                # Ending on an edit that still has required fixes -- see
+                # EnhanceDeliveryGuard.failed_edit.
+                _nfix = _delivery.failed_edit(allowed_names)
+                if _nfix:
+                    _delivery.mark_fix_forced()
+                    yield _emit_usage("failed_edit_forced")
+                    turn_idx += 1
+                    history.append({
+                        "role": "user",
+                        "content": FAILED_EDIT_DIRECTIVE.format(n=_nfix),
                     })
                     continue
 

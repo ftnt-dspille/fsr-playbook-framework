@@ -739,3 +739,17 @@ def test_a_missing_step_says_the_refused_call_applied_nothing():
                           "set": {"note": "hello"}}])
     assert res.get("code") == "bad_operation"
     assert "a refused call applied nothing" in res["message"]
+
+
+def test_an_extra_vars_hop_names_the_exact_path():
+    # Live (malware build): vars.steps.Stash_Alert_Data.vars.source_ip x4,
+    # the turn ended "very close" with no offer.
+    res = edit_playbook([
+        {"op": "add_step", "after": "Note A", "step": {
+            "name": "Stash", "type": "set_variable", "vars": {"ip": "1.2.3.4"}}},
+        {"op": "add_step", "after": "Stash", "step": {
+            "name": "Use", "type": "set_variable",
+            "vars": {"x": "{{ vars.steps.Stash.vars.ip }}"}}},
+    ])
+    msgs = " ".join(f["message"] for f in res["required_fixes"])
+    assert "Use vars.steps.Stash.ip" in msgs, msgs

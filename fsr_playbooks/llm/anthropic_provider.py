@@ -29,6 +29,7 @@ from . import approvals as _approvals
 from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     EMPTY_WRAPUP_TEXT,
+    FAILED_EDIT_DIRECTIVE,
     MAX_PARALLEL_TOOLS,
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
@@ -1099,6 +1100,28 @@ class AnthropicProvider(CapabilityMixin):
                     turn_idx += 1
                     history.append(Message(
                         role="user", content=UNVERIFIED_DRAFT_DIRECTIVE))
+                    continue
+
+                # Ending on an edit that still has required fixes -- see
+                # EnhanceDeliveryGuard.failed_edit.
+                _nfix = _delivery.failed_edit(allowed_names)
+                if _nfix:
+                    _delivery.mark_fix_forced()
+                    yield UsageEvent(
+                        session_id=session_id, turn=turn_idx, model=self.model,
+                        input_tokens=input_tok, output_tokens=output_tok,
+                        cache_read=cache_hit, cache_write=cache_write,
+                        prefix_fingerprint=_prefix_fp,
+                        history_chars=history_chars,
+                        stop_reason="failed_edit_forced",
+                        self_repair_turn=self_repair_turns,
+                        tool_calls=tool_call_usage, tags=tags,
+                        dropped_calls=dropped_calls,
+                    )
+                    turn_idx += 1
+                    history.append(Message(
+                        role="user",
+                        content=FAILED_EDIT_DIRECTIVE.format(n=_nfix)))
                     continue
 
                 _vid = _delivery.outstanding(allowed_names)
