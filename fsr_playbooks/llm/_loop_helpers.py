@@ -161,6 +161,12 @@ def model_view(name: str, result: Any) -> Any:
             out.pop("checks_run", None)
         else:
             out.pop("how_to_apply", None)
+            # The next edit starts from the open playbook, not this draft, so
+            # the draft mostly invites re-typing the document (live: the
+            # malware build did). Kept only when a fix points at a line in it.
+            if not any(str((f or {}).get("path") or "").startswith("<line")
+                       for f in out.get("required_fixes") or []):
+                out.pop("after_yaml", None)
         return out
     if name == "find":
         out = dict(result)

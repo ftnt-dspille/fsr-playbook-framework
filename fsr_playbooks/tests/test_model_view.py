@@ -35,13 +35,20 @@ def test_a_passing_edit_keeps_the_handle_and_drops_echoes():
     assert "after" in res["diff_summary"]["changes"][0]  # host copy untouched
 
 
-def test_a_failing_edit_keeps_its_fixes_and_yaml():
+def test_a_failing_edit_keeps_its_fixes_not_the_draft():
     res = {"ok": False, "ready_to_push": False, "after_yaml": "y",
-           "required_fixes": [{"code": "bad_value", "message": "m"}],
+           "required_fixes": [{"code": "bad_value", "message": "m", "path": "steps[2]"}],
            "how_to_apply": "NOT ready", "applied": ["a"]}
     v = model_view("edit_playbook", res)
-    assert v["required_fixes"] and v["after_yaml"] == "y"
-    assert "how_to_apply" not in v and "applied" not in v
+    assert v["required_fixes"]
+    for gone in ("after_yaml", "how_to_apply", "applied"):
+        assert gone not in v
+
+
+def test_a_fix_that_points_at_a_line_keeps_the_draft():
+    res = {"ok": False, "ready_to_push": False, "after_yaml": "y",
+           "required_fixes": [{"code": "bad_value", "message": "m", "path": "<line 14>"}]}
+    assert model_view("edit_playbook", res)["after_yaml"] == "y"
 
 
 def test_find_operation_carries_connector_status(monkeypatch):
