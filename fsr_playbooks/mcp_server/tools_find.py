@@ -77,6 +77,10 @@ def find(kind: str, query: str = "", connector: str = "",
                     "message": "kind='operation' needs `connector` -- use "
                                "kind='connector' first to find its name"}
         out = find_operation(connector, query, limit=limit)
+        if isinstance(out, dict):
+            status = _connector_status(connector)
+            if status:
+                out["connector_status"] = status
     elif k == "action":
         out = _find_actions(
             find_containment_actions, find_enrichment_actions,
@@ -134,6 +138,28 @@ def _trim_recipe_templates(out: Any) -> Any:
             f"YAML shown for the top {RECIPE_TEMPLATES_SHOWN} only; for "
             "another, find(kind='recipe', query=<its name>, limit=1).")
     return out
+
+
+def _connector_status(name: str) -> dict[str, Any] | None:
+    """Is `name` configured here, and its last known health -- from the same
+    caches run_op's preflight reads (configured rows: 2 min; health: warmup /
+    last probe). Lets a build pick a connector without the slow
+    list_configured_connectors(probe=True) call (13s live). None when there is
+    no live instance or the lookup fails: say nothing rather than guess."""
+    try:
+        from probes._env import get_client, get_config
+        if not get_config().is_live():
+            return None
+        from .tools_execution import _cached_health, _configured_rows
+        rows = _configured_rows(get_client())
+        row = next((r for r in rows if r.get("name") == name), None)
+        if row is None:
+            return {"configured": False}
+        cached = _cached_health(name, str(row.get("version") or ""), "")
+        return {"configured": True,
+                "health": (cached or {}).get("status") or "unknown"}
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _box_playbook_row(r: dict[str, Any]) -> dict[str, Any]:

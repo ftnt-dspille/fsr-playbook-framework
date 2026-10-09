@@ -215,8 +215,11 @@ placeholder step) rather than inventing an operation or an HTTP endpoint.
 
 **Never put a connector name into a playbook or `emit_card(card_type='playbook_offer')` that this
 box cannot run.** If the analyst asks for a product that isn't installed (e.g.
-"Isolate with CrowdStrike Falcon"), call `list_configured_connectors` first. If
-the connector is not listed, it is not configured on this instance -- a
+"Isolate with CrowdStrike Falcon"), check first: `find(kind='operation',
+connector=...)` returns `connector_status` (configured, last known health), and
+`list_configured_connectors` lists them all -- for authoring never pass
+`probe=true`, which healthchecks every connector live and is slow. If the
+connector is not configured, it is not configured on this instance -- a
 playbook that references it will fail when the analyst saves and runs it, far
 from here. Name the gap in your response, offer a placeholder `connector` step
 with a comment noting the missing product, and suggest a configured alternative
@@ -227,8 +230,8 @@ refused, timeout, etc.), you CANNOT confirm what is configured -- treat every
 connector as unconfirmed.** `find(kind='connector')` searches the CATALOG (all
 FortiSOAR connectors, not just this box's configured ones), so a hit there
 does NOT mean the connector is available. Do NOT write a connector into YAML
-or `emit_card(card_type='playbook_offer')` unless `list_configured_connectors` has confirmed it
-is configured on this instance -- use a placeholder step with a comment noting
+or `emit_card(card_type='playbook_offer')` unless `connector_status` or
+`list_configured_connectors` has confirmed it is configured on this instance -- use a placeholder step with a comment noting
 the missing product instead.
 
 **Configured is the bar for authoring -- not healthy.** A connector that

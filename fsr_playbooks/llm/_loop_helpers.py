@@ -106,6 +106,72 @@ def _args_hash(args: Any) -> str:
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
 
 
+# ─────────────────────── model view of a tool result ───────────────────────
+#
+# What the MODEL reads back, not what the host gets: ToolResultEvent still
+# carries the full result (the widget renders the card from it). Audit of 801
+# build-session calls: three tools were ~73% of all tool-result text, mostly
+# echoing what the model had just sent -- emit_card returned the whole card
+# (6.4k avg), edit/verify results carried full step bodies in
+# diff_summary.changes (1.7k) and after_yaml/applied/how_to_apply on calls
+# that passed. Every one of those is re-sent on each later call of the turn.
+
+_EDIT_RESULT_TOOLS = frozenset({"edit_playbook", "verify_enhancement",
+                                "verify_playbook"})
+_CHANGE_KEYS = ("playbook", "step", "kind", "type", "changed_fields")
+_FIND_LIST_CAP = 3
+
+
+def model_view(name: str, result: Any) -> Any:
+    """The part of `result` worth re-reading on every later call."""
+    if not isinstance(result, dict):
+        return result
+    if name == "emit_card":
+        card = result.get("card")
+        if result.get("ok") is not False and isinstance(card, dict):
+            out = {k: v for k, v in result.items() if k != "card"}
+            out["card_id"] = card.get("id")
+            out["delivered"] = True
+            return out
+        return result
+    if name in _EDIT_RESULT_TOOLS:
+        out = dict(result)
+        ds = out.get("diff_summary")
+        if isinstance(ds, dict) and ds.get("changes"):
+            ds = dict(ds)
+            ds["changes"] = [
+                {**{k: c[k] for k in _CHANGE_KEYS if c.get(k) not in (None, [])},
+                 # a rename keeps its old/new names
+                 **({"before": c["before"].get("name"), "after": c["after"].get("name")}
+                    if c.get("kind") == "renamed"
+                    and isinstance(c.get("before"), dict)
+                    and isinstance(c.get("after"), dict) else {})}
+                for c in ds["changes"] if isinstance(c, dict)]
+            out["diff_summary"] = ds
+        ev = out.get("evidence")
+        if isinstance(ev, dict):
+            ev = {k: v for k, v in ev.items() if k != "type_trace_path"}
+            if out.get("ready_to_push"):
+                ev.pop("typed_walk", None)
+            out["evidence"] = ev
+        out.pop("applied", None)
+        if out.get("ready_to_push"):
+            # Nothing left to fix: the handle is what the next call needs.
+            out.pop("after_yaml", None)
+            out.pop("checks_run", None)
+        else:
+            out.pop("how_to_apply", None)
+        return out
+    if name == "find":
+        out = dict(result)
+        if isinstance(out.get("results"), list) and out.get("kind") == "jinja_block":
+            out["results"] = out["results"][:_FIND_LIST_CAP]
+        if isinstance(out.get("examples"), list):
+            out["examples"] = out["examples"][:_FIND_LIST_CAP]
+        return out
+    return result
+
+
 def shrink_history(history: list[Any]) -> int:
     """Compact the conversation in place to cut redundant tokens.
 

@@ -995,10 +995,11 @@ def _find(steps, ref: Any):
     if not steps:
         # Live: every op anchored on "Start" in a playbook with no steps at all.
         raise _MissingStep(ref, (
-            f"no step named {ref!r} -- the open playbook has no steps yet. Add "
-            f"the start step first with no `after` "
-            f"({{op: add_step, step: {{name: Start, type: start, ...}}}}), then "
-            f"add each step `after` the one before it"))
+            f"no step named {ref!r} -- the open playbook has no steps yet and "
+            f"nothing in this operations list adds {ref!r}. Put this first, "
+            f"with no `after`: {{op: add_step, step: {{name: {ref if ref.lower() == 'start' else 'Start'}, "
+            f"type: start, module: <module>, next: <first step>}}}}, then add "
+            f"each step `after` the one before it"))
     names = ", ".join(repr(str(s.get("name"))) for s in steps)
     raise _MissingStep(ref, (
         f"no step named {ref!r} -- steps are: {names}. Each edit_playbook call "

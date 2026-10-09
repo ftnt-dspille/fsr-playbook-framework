@@ -48,6 +48,7 @@ from ._loop_helpers import (
     evidence_id_line,
     is_authoring_slice,
     latest_user_text,
+    model_view,
     stall_directive,
     unexecuted_tool_calls_note,
     verdict_directive,
@@ -1425,7 +1426,7 @@ class AnthropicProvider(CapabilityMixin):
                     from ..mcp_server._citation_validator import register_tool_result
                     register_tool_result(call_id, name, success, args, result)
                 content_str = (evidence_id_line(call_id, name, args, success)
-                               + _stringify(result))
+                               + _stringify(model_view(name, result)))
                 block = {
                     "type": "tool_result",
                     "tool_use_id": "",  # filled by caller
