@@ -644,3 +644,35 @@ def test_an_error_branch_points_at_ignore_errors_and_ignore_errors_applies():
                            "set": {"ignore_errors": True}}])
     assert good["ready_to_push"], good.get("required_fixes")
     assert _steps(good["after_yaml"])["Note A"].get("ignore_errors") is True
+
+
+_CHILD_STEPS = [
+    {"name": "Start", "type": "start", "next": "Record IP"},
+    {"name": "Record IP", "type": "set_variable",
+     "vars": {"blocked": "{{ vars.input.params.ip }}"}},
+]
+
+
+def test_add_playbook_builds_a_child_the_open_playbook_calls():
+    # Analyst sim: "put the blocking in its own reusable playbook and call it"
+    # -- no op could add a playbook, so the model put everything in one.
+    res = edit_playbook([
+        {"op": "add_playbook", "name": "Block One IP", "parameters": ["ip"],
+         "steps": _CHILD_STEPS},
+        {"op": "add_step", "after": "Note A",
+         "step": {"name": "Call Block", "type": "workflow_reference",
+                  "target": "Block One IP",
+                  "ip": "{{ vars.input.records[0].sourceIp }}"}},
+    ])
+    assert res["ready_to_push"], (res.get("required_fixes"), res.get("regressions"))
+    doc = YAML(typ="safe").load(res["after_yaml"])
+    assert [p["name"] for p in doc["playbooks"]] == ["P", "Block One IP"]
+    card = emit_card("enhancement_offer", {"id": "e9", "summary": "split out the block",
+                                           "verified_id": res["verified_id"]})["card"]
+    assert card["playbooks_added"] == ["Block One IP"]
+
+
+def test_add_playbook_refuses_a_child_with_no_trigger():
+    res = edit_playbook([{"op": "add_playbook", "name": "X",
+                          "steps": [{"name": "Only", "type": "set_variable", "vars": {"a": 1}}]}])
+    assert res.get("code") == "bad_operation" and "trigger" in res["message"]

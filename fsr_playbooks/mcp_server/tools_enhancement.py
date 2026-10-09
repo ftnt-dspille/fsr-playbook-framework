@@ -899,7 +899,7 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
 # ---------------------------------------------------------------------------
 
 _EDIT_OPS = ("add_step", "update_step", "rename_step", "remove_step",
-             "set_route", "remove_route", "add_parameter")
+             "set_route", "remove_route", "add_parameter", "add_playbook")
 # Step-level keys an update may not change: `name` has its own op because
 # routes point at it; `uuid` ties the step to its live record.
 _UPDATE_FORBIDDEN = frozenset({"name", "uuid"})
@@ -1061,7 +1061,38 @@ _OP_SHAPES = {
     "set_route": "{op: set_route, from: <step>, to: <step>, option: <branch>}",
     "remove_route": "{op: remove_route, from: <step>, option: <branch>}",
     "add_parameter": "{op: add_parameter, name: <parameter>}",
+    "add_playbook": "{op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [{name, type, ...}]}",
 }
+
+
+def _add_playbook(pbs: list, n: dict) -> str:
+    """Append a new playbook to the open collection.
+
+    Analyst sim: "put the blocking in its own reusable playbook and call it" --
+    no op could add a playbook, so the model put everything in one, or
+    re-typed the document and lost the open playbook (playbook_dropped)."""
+    name = str(n.get("name") or "").strip()
+    if not name:
+        raise _EditError("add_playbook needs name=<the new playbook's name>")
+    if any(str(p.get("name")) == name for p in pbs if isinstance(p, dict)):
+        raise _EditError(f"a playbook named {name!r} already exists in the collection")
+    steps = n.get("steps")
+    if not isinstance(steps, list) or not steps or not all(isinstance(x, dict) for x in steps):
+        raise _EditError("add_playbook needs steps=[{name, type, ...}, ...] -- its whole step list")
+    if not any(str(x.get("type") or "").startswith("start") for x in steps):
+        raise _EditError("add_playbook: the new playbook needs a trigger step first "
+                         "({name: Start, type: start, next: <first step>}) -- "
+                         "`type: start` with no module makes it callable from other playbooks")
+    params = n.get("parameters") or []
+    if not isinstance(params, list) or not all(
+            isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in params):
+        raise _EditError("add_playbook: parameters must be a list of identifiers")
+    pb: dict[str, Any] = {"name": name}
+    if params:
+        pb["parameters"] = list(params)
+    pb["steps"] = [dict(x) for x in steps]
+    pbs.append(pb)
+    return f"added playbook {name!r} ({len(steps)} steps)"
 
 
 def _normalize_op(op: dict) -> dict:
@@ -1314,6 +1345,13 @@ def edit_playbook(
       - {op: remove_route, from: <step>, option: <branch label>}
       - {op: add_parameter, name: <parameter>}
           declares a playbook parameter, so `vars.input.params.<name>` resolves.
+      - {op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [...]}
+          adds a NEW playbook beside the open one -- a reusable child the open
+          playbook calls with a workflow_reference step (`target: <its name>`,
+          one key per parameter). Give it its whole step list, starting with
+          `{name: Start, type: start, next: ...}`. Add the reference step to the
+          open playbook in the SAME call. Apply saves the new playbook and puts
+          the open one's change on the canvas.
 
     `playbook`: which playbook, when the open collection holds several.
     Returns the verify_enhancement envelope plus `applied` (one line per op) and
@@ -1388,6 +1426,8 @@ def edit_playbook(
 
     def _apply(op: dict) -> str:
         n = _normalize_op(op)
+        if n.get("op") == "add_playbook":
+            return _add_playbook(pbs, n)
         if n.get("op") == "add_parameter":
             # Playbook-level, not a step: live, a step read
             # `vars.input.params.servicenow_caller_id`, the gate said "add it

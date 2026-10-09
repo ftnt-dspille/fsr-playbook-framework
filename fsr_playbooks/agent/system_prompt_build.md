@@ -187,6 +187,12 @@ them returns nothing):
   a `set_variable` that only builds a message string -- that creates no record.
 - **Set values / shape data** → `set_variable`.
 - **Branch on a condition** → `decision`.
+- **Call another playbook** → `workflow_reference`. One that already exists on
+  this FortiSOAR: `find(kind='playbook', query=<name>)`, then
+  `workflowReference: <its workflowReference>` plus one key per parameter --
+  never rebuild what it does. A NEW reusable one: in ONE `edit_playbook` call,
+  `add_playbook` (its whole step list, `type: start` first) and an `add_step`
+  of the reference (`target: <its name>`) in the open playbook.
 - **Keep going when a step fails** → `ignore_errors: true` on that step, then a
   `decision` on its output. There is no error branch or `on_error` key; without
   `ignore_errors` a failed step halts the run and any check after it never runs.

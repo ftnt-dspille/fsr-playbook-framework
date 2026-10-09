@@ -1035,11 +1035,19 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                         "op": {"type": "string",
                                "enum": ["add_step", "update_step", "rename_step",
                                         "remove_step", "set_route", "remove_route",
-                                        "add_parameter"]},
+                                        "add_parameter", "add_playbook"]},
                         "name": {"type": "string",
                                  "description": "The step this op acts on "
                                                 "(update/rename/remove); "
-                                                "add_parameter: the parameter."},
+                                                "add_parameter: the parameter; "
+                                                "add_playbook: the new playbook."},
+                        "steps": {"type": "array", "items": {"type": "object"},
+                                  "description": "add_playbook: the new "
+                                                 "playbook's whole step list, "
+                                                 "trigger first."},
+                        "parameters": {"type": "array", "items": {"type": "string"},
+                                       "description": "add_playbook: its input "
+                                                      "parameters."},
                         "step": {"type": ["object", "string"],
                                  "description": "add_step: the new step "
                                                 "{name, type, ...step keys}. "

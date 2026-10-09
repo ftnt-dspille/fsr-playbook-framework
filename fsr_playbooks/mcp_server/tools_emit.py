@@ -1231,6 +1231,11 @@ def emit_enhancement_offer(
         # The per-step before/after payloads the card renders as the diff.
         # The name lists above stay as the header index.
         "changes": list(diff.get("changes") or []),
+        # Playbooks this edit ADDS beside the open one (a reusable child it
+        # calls). Apply saves them -- they cannot go on the designer canvas,
+        # which holds one playbook -- so the card has to say so up front.
+        "playbooks_added": [str(c.get("playbook")) for c in diff.get("changes") or []
+                            if isinstance(c, dict) and c.get("kind") == "playbook_added"],
     }
     trigger = _trigger_summary(yaml_text)
     if trigger:
