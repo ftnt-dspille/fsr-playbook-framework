@@ -160,8 +160,14 @@ def _walk_losses(before: Any, after: Any, path: str, out: list[str]) -> None:
         # identity rather than by index -- otherwise deleting the first of
         # three steps reports every later step as changed instead of
         # reporting the one that actually vanished.
-        before_by_id = {_identity(v): v for v in before}
-        after_ids = {_identity(v) for v in after}
+        ident_of = _identity
+        if _has_duplicate_ids(before) or _has_duplicate_ids(after):
+            # Two members share a key (two branches with one label): keying
+            # by it would merge them and hide the loss of one. Compare whole
+            # values instead -- stricter, never blinder.
+            ident_of = str
+        before_by_id = {ident_of(v): v for v in before}
+        after_ids = {ident_of(v) for v in after}
         for ident, value in before_by_id.items():
             if ident not in after_ids:
                 out.append(f"{path}[{ident}]")
@@ -169,11 +175,16 @@ def _walk_losses(before: Any, after: Any, path: str, out: list[str]) -> None:
             # Same identity on both sides -- recurse to catch a step that
             # survived but lost an argument (the `for_each` / `parameters`
             # defect class).
-            match = next(v for v in after if _identity(v) == ident)
+            match = next(v for v in after if ident_of(v) == ident)
             _walk_losses(value, match, f"{path}[{ident}]", out)
         return
     # Two non-empty scalars, or a type change between non-empty values:
     # that is a modification, not a loss.
+
+
+def _has_duplicate_ids(items: list) -> bool:
+    ids = [_identity(v) for v in items]
+    return len(set(ids)) < len(ids)
 
 
 def _identity(item: Any) -> str:
@@ -186,6 +197,12 @@ def _identity(item: Any) -> str:
     if isinstance(item, dict):
         if "name" in item:
             return str(item.get("name"))
+        # A decision condition / manual-input option is its branch label.
+        # Keyed by the whole dict, re-pointing a branch at a new step (the
+        # analyst's "block it if malicious" refinement) read as deleting the
+        # branch, and every such Apply was refused would_drop_fields.
+        if isinstance(item.get("option"), str) and item["option"]:
+            return item["option"]
         if "src_name" in item or "tgt_name" in item:
             label = item.get("label")
             edge = f"{item.get('src_name')}->{item.get('tgt_name')}"
