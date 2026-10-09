@@ -872,8 +872,19 @@ class ConnectorArgsMixin:
                     return
                 sug = difflib.get_close_matches(target_name, list(pb_by_name), n=1, cutoff=0.6)
                 errors.append(CompileError(
-                    code=ErrorCode.UNKNOWN_NEXT_STEP,  # close enough -- unknown ref
-                    message=f"target playbook {target_name!r} not found in this collection",
+                    code=ErrorCode.WORKFLOW_REFERENCE_UNRESOLVABLE,
+                    # Analyst sim: told only "not found in this collection",
+                    # the model retried the same name three times. `target:`
+                    # resolves within THIS YAML; a playbook that already
+                    # exists on the box is called by its id.
+                    message=(
+                        f"target playbook {target_name!r} is not in this YAML. "
+                        "`target:` names a playbook defined in the same YAML. To "
+                        "call a playbook that already exists on FortiSOAR, look "
+                        "it up with find(kind='playbook', query=<name>) -- rows "
+                        "with on_this_box: true carry its uuid and parameters -- "
+                        "and set `workflowReference: /api/3/workflows/<uuid>` "
+                        "instead of `target:`."),
                     path=f"{path}.arguments.target",
                     near=sug[0] if sug else None,
                     suggestion=f"did you mean {sug[0]!r}?" if sug else None,

@@ -42,7 +42,9 @@ def find(kind: str, query: str = "", connector: str = "",
     get_op_schema → run_op. `example` = a worked call (`connector` set) or
     vendor API docs. `recipe` = a step-sequence pattern for a build. `api` =
     a vendor's raw API for HTTP-fallback steps. `playbook` = existing
-    playbooks. `step` = real examples of one step type (query = the type).
+    playbooks: the analyst's own on this FortiSOAR first (`on_this_box: true`,
+    with the uuid and parameters a workflow_reference needs), then examples
+    from the reference library. `step` = real examples of one step type (query = the type).
     `jinja` = a filter for a transform; `filter_usage` = real usages of one
     named filter; `jinja_block` = whole {% set %}/{% for %} idioms.
     `field` = a module's record fields (`module` required, `query` ranks
@@ -106,12 +108,70 @@ def find(kind: str, query: str = "", connector: str = "",
         from .tools_jinja import get_filter_examples  # noqa: PLC0415
         out = get_filter_examples(query, limit=limit)
     else:  # playbook
-        out = search_playbooks(query, limit=limit)
+        out = _find_playbooks(query, limit, search_playbooks)
     if isinstance(out, dict):
         out.setdefault("kind", k)
         return out
     # A few catalogs (e.g. the jinja filter search) return a bare list.
     return {"kind": k, "results": out}
+
+
+def _box_playbook_row(r: dict[str, Any]) -> dict[str, Any]:
+    uuid = str(r.get("uuid") or "")
+    iri = r.get("@id") or (f"/api/3/workflows/{uuid}" if uuid else "")
+    params = r.get("parameters") or []
+    return {
+        "name": r.get("name"),
+        "on_this_box": True,
+        "uuid": uuid,
+        "workflowReference": iri,
+        "parameters": [p for p in params if isinstance(p, str)],
+        "active": r.get("isActive"),
+        "collection": r.get("collection"),
+    }
+
+
+def _find_playbooks(query: str, limit: int, search_corpus) -> dict[str, Any]:
+    """The analyst's playbooks on this FortiSOAR, then reference examples.
+
+    Analyst sim: asked to call "our existing 'Block IP - Shared' playbook", the
+    model had no way to see it -- this kind searched only the reference
+    library -- and guessed `target: <name>` (an error: target resolves within
+    the YAML) and then a raw step type that compiled and called nothing. A
+    workflow_reference to an existing playbook needs its uuid and parameters;
+    that is exactly what the box rows carry.
+    """
+    from . import _shared  # noqa: PLC0415
+    lim = max(1, min(int(limit or 10), 25))
+    box_rows: list[dict[str, Any]] = []
+    note = None
+    client = _shared._live_client()
+    api = getattr(client, "playbooks", None) if client is not None else None
+    if api is None:
+        note = ("not connected to a FortiSOAR, so the analyst's own playbooks "
+                "were not searched -- only reference examples below")
+    else:
+        try:
+            rows = api.find(name_contains=query, limit=lim) if query else api.find(limit=lim)
+            box_rows = [_box_playbook_row(r) for r in rows or [] if isinstance(r, dict)]
+        except Exception as exc:  # noqa: BLE001 -- the library half still answers
+            note = f"could not search this FortiSOAR's playbooks ({type(exc).__name__}: {exc})"
+    corpus = search_corpus(query, limit=lim)
+    corpus_rows = corpus if isinstance(corpus, list) else (corpus or {}).get("results") or []
+    out: dict[str, Any] = {
+        "kind": "playbook",
+        "results": box_rows + [dict(r, on_this_box=False)
+                               if isinstance(r, dict) and r.get("name") else r
+                               for r in corpus_rows],
+        "on_this_box": len(box_rows),
+    }
+    if box_rows:
+        out["how_to_call"] = ("call one with a workflow_reference step: "
+                              "`workflowReference: <its workflowReference>` plus "
+                              "one key per name in its `parameters`")
+    if note:
+        out["note"] = note
+    return out
 
 
 def _find_actions(containment, enrichment, record, *, query: str,

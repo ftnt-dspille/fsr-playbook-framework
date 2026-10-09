@@ -411,6 +411,11 @@ class _PlaybooksAPI:
         rows = self._rows
         if active is not None:
             rows = [r for r in rows if bool(r.get("isActive")) is bool(active)]
+        needle = (_kw.get("name_contains") or "").lower()
+        if needle:
+            # pyfsr: `name$like %x%`, case-insensitive. Ignored before, so a
+            # name search returned every playbook in the bundle.
+            rows = [r for r in rows if needle in str(r.get("name") or "").lower()]
         if trigger_type and trigger_type != "manual":
             # Only the manual/record-action surface is captured. Say so rather
             # than returning the manual rows under another trigger's name.
