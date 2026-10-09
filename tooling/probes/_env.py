@@ -140,3 +140,28 @@ def get_client():
     if cfg.base_url.startswith("http://"):
         client.base_url = cfg.base_url.rstrip("/")
     return client
+
+
+def live_license_serial(client=None) -> str | None:
+    """The configured (or given) target's license serial, or None.
+
+    One advisory round-trip to ``GET /api/auth/license?param=license_details``.
+    Used for durable-catalog provenance: a base_url says *where we dialed*,
+    a serial says *which appliance answered* -- and one box legitimately
+    answers on several listeners (https://h AND https://h:13000, same serial,
+    live-confirmed), where URL-only identity reads a false mismatch.
+    """
+    if client is None:
+        cfg = get_config()
+        if not cfg.is_live():
+            return None
+        client = get_client()
+        if client is None:
+            return None
+    try:
+        payload = client.get("/api/auth/license", params={"param": "license_details"})
+        from fsr_playbooks._catalog_meta import license_serial_from_details
+
+        return license_serial_from_details(payload)
+    except Exception:  # noqa: BLE001 -- identity is advisory, never fatal
+        return None

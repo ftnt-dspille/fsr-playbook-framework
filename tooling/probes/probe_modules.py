@@ -437,12 +437,18 @@ def _stamp_provenance(conn: sqlite3.Connection, client) -> None:
             last_publish = p.get("last_publish_time")
     except Exception:  # noqa: BLE001
         pass
+    licence_serial = None
+    try:  # durable identity: license serial survives URL/port changes
+        licence_serial = _env.live_license_serial(client)
+    except Exception:  # noqa: BLE001
+        pass
     _catalog_meta.stamp_instance(
         conn,
         instance_label=cfg.instance_label,
         base_url=cfg.base_url,
         fsr_version=fsr_version,
         last_publish_time=last_publish,
+        instance_serial=licence_serial,
     )
     # Baseline the cheap row counts so a later `check-fresh` can detect
     # add/delete drift (incl. picklist value adds that publish nothing).

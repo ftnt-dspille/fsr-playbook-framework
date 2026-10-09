@@ -20,9 +20,14 @@ Keys written by :func:`stamp_instance` and the freshness probes:
 key                         meaning
 ==========================  ==============================================
 ``instance_label``          human label of the warmed instance (e.g. ``dev``)
-``base_url``                normalized base URL the catalog was warmed from
-``base_url_hash``           short hash of ``base_url`` (cheap identity check)
-``fsr_version``             ``GET /api/version`` build at warm time (Tier-0)
+``base_url``               normalized base URL the catalog was warmed from
+``base_url_hash``          short hash of ``base_url`` (cheap identity check)
+``instance_serial``        license serial of the last live warm's target
+                           (e.g. ``FSRVMTEST260001``, from
+                           ``GET /api/auth/license?param=license_details``) --
+                           the one identity that survives URL/port changes;
+                           unlike ``base_url_hash``, REFRESHED each live warm
+``fsr_version``            ``GET /api/version`` build at warm time (Tier-0)
 ``last_publish_time``       ``GET /api/publish/error`` epoch (Tier-1 watermark)
 ``structural_warmed_at``    ISO-8601 UTC of the last Tier-1 warm
 ``data_warmed_at``          ISO-8601 UTC of the last Tier-2 warm
@@ -43,6 +48,7 @@ import hashlib
 import os
 import sqlite3
 from datetime import datetime, timezone
+from typing import Any
 
 SCHEMA_VERSION = "1"
 
@@ -94,19 +100,61 @@ def set_(conn: sqlite3.Connection, key: str, value: str | None) -> None:
 
 # ----------------------- instance identity -----------------------
 
+def license_serial_from_details(payload: Any) -> str | None:
+    """Pull the durable license serial out of a license_details payload.
+
+    Pure (no network) -- feeds :func:`stamp_instance`'s ``instance_serial``
+    and the serial-authored instance-mismatch check. The serial (e.g.
+    ``FSRVMTEST260001``) is stable across URL/port/proxy changes, which a
+    base_url hash is not: one appliance routinely answers on both ``https://h``
+    and ``https://h:13000`` (live-confirmed -- same serial both listeners) and
+    URL-only identity reads those as two boxes. Cluster-safe: prefers the
+    ``primary`` role node.
+    """
+    if not isinstance(payload, dict):
+        return None
+    nodes = payload.get("nodes") or {}
+    pick = None
+    for nd in nodes.values():
+        if not isinstance(nd, dict):
+            continue
+        meta = nd.get("node") or {}
+        if meta.get("role") == "primary":
+            pick = nd
+            break
+        if pick is None:
+            pick = nd
+    if pick is None and isinstance(payload.get("details"), dict):
+        return payload["details"].get("serial_no")
+    serial = ((pick or {}).get("details") or {}).get("serial_no")
+    return str(serial) if serial else None
+
+
 def normalize_base_url(url: str) -> str:
     """Canonicalize a base URL for stable identity comparison.
 
-    Lowercases the host, drops the scheme and any trailing slash. Two configs
-    that differ only by ``http`` vs ``https`` or a trailing ``/`` are the same
-    instance for catalog purposes.
+    Lowercases the host, drops the scheme, any trailing slash, and any
+    *default* port (``:443`` / ``:80``): two configs that differ only by
+    ``http`` vs ``https``, a trailing ``/``, or an explicit default port are
+    the same instance for catalog purposes. A non-default port (e.g. the
+    ``:13000`` migration listener) is kept -- it identifies a distinct
+    listener. Note an true *instance UUID* is not comparable here: 8.0.0
+    exposes no per-appliance UUID (``GET /api/version`` is a shared build
+    string), so URL identity + the cheap auto-warm fallback is the whole
+    story -- mis-detection costs a lazy re-warm, not a dead push.
     """
     u = (url or "").strip()
     for prefix in ("https://", "http://"):
         if u.lower().startswith(prefix):
             u = u[len(prefix):]
             break
-    return u.rstrip("/").lower()
+    u = u.rstrip("/").lower()
+    host = u.split("/")[0]
+    for default in (":443", ":80"):
+        if host.endswith(default):
+            u = host[: -len(default)] + u[len(host):]
+            break
+    return u
 
 
 def base_url_hash(url: str) -> str:
@@ -120,6 +168,7 @@ def stamp_instance(
     base_url: str,
     fsr_version: str | None = None,
     last_publish_time: str | int | None = None,
+    instance_serial: str | None = None,
 ) -> None:
     """Record which instance (and version/watermark) the catalog was warmed
     from. Called by the Tier-1 structural warmup (``probe_modules`` et al.)."""
@@ -133,6 +182,8 @@ def stamp_instance(
         set_(conn, "fsr_version", str(fsr_version))
     if last_publish_time is not None:
         set_(conn, "last_publish_time", str(last_publish_time))
+    if instance_serial:
+        set_(conn, "instance_serial", str(instance_serial))
 
 
 def record_count(conn: sqlite3.Connection, collection: str, total: int) -> None:

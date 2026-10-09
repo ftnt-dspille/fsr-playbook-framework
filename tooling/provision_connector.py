@@ -199,10 +199,44 @@ def write_connector(conn: sqlite3.Connection, info: dict, source: str,
     _insert(conn, "operations", ops)
     _insert(conn, "operation_params", params)
 
+    marker = f"{source}:{crow['version']}"
+    if source == SOURCE_LIVE:
+        # Record WHICH appliance this connector's ops came from. The primary
+        # base_url_hash stamp is NOT overwritten (a half-warmed catalog stays
+        # honestly "mismatched" for the picklists it still holds from the old
+        # box), but a blank catalog gets fully stamped, and every live row is
+        # traceable. Warm convergence is guaranteed by the ops themselves:
+        # once present, no unknown-operation verdict re-fires the warm.
+        from fsr_playbooks import _catalog_meta
+
+        try:
+            from probes import _env  # type: ignore
+
+            cfg = _env.get_config()
+            base_url = cfg.base_url or ""
+            label = getattr(cfg, "label", None) or getattr(cfg, "instance_label", None) or ""
+            serial = info.get("instance_serial") or None
+            if serial:
+                # The last live warm's target identity, updated every warm --
+                # unlike base_url_hash (intentionally frozen once stamped).
+                _catalog_meta.set_(conn, "instance_serial", str(serial))
+            if base_url:
+                marker = f"{marker}@{_catalog_meta.base_url_hash(base_url)}"
+                if _catalog_meta.check_instance(conn, base_url)[0] == "unstamped":
+                    _catalog_meta.stamp_instance(
+                        conn,
+                        instance_label=label,
+                        base_url=base_url,
+                        fsr_version=info.get("fsr_version"),
+                        instance_serial=serial,
+                    )
+        except Exception:  # noqa: BLE001 -- provenance recording is advisory
+            pass
+
     conn.execute(
         "INSERT OR REPLACE INTO _catalog_meta (key, value, updated_at) "
         "VALUES (?, ?, ?)",
-        (f"provisioned:{name}", f"{source}:{crow['version']}",
+        (f"provisioned:{name}", marker,
          _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")),
     )
     conn.commit()
@@ -256,18 +290,40 @@ def load_from_instance(name: str) -> dict:
         body = detail.json()
         body = body.get("data", body) if isinstance(body, dict) else body
         if isinstance(body, dict) and body.get("operations"):
-            return body
-    # Detail endpoint unavailable -- the listing already carries operations on
-    # 7.x, so fall back to it rather than failing the provision outright.
-    return match
+            info = body
+        else:
+            info = match
+    else:
+        # Detail endpoint unavailable -- the listing already carries
+        # operations on 7.x, so fall back to it rather than failing the
+        # provision outright.
+        info = match
+
+    # Durable identity for provenance stamping: the license serial survives
+    # URL/port/proxy changes (the base_url stamp does not). Advisory only.
+    try:
+        from probes import _env  # type: ignore
+
+        serial = _env.live_license_serial(client)
+        if serial:
+            info = {**info, "instance_serial": serial}
+    except Exception:  # noqa: BLE001 -- identity is advisory, never fatal
+        pass
+    return info
 
 
 def _instance_mismatch_warning(conn: sqlite3.Connection) -> str | None:
     """The catalog is warmed from one instance; warn when we're on another.
 
     Mixing two appliances' definitions into one store silently produces wrong
-    config UUIDs and wrong operation sets. Delegates to the Phase 9 guard so
-    this uses the same normalization as the rest of the catalog.
+    config UUIDs and wrong operation sets. URL comparison (via the Phase 9
+    guard) is the base check, but when the catalog carries a *license serial*
+    stamp the serial is AUTHORITATIVE: fetch the target's serial and, when
+    the two agree, there is no mismatch no matter the URLs -- an appliance
+    can legitimately answer on more than one listener (live-verified: the
+    same serial on both a box's default and high ports), which URL-only
+    identity reads as two different boxes. Serial fetch is advisory:
+    unreachable/absent falls back to the URL verdict.
     """
     try:
         from probes import _env  # type: ignore
@@ -281,9 +337,16 @@ def _instance_mismatch_warning(conn: sqlite3.Connection) -> str | None:
         # fall back to the stamped base_url for a message a human can act on.
         status, stamped_label, _hash = _catalog_meta.check_instance(conn, base_url)
         if status == "mismatch":
+            serial_stamp = _catalog_meta.get(conn, "instance_serial")
+            if serial_stamp and _env.get_config().is_live():
+                live_serial = _env.live_license_serial()
+                if live_serial == serial_stamp:
+                    return None  # same appliance; the URLs merely differ
             warmed = (stamped_label
                       or _catalog_meta.get(conn, "base_url")
                       or "an unnamed instance")
+            if serial_stamp:
+                warmed = f"{warmed} (serial {serial_stamp})"
             return (f"catalog was warmed from {warmed} but FSR_BASE_URL points at "
                     f"{_catalog_meta.normalize_base_url(base_url)} -- provisioning "
                     f"from a different instance than the rest of the catalog")

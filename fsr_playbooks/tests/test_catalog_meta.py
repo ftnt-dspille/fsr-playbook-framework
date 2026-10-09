@@ -50,13 +50,54 @@ def test_normalize_base_url_collapses_scheme_and_slash():
         cm.base_url_hash("soar.example.com")
 
 
+def test_normalize_base_url_drops_default_ports_only():
+    """https://box:443 IS https://box; the :13000 migration listener is NOT.
+
+    Over-triggering ahead of a cheap lazy auto-warm is survivable, but default
+    ports are pure spelling -- they must not read as a different appliance.
+    """
+    assert cm.normalize_base_url("https://box/") == \
+        cm.normalize_base_url("https://box:443") == "box"
+    assert cm.normalize_base_url("http://box:80/some/path") == "box/some/path"
+    assert cm.normalize_base_url("https://box:13000") == "box:13000"
+    assert cm.base_url_hash("https://box") == cm.base_url_hash("https://box:443/")
+    assert cm.base_url_hash("https://box:13000") != cm.base_url_hash("https://box")
+
+
 def test_stamp_and_check_match(conn):
-    cm.stamp_instance(conn, instance_label="dev", base_url="https://198.51.100.10")
+    cm.stamp_instance(conn, instance_label="dev", base_url="https://198.51.100.10",
+                      instance_serial="FSRVMTEST260001")
+    assert cm.get(conn, "instance_serial") == "FSRVMTEST260001"
     status, label, _ = cm.check_instance(conn, "https://198.51.100.10/")
     assert status == "ok"
     assert label == "dev"
     other, _, _ = cm.check_instance(conn, "https://198.51.100.99")
     assert other == "mismatch"
+
+
+def test_license_serial_prefers_the_primary_node():
+    payload = {"nodes": {
+        "n2": {"details": {"serial_no": "SECONDARY"}, "node": {"role": "secondary"}},
+        "n1": {"details": {"serial_no": "PRIMARY-BOX"}, "node": {"role": "primary"}},
+    }}
+    assert cm.license_serial_from_details(payload) == "PRIMARY-BOX"
+
+
+def test_license_serial_survives_moduleless_payloads():
+    assert cm.license_serial_from_details(None) is None
+    assert cm.license_serial_from_details("junk") is None
+    assert cm.license_serial_from_details({"nodes": {}}) is None
+    assert cm.license_serial_from_details(
+        {"details": {"serial_no": "TOPLEVEL"}}) == "TOPLEVEL"
+
+
+def test_restamp_without_serial_keeps_the_recorded_serial(conn):
+    """Serial provenance is write-once through the optional param: a re-stamp
+    that cannot fetch the license again never erases the identity."""
+    cm.stamp_instance(conn, instance_label="dev", base_url="https://198.51.100.10",
+                      instance_serial="FSRVMTEST260001")
+    cm.stamp_instance(conn, instance_label="dev2", base_url="https://198.51.100.11")
+    assert cm.get(conn, "instance_serial") == "FSRVMTEST260001"
 
 
 def test_guard_silent_without_target(conn, monkeypatch):
