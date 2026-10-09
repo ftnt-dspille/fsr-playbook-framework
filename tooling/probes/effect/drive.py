@@ -25,6 +25,7 @@ if str(ROOT / "tooling") not in sys.path:
     sys.path.insert(0, str(ROOT / "tooling"))
 
 from evals.chat_drive import _execute, _unwrap  # noqa: E402
+from harness import frames  # noqa: E402
 
 from probes._env import get_client  # noqa: E402
 
@@ -101,8 +102,7 @@ def accept_enhancement_offer(session: str, card: dict, workflow_iri: str) -> dic
 
 def cards(res: dict, kind: str) -> list[dict]:
     """Every card of one type in a turn result's transcript."""
-    return [e for e in (res.get("transcript") or [])
-            if isinstance(e, dict) and e.get("type") == kind]
+    return [c for c in frames.cards(res) if c.get("type") == kind]
 
 
 def first_card(res: dict, kind: str) -> dict | None:
@@ -111,10 +111,8 @@ def first_card(res: dict, kind: str) -> dict | None:
 
 
 def tool_names(res: dict) -> list[str]:
-    return [e.get("name") or "" for e in (res.get("transcript") or [])
-            if isinstance(e, dict) and e.get("type") in ("tool_use", "tool_call")]
+    return frames.tools_called(res)
 
 
 def final_text(res: dict) -> str:
-    return "".join(e.get("text", "") for e in (res.get("transcript") or [])
-                   if isinstance(e, dict) and e.get("type") == "text").strip()
+    return frames.assistant_text(res)
