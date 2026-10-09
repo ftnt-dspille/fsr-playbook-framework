@@ -11,14 +11,11 @@ beyond what we cover, add the case here rather than papering over it.
 """
 from __future__ import annotations
 
-import hashlib
 import inspect
 import json
 import logging
-import os
 import re
 import sqlite3
-import time
 import typing
 import uuid
 from collections.abc import Callable
@@ -765,182 +762,28 @@ def _default_approval_summary(name: str, args: dict[str, Any]) -> str | None:
     return f"{verb}: {subject}" if verb else f"{name}: {subject}"
 
 
-def _args_hash(name: str, args: dict[str, Any]) -> str:
-    payload = json.dumps({"tool": name, "args": args or {}}, sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
-
-
-# Per-process audit log. The chat backend (Phase 1) will replace this
-# with a per-conversation store keyed off the session id.
-AUDIT_LOG: list[dict[str, Any]] = []
-
-
-def _record_audit(name: str, args: dict[str, Any], tier: int, decision: str, *, result_preview: Any = None) -> None:
-    AUDIT_LOG.append({
-        "ts": time.time(),
-        "tool": name,
-        "tier": tier,
-        "args_hash": _args_hash(name, args),
-        "decision": decision,  # "auto_allow" | "approved" | "denied" | "pending"
-        "result_preview": result_preview,
-    })
-
-
-def clear_audit_log() -> None:
-    """Test/eval harness helper. Per-task resets so the
-    `appropriate_approval_requests` gate scores only the calls made
-    during the task it's measuring."""
-    AUDIT_LOG.clear()
-
-
-def snapshot_audit_log() -> list[dict[str, Any]]:
-    """Return a defensive copy of the audit log for scoring."""
-    return [dict(r) for r in AUDIT_LOG]
-
-
-# --- Eval-mode approval policy (Phase 3) ----------------------------------
-#
-# Under the chat / agent loop the gate suspends and waits for a human.
-# Under the eval harness there's no human in the loop -- the policy
-# decides for us. Set via env (`EVAL_APPROVAL_POLICY`) or the per-task
-# `approval_policy` field, which the harness sets per task before
-# calling dispatch. Recognized values:
-#   "suspend"          -- production behavior (default). Return pending_approval.
-#   "approve-all"      -- auto-approve every gated call.
-#   "deny-tier-3+"     -- synthesize `{ok:false, code:user_denied, ...}`.
-#   "auto-approve-tier:N" -- approve iff tier ≤ N, else deny.
-# Anything unrecognized falls back to "suspend".
-
-_EVAL_POLICY_OVERRIDE: str | None = None  # set by the harness per task
-
-
-def set_eval_policy(policy: str | None) -> None:
-    global _EVAL_POLICY_OVERRIDE
-    _EVAL_POLICY_OVERRIDE = policy or None
-
-
-def _active_eval_policy() -> str | None:
-    if _EVAL_POLICY_OVERRIDE:
-        return _EVAL_POLICY_OVERRIDE
-    return os.environ.get("EVAL_APPROVAL_POLICY") or None
-
-
-# --- Read-only auto-approve policy ----------------------------------------
-#
-# Read-only actions (tier 1-2: FSR/third-party queries) auto-run without an
-# approval card. This is the intended default -- a SOC analyst shouldn't have to
-# click "approve" to let the agent *look* at a record. The behavior used to be
-# implicit in the `tier >= 3` gate; this flag makes it an explicit, documented,
-# operator-toggleable policy.
-#
-#   FSR_AUTO_APPROVE_READONLY=1  (default) -- tier 1-2 auto-run, tier 3+ gated.
-#   FSR_AUTO_APPROVE_READONLY=0            -- paranoid mode: tier 1+ all gated;
-#                                            only tier-0 local tools auto-run.
-#
-# Deferred (not built here): "allow-once / always-allow this specific tool"
-# -- a per-(tool[,connector,op]) grant that survives one approval. This flag is
-# the coarse read-only switch, not that per-tool machinery.
-_READONLY_AUTO_APPROVE_OVERRIDE: bool | None = None  # test/host override
-
-
-def set_readonly_auto_approve(enabled: bool | None) -> None:
-    """Programmatic override for the read-only auto-approve flag. `None`
-    reverts to the env default. Mirrors `set_eval_policy`."""
-    global _READONLY_AUTO_APPROVE_OVERRIDE
-    _READONLY_AUTO_APPROVE_OVERRIDE = enabled
-
-
-def _readonly_auto_approve() -> bool:
-    if _READONLY_AUTO_APPROVE_OVERRIDE is not None:
-        return _READONLY_AUTO_APPROVE_OVERRIDE
-    raw = os.environ.get("FSR_AUTO_APPROVE_READONLY")
-    if raw is None:
-        return True  # default: read-only auto-runs
-    return raw.strip().lower() not in ("0", "false", "no", "off", "")
-
-
-def _approval_floor() -> int:
-    """Minimum tier that requires human approval. Default 3 (read-only
-    tier 1-2 auto-runs). With read-only auto-approve disabled, everything
-    above tier 0 (local, side-effect-free tools) is gated."""
-    return 3 if _readonly_auto_approve() else 1
-
-
-# --- Per-session approval grants -------------------------------------------
-#
-# Once a human approves a tool/action, the grant store tracks future approvals:
-#   - "once": auto-approve exactly the next matching call, then consume the grant.
-#   - "always": auto-approve all matching future calls (until session ends).
-#
-# Key: (session_id, tool_name, op_key) where op_key is None for regular tools
-# or f"{connector}:{operation}" for run_op-style dynamic dispatch.
-# Value: "once" | "always"
-#
-# In-memory only; persistence is out of scope for this phase.
-
-_APPROVAL_GRANTS: dict[tuple[str, str, str | None], str] = {}
-
-
-def grant_tool_approval(
-    session_id: str, tool_name: str, *, op_key: str | None = None, mode: str = "once"
-) -> None:
-    """Grant a tool approval for a session. Mode is 'once' (consume after next
-    matching call) or 'always' (persist until session ends).
-
-    Args:
-        session_id: Session identifier (e.g., chat session UUID).
-        tool_name: Name of the tool being granted (e.g., 'run_op').
-        op_key: Optional operation key for tools with dynamic tier (e.g.,
-            'fortigate:block_ip' for run_op). None for tools with static tier.
-        mode: 'once' or 'always'. Defaults to 'once'.
-    """
-    if mode not in ("once", "always"):
-        raise ValueError(f"Invalid grant mode {mode!r}; must be 'once' or 'always'")
-    key = (session_id, tool_name, op_key)
-    _APPROVAL_GRANTS[key] = mode
-
-
-def _consume_grant(
-    session_id: str, tool_name: str, op_key: str | None = None
-) -> bool:
-    """Check if a matching grant exists and consume it if mode == 'once'.
-
-    Returns True if a grant was found (and consumed for 'once' mode),
-    False otherwise. After this returns True, dispatch() treats the call
-    as if a human approved it."""
-    key = (session_id, tool_name, op_key)
-    mode = _APPROVAL_GRANTS.get(key)
-    if mode is None:
-        return False
-    if mode == "once":
-        del _APPROVAL_GRANTS[key]
-    return True
-
-
-def clear_session_grants(session_id: str) -> None:
-    """Clear all grants (both 'once' and 'always') for a session. Call this
-    when the session ends or on logout."""
-    to_delete = [k for k in _APPROVAL_GRANTS if k[0] == session_id]
-    for k in to_delete:
-        del _APPROVAL_GRANTS[k]
-
-
-def _apply_eval_policy(policy: str, tier: int) -> str:
-    """Return 'approve' | 'deny' for a given policy + tier. Anything
-    unknown returns 'suspend' so production behavior is the safe
-    default."""
-    p = policy.strip().lower()
-    if p in ("approve-all", "approve"):
-        return "approve"
-    if p in ("deny-tier-3+", "deny"):
-        return "deny"
-    if p.startswith("auto-approve-tier:"):
-        try:
-            cap = int(p.split(":", 1)[1].split(",")[-1].strip())
-            return "approve" if tier <= cap else "deny"
-        except (ValueError, IndexError):
-            return "suspend"
-    return "suspend"
+# Tier policy, grants, the eval policy and the audit log live in
+# `authorization`; re-exported here for existing callers.
+from .authorization import (  # noqa: E402,F401
+    _APPROVAL_GRANTS,
+    AUDIT_LOG,
+    HUMAN,
+    _active_eval_policy,
+    _apply_eval_policy,
+    _approval_floor,
+    _args_hash,
+    _consume_grant,
+    _readonly_auto_approve,
+    authorize,
+    clear_audit_log,
+    clear_session_grants,
+    grant_tool_approval,
+    needs_approval,
+    set_eval_policy,
+    set_readonly_auto_approve,
+    snapshot_audit_log,
+)
+from .authorization import record_audit as _record_audit  # noqa: E402,F401
 
 
 @dataclass(frozen=True)
@@ -1840,7 +1683,7 @@ def _is_invoke_failure(result: Any) -> bool:
 
 def dispatch(
     name: str, arguments: dict[str, Any], *, _internal: bool = False,
-    session_id: str | None = None
+    session_id: str | None = None, approved_by: str | None = None,
 ) -> Any:
     """Tier-aware dispatch (HITL_GUARDRAILS_PLAN Phase 0).
 
@@ -1855,6 +1698,11 @@ def dispatch(
     the pending_approval envelope is skipped and the action auto-runs,
     audited as 'auto_allow_grant'. Grants can be 'once' (consumed on match)
     or 'always' (persistent until session ends).
+
+    Whether the call runs, cards or is denied is `authorization.authorize`.
+    An internal caller re-dispatching an approved call passes `_approved` in
+    the arguments and names who approved it in `approved_by` ("human" when
+    omitted; "system:autonomy" for an autonomy rule acting unattended).
     """
     spec = REGISTRY.get(name)
     if spec is None:
@@ -1894,6 +1742,7 @@ def dispatch(
             ),
         }
     approved = bool(raw_args.pop("_approved", False)) if _internal else False
+    actor = (approved_by or HUMAN) if approved else None
     summary = raw_args.pop("_summary", None)
 
     # A read-only turn (explain / find_issues chip): refuse the write frontier
@@ -2084,43 +1933,12 @@ def dispatch(
     if name == "verify_playbook" and "live_probe" not in raw_args:
         raw_args["live_probe"] = True
 
-    tier = _resolve_tier(name, raw_args)
-
-    floor = _approval_floor()
-    if tier >= floor and not approved:
-        # Check for approval grants before policy/pending_approval.
-        # Build op_key for tools with dynamic tier (run_op, etc.).
-        op_key: str | None = None
-        if name == "run_op":
-            connector = (raw_args or {}).get("connector") or ""
-            op = (raw_args or {}).get("op") or ""
-            op_key = f"{connector}:{op}" if connector and op else None
-
-        if session_id and _consume_grant(session_id, name, op_key):
-            # Grant exists (and 'once' grants are consumed). Execute with the
-            # grant decision, bypassing the approval envelope.
-            result = _invoke(spec, name, raw_args)
-            if _is_invoke_failure(result):
-                return result
-            _record_audit(name, raw_args, tier, "auto_allow_grant")
-            return _finalize_tool_output(name, result)
-
-        # Phase 3: eval-mode policy short-circuit. Production callers
-        # (the chat loop) leave the policy unset, fall through to the
-        # pending_approval envelope, and the chat layer suspends.
-        policy = _active_eval_policy()
-        policy_decision = _apply_eval_policy(policy, tier) if policy else "suspend"
-        if policy_decision == "approve":
-            result = _invoke(spec, name, raw_args)
-            if _is_invoke_failure(result):
-                return result
-            _record_audit(name, raw_args, tier, "approved")
-            return _finalize_tool_output(name, result)
-        if policy_decision == "deny":
-            _record_audit(name, raw_args, tier, "denied")
-            return {"ok": False, "code": "user_denied",
-                    "reason": f"Eval policy '{policy}' denied tier-{tier} action."}
-
+    decision = authorize(name, raw_args, approved_by=actor, session_id=session_id)
+    tier = decision.tier
+    if decision.outcome == "deny":
+        _record_audit(name, raw_args, tier, decision.label, actor=decision.actor)
+        return {"ok": False, "code": "user_denied", "reason": decision.reason}
+    if decision.outcome == "card":
         # About to card this call. An argument that cannot possibly work must
         # bounce a clean, self-correctable error instead of a misleading approval
         # card -- a `run_op` on a connector that exists nowhere, a `run_playbook`
@@ -2194,7 +2012,5 @@ def dispatch(
     result = _invoke(spec, name, raw_args)
     if _is_invoke_failure(result):
         return result
-
-    decision = "approved" if approved else ("auto_allow" if tier <= 2 else "approved")
-    _record_audit(name, raw_args, tier, decision)
+    _record_audit(name, raw_args, tier, decision.label, actor=decision.actor)
     return _finalize_tool_output(name, result)

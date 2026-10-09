@@ -66,6 +66,7 @@ from ._loop_helpers import (
     with_readable_dates,
     wrapup_directive,
 )
+from .authorization import needs_approval
 from .provider import (
     ApprovalRequestEvent,
     DoneEvent,
@@ -655,7 +656,7 @@ async def run_loop(
         # ── tool round: parallel up to the approval boundary ──────────
         calls = rnd.tool_calls
         tiers = [_tier_for(c.name, c.args) for c in calls]
-        approval_idx = next((i for i, t in enumerate(tiers) if t >= 3), len(calls))
+        approval_idx = next((i for i, t in enumerate(tiers) if needs_approval(t)), len(calls))
         # Staging an action card ends the agent's half of the turn, which
         # TriageDiscipline enforces -- but only for calls evaluated after the
         # card's result is noted. Concurrent siblings would slip past it

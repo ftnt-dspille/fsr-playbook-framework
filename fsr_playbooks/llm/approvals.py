@@ -27,6 +27,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .authorization import needs_approval
+
 # The result a skipped call gets. One definition, used by run_turn and every
 # provider's resume. It used to be the bare `{"ok": false, "code":
 # "superseded_by_approval"}`, which a model read as "queued for approval": in
@@ -252,7 +254,7 @@ def collect_batch(remaining: list[tuple[str, str, dict[str, Any]]],
         if len(batch) >= BATCH_LIMIT:
             break
         try:
-            gated = int(tier_fn(name, args)) >= 3
+            gated = needs_approval(int(tier_fn(name, args)))
         except Exception:  # noqa: BLE001 -- an unknown tier never batches
             gated = False
         if not gated:
