@@ -34,6 +34,7 @@ Additions and in-place value changes are never refused -- those are the edit.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -161,12 +162,12 @@ def _walk_losses(before: Any, after: Any, path: str, out: list[str]) -> None:
         # identity rather than by index -- otherwise deleting the first of
         # three steps reports every later step as changed instead of
         # reporting the one that actually vanished.
-        ident_of = _identity
+        ident_of: Callable[[Any], str] = _identity
         if _has_duplicate_ids(before) or _has_duplicate_ids(after):
             # Two members share a key (two branches with one label): keying
             # by it would merge them and hide the loss of one. Compare whole
             # values instead -- stricter, never blinder.
-            ident_of = str
+            ident_of = _whole_value
         before_by_id = {ident_of(v): v for v in before}
         after_ids = {ident_of(v) for v in after}
         for ident, value in before_by_id.items():
@@ -201,6 +202,10 @@ def _type_changed(before: Any, after: Any) -> bool:
         return False
     a, b = _step_type_key(before), _step_type_key(after)
     return bool(a and b and a != b)
+
+
+def _whole_value(v: Any) -> str:
+    return str(v)
 
 
 def _has_duplicate_ids(items: list) -> bool:

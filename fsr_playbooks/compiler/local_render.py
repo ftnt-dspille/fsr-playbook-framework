@@ -250,7 +250,7 @@ def sample_from_shape(shape: Any, _depth: int = 0) -> Any:
         return Opaque("unrecorded part of the output")
     t = shape.get("type")
     return {"integer": 1, "number": 1.0, "boolean": True,
-            "null": None}.get(t, "sample")
+            "null": None}.get(str(t), "sample")
 
 
 def sample_record(fields: list[tuple[str, str, str | None]], module: str) -> dict[str, Any]:
