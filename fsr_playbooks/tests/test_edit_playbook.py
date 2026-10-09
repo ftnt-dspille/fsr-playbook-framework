@@ -765,3 +765,26 @@ def test_yes_no_labels_sent_as_json_strings_pass():
     codes = [f["code"] for f in res.get("required_fixes") or []]
     assert "bad_value" not in codes, res.get("required_fixes")
     assert 'display: "Yes"' in res["after_yaml"]
+
+
+_WITH_PARAM = ("collection: C\nplaybooks:\n- name: P\n  parameters: [lead_email]\n  steps:\n"
+               "  - {name: Start, type: start, next: Note A}\n"
+               "  - {name: Note A, type: set_variable, vars: {to: '{{ vars.input.params.lead_email }}'}}\n")
+
+
+def test_a_removed_unread_parameter_is_acknowledged_for_the_save():
+    # Analyst sim: the analyst agreed to drop `lead_email`; verify passed and
+    # Apply's write guard refused three times (would_drop_fields).
+    tok = set_grounded_yaml(_WITH_PARAM)
+    try:
+        still_read = edit_playbook([{"op": "remove_parameter", "name": "lead_email"}])
+        res = edit_playbook([
+            {"op": "update_step", "name": "Note A", "set": {"vars": {"to": "soc-leads@example.com"}}},
+            {"op": "remove_parameter", "name": "lead_email"}])
+    finally:
+        reset_grounded_yaml(tok)
+    assert not still_read["ready_to_push"]
+    assert res["ready_to_push"], res.get("required_fixes")
+    assert res["acknowledged_drops"] == ["lead_email"]
+    from fsr_playbooks.compiler.prewrite import _ack_matches
+    assert _ack_matches("lead_email", "collection.workflows[P].parameters[lead_email]")

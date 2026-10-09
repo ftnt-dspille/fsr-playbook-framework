@@ -853,6 +853,36 @@ def _grandfather_preexisting(result: dict[str, Any],
     return out
 
 
+def _parameter_names(yaml_text: str) -> set[str]:
+    from ruamel.yaml import YAML
+    try:
+        doc = YAML(typ="safe").load(yaml_text or "") or {}
+    except Exception:  # noqa: BLE001
+        return set()
+    out: set[str] = set()
+    for pb in doc.get("playbooks") or [] if isinstance(doc, dict) else []:
+        params = (pb or {}).get("parameters") if isinstance(pb, dict) else None
+        if isinstance(params, dict):
+            out.update(str(k) for k in params)
+        for p in params if isinstance(params, list) else []:
+            out.add(str(p.get("name")) if isinstance(p, dict) else str(p))
+    return out
+
+
+def _unread_dropped_parameters(before_yaml: str, after_yaml: str) -> list[str]:
+    """Parameters the edit removed that nothing in it still reads.
+
+    Live (analyst sim): the analyst agreed to drop `lead_email`, verify passed,
+    and Apply refused three times -- the write guard only took step names as
+    acknowledged drops, so removing a parameter could never be saved. One that
+    no step reads (`vars.input.params.<name>`) is safe to drop; one still read
+    would fail verify first, so it never reaches here unacknowledged."""
+    gone = _parameter_names(before_yaml) - _parameter_names(after_yaml)
+    return sorted(p for p in gone if not re.search(
+        rf"params(\.{re.escape(p)}\b|\[\s*['\"]{re.escape(p)}['\"]\s*\])",
+        after_yaml or ""))
+
+
 def _issue_verified_id(out: dict[str, Any], after_yaml: str,
                        before_yaml: str) -> dict[str, Any]:
     """Bind the verdict to the bytes it blessed, on the way out.
@@ -887,8 +917,9 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
     # step AND used a delete verb, so this list is the set of drops a gate
     # already judged intentional -- the model cannot widen it by asking.
     out["acknowledged_drops"] = sorted(
-        str(r.get("step")) for r in (out.get("regressions") or [])
-        if r.get("kind") == "step_deleted_as_requested" and r.get("step")
+        [str(r.get("step")) for r in (out.get("regressions") or [])
+         if r.get("kind") == "step_deleted_as_requested" and r.get("step")]
+        + _unread_dropped_parameters(before_yaml, after_yaml)
     )
 
     out["verified_id"] = _verified_yaml.remember(
@@ -926,7 +957,8 @@ def _issue_verified_id(out: dict[str, Any], after_yaml: str,
 # ---------------------------------------------------------------------------
 
 _EDIT_OPS = ("add_step", "update_step", "rename_step", "remove_step",
-             "set_route", "remove_route", "add_parameter", "add_playbook")
+             "set_route", "remove_route", "add_parameter", "remove_parameter",
+             "add_playbook")
 # Step-level keys an update may not change: `name` has its own op because
 # routes point at it; `uuid` ties the step to its live record.
 _UPDATE_FORBIDDEN = frozenset({"name", "uuid"})
@@ -1093,6 +1125,7 @@ _OP_SHAPES = {
     "set_route": "{op: set_route, from: <step>, to: <step>, option: <branch>}",
     "remove_route": "{op: remove_route, from: <step>, option: <branch>}",
     "add_parameter": "{op: add_parameter, name: <parameter>}",
+    "remove_parameter": "{op: remove_parameter, name: <parameter>}",
     "add_playbook": "{op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [{name, type, ...}]}",
 }
 
@@ -1436,6 +1469,7 @@ def edit_playbook(
       - {op: remove_route, from: <step>, option: <branch label>}
       - {op: add_parameter, name: <parameter>}
           declares a playbook parameter, so `vars.input.params.<name>` resolves.
+      - {op: remove_parameter, name: <parameter>}  -- once no step reads it.
       - {op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [...]}
           adds a NEW playbook beside the open one -- a reusable child the open
           playbook calls with a workflow_reference step (`target: <its name>`,
@@ -1539,6 +1573,16 @@ def edit_playbook(
                 return f"parameter {pname!r} already declared"
             params.append(pname)
             return f"declared parameter {pname!r}"
+        if n.get("op") == "remove_parameter":
+            pname = str(n.get("name") or "").strip()
+            params = target.get("parameters")
+            names = [(p.get("name") if isinstance(p, dict) else str(p))
+                     for p in (params if isinstance(params, list) else [])]
+            if pname not in names:
+                raise _EditError(f"no parameter named {pname!r} -- parameters are: "
+                                 + (", ".join(map(repr, names)) or "none"))
+            params.pop(names.index(pname))
+            return f"removed parameter {pname!r}"
         old = None
         if n.get("op") == "rename_step":
             try:
