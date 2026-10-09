@@ -18,7 +18,10 @@ import re
 import sys
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # annotation-only: keeps CLI startup free of compiler imports
+    from fsr_playbooks.compiler.pipeline import CompileResult
 
 # Local sibling modules (recover.py, picklists.py, …) and the legacy `tooling/`
 # layout live alongside this file, not in an installed package. Put this dir on
@@ -496,6 +499,201 @@ def _connector_preflight(ir, client) -> None:
         )
 
 
+_PUSH_CONFIG_PLACEHOLDER = "REPLACE_WITH_CONFIG_UUID"
+
+
+def _push_input_text(raw: str, db: Path) -> str:
+    """Accept native compiled exports, not just authored YAML.
+
+    Feeding ``fsrpb push`` the compiled ``workflow_collections`` export the
+    platform (or ``fsrpb pull`` / ``generate-recipe``) produces used to die
+    with ``[missing_field] playbooks: at least one playbook is required`` --
+    a misleading refusal for a file the same toolchain emitted. Detect that
+    JSON shape and decompile it first (the same roundtrip ``fsrpb decompile``
+    performs), then compile as usual.
+    """
+    if not raw.lstrip().startswith("{"):
+        return raw
+    try:
+        src = json.loads(raw)
+    except ValueError:
+        return raw
+    if isinstance(src, dict) and src.get("type") == "workflow_collections" and "data" in src:
+        from fsr_playbooks.compiler.decompiler import decompile_to_yaml
+
+        print(
+            "input is a compiled workflow_collections export -- "
+            "decompiling to YAML for push",
+            file=sys.stderr,
+        )
+        return decompile_to_yaml(src, db)
+    return raw
+
+
+def _unknown_connectors_in(errors) -> list[str]:
+    """Connector names behind unknown_connector / unknown_operation errors."""
+    from fsr_playbooks.compiler.errors import ErrorCode
+
+    names: list[str] = []
+    for e in errors:
+        if e.code == ErrorCode.UNKNOWN_CONNECTOR:
+            m = re.search(r"unknown connector: '([^']+)'", e.message)
+        elif e.code == ErrorCode.UNKNOWN_OPERATION:
+            m = re.search(r"on connector '([^']+)'", e.message)
+        else:
+            continue
+        if m and m.group(1) not in names:
+            names.append(m.group(1))
+    return names
+
+
+def _autowarm_and_recompile(text: str, args: argparse.Namespace,
+                            result: CompileResult) -> CompileResult:
+    """Recover a compile blocked by catalog-blindness: warm, then re-compile.
+
+    The reference catalog is warmed from ONE instance. Pointing FSR_BASE_URL
+    at another used to block every push with unknown_connector /
+    unknown_operation verdicts the foreign catalog cannot actually support --
+    seen live: an operation that EXISTS on the target was refused because the
+    catalog predated the connector's install. Warm exactly the referenced
+    connectors from the configured target (seconds each, never a full
+    refresh), then retry the compile loop until no new unknowns surface.
+
+    Only when warming is impossible (no live config / warm error) do the two
+    verdict classes demote to warnings -- and only if the catalog's
+    provenance actually differs from the configured target: after a
+    successful warm, absence in the catalog IS evidence of a typo and stays
+    fatal. Demotion re-compiles with ``lax_codes`` so the pipeline still
+    emits its JSON (mutating severities on an already-blocked result cannot
+    help -- a blocked compile ships no ``fsr_json`` to push).
+    """
+    from fsr_playbooks.compiler import compile_yaml
+    from fsr_playbooks.compiler.errors import ErrorCode
+
+    if not _unknown_connectors_in(result.errors):
+        return result
+
+    from probes import _env  # type: ignore
+
+    db = Path(args.db)
+    if _env.get_config().is_live():
+        try:
+            import sqlite3
+
+            from provision_connector import (
+                SOURCE_LIVE,
+                load_from_instance,
+                write_connector,
+            )
+
+            warmed: list[str] = []
+            for _ in range(3):
+                pending = [n for n in _unknown_connectors_in(result.errors) if n not in warmed]
+                if not pending:
+                    break
+                conn = sqlite3.connect(db)
+                try:
+                    for name in pending:
+                        info = load_from_instance(name)
+                        row = write_connector(conn, info, SOURCE_LIVE, None)
+                        warmed.append(row["connector"])
+                        print(
+                            f"auto-warmed {row['connector']} v{row['version']} from the "
+                            f"configured target ({row['operations']} operations) -- the "
+                            f"catalog could not validate it",
+                            file=sys.stderr,
+                        )
+                finally:
+                    conn.close()
+                result = compile_yaml(text, db)
+            if result.ok and warmed:
+                # Connector ops now match the target, but the rest of the
+                # catalog (picklists, module defs) may still be from another
+                # appliance -- the primary provenance stamp intentionally
+                # stays "mismatched" until a full warm aligns it. Say so once,
+                # instead of letting the next compile re-warn mysteriously.
+                try:
+                    from provision_connector import _instance_mismatch_warning
+
+                    conn = sqlite3.connect(db)
+                    try:
+                        residual = _instance_mismatch_warning(conn)
+                    finally:
+                        conn.close()
+                    if residual:
+                        print(
+                            "note: connector ops warmed from the target, but the "
+                            "catalog's picklists/module defs still carry provenance "
+                            "from another instance -- run a full warmup to align",
+                            file=sys.stderr,
+                        )
+                except Exception:  # noqa: BLE001 -- advisory only
+                    pass
+            return result
+        except Exception as e:  # noqa: BLE001
+            print(f"auto-warm failed ({e!r}); falling back to catalog as-warmed", file=sys.stderr)
+
+    # Warming impossible: a foreign catalog still cannot assert unknown-ness.
+    try:
+        import sqlite3
+
+        from provision_connector import _instance_mismatch_warning
+
+        conn = sqlite3.connect(db)
+        try:
+            mismatch = _instance_mismatch_warning(conn)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 -- advisory only
+        mismatch = None
+    if mismatch:
+        print(
+            "catalog provenance differs from the configured target AND auto-warming "
+            "was unavailable -- demoting unknown_connector / unknown_operation to "
+            "warnings (absence in a foreign catalog is not evidence)",
+            file=sys.stderr,
+        )
+        return compile_yaml(
+            text, db,
+            lax_codes={ErrorCode.UNKNOWN_CONNECTOR, ErrorCode.UNKNOWN_OPERATION},
+        )
+    return result
+
+
+def _placeholder_step_holders(coll_entity: dict) -> list[str]:
+    """Steps still carrying the generated config-UUID placeholder."""
+    hits: list[str] = []
+    for wf in coll_entity.get("workflows") or []:
+        for st in wf.get("steps") or []:
+            if isinstance(st, dict) and _PUSH_CONFIG_PLACEHOLDER in json.dumps(st):
+                hits.append(f"{wf.get('name')} -> {st.get('name')}")
+    return hits
+
+
+def _ensure_workflows_active(coll_entity: dict, args: argparse.Namespace) -> None:
+    """push delivers runnable state: workflows arrive isActive, not drafts.
+
+    Recipes are generated inactive (they are samples until pointed at a
+    real appliance), and an inactive push used to produce a deploy that
+    LOOKS complete -- until the first run fails with
+    ``CS-WF-1: referenced playbook non-existent or Inactive`` (seen live:
+    every workflow of a freshly pushed ingest trio needed manual
+    activation). Push is a deploy verb: it activates what it writes.
+    ``--no-activate`` preserves the as-authored state.
+    """
+    if getattr(args, "no_activate", False):
+        return
+    inactive = [w.get("name") for w in coll_entity.get("workflows") or [] if not w.get("isActive")]
+    for w in coll_entity.get("workflows") or []:
+        w["isActive"] = True
+    if inactive:
+        print(
+            f"activating {len(inactive)} workflow(s) that arrived inactive: "
+            f"{', '.join(inactive)} (push --no-activate to leave them as-authored)",
+            file=sys.stderr,
+        )
+
+
 def cmd_push(args: argparse.Namespace) -> int:
     """Compile YAML and POST/PUT the unwrapped collection to /api/3/workflow_collections.
 
@@ -546,8 +744,10 @@ def cmd_push(args: argparse.Namespace) -> int:
     if getattr(args, "url", None) or getattr(args, "user", None) or getattr(args, "password", None):
         _env._cached_cfg = None  # force re-read with updated env
 
-    text = Path(args.input).read_text()
+    text = _push_input_text(Path(args.input).read_text(), Path(args.db))
     result = compile_yaml(text, Path(args.db))
+    if not result.ok:
+        result = _autowarm_and_recompile(text, args, result)
     if not result.ok:
         _print_errors(result.errors)
         return 1
@@ -560,6 +760,18 @@ def cmd_push(args: argparse.Namespace) -> int:
     coll_entity = result.fsr_json["data"][0]
     coll_uuid = coll_entity["uuid"]
     coll_name = coll_entity["name"]
+
+    placeholders = _placeholder_step_holders(coll_entity)
+    if placeholders:
+        print(
+            f"refusing to push: {len(placeholders)} step(s) still carry the generated "
+            f"REPLACE_WITH_CONFIG_UUID placeholder (steps: {'; '.join(placeholders)}). "
+            "Replace it with the target appliance's connector configuration UUID "
+            "(fsrpb health, or client.connectors.list_configurations) and push again.",
+            file=sys.stderr,
+        )
+        return 1
+    _ensure_workflows_active(coll_entity, args)
 
     client = _env.get_client()
 
@@ -1939,6 +2151,43 @@ def _print_env_summary(data, env_obj, steps_arr, steps_map) -> None:
         print(f"    {label} {st} {preview}", file=sys.stderr)
 
 
+def _health_connectors_configs(client, name: str, version: str) -> list[tuple[str, str]]:
+    """A connector's configurations as (display name, config_id) pairs.
+
+    The definition POST carries the configuration rows (the same call pyfsr's
+    connector_detail uses). The bare healthcheck endpoint keys the DEFAULT
+    configuration -- so with configs that are live-but-not-default, or
+    several configs in mixed health, it answers for at most one of them.
+    """
+    try:
+        r = client.session.post(
+            client.base_url
+            + f"/api/integration/connectors/{name}/{version}/?format=json",
+            json={}, verify=client.verify_ssl,
+        )
+        rows = (r.json() or {}).get("configuration") or []
+    except Exception:  # noqa: BLE001 -- fall back to the default-config probe
+        return []
+    out = []
+    for x in rows:
+        cid = x.get("config_id")
+        if cid:
+            out.append((x.get("name") or cid, cid))
+    return out
+
+
+def _health_probe_config(client, name: str, version: str, config: str | None = None) -> str:
+    """Probe one healthcheck endpoint (optionally one specific configuration)."""
+    url = (client.base_url
+           + f"/api/integration/connectors/healthcheck/{name}/{version}/")
+    if config:
+        url += f"?config={config}"
+    r = client.session.get(url, verify=client.verify_ssl)
+    if r.status_code == 404:
+        return "no-config"
+    return (r.json() or {}).get("status", "?")
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     """List configured-and-active connectors, with optional live healthcheck.
 
@@ -2005,20 +2254,38 @@ def cmd_health(args: argparse.Namespace) -> int:
     available, disconnected, other = [], [], []
     for t in targets:
         if do_probe:
-            url = (client.base_url
-                   + f"/api/integration/connectors/healthcheck/{t['name']}/{t['version']}/")
-            if args.config:
-                url += f"?config={args.config}"
+            # Per-configuration probing. The bare endpoint answers for the
+            # DEFAULT configuration only -- a lone healthy non-default config
+            # read as "Disconnected" for a connector that was in fact working
+            # (seen live: hunt succeeded minutes after a "Disconnected" probe).
+            # With configs enumerable, probe each and report the real picture;
+            # the bare default probe (and its 404/no-config) is kept for
+            # connectors with no configurations to enumerate.
             try:
-                r = client.session.get(url, verify=client.verify_ssl)
-                if r.status_code == 404:
-                    status = "no-config"; bucket = other
+                if args.config:
+                    states = [(args.config, _health_probe_config(client, t["name"], t["version"], args.config))]
                 else:
-                    j = r.json(); status = j.get("status", "?")
-                    bucket = (available if status == "Available"
-                              else disconnected if status == "Disconnected"
-                              else other)
+                    configs = _health_connectors_configs(client, t["name"], t["version"])
+                    if not configs:
+                        states = []
+                    else:
+                        states = []
+                        for cname, cid in configs:
+                            try:
+                                states.append((cname, _health_probe_config(client, t["name"], t["version"], cid)))
+                            except Exception as e:  # noqa: BLE001
+                                states.append((cname, f"error:{e!r}"))
+                statuses = [s for _, s in states] if states else \
+                    [_health_probe_config(client, t["name"], t["version"])]
+                t["configs"] = states
+                if "Available" in statuses:
+                    status, bucket = "Available", available
+                elif statuses and all(s == "Disconnected" for s in statuses):
+                    status, bucket = "Disconnected", disconnected
+                else:
+                    status, bucket = (statuses[0] if len(statuses) == 1 else "?"), other
             except Exception as e:  # noqa: BLE001
+                t["configs"] = []
                 status = f"error:{e!r}"; bucket = other
             t["status"] = status
             bucket.append(t)
@@ -2037,6 +2304,13 @@ def cmd_health(args: argparse.Namespace) -> int:
         print(_ansi(f"\n{label} ({len(rows)})", color))
         for r in rows:
             extra = f"  cfg={r.get('config_count')}" if r.get('config_count') is not None else ""
+            cfgs = r.get("configs")
+            if cfgs:
+                short = {"Available": "ok", "Disconnected": "down"}
+                parts = ", ".join(
+                    f"{c}={short.get(s, s)}" for c, s in cfgs
+                )
+                extra = f"  cfg: {parts}"
             print(f"  {r['name']:<35} {r['version']:<10} {r['status']}{extra}")
 
     if do_probe:
@@ -4898,6 +5172,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "replace: hard-purge then POST -- gated on "
                          "FSR_ALLOW_HARD_DELETE; use only for recovery.")
     sp.add_argument("--json", action="store_true", help="print response JSON to stdout")
+    sp.add_argument("--no-activate", action="store_true",
+                    help="push workflows exactly as authored (keep an isActive: "
+                         "false recipe inactive). Default: push activates the "
+                         "workflows it writes -- an inactive push looks like a "
+                         "successful deploy until the first run dies with "
+                         "CS-WF-1 (referenced playbook non-existent or Inactive).")
     sp.add_argument("--force-large-purge", action="store_true",
                     help="replace mode: bypass the >50-workflow / >500-step "
                          "safety cap. Required only when an intentional purge "
