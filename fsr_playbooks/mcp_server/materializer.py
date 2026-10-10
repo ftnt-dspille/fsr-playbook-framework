@@ -40,6 +40,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from contextvars import ContextVar, Token
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,34 @@ _MAX_TOOLS = 80
 # materialized tool name → (server, tool_name). Used by the trace→playbook
 # compiler (later phase) + attribution. Populated at materialize time.
 SERVER_MAP: dict[str, tuple[str, str]] = {}
+
+# The materialized MCP tools THIS turn may call, as the host advertised them.
+# SERVER_MAP is worker-wide (every config on the worker shares it), so the
+# discovery tools read this instead to say which MCP servers are in reach.
+_TURN_MCP_TOOLS: ContextVar[tuple[str, ...]] = ContextVar("_turn_mcp_tools", default=())
+
+
+def set_turn_mcp_tools(names: Any) -> Token:
+    """Record the `mcp_*` tools the host advertised for this turn."""
+    return _TURN_MCP_TOOLS.set(tuple(
+        n for n in (names or ()) if isinstance(n, str) and n.startswith("mcp_")))
+
+
+def turn_mcp_reach() -> list[dict[str, Any]]:
+    """`[{server, tools: [bare names]}]` for the MCP tools in reach this turn."""
+    by_server: dict[str, list[str]] = {}
+    for name in _TURN_MCP_TOOLS.get():
+        server, tool = SERVER_MAP.get(name) or _split_mcp_name(name)
+        if server and tool:
+            by_server.setdefault(server, []).append(tool)
+    return [{"server": s, "tools": sorted(t)} for s, t in sorted(by_server.items())]
+
+
+def _split_mcp_name(name: str) -> tuple[str, str]:
+    body = name[len("mcp_"):] if name.startswith("mcp_") else ""
+    server, _, tool = body.partition("__")
+    return server, tool
+
 
 # module-level state (configure → ensure_initialized → initialize)
 _allowlist: dict[str, dict[str, Any]] = {}

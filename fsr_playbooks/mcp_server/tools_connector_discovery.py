@@ -904,6 +904,43 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
 
 
 @mcp.tool()
+def _mcp_reach() -> list[dict[str, Any]]:
+    """The native-MCP servers this turn can call, or [] (fail-open)."""
+    try:
+        from .materializer import turn_mcp_reach
+        return turn_mcp_reach()
+    except Exception:  # noqa: BLE001 - discovery must never fail over MCP
+        return []
+
+
+_MCP_REACH_NOTE = (
+    "These MCP servers are reachable this turn through their "
+    "mcp_<server>__<tool> tools. They are not connectors, so connector "
+    "listings do not show them; use them as evidence sources.")
+
+
+def annotate_mcp_reach(out: dict[str, Any], *, lookup_empty: bool = False) -> dict[str, Any]:
+    """Add the turn's native-MCP reach to a discovery result, in place.
+
+    Shared by the real tools and the offline harness's stand-ins, so both say
+    the same thing. `lookup_empty`: an enrichment lookup found no connector op.
+    With MCP tools in reach that is not a gap, and the message must not tell
+    the model to report one -- it did, and called a C2 beacon 'suspicious'
+    while FortiSIEM's reputation tool sat in its tool list."""
+    reach = _mcp_reach()
+    if not reach:
+        return out
+    out["native_mcp"] = reach
+    out["native_mcp_note"] = _MCP_REACH_NOTE
+    if lookup_empty:
+        out.pop("suggested_card", None)
+        out["message"] = (
+            "No connector enrichment lookup matches, but the MCP servers in "
+            "`native_mcp` are reachable this turn. Check their tools before "
+            "reporting a gap.")
+    return out
+
+
 def find_enrichment_actions(target_type: str = "", probe: bool = True,
                             limit: int = 25) -> dict[str, Any]:
     """List the read-only ENRICHMENT/intel lookups that are CONFIGURED (and,
@@ -962,9 +999,11 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
         if c.get("_agent_id"):
             agent_of[name] = c["_agent_id"]
     if not configured:
-        return {"ok": True, "target_type": target or None, "actions": [],
-                "count": 0, "probed": probe,
-                "message": "no configured connectors to enrich with"}
+        return annotate_mcp_reach(
+            {"ok": True, "target_type": target or None, "actions": [],
+             "count": 0, "probed": probe,
+             "message": "no configured connectors to enrich with"},
+            lookup_empty=True)
 
     # 2. Pull each connector's read ops from the store, classify, filter.
     actions: list[dict[str, Any]] = []
@@ -1106,7 +1145,7 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
             f"analyst: call `emit_capability_gap_card` with the `suggested_card` "
             f"payload returned here (it names which TI connector to configure "
             f"and includes a resume button).")
-    return out
+    return annotate_mcp_reach(out, lookup_empty=not actions)
 
 
 @mcp.tool()
@@ -1138,7 +1177,8 @@ def list_configured_connectors(probe: bool = False,
             all ~45 configured ones. Not exposed to the agent.
 
     Returns:
-        {configured: [{name, status[, version, label, config_count]}], probed: bool}
+        {configured: [{name, status[, version, label, config_count]}], probed: bool,
+         native_mcp?: [{server, tools}]}   -- the MCP servers in reach this turn
         With probe=True, status is "Available", "Disconnected", or an error.
         With probe=False, status comes from the listing endpoint
         ("Completed" = config saved successfully).
@@ -1242,7 +1282,7 @@ def list_configured_connectors(probe: bool = False,
     # `ok: True` so the connector's result classifier doesn't read a
     # successful payload that happens to omit `ok` as a failure (it was
     # mislabeling this tool `(error)` despite returning valid data).
-    return {
+    return annotate_mcp_reach({
         "ok": True, "configured": out, "probed": probe, "count": len(out),
         # This lists only connectors with a SAVED configuration. Config-less
         # connectors (utilities such as cyops_utilities) run without one and do
@@ -1254,7 +1294,7 @@ def list_configured_connectors(probe: bool = False,
             "without a config and won't appear here -- author them with "
             "`config: ''`. Absence here does not mean a connector is unavailable."
         ),
-    }
+    })
 
 
 def _build_run_filter_qs(*, modified_after: str | None,
