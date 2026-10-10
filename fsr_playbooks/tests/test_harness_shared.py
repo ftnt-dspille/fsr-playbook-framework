@@ -95,3 +95,11 @@ def test_tool_results_keep_orphans_and_fall_back_to_output():
     got = tool_results(t)
     assert [(r.tool_use_id, r.body) for r in got] == [
         ("cardexec_1", {"ok": True}), ("x", {"ok": False})]
+
+
+def test_frames_of_filters_by_type_in_order():
+    from fsr_playbooks.harness.frames import frame_types, frames_of
+    t = [{"type": "text", "text": "a"}, {"type": "action_card", "id": "1"},
+         {"type": "approval_request", "approval_id": "2"}, {"type": "action_card", "id": "3"}]
+    assert [f.get("id", f.get("approval_id")) for f in frames_of(t, "action_card", "approval_request")] == ["1", "2", "3"]
+    assert frame_types(t) == ["text", "action_card", "approval_request", "action_card"]

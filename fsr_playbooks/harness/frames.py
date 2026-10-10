@@ -49,6 +49,11 @@ def frames(transcript: Any) -> list[dict]:
     return []
 
 
+def frames_of(transcript: Any, *types: str) -> list[dict]:
+    """The frames whose `type` is one of `types`, in order."""
+    return [f for f in frames(transcript) if f.get("type") in types]
+
+
 def frame_types(transcript: Any) -> list[str | None]:
     """The `type` of each frame, in order (None for a frame without one)."""
     return [f.get("type") for f in frames(transcript)]
