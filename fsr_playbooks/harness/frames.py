@@ -177,6 +177,10 @@ class ToolCall:
     args: dict
     result: Any = None
     has_result: bool = False
+    #: The gate tier the call was dispatched at (on the tool_use), or None.
+    tier: Any = None
+    #: The call's wall time in ms, from its result frame, or None.
+    duration_ms: Any = None
 
     @property
     def ok(self) -> bool | None:
@@ -223,6 +227,10 @@ def tool_calls(transcript: Any) -> list[ToolCall]:
     for r in tool_results(fs):
         if r.tool_use_id is not None:
             results[r.tool_use_id] = r.body
+    durations: dict[str, Any] = {}
+    for f in fs:
+        if f.get("type") == "tool_result" and f.get("tool_use_id") is not None:
+            durations[f["tool_use_id"]] = f.get("duration_ms")
     out: list[ToolCall] = []
     for f in fs:
         if f.get("type") != "tool_use":
@@ -232,7 +240,8 @@ def tool_calls(transcript: Any) -> list[ToolCall]:
         out.append(ToolCall(
             id=cid, name=str(f.get("name") or ""),
             args=args if isinstance(args, dict) else {},
-            result=results.get(cid), has_result=cid in results))
+            result=results.get(cid), has_result=cid in results,
+            tier=f.get("tier"), duration_ms=durations.get(cid)))
     return out
 
 

@@ -103,3 +103,10 @@ def test_frames_of_filters_by_type_in_order():
          {"type": "approval_request", "approval_id": "2"}, {"type": "action_card", "id": "3"}]
     assert [f.get("id", f.get("approval_id")) for f in frames_of(t, "action_card", "approval_request")] == ["1", "2", "3"]
     assert frame_types(t) == ["text", "action_card", "approval_request", "action_card"]
+
+
+def test_tool_call_carries_tier_and_duration():
+    t = [{"type": "tool_use", "id": "a", "name": "run_op", "input": {}, "tier": 3},
+         {"type": "tool_result", "tool_use_id": "a", "content": {"ok": True}, "duration_ms": 41}]
+    (c,) = tool_calls(t)
+    assert (c.tier, c.duration_ms) == (3, 41)
