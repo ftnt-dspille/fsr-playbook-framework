@@ -153,6 +153,57 @@ def test_one_bare_value_for_a_string_list_is_wrapped():
     assert coerce_scalar_args(schema, {"only": "a,b"}) == {"only": "a,b"}
 
 
+# A pydantic/FastMCP server (FortiSIEM's MCP) declares a nested model as a
+# `$ref` with no `type`. Live, the model sent params='{"ip": [...]}' to every
+# FortiSIEM tool and all of them were refused: no enrichment ever ran.
+_REF_SCHEMA = {
+    "$defs": {"Q": {"type": "object", "properties": {"ip": {"type": "array"}}}},
+    "properties": {"params": {"$ref": "#/$defs/Q"}},
+    "required": ["params"],
+}
+
+
+def test_a_json_string_for_a_ref_object_is_decoded():
+    from fsr_playbooks.llm.tool_models import coerce_scalar_args
+    out = coerce_scalar_args(_REF_SCHEMA, {"params": '{"ip": ["198.51.100.77"]}'})
+    assert out == {"params": {"ip": ["198.51.100.77"]}}
+
+
+def test_a_ref_without_type_but_with_properties_is_an_object():
+    from fsr_playbooks.llm.tool_models import coerce_scalar_args
+    schema = {"$defs": {"Q": {"properties": {"ip": {}}}},
+              "properties": {"params": {"$ref": "#/$defs/Q"}}}
+    assert coerce_scalar_args(schema, {"params": '{"ip": "x"}'}) == {"params": {"ip": "x"}}
+
+
+def test_an_optional_ref_object_is_decoded_but_a_string_member_is_respected():
+    from fsr_playbooks.llm.tool_models import coerce_scalar_args
+    nullable = {"$defs": _REF_SCHEMA["$defs"],
+                "properties": {"params": {"anyOf": [{"$ref": "#/$defs/Q"}, {"type": "null"}]}}}
+    assert coerce_scalar_args(nullable, {"params": '{"ip": []}'}) == {"params": {"ip": []}}
+    # A string is an allowed shape: the text may be exactly what is wanted.
+    either = {"properties": {"q": {"anyOf": [{"type": "object"}, {"type": "string"}]}}}
+    assert coerce_scalar_args(either, {"q": '{"a": 1}'}) == {"q": '{"a": 1}'}
+
+
+def test_a_ref_object_sent_as_text_runs_through_dispatch(monkeypatch):
+    seen = {}
+
+    def tool(params):
+        seen["params"] = params
+        return {"ok": True}
+
+    spec = T.REGISTRY["find_connector"]
+    monkeypatch.setitem(T.REGISTRY, "mcp_x__lookup",
+                        type(spec)(name="mcp_x__lookup", fn=tool,
+                                   input_schema=_REF_SCHEMA,
+                                   **{k: getattr(spec, k) for k in type(spec).__dataclass_fields__
+                                      if k not in ("name", "fn", "input_schema")}))
+    out = T.dispatch("mcp_x__lookup", {"params": '{"ip": ["198.51.100.77"]}'}, _internal=True)
+    assert out == {"ok": True}, out
+    assert seen["params"] == {"ip": ["198.51.100.77"]}
+
+
 # --------------------------------------------- bad call vs failing tool
 
 def test_a_typeerror_inside_the_tool_is_a_tool_error_not_bad_arguments(monkeypatch):

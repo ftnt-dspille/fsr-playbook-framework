@@ -268,6 +268,38 @@ _FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
 _INT_RE = re.compile(r"^[+-]?\d+$")
 
 
+def _declared_type(prop: dict[str, Any], schema: dict[str, Any] | None,
+                   _depth: int = 0) -> Any:
+    """The one JSON type `prop` declares, following what pydantic/FastMCP MCP
+    servers emit for a nested model: a local `$ref` with no `type` (FortiSIEM's
+    `params`), a `$defs` entry with `properties` but no `type`, and
+    `anyOf: [X, null]` for an optional one. None when the declared shape is
+    ambiguous -- including any member that permits a string."""
+    if _depth > 8 or not isinstance(prop, dict):
+        return None
+    ref = prop.get("$ref")
+    if isinstance(ref, str):
+        if not ref.startswith("#/"):
+            return None
+        node: Any = schema or {}
+        for part in ref[2:].split("/"):
+            node = node.get(part) if isinstance(node, dict) else None
+        return _declared_type(node, schema, _depth + 1)
+    jtype = prop.get("type")
+    if jtype is not None:
+        return jtype
+    if isinstance(prop.get("properties"), dict):
+        return "object"
+    members = prop.get("anyOf") or prop.get("oneOf")
+    if isinstance(members, list):
+        types = {_declared_type(m, schema, _depth + 1) for m in members}
+        types.discard("null")
+        if len(types) == 1:
+            only = types.pop()
+            return only if isinstance(only, str) else None
+    return None
+
+
 def coerce_scalar_args(schema: dict[str, Any] | None,
                        args: dict[str, Any]) -> dict[str, Any]:
     """Return `args` with string scalars coerced to the types `schema` declares.
@@ -306,7 +338,7 @@ def coerce_scalar_args(schema: dict[str, Any] | None,
         declared = props.get(key)
         if not isinstance(declared, dict):
             continue
-        jtype = declared.get("type")
+        jtype = _declared_type(declared, schema)
         # A schema that also permits a string (`type` absent, or a list of
         # types including "string") means the string may well be what the tool
         # wants. Never second-guess that.
