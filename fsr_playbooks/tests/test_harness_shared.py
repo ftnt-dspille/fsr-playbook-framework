@@ -9,7 +9,6 @@ from fsr_playbooks.harness.frames import (
     assistant_summary,
     assistant_text,
     cards,
-    delivered_yaml,
     pending_halt,
     tool_calls,
 )
