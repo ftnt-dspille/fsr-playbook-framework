@@ -7,6 +7,8 @@ Every accessor here takes either.
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass
 from typing import Any
 
 #: How a halted turn is resumed: the card type and the key `chat_resume`
@@ -22,12 +24,34 @@ CARD_RESUME_KEY = {
 }
 
 
+#: Frame types that halt a turn for an answer (a card the user decides, or a
+#: tier-gated approval). `drive` and `live_writes` answer these; `pending_halt`
+#: resumes on the same set.
+HALT_FRAME_TYPES = frozenset({
+    "approval_request", "action_card", "manual_input", "choice_card",
+    "capability_gap", "playbook_offer", "enhancement_offer",
+})
+
+#: Card frames whose YAML is the playbook a turn delivered (offer cards carry
+#: it as `final_yaml`).
+OFFER_CARD_TYPES = frozenset({"playbook_offer", "enhancement_offer"})
+
+
 def frames(transcript: Any) -> list[dict]:
+    """Every frame of a turn, from an envelope or a bare frame list.
+
+    The one place that reads a turn's frame list. Callers test `f.get("type")`
+    through the accessors in this module, never on the raw list."""
     if isinstance(transcript, dict):
         return [f for f in (transcript.get("transcript") or []) if isinstance(f, dict)]
     if isinstance(transcript, list):
         return [f for f in transcript if isinstance(f, dict)]
     return []
+
+
+def frame_types(transcript: Any) -> list[str | None]:
+    """The `type` of each frame, in order (None for a frame without one)."""
+    return [f.get("type") for f in frames(transcript)]
 
 
 def assistant_text(transcript: Any) -> str:
@@ -131,3 +155,164 @@ def pending_halt(transcript: Any) -> dict | None:
     if card:
         return {"key": CARD_RESUME_KEY[card[0]], "value": card[1], "kind": card[0]}
     return None
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """One tool call of a turn, paired with its result.
+
+    `name` and `args` come from the `tool_use` frame. The wire's `tool_result`
+    carries only `tool_use_id`, so the name is taken from the matching
+    `tool_use`, never from the result frame (which has no `name` or `tool`).
+    `result` is the decoded body (a JSON string is parsed). `ok` is the
+    body's own `ok` flag when it has one, else None."""
+
+    id: str | None
+    name: str
+    args: dict
+    result: Any = None
+    has_result: bool = False
+
+    @property
+    def ok(self) -> bool | None:
+        if isinstance(self.result, dict) and isinstance(self.result.get("ok"), bool):
+            return self.result["ok"]
+        return None
+
+
+def _decode(body: Any) -> Any:
+    if isinstance(body, str):
+        try:
+            return json.loads(body)
+        except ValueError:
+            return body
+    return body
+
+
+def tool_calls(transcript: Any) -> list[ToolCall]:
+    """Every tool call the turn made, in order, each with its result paired by
+    `tool_use_id`. A call with no result yet has `has_result=False`."""
+    fs = frames(transcript)
+    results: dict[str, Any] = {}
+    for f in fs:
+        if f.get("type") == "tool_result" and f.get("tool_use_id") is not None:
+            body = f.get("content")
+            if body is None:
+                body = f.get("output", f.get("result"))
+            results[f["tool_use_id"]] = _decode(body)
+    out: list[ToolCall] = []
+    for f in fs:
+        if f.get("type") != "tool_use":
+            continue
+        cid = f.get("id")
+        args = f.get("input") or {}
+        out.append(ToolCall(
+            id=cid, name=str(f.get("name") or ""),
+            args=args if isinstance(args, dict) else {},
+            result=results.get(cid), has_result=cid in results))
+    return out
+
+
+def halts(transcript: Any) -> list[dict]:
+    """The frames that halt the turn for an answer, in order."""
+    return [f for f in frames(transcript) if f.get("type") in HALT_FRAME_TYPES]
+
+
+# -- the delivered playbook -------------------------------------------------
+
+_FENCE = re.compile(r"```ya?ml\s*\n([\s\S]*?)```", re.I)
+
+#: The argument each YAML-carrying tool takes its playbook in. `emit_card`
+#: nests the card's fields under `payload` (playbook_offer's `yaml`), so
+#: `delivered_yaml` looks inside it.
+YAML_CARRIER: dict[str, str] = {
+    # build
+    "emit_playbook_offer": "yaml",
+    "verify_playbook": "yaml_text",
+    "push_playbook": "yaml_text",
+    # enhance
+    "verify_enhancement": "after_yaml",
+    "emit_card": "payload",
+}
+
+
+def extracted_yaml(transcript: Any) -> str:
+    """The YAML the widget would push: the LAST ```yaml fence in the turn's
+    streamed text.
+
+    Mirrors `view.controller.js#_extractYaml`, including the reason it
+    concatenates first: text arrives as streamed deltas, so a fence routinely
+    spans several frames and a per-frame regex finds nothing. LAST fence, not
+    first: the assistant often shows the current playbook before the revision.
+    """
+    combined = "".join(str(f.get("text") or "") for f in frames(transcript)
+                       if f.get("type") == "text")
+    found = _FENCE.findall(combined)
+    return found[-1].strip() if found else ""
+
+
+def is_offer_call(f: dict) -> bool:
+    """A tool_use frame that delivers a playbook to the analyst."""
+    if f.get("name") == "emit_playbook_offer":
+        return True
+    return (f.get("name") == "emit_card"
+            and (f.get("input") or {}).get("card_type") in OFFER_CARD_TYPES)
+
+
+def refused_tool_use_ids(transcript: Any) -> set:
+    """ids of tool calls whose result came back `ok: false`."""
+    out = set()
+    for f in frames(transcript):
+        if f.get("type") != "tool_result":
+            continue
+        body = _decode(f.get("content"))
+        if isinstance(body, dict) and body.get("ok") is False:
+            out.add(f.get("tool_use_id"))
+    return out
+
+
+def delivered_yaml(transcript: Any) -> str:
+    """The playbook one turn delivered to the analyst. Order, first match wins
+    in this order:
+
+    1. the LAST offer card's `final_yaml` (playbook_offer / enhancement_offer);
+    2. the LAST ```yaml fence in the streamed text;
+    3. the LAST YAML-carrying tool argument (`YAML_CARRIER`), where an offer the
+       tool REFUSED does not count and resets the carry.
+
+    Shared by t1 scenarios and the conversation tier, so both agree on what a
+    turn delivered."""
+    fs = frames(transcript)
+    offered = ""
+    for f in fs:
+        if f.get("type") in OFFER_CARD_TYPES:
+            body = f.get("final_yaml")
+            if isinstance(body, str) and body.strip():
+                offered = body       # last delivered offer wins
+    if offered:
+        return offered
+    fenced = extracted_yaml(fs)
+    if fenced.strip():
+        return fenced
+
+    refused = refused_tool_use_ids(fs)
+    carried = ""
+    for f in fs:
+        if f.get("type") != "tool_use":
+            continue
+        # An offer the tool REFUSED was never delivered, so it cannot pass as
+        # the playbook. Drafts carried BEFORE the refusal are superseded too:
+        # only what comes after it can count.
+        if f.get("id") in refused and is_offer_call(f):
+            carried = ""
+            continue
+        arg = YAML_CARRIER.get(f.get("name"))
+        if not arg:
+            continue
+        body = (f.get("input") or {}).get(arg)
+        if f.get("name") == "emit_card" and isinstance(body, dict):
+            body = body.get("yaml") or body.get("after_yaml")
+        if isinstance(body, str) and body.strip():
+            carried = body  # last one wins, mirroring the fence rule
+    return carried
+
