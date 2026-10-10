@@ -116,19 +116,31 @@ def set_result_reader(reader: ResultReader | None) -> None:
 
 def read_finding(tool_name: str, args: dict[str, Any] | None,
                  result: Any) -> dict[str, Any] | None:
-    """What a successful run_op lookup said, via the installed reader. None
-    when there is no reader, it is not a run_op, or the reader cannot tell.
-    A reader bug never fails the call."""
-    if (_RESULT_READER is None or tool_name != "run_op"
-            or not isinstance(args, dict) or not isinstance(result, dict)):
+    """What a successful lookup said, via the installed reader. None when there
+    is no reader, it is neither a run_op nor a declared MCP intel tool, or the
+    reader cannot tell. A reader bug never fails the call.
+
+    A declared MCP intel tool reaches the reader as connector ``mcp:<server>``,
+    op ``<tool>``, its own arguments as params, and its result wrapped in the
+    run_op envelope (``{"ok": True, "data": result}``)."""
+    if _RESULT_READER is None or not isinstance(args, dict):
         return None
-    params = args.get("params")
-    if not isinstance(params, dict):
-        params = {}
+    if tool_name == "run_op" and isinstance(result, dict):
+        params = args.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        connector = str(args.get("connector") or "")
+        op = str(args.get("op") or args.get("operation") or "")
+    elif tool_name.startswith("mcp_") and "__" in tool_name:
+        from .materializer import turn_intel_mcp_tools
+        if tool_name not in turn_intel_mcp_tools():
+            return None
+        server, op = tool_name[len("mcp_"):].split("__", 1)
+        connector, params, result = f"mcp:{server}", args, {"ok": True, "data": result}
+    else:
+        return None
     try:
-        rec = _RESULT_READER(str(args.get("connector") or ""),
-                             str(args.get("op") or args.get("operation") or ""),
-                             params, result)
+        rec = _RESULT_READER(connector, op, params, result)
     except Exception:  # noqa: BLE001
         return None
     if not isinstance(rec, dict):

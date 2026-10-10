@@ -105,6 +105,25 @@ def turn_mcp_reach() -> list[dict[str, Any]]:
     return [{"server": s, "tools": sorted(t)} for s, t in sorted(by_server.items())]
 
 
+# The materialized MCP tools the host DECLARED to be threat-intel lookups this
+# turn, each mapped to its product ("fortisiem"). Never guessed from a name:
+# the autonomy policy acts on what these say. Unbound, no MCP tool is intel
+# evidence -- the policy then fails closed, as before.
+_TURN_INTEL_MCP_TOOLS: ContextVar[dict[str, str] | None] = ContextVar(
+    "_turn_intel_mcp_tools", default=None)
+
+
+def set_turn_intel_mcp_tools(product_by_name: Any) -> Token:
+    """Record `{mcp tool name: product}` for this turn's declared intel tools."""
+    return _TURN_INTEL_MCP_TOOLS.set({
+        str(k): str(v) for k, v in dict(product_by_name or {}).items()
+        if str(k).startswith("mcp_")})
+
+
+def turn_intel_mcp_tools() -> dict[str, str]:
+    return dict(_TURN_INTEL_MCP_TOOLS.get() or {})
+
+
 def _split_mcp_name(name: str) -> tuple[str, str]:
     body = name[len("mcp_"):] if name.startswith("mcp_") else ""
     server, _, tool = body.partition("__")

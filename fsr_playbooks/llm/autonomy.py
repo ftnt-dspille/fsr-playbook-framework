@@ -304,9 +304,15 @@ def _connector_category(connector: str) -> str | None:
 
 def _intel_lookup(entry: dict[str, Any]) -> bool:
     """A cited call that asked a threat-intelligence source: a read-only
-    run_op on a connector the catalog files as threat intel, or one of the
-    known intel connectors. Unknown connectors do not count (fails closed)."""
-    if entry.get("name") != "run_op" or not _read_only(entry):
+    run_op on a connector the catalog files as threat intel, one of the known
+    intel connectors, or a native-MCP tool the host DECLARED an intel lookup
+    this turn. Unknown connectors and undeclared MCP tools do not count
+    (fails closed)."""
+    name = str(entry.get("name") or "")
+    if name.startswith("mcp_"):
+        from ..mcp_server.materializer import turn_intel_mcp_tools
+        return name in turn_intel_mcp_tools() and _read_only(entry)
+    if name != "run_op" or not _read_only(entry):
         return False
     connector = str((entry.get("args") or {}).get("connector") or "")
     if not connector:
