@@ -189,17 +189,35 @@ def _decode(body: Any) -> Any:
     return body
 
 
+@dataclass(frozen=True)
+class ToolResult:
+    """One `tool_result` frame: its `tool_use_id` and the decoded body. The
+    result frame has no name; use `tool_calls` to pair it with its call."""
+
+    tool_use_id: str | None
+    body: Any
+
+
+def tool_results(transcript: Any) -> list[ToolResult]:
+    """Every tool result of the turn, in order, body decoded. A result whose
+    body is a JSON string is parsed; a body that is not JSON stays a string."""
+    out = []
+    for f in frames(transcript):
+        if f.get("type") != "tool_result":
+            continue
+        raw = f.get("content") or f.get("output") or f.get("result")
+        out.append(ToolResult(f.get("tool_use_id"), _decode(raw)))
+    return out
+
+
 def tool_calls(transcript: Any) -> list[ToolCall]:
     """Every tool call the turn made, in order, each with its result paired by
     `tool_use_id`. A call with no result yet has `has_result=False`."""
     fs = frames(transcript)
     results: dict[str, Any] = {}
-    for f in fs:
-        if f.get("type") == "tool_result" and f.get("tool_use_id") is not None:
-            body = f.get("content")
-            if body is None:
-                body = f.get("output", f.get("result"))
-            results[f["tool_use_id"]] = _decode(body)
+    for r in tool_results(fs):
+        if r.tool_use_id is not None:
+            results[r.tool_use_id] = r.body
     out: list[ToolCall] = []
     for f in fs:
         if f.get("type") != "tool_use":

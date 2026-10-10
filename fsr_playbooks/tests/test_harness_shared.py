@@ -84,3 +84,14 @@ def test_a_nested_card_without_its_own_type_takes_the_frame_type():
     t = {"transcript": [{"type": "choice_card", "card": {"id": "c-7"}}]}
     assert pending_halt(t) == {"key": "choice_id", "value": "c-7", "kind": "choice_card"}
     assert cards(t) == [{"id": "c-7"}]
+
+
+def test_tool_results_keep_orphans_and_fall_back_to_output():
+    """A result with no matching call is still a result (a card's execution
+    arrives this way); `output` is read when `content` is absent."""
+    from fsr_playbooks.harness.frames import tool_results
+    t = [{"type": "tool_result", "tool_use_id": "cardexec_1", "content": {"ok": True}},
+         {"type": "tool_result", "tool_use_id": "x", "output": '{"ok": false}'}]
+    got = tool_results(t)
+    assert [(r.tool_use_id, r.body) for r in got] == [
+        ("cardexec_1", {"ok": True}), ("x", {"ok": False})]
