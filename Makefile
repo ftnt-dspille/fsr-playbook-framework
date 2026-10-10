@@ -14,7 +14,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen matrix tool-gate mypy-gate wire-audit wire-census test-effect-probes
+.PHONY: backend frontend dev e2e tests playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen matrix tool-gate mypy-gate wire-audit wire-census test-effect-probes
 
 PY        := uv run python
 BACKEND_DIR := web/backend
@@ -70,6 +70,9 @@ e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 
 tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
 	$(PY) -m pytest tooling/tests/ -q -m "not live and not slow"
+
+playbook-tests: ## fsr_playbooks offline suite (the shipped package: harness readers, compiler, llm) -- run with `make tests`
+	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q -p no:randomly
 
 # Order-dependence gate (PLAN_testing_that_can_fail 0.3). A suite whose tests
 # leak state into one another can go green for reasons unrelated to the code --
