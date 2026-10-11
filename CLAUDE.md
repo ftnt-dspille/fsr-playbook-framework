@@ -39,12 +39,15 @@ Notes:
 
 ## Releases
 
-- The user cuts releases and pushes `main`. Agents don't. A release is `make release VERSION=X.Y.Z`
-  and it is permanent and public.
+- The user cuts releases and pushes `main`. Agents don't. Releases are permanent and public.
+  Framework only: `make release VERSION=X.Y.Z`. Release and ship to the connector in one
+  ordered step: `make release-ship FW=next` in the connector repo (the `release-ship`
+  skill). Never assemble those steps by hand.
 - Framework changes reach the connector only through a release. The connector pins the wheel in its
   `requirements.txt`, so a change here is not visible to its CI until released.
   Before a release, run both `make tests` (`tooling/tests`) and `make verify` (which covers
-  `fsr_playbooks/tests` and the connector suite). Neither alone is the release gate.
+  `fsr_playbooks/tests` and the connector suite). Neither alone is the release gate. CI
+  runs both test suites, each in its own process (they resolve different reference DBs).
 - Tests must not name `data/fsr_reference.db`. It is a gitignored dev cache, and CI does not have it.
   Fifteen existing test files still do. That is known debt, so don't add more.
 
@@ -74,9 +77,9 @@ parallel, and update or close it in the same session.
 - **Library first.** Before you write a playbook validator, extend the existing ones:
   `FieldValueValidator`, `PicklistMixin`, the typed walker, and `module_schema.field_names`
   (the one field lookup).
-- **Public-repo hygiene.** This repo ships. No lab IPs, appliance hostnames, ports tied to a box,
-  credentials, usernames, or capture dates in tracked files. Use placeholders. Test-net
-  addresses (RFC 5737) are not internal: use `is_internal_ip`, not `ipaddress.is_private`.
+- **Public-repo hygiene.** This repo is public. No lab IPs, hostnames, box ports,
+  credentials or capture dates in tracked files; use placeholders. Test-net addresses
+  (RFC 5737) are not internal: use `is_internal_ip`, not `ipaddress.is_private`.
 - **Typing.** Use typed fields or pydantic models, not bare dicts or loose params.
 - **Pyfsr.** Scripts that talk to FortiSOAR use pyfsr's typed methods, not raw `c.get`/`c.post` calls.
 - **Scripts.** Use `#!/usr/bin/env bash`, not `/bin/bash`. macOS ships bash 3.2.
