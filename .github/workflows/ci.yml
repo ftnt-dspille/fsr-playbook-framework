@@ -64,7 +64,7 @@ jobs:
         run: |
           uv venv --python ${{ matrix.python }}
           uv pip install pyyaml "ruamel.yaml" jinja2 openai anthropic "mcp>=1.0" \
-                         httpx pytest requests-mock anyio
+                         httpx pytest requests-mock anyio python-dotenv
           uv pip install --no-deps -e packaging/fsr_playbooks
       - name: Run tests
         # Call the venv interpreter directly -- deterministic, avoids uv trying
@@ -83,6 +83,15 @@ jobs:
         env:
           PYTHONPATH: tooling
         run: .venv/bin/python -m pytest fsr_playbooks/tests -q -m "not live and not slow"
+      - name: Run tooling tests
+        # The release gate (`make tests` in scripts/release.sh). Until it ran
+        # here a red tooling suite was only found at release time, on one
+        # laptop. Its own process: the two suites resolve different reference
+        # DBs and the root conftest refuses to collect both at once.
+        # python-dotenv above is for this suite only.
+        env:
+          PYTHONPATH: tooling
+        run: .venv/bin/python -m pytest tooling/tests -q -m "not live and not slow"
 
   package:
     name: build + twine check
