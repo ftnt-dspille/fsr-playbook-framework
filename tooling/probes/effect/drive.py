@@ -24,9 +24,10 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT / "tooling") not in sys.path:
     sys.path.insert(0, str(ROOT / "tooling"))
 
-from evals.chat_drive import _execute, _unwrap  # noqa: E402
+from evals.chat_drive import BoxExec  # noqa: E402
 
 from fsr_playbooks.harness import frames  # noqa: E402
+from fsr_playbooks.harness.drive import FsrTransport  # noqa: E402
 from probes._env import get_client  # noqa: E402
 
 CONFIG = ""      # empty = the box's default config, the analyst's real surface
@@ -58,10 +59,16 @@ def open_playbook_entity(iri: str, uuid: str, name: str, yaml_text: str) -> dict
             "fields": {"name": name}, "playbook_yaml": yaml_text}
 
 
+def _transport(config: str, version: str) -> FsrTransport:
+    # The shared driver's sync transport over the raw-execute adapter: the
+    # version is omitted when empty, the config is always sent.
+    return FsrTransport(BoxExec(get_client(), version=version or None,
+                                config=config), session_id="effect-probe")
+
+
 def turn(message: str, *, session: str, intent: str = "build",
          entity: dict | None = None, record: dict | None = None,
          config: str = CONFIG, version: str = VERSION) -> dict:
-    client = get_client()
     params: dict[str, Any] = {
         "session_id": session,
         "messages": [{"role": "user", "content": message}],
@@ -71,20 +78,23 @@ def turn(message: str, *, session: str, intent: str = "build",
         params["entity"] = entity
     if record is not None:
         params["record"] = record
-    res = _unwrap(_execute(client, "chat_turn", params, version, config))
+    try:
+        res = _transport(config, version).turn(params)
+    except RuntimeError as exc:  # a non-dict answer: keep it in the dump, then fail
+        LOG.append({"call": "chat_turn", "params": params, "result": str(exc)})
+        raise
     LOG.append({"call": "chat_turn", "params": params, "result": res})
-    if not isinstance(res, dict):
-        raise RuntimeError(f"chat_turn returned non-dict: {res!r:.300}")
     return res
 
 
 def resume(payload: dict, *, config: str = CONFIG, version: str = VERSION) -> dict:
-    client = get_client()
     body = dict(payload, mode="live")
-    res = _unwrap(_execute(client, "chat_resume", body, version, config))
+    try:
+        res = _transport(config, version).resume(body)
+    except RuntimeError as exc:
+        LOG.append({"call": "chat_resume", "params": body, "result": str(exc)})
+        raise
     LOG.append({"call": "chat_resume", "params": body, "result": res})
-    if not isinstance(res, dict):
-        raise RuntimeError(f"chat_resume returned non-dict: {res!r:.300}")
     return res
 
 

@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT / "tooling") not in sys.path:
     sys.path.insert(0, str(ROOT / "tooling"))
 
-from evals.chat_drive import _execute, _unwrap  # noqa: E402
+from evals.chat_drive import BoxExec  # noqa: E402
 
 from probes._env import get_client  # noqa: E402
 from probes.effect import drive  # noqa: E402
@@ -112,13 +112,15 @@ def _approve_gate(session: str, res: dict) -> tuple[dict | None, str]:
 def _run_op(connector: str, op: str, params: dict) -> dict:
     """A direct op execution on the box, outside the agent loop -- the ground
     truth read (and the cleanup write) for T1."""
-    client = get_client()
-    res = _unwrap(_execute(client, "call_mcp_tool", {
-        "tool": "run_op",
-        "args": {"connector": connector, "op": op, "params": params,
-                 "confirm": True},
-    }, drive.VERSION, drive.CONFIG))
-    return res if isinstance(res, dict) else {"ok": False, "raw": str(res)[:300]}
+    adapter = BoxExec(get_client(), version=drive.VERSION or None, config=drive.CONFIG)
+    try:
+        return adapter.execute("call_mcp_tool", {
+            "tool": "run_op",
+            "args": {"connector": connector, "op": op, "params": params,
+                     "confirm": True},
+        }).data
+    except RuntimeError as exc:  # a non-dict answer is a failed read, not a crash
+        return {"ok": False, "raw": str(exc)[:300]}
 
 
 def _firewall_holds(ip: str) -> bool:

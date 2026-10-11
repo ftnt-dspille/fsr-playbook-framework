@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from evals.levers import lever_for  # noqa: E402
-from fsr_playbooks.harness.frames import assistant_text, pending_halt  # noqa: E402
+from fsr_playbooks.harness.drive import FsrTransport, drive  # noqa: E402
+from fsr_playbooks.harness.frames import assistant_text  # noqa: E402
 
 # The deployed connector's `name` (info.json), NOT the repo/dir name. It was
 # renamed fsr-playbook-builder -> connector-fsr-soc-assistant; env-overridable so
@@ -89,6 +91,71 @@ def _unwrap(resp: Any) -> Any:
     return resp
 
 
+@dataclass
+class ExecResult:
+    """What `BoxExec.execute` returns: the driver's ok / data / error shape."""
+    ok: Any
+    data: dict
+    error: Any = None
+
+
+class BoxExec:
+    """The probes client as the shared driver's `fsr` (`.execute(op, params,
+    timeout=)`). Keeps the raw execute path this module always used: POST
+    /api/integration/execute/ with the connector name and the config name, and a
+    version omitted when falsy so the box resolves the ACTIVE install. A response
+    that is not a dict never ran, so it raises rather than being graded."""
+
+    def __init__(self, client, *, version: str | None = None,
+                 config: str = DEFAULT_CONFIG):
+        self.client = client
+        self.version = version
+        self.config = config
+
+    def execute(self, op: str, params: dict, *, timeout: int | None = None) -> ExecResult:
+        raw = _unwrap(_execute(self.client, op, params, self.version, self.config,
+                               290 if timeout is None else timeout))
+        if not isinstance(raw, dict):
+            raise RuntimeError(f"{op} returned non-dict: {raw!r:.300}")
+        return ExecResult(ok=raw.get("ok"), data=raw, error=raw.get("error"))
+
+
+class _Timed:
+    """Times and logs each turn and resume the way drive_scenario always has.
+    It wraps the transport the driver sends through and does not change what is
+    sent."""
+
+    def __init__(self, inner: FsrTransport, log):
+        self.inner = inner
+        self.log = log
+        self.session_id = inner.session_id
+        self.elapsed = 0.0
+        self.turn_elapsed = 0.0
+        self.last_stop: Any = None
+
+    def turn(self, params: dict) -> dict:
+        msgs = params.get("messages") or []
+        self.log(f">> chat_turn (sync) session={self.session_id} "
+                 f"intent={params.get('intent')}")
+        self.log(f">> msg: {msgs[-1].get('content') if msgs else ''}")
+        t0 = time.time()
+        env = self.inner.turn(params)
+        self.turn_elapsed = time.time() - t0
+        self.elapsed += self.turn_elapsed
+        self.last_stop = env.get("stop_reason")
+        return env
+
+    def resume(self, params: dict) -> dict:
+        self.log(f">> chat_resume decision={params.get('decision')} "
+                 f"(stop_reason was {self.last_stop})")
+        t1 = time.time()
+        env = self.inner.resume(params)
+        self.elapsed += time.time() - t1
+        self.last_stop = env.get("stop_reason", self.last_stop)
+        self.log(f">> resume returned stop_reason={self.last_stop}")
+        return env
+
+
 def drive_scenario(message: str, intent: str, *, record: Any = None,
                    entity: Any = None,
                    version: str | None = DEFAULT_VERSION, config: str = DEFAULT_CONFIG,
@@ -101,7 +168,12 @@ def drive_scenario(message: str, intent: str, *, record: Any = None,
     `record` is the triage alert context; `entity` is the build/enhance open-
     playbook context (the connector reads `params.entity`, mounting
     `entity.playbook_yaml` into its OPEN PLAYBOOK block -- the shipped widget
-    path). Enhance scenarios pass `entity`, not `record`."""
+    path). Enhance scenarios pass `entity`, not `record`.
+
+    The loop is the shared driver (fsr_playbooks.harness.drive): one user step,
+    then at most one resume step. The resume is sent when the caller scripts one
+    (`resume`, sent as given) or the turn stopped on an approval (decision
+    approve, answering the halt it stopped on)."""
     from probes import _env  # type: ignore
 
     cfg = _env.get_config()
@@ -110,59 +182,55 @@ def drive_scenario(message: str, intent: str, *, record: Any = None,
     client = _env.get_client()
 
     session = session or f"chatdrive-{int(time.time())}"
-    params: dict[str, Any] = {
-        "session_id": session,
-        "messages": [{"role": "user", "content": message}],
-        "intent": intent,
-        "mode": "live",
-        "detached": False,
-    }
+    turn_extra: dict[str, Any] = {"mode": "live", "detached": False}
     if record is not None:
-        params["record"] = record
-    if entity is not None:
-        params["entity"] = entity
+        turn_extra["record"] = record
+    timed = _Timed(FsrTransport(BoxExec(client, version=version, config=config),
+                                session_id=session), log)
 
-    log(f">> chat_turn (sync) session={session} intent={intent}")
-    log(f">> msg: {message}")
-    t0 = time.time()
-    res = _unwrap(_execute(client, "chat_turn", params, version, config))
-    elapsed = time.time() - t0
-    if not isinstance(res, dict):
-        raise RuntimeError(f"chat_turn returned non-dict: {res!r:.300}")
-    if res.get("ok") is False or res.get("error"):
-        raise RuntimeError(f"chat_turn error: {res.get('error') or res}")
+    def _after_turn(trace):
+        if len(trace) != 1:
+            return None
+        env = trace[0].envelope
+        if env.get("ok") is False or env.get("error"):
+            raise RuntimeError(f"chat_turn error: {env.get('error') or env}")
+        log(f">> returned in {timed.turn_elapsed:.1f}s  "
+            f"stop_reason={env.get('stop_reason')}  turn={env.get('turn')}  "
+            f"contract={env.get('contract_version')}")
+        if resume or env.get("stop_reason") == "approval_required":
+            return {"resume": dict(resume or {"decision": "approve"})}
+        return None
 
-    transcript = list(res.get("transcript") or [])
-    stop_reason = res.get("stop_reason")
-    log(f">> returned in {elapsed:.1f}s  stop_reason={stop_reason}  "
-        f"turn={res.get('turn')}  contract={res.get('contract_version')}")
-
-    # Approval / multi-turn: fire chat_resume when the turn suspended, or when
-    # the scenario explicitly scripts a resume decision.
-    if resume or stop_reason == "approval_required":
-        rp = dict(resume or {"decision": "approve"})
-        rp["session_id"] = session
+    def _resume_params(raw: dict, halt: dict | None) -> dict:
         # chat_resume routes on the id it is sent; a bare {"decision"} resumed
         # nothing. Answer the halt this turn actually stopped on.
-        halt = pending_halt(res)
+        rp = dict(raw["resume"])
+        rp["session_id"] = session
         if halt is not None and halt["key"] not in rp:
             rp[halt["key"]] = halt["value"]
-        log(f">> chat_resume decision={rp.get('decision')} "
-            f"(stop_reason was {stop_reason})")
-        t1 = time.time()
-        res2 = _unwrap(_execute(client, "chat_resume", rp, version, config))
-        elapsed += time.time() - t1
-        if isinstance(res2, dict):
-            transcript += list(res2.get("transcript") or [])
-            stop_reason = res2.get("stop_reason", stop_reason)
-            log(f">> resume returned stop_reason={stop_reason}")
+        return rp
+
+    steps = drive(timed, {}, steps=[{"user": message}], intent=intent,
+                  entity=entity, next_step=_after_turn,
+                  turn_params=lambda raw: dict(turn_extra),
+                  resume_params=_resume_params, resume_without_halt=True)
+    for st in steps:
+        if st.error:
+            raise RuntimeError(f"chat_resume error: {st.error}")
+
+    envelopes = [env for st in steps for env in st.envelopes]
+    transcript: list = []
+    stop_reason = None
+    for env in envelopes:
+        transcript += list(env.get("transcript") or [])
+        stop_reason = env.get("stop_reason", stop_reason)
 
     trace = transcript_to_trace(transcript)
     final_text = assistant_text(transcript)
     return {
         "session": session, "transcript": transcript, "trace": trace,
         "final_text": final_text, "stop_reason": stop_reason,
-        "elapsed": round(elapsed, 1), "version": version, "config": config,
+        "elapsed": round(timed.elapsed, 1), "version": version, "config": config,
     }
 
 

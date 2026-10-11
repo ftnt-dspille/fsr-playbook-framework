@@ -11,8 +11,13 @@ copy of the same three things, and the copies disagreed:
   assistant's text", "the tools it called", "what it is waiting on".
 - `classify`: whether a turn answered at all. Six policies -- a dead gateway
   graded as a model failure in one harness and as an answer in another.
+- `drive`: the conversation loop (transports, halts answered by policy, resume,
+  history). The connector and the framework each had their own transport and
+  loop; `drive.Executor` is now the one seam, so any object with
+  `.execute(op, params, timeout=)` can drive a turn.
 
 Lives in the shipped package (`fsr_playbooks.harness`) so the connector's CI,
 which installs the wheel, can import it. Dependency-free by design: stdlib
-only, no tooling/ imports.
+only, no tooling/ imports. Connector-only pieces (LocalTransport, mount_entity)
+stay in the connector.
 """

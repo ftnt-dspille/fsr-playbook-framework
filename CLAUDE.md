@@ -64,6 +64,16 @@ user pushes). Cards are managed with `scripts/tracker.sh` (`show|comment|close|c
 not raw `gh issue`. Claim a card before working it, because several agents run in
 parallel, and update or close it in the same session.
 
+## One conversation driver
+
+The loop that sends a chat turn, answers its halts and resumes it lives once, in
+`fsr_playbooks/harness/drive.py` (`drive`, `FsrTransport`, `detached_turn`,
+`poll_to_done`). Its only seam is `Executor.execute(op, params, timeout=)`.
+`tooling/evals/chat_drive.py` drives through `BoxExec` (the probes client as an
+Executor, which keeps the version-omission and config behaviour), and the effect
+probes (`tooling/probes/effect/drive.py`, `triage.py`) use the same transport.
+Don't add a second chat_turn loop; add the behaviour to `drive.py`.
+
 ## Rules for changing agent behaviour
 
 - **One approval decision.** `fsr_playbooks/llm/authorization.py` `authorize()` decides.
