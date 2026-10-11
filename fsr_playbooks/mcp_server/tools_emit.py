@@ -849,6 +849,46 @@ def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str]]:
     return missing, have
 
 
+def fenced_connector_errors(yaml_text: str) -> str | None:
+    """The connector check the offer gate applies, for a playbook that reaches
+    the analyst in the reply TEXT as a ```yaml fence. The widget saves the last
+    fence over the open record, so the fence is a delivery and needs the same
+    check an offer card gets.
+
+    Returns the message to send the model back with, or None when every
+    connector the playbook calls is configured, or it calls none.
+
+    Unlike the offer gate this FAILS CLOSED: a connector list it cannot read
+    cannot clear a connector, so it refuses and says the connectors could not
+    be verified. It asks nothing of the listing for a playbook that calls no
+    connector.
+    """
+    used = _yaml_connectors(yaml_text)
+    if not used:
+        return None
+    from . import tools_connector_discovery as _tcd
+    try:
+        listing = _tcd.list_configured_connectors()
+        rows = listing.get("configured") if isinstance(listing, dict) else None
+    except Exception:  # noqa: BLE001 -- undecidable is refused, not passed
+        rows = None
+    if not rows:
+        return (
+            "- could not verify connectors on this box, so the connector(s) "
+            f"{', '.join(repr(c) for c in used)} cannot be cleared. Retry once "
+            "the connector list can be read, or leave the playbook out of the "
+            "reply and say so.")
+    names = {r.get("name") for r in rows if isinstance(r, dict) and r.get("name")}
+    missing = [c for c in used if c not in names and _needs_configuration(c)]
+    if not missing:
+        return None
+    return "\n".join(
+        f"- connector '{c}' is not configured on this FortiSOAR box, so a step "
+        "that calls it fails the first time the playbook runs. Rebuild the "
+        "playbook on a configured connector, or leave it out of the reply and "
+        "say so." for c in missing)
+
+
 def _step_names(yaml_text: str) -> list[str]:
     """Step `name:` values of the first playbook, in order. [] if unparseable."""
     try:

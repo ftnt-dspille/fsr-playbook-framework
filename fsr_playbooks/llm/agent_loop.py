@@ -53,6 +53,7 @@ from ._loop_helpers import (
     budget_ask_card,
     budget_note,
     compile_errors,
+    connector_errors_for_reply,
     drain_with_idle_timeout,
     evidence_id_line,
     extract_yaml_block,
@@ -126,6 +127,11 @@ UNVERIFIED_DRAFT_FAILED_DIRECTIVE = (
     "emit_card(card_type='capability_gap', ...) naming it."
 )
 
+_CONNECTOR_REPAIR_PREFIX = (
+    "The playbook in your reply calls a connector this box has not configured, "
+    "so it would fail the first time it runs. Rebuild it on a configured "
+    "connector, or leave it out of the reply and say so.\n\nProblems:\n"
+)
 _SELF_REPAIR_PREFIX = (
     "The YAML you just produced doesn't compile. Fix the errors and emit a "
     "corrected fenced ```yaml block.\n\nErrors:\n"
@@ -502,6 +508,16 @@ async def run_loop(
                 if errors_text:
                     self_repair_turns += 1
                     w.append_user(_SELF_REPAIR_PREFIX + errors_text)
+                    yield usage_event(rnd.stop_reason or "", repair_delta=1)
+                    continue
+                # A playbook that compiles can still call a connector this box
+                # does not have. The reply is a delivery (the widget saves the
+                # last fence), so it gets the check the offer card gets.
+                connector_text = (connector_errors_for_reply(yaml_block)
+                                  if yaml_block else None)
+                if connector_text:
+                    self_repair_turns += 1
+                    w.append_user(_CONNECTOR_REPAIR_PREFIX + connector_text)
                     yield usage_event(rnd.stop_reason or "", repair_delta=1)
                     continue
 
