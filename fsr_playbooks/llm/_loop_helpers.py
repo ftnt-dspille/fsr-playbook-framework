@@ -1441,6 +1441,14 @@ def budget_ask_card(max_turns: int = MAX_TOOL_TURNS) -> dict[str, Any]:
     }
 
 
+def connector_errors_for_reply(yaml_text: str) -> str | None:
+    """The connector check for a playbook in the reply text (see
+    `tools_emit.fenced_connector_errors`). Imported lazily: the tool layer
+    imports this module."""
+    from ..mcp_server.tools_emit import fenced_connector_errors as _impl
+    return _impl(yaml_text)
+
+
 def compile_errors(yaml_text: str) -> str | None:
     """Run the same compiler the editor uses; return a bullet list of
     blocking errors or None if clean. Imported lazily so a missing
