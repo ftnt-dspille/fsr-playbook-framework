@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from . import _shared
@@ -526,7 +527,7 @@ _STRAGGLER_SKIP_S = 10 * 60
 
 def _healthcheck_many(
         client,
-        targets: list[tuple[str, str] | tuple[str, str, str]],
+        targets: Sequence[tuple[str, str] | tuple[str, str, str]],
         deadline_s: float = 20.0,
         timing: dict[str, Any] | None = None) -> dict[str, str]:
     """Healthcheck many (name, version) connectors CONCURRENTLY, returning
@@ -740,8 +741,10 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
 
     # 2. Pull each connector's destructive ops from the store, classify, filter.
     actions: list[dict[str, Any]] = []
+    _tier: Callable[[dict[str, Any]], int] | None
     try:
-        from fsr_playbooks.llm.tools import _tier_for_run_op as _tier  # type: ignore
+        from fsr_playbooks.llm.tools import _tier_for_run_op
+        _tier = _tier_for_run_op
     except Exception:  # noqa: BLE001
         _tier = None  # tier becomes best-effort
     placeholders = ",".join("?" * len(configured))
@@ -860,10 +863,10 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
         miss = f"{target} containment" if target else "containment / response"
         could = _connectors_that_could_contain(keywords, set(configured))
         if could:
-            names = ", ".join(c["connector"] for c in could)
+            connector_names = ", ".join(c["connector"] for c in could)
             fix_steps = [
                 f"Configure one of these connectors under Settings → "
-                f"Connectors: {names} (each carries a matching containment op, "
+                f"Connectors: {connector_names} (each carries a matching containment op, "
                 f"e.g. {could[0]['connector']}.{could[0]['op']}).",
                 "Save the configuration and confirm it shows as Available.",
             ]
@@ -1007,8 +1010,10 @@ def find_enrichment_actions(target_type: str = "", probe: bool = True,
 
     # 2. Pull each connector's read ops from the store, classify, filter.
     actions: list[dict[str, Any]] = []
+    _tier: Callable[[dict[str, Any]], int] | None
     try:
-        from fsr_playbooks.llm.tools import _tier_for_run_op as _tier  # type: ignore
+        from fsr_playbooks.llm.tools import _tier_for_run_op
+        _tier = _tier_for_run_op
     except Exception:  # noqa: BLE001
         _tier = None
     placeholders = ",".join("?" * len(configured))

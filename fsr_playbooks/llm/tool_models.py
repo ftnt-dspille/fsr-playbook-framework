@@ -183,7 +183,7 @@ class SearchAlerts(BaseModel):
 
 
 # Mapping of tool names to their argument models
-TOOL_MODELS = {
+TOOL_MODELS: dict[str, type[BaseModel]] = {
     "get_record": GetRecordArgs,
     "search_module_records": SearchModuleRecordsArgs,
     "run_op": RunOpArgs,

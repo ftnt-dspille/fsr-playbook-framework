@@ -603,14 +603,14 @@ async def run_loop(
                     forced: tuple[ToolCall, Any] | None = None
                     for _attempt in range(2):
                         w.append_user(directive)
-                        out: list[Any] = []
+                        forced_out: list[Any] = []
                         try:
-                            async for ev in force_emit_card("verdict", lambda _a: None, out):
+                            async for ev in force_emit_card("verdict", lambda _a: None, forced_out):
                                 yield ev
                         except Exception:
                             log.exception("forced verdict delivery failed")
                             break
-                        call, result = out[0]
+                        call, result = forced_out[0]
                         contain.note_result("emit_card", call.args, result)
                         if not (isinstance(result, dict) and result.get("ok") is False):
                             forced = (call, result)

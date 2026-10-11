@@ -339,7 +339,7 @@ def compile_yaml(yaml_text: str, verbose: bool = False) -> dict[str, Any]:
             "and suggestions",
             errors=[_serialize_compiler_error(e) for e in result.errors],
         )
-    coll = (result.fsr_json.get("data") or [{}])[0]
+    coll = (result.compiled_json().get("data") or [{}])[0]
     workflows = coll.get("workflows") or []
     summary = {
         "name": coll.get("name"),
@@ -477,7 +477,7 @@ def build_playbook_from_trace(
         from fsr_playbooks.compiler import compile_yaml as _compile
         result = _compile(yaml_text, _shared.DB_PATH)
         if result.ok:
-            coll = (result.fsr_json.get("data") or [{}])[0]
+            coll = (result.compiled_json().get("data") or [{}])[0]
             workflows = coll.get("workflows") or []
             compile_summary: dict[str, Any] = {
                 "ok": True,

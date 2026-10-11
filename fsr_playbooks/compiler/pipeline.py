@@ -99,6 +99,13 @@ class CompileResult:
         blocking = [e for e in self.errors if e.severity != "warning"]
         return not blocking and self.fsr_json is not None
 
+    def compiled_json(self) -> dict[str, Any]:
+        """The emitted collection of a result that compiled clean. Check `ok`
+        first: a result with blocking errors has no emitted JSON."""
+        if self.fsr_json is None:
+            raise ValueError("no emitted JSON: check `ok` before reading it")
+        return self.fsr_json
+
     @property
     def warnings(self) -> list[CompileError]:
         return [e for e in self.errors if e.severity == "warning"]

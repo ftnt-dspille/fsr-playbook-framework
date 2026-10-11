@@ -293,14 +293,19 @@ class Message:
 
 class LLMProvider(Protocol):
     name: str
-    #: Declared native primitives -- see the capability seam above.
-    capabilities: ProviderCapabilities
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declared native primitives -- see the capability seam above. A
+        read-only property: a class may serve it as a property (per-model,
+        as Anthropic does) or as a plain class attribute."""
+        ...
 
     def request(self, req: TurnRequest) -> HostEmulation:
         """Ask for this turn's capabilities; return what the host must emulate."""
         ...
 
-    async def stream(
+    def stream(
         self,
         *,
         system: str,

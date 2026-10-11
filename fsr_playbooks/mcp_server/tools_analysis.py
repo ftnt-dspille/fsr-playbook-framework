@@ -749,7 +749,7 @@ def walk_paths(yaml_text: str, playbook: str | None = None, *,
     pb = next((p for p in pbs if p.get("name") == playbook), pbs[0] if pbs else None)
     if not isinstance(pb, dict):
         return {"ok": False, "error": "no playbooks in YAML"}
-    pins: list[tuple[str, str, str]] = []  # (kind, step id, label)
+    pins: list[tuple[str, str | None, str]] = []  # (kind, step id, label)
     for st in pb.get("steps") or []:
         if not isinstance(st, dict):
             continue
@@ -769,6 +769,8 @@ def walk_paths(yaml_text: str, playbook: str | None = None, *,
     approach = _approach_choices(pb)
     runs: list[dict[str, Any]] = [{}]
     for k, sid, lab in pins:
+        if sid is None:  # a step with no id or name cannot be pinned
+            continue
         bc, mc = dict(approach.get(sid, ({}, {}))[0]), dict(approach.get(sid, ({}, {}))[1])
         (bc if k == "branch" else mc)[sid] = lab
         runs.append({**({"branch_choices": bc} if bc else {}),
@@ -826,15 +828,18 @@ def _approach_choices(pb: dict[str, Any]) -> dict[str, tuple[dict, dict]]:
         out: list[tuple[str, str | None, str | None]] = []
         if st.get("type") == "decision":
             for c in st.get("conditions") or []:
-                if isinstance(c, dict) and _to(c.get("next")):
-                    out.append((_to(c.get("next")), "branch", str(c.get("display") or "")))
+                nxt = _to(c.get("next")) if isinstance(c, dict) else None
+                if nxt:
+                    out.append((nxt, "branch", str(c.get("display") or "")))
         elif st.get("type") == "manual_input":
             for o in st.get("options") or []:
-                if isinstance(o, dict) and _to(o.get("next")):
-                    out.append((_to(o.get("next")), "manual",
+                nxt = _to(o.get("next")) if isinstance(o, dict) else None
+                if nxt:
+                    out.append((nxt, "manual",
                                 str(o.get("display") or o.get("option") or "")))
-        if _to(st.get("next")):
-            out.append((_to(st.get("next")), None, None))
+        nxt = _to(st.get("next"))
+        if nxt:
+            out.append((nxt, None, None))
         edges[name] = out
     start = next((str(s.get("name") or s.get("id")) for s in steps
                   if str(s.get("type") or "").startswith("start")), None)

@@ -1648,7 +1648,8 @@ def edit_playbook(
     touched = set()
     for op in operations:
         n = _normalize_op(op) if isinstance(op, dict) else {}
-        for key in _TOUCHING_OPS.get(n.get("op"), ()):
+        op_name = n.get("op")
+        for key in (_TOUCHING_OPS.get(op_name, ()) if isinstance(op_name, str) else ()):
             if isinstance(n.get(key), str) and n[key].strip():
                 touched.add(n[key].strip())
     token = _OP_RENAMES.set(renames)

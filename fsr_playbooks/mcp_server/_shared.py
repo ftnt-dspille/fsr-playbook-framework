@@ -36,6 +36,9 @@ class _FallbackFastMCP:
             "`python -m mcp_server` / `fsrpb mcp` need the real SDK.")
 
 
+# Either the real class or the fallback shim; the two are unrelated types, so
+# the name is declared as the common `type[Any]` before either branch assigns it.
+FastMCP: type[Any]
 try:
     from mcp.server.fastmcp import FastMCP as _ImportedFastMCP
 except Exception:  # noqa: BLE001
@@ -397,7 +400,7 @@ def catalog_override(db_path: str | None):
         yield
         return
     prev = DB_PATH
-    DB_PATH = str(db_path)
+    DB_PATH = Path(db_path)
     try:
         yield
     finally:

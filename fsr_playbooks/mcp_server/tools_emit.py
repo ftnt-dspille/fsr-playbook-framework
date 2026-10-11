@@ -796,7 +796,8 @@ def _yaml_connectors(yaml_text: str) -> list[str]:
         for s in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
             if not isinstance(s, dict):
                 continue
-            args = s.get("arguments") if isinstance(s.get("arguments"), dict) else {}
+            raw_args = s.get("arguments")
+            args = raw_args if isinstance(raw_args, dict) else {}
             name = s.get("connector") or args.get("connector")
             if isinstance(name, str) and name.strip() and name not in seen:
                 seen.append(name.strip())
@@ -842,8 +843,8 @@ def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str]]:
     rows = listing.get("configured") if isinstance(listing, dict) else None
     if not rows:
         return [], []
-    have = sorted({r.get("name") for r in rows
-                   if isinstance(r, dict) and r.get("name")})
+    names = {r.get("name") for r in rows if isinstance(r, dict) and r.get("name")}
+    have = sorted(n for n in names if isinstance(n, str))
     missing = [c for c in used if c not in have and _needs_configuration(c)]
     return missing, have
 

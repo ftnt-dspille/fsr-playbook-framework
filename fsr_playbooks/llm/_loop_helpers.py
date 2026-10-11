@@ -243,6 +243,8 @@ def shrink_history(history: list[Any]) -> int:
             if block.get("type") != "tool_result":
                 continue
             cid = block.get("tool_use_id")
+            if not isinstance(cid, str):
+                continue
             orig = canonical_for.get(cid)
             if not orig:
                 continue
@@ -1445,8 +1447,8 @@ def compile_errors(yaml_text: str) -> str | None:
     compiler doesn't break test collection."""
     try:
         from fsr_playbooks.compiler import compile_yaml as _cy  # type: ignore
-    except Exception as e:
-        return f"compiler import failed: {e}"
+    except Exception as exc:
+        return f"compiler import failed: {exc}"
 
     from .._db import default_db_path
     res = _cy(yaml_text, default_db_path())

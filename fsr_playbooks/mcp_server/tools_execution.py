@@ -517,7 +517,7 @@ def populate_connector_health(client, time_budget_s: float = 60.0,
             continue
         agent_id = row.get("_agent_id") or ""
         config_ids = _row_config_ids(row)
-        verdicts: list[str] = []
+        verdicts: list[str | None] = []
         any_authoritative = False
         # Per-config healthchecks (when we can see individual config UUIDs).
         for cid in config_ids:
@@ -762,8 +762,8 @@ def _fetch_live_op(client, connector: str,
     lookup shared by op-existence AND param grounding. Returns `(None, [])` on
     any hiccup so callers fail open."""
     ops = _live_ops_for(client, connector)
-    op_names = [(o.get("operation") or o.get("name")) for o in ops]
-    op_names = [n for n in op_names if n]
+    op_names = [n for n in ((o.get("operation") or o.get("name")) for o in ops)
+                if isinstance(n, str) and n]
     op_def = next(
         (o for o in ops if (o.get("operation") or o.get("name")) == op), None)
     return op_def, op_names
@@ -1158,7 +1158,8 @@ def _prune_known_enrichment(cn: str, data: Any) -> Any | None:
     if "shodan" in cn and ("ip_str" in data or "ports" in data or "org" in data):
         return {k: v for k, v in data.items() if k in _SHODAN_KEEP}
     if "abuseipdb" in cn:
-        inner = data.get("data") if isinstance(data.get("data"), dict) else data
+        nested = data.get("data")
+        inner = nested if isinstance(nested, dict) else data
         pruned = {k: v for k, v in inner.items() if k in _ABUSEIPDB_KEEP}
         return {"data": pruned} if "data" in data else pruned
     if "fortiguard" in cn and isinstance(data.get("data"), list):
@@ -1473,7 +1474,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
     if not result.ok:
         return _err("agent_wrap_compile_failed",
                     "; ".join(e.message for e in result.errors))
-    coll = result.fsr_json["data"][0]
+    coll = result.compiled_json()["data"][0]
     coll_uuid = coll["uuid"]
     wf = coll["workflows"][0]
     wf_uuid = wf["uuid"]
@@ -2221,7 +2222,7 @@ def push_playbook(yaml_text: str,
              "suggestion": e.suggestion or ""}
             for e in result.errors
         ]}
-    coll = result.fsr_json["data"][0]
+    coll = result.compiled_json()["data"][0]
     client = get_client()
 
     # HARDEN-1: refuse a save that silently deletes live data. This is the
@@ -2241,7 +2242,7 @@ def push_playbook(yaml_text: str,
         return {"ok": False, "code": "live_shape_unreadable",
                 "error": (f"the appliance's copy of this playbook did not match "
                           f"a shape we can diff against: {e}")}
-    verdict = check_prewrite(live, result.fsr_json, acknowledged_drops)
+    verdict = check_prewrite(live, result.compiled_json(), acknowledged_drops)
     if not verdict.ok:
         # Propagate the verdict's OWN class. Hardcoding "would_drop_fields"
         # here reported an unreadable live pull -- which carries an empty

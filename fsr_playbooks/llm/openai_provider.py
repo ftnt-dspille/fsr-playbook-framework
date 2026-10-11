@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from openai import (
     APIConnectionError,
@@ -50,6 +50,13 @@ from .agent_loop import (
 from .provider import CapabilityMixin, DroppedCall, Event, Message, ProviderCapabilities
 from .replay import blocks_to_openai, is_block_content
 from .tools import openai_tools
+
+if TYPE_CHECKING:
+    from openai.types.chat import (
+        ChatCompletionMessageFunctionToolCall,
+        ChatCompletionMessageParam,
+        ChatCompletionToolParam,
+    )
 
 DEFAULT_BASE_URL = (
     os.environ.get("OPENAI_ENDPOINT")
@@ -125,7 +132,12 @@ def _contract_stop_reason(finish_reason: str | None) -> str:
     return _FINISH_TO_CONTRACT.get(finish_reason, finish_reason)
 
 
-def _max_tokens_param(model: str, value: int) -> dict[str, int]:
+class _MaxTokensKwarg(TypedDict, total=False):
+    max_tokens: int
+    max_completion_tokens: int
+
+
+def _max_tokens_param(model: str, value: int) -> _MaxTokensKwarg:
     """The output-cap kwarg for `model`, under its correct name.
 
     GPT-5 and later reject `max_tokens` outright ("Unsupported parameter:
@@ -134,8 +146,15 @@ def _max_tokens_param(model: str, value: int) -> dict[str, int]:
     models fail. Older models (gpt-4o, gpt-4.1*) accept `max_tokens`; some do not
     yet accept the new name, so we cannot simply always send the new one.
     """
-    name = "max_completion_tokens" if _is_gpt5_plus(model) else "max_tokens"
-    return {name: value}
+    if _is_gpt5_plus(model):
+        return {"max_completion_tokens": value}
+    return {"max_tokens": value}
+
+
+def _chat_messages(history: list[dict[str, Any]]) -> list[ChatCompletionMessageParam]:
+    """The wire dicts `_to_openai_messages` builds are the SDK's chat-message
+    TypedDict shapes; this states that where they are sent."""
+    return cast("list[ChatCompletionMessageParam]", history)
 
 
 def _is_gpt5_plus(model: str) -> bool:
@@ -289,8 +308,8 @@ class _OpenAITurn:
         usage = RoundUsage()
         stream = await p._client.chat.completions.create(
             model=p.model,
-            messages=self.history,
-            tools=self.plain_tools,
+            messages=_chat_messages(self.history),
+            tools=cast("list[ChatCompletionToolParam]", self.plain_tools),
             stream=True,
             **_max_tokens_param(p.model, p.max_output_tokens),
             stream_options={"include_usage": True},
@@ -359,7 +378,7 @@ class _OpenAITurn:
         usage = RoundUsage()
         stream = await p._client.chat.completions.create(
             model=p.model,
-            messages=self.history,
+            messages=_chat_messages(self.history),
             stream=True,
             # The normal ceiling, not a small one: a reasoning model spends its
             # reasoning out of this budget, and at 512 a wrap-up came back with
@@ -381,9 +400,14 @@ class _OpenAITurn:
 
     async def forced_call(self, name: str) -> ToolCall | None:
         p = self.p
+        schema = self._schema(name)
+        if schema is None:
+            # Nothing to force: the tool is not in this turn's set. Sending
+            # `tools=[None]` would be a 400 from the API.
+            return None
         resp = await p._client.chat.completions.create(
-            model=p.model, messages=self.history,
-            tools=[self._schema(name)],
+            model=p.model, messages=_chat_messages(self.history),
+            tools=[cast("ChatCompletionToolParam", schema)],
             tool_choice={"type": "function", "function": {"name": name}},
             **_max_tokens_param(p.model, p.max_output_tokens),
         )
@@ -392,7 +416,10 @@ class _OpenAITurn:
             return None
         tc = msg.tool_calls[0]
         try:
-            args = json.loads(tc.function.arguments or "{}")
+            # forced_call requests a function tool, so this is a function call;
+            # a custom call has no `.function` and takes the except path below.
+            fn_call = cast("ChatCompletionMessageFunctionToolCall", tc)
+            args = json.loads(fn_call.function.arguments or "{}")
         except Exception:
             args = {}
         return ToolCall(tc.id or "", name, args if isinstance(args, dict) else {})

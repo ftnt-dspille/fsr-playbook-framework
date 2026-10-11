@@ -898,6 +898,7 @@ def _render_op_schema_md(
     desc = op_row.get("description") or ""
     head = f"`{name}` -- {title}".rstrip(" --")
     by_name = {p["param_name"]: p for p in params}
+    p: dict[Any, Any] | None
 
     lines = [f"# {head}", f"connector: {connector}"]
     if desc:

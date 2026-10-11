@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from pathlib import Path
 from typing import Any
 
 from fsr_playbooks import module_schema
@@ -102,8 +103,8 @@ def _db_override(db_path: str):
     from . import _shared
     global DB_PATH
     prev_shared, prev_local = _shared.DB_PATH, DB_PATH
-    _shared.DB_PATH = str(db_path)
-    DB_PATH = str(db_path)
+    _shared.DB_PATH = Path(db_path)
+    DB_PATH = Path(db_path)
     try:
         yield
     finally:
@@ -592,7 +593,8 @@ def _mark_environment_diagnostic(diag: dict[str, Any]) -> dict[str, Any]:
     is now on the wire instead of being something the model has to infer from
     getting the same error twice.
     """
-    guidance = _ENVIRONMENT_CODES.get(diag.get("code"))
+    code = diag.get("code")
+    guidance = _ENVIRONMENT_CODES.get(code) if isinstance(code, str) else None
     if guidance:
         diag["environment"] = True
         diag["remediation"] = guidance
@@ -1035,7 +1037,8 @@ def _finalize(checks_run, required_fixes, warnings, evidence,
     # visible. `ready_to_push` is computed on what remains.
     suppressed: list[dict[str, Any]] = []
     if disabled_codes:
-        kept_fixes, kept_warnings = [], []
+        kept_fixes: list[dict[str, Any]] = []
+        kept_warnings: list[dict[str, Any]] = []
         # A diagnostic is suppressed if EITHER its coarse `code` or its
         # fine-grained `check` sub-tag is in the disabled set -- so `value`
         # (code) and `picklist`/`param_type`/`snippet` (check) both work.

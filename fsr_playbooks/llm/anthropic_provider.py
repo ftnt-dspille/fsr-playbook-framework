@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 try:
     from anthropic import AsyncAnthropic
@@ -47,6 +47,18 @@ from .provider import (
     ProviderCapabilities,
 )
 from .tools import anthropic_tools
+
+if TYPE_CHECKING:
+    from anthropic.lib.streaming import (
+        AsyncMessageStreamManager,
+        BetaAsyncMessageStreamManager,
+    )
+    from anthropic.types import MessageParam, TextBlockParam, ToolUnionParam
+    from anthropic.types.beta import (
+        BetaMessageParam,
+        BetaTextBlockParam,
+        BetaToolUnionParam,
+    )
 
 # The agent runs a multi-step tool loop, so the default must be a model that
 # can plan across calls. Sonnet 4.5 predates adaptive thinking entirely -- it
@@ -578,8 +590,7 @@ class _AnthropicTurn:
             return 0
 
     def history_dicts(self) -> list[dict[str, Any]]:
-        return [{"role": m.role, "content": m.content} if hasattr(m, "role") else m
-                for m in self.history]
+        return [{"role": m.role, "content": m.content} for m in self.history]
 
     def has_tool(self, name: str) -> bool:
         return any(t.get("name") == name for t in self.plain_tools)
@@ -590,26 +601,51 @@ class _AnthropicTurn:
     def _messages(self) -> list[dict[str, Any]]:
         return _with_history_breakpoint(_to_anthropic_messages(self.history))
 
+    # The wire dicts built above are the SDK's own TypedDict shapes; these
+    # casts state that for the type checker at the one place they are sent.
+    def _system_param(self) -> list[TextBlockParam]:
+        return cast("list[TextBlockParam]", self.system)
+
+    def _messages_param(self) -> list[MessageParam]:
+        return cast("list[MessageParam]", self._messages())
+
+    def _tools_param(self) -> list[ToolUnionParam]:
+        return cast("list[ToolUnionParam]", self.request_tools)
+
     # -- requests ---------------------------------------------------------
+
+    def _open_stream(self, native_kw: dict[str, Any], betas: list[str]
+                     ) -> AsyncMessageStreamManager | BetaAsyncMessageStreamManager:
+        p = self.p
+        if betas:
+            # The beta endpoint is the only one that takes `betas`; the two
+            # branches are typed separately because the SDK's param types differ.
+            return p._client.beta.messages.stream(
+                model=p.model,
+                max_tokens=p.max_output_tokens,
+                system=cast("list[BetaTextBlockParam]", self.system),
+                messages=cast("list[BetaMessageParam]", self._messages()),
+                tools=cast("list[BetaToolUnionParam]", self.request_tools),
+                betas=betas,
+                **native_kw,
+            )
+        return p._client.messages.stream(
+            model=p.model,
+            max_tokens=p.max_output_tokens,
+            system=self._system_param(),
+            messages=self._messages_param(),
+            tools=self._tools_param(),
+            **native_kw,
+        )
 
     async def stream_round(self) -> AsyncIterator[tuple[str, Any]]:
         p = self.p
         # A task budget rides the BETA endpoint, so the endpoint follows the
         # kwargs rather than being decided up front.
         native_kw, betas = p._native_request_kwargs(self.turn_budget)
-        api = p._client.beta.messages if betas else p._client.messages
-        extra = {"betas": betas} if betas else {}
-        async with api.stream(
-            model=p.model,
-            max_tokens=p.max_output_tokens,
-            system=self.system,
-            messages=self._messages(),
-            tools=self.request_tools,
-            **native_kw,
-            **extra,
-        ) as stream:
+        async with self._open_stream(native_kw, betas) as stream:
             async for ev in stream:
-                if ev.type == "content_block_delta" and getattr(ev.delta, "type", None) == "text_delta":
+                if ev.type == "content_block_delta" and ev.delta.type == "text_delta":
                     yield ("text", ev.delta.text)
             final = await stream.get_final_message()
         yield ("final", self._parse(final))
@@ -648,11 +684,11 @@ class _AnthropicTurn:
         async with p._client.messages.stream(
             model=p.model,
             max_tokens=max_tokens,
-            system=self.system,
-            messages=self._messages(),
+            system=self._system_param(),
+            messages=self._messages_param(),
         ) as stream:
             async for ev in stream:
-                if ev.type == "content_block_delta" and getattr(ev.delta, "type", None) == "text_delta":
+                if ev.type == "content_block_delta" and ev.delta.type == "text_delta":
                     yield ("text", ev.delta.text)
             final = await stream.get_final_message()
         yield ("final", _round_usage(final))
@@ -662,9 +698,9 @@ class _AnthropicTurn:
         schema = next(t for t in self.plain_tools if t.get("name") == name)
         resp = await p._client.messages.create(
             model=p.model, max_tokens=p.max_output_tokens,
-            system=self.system,
-            messages=self._messages(),
-            tools=[schema],
+            system=self._system_param(),
+            messages=self._messages_param(),
+            tools=[cast("ToolUnionParam", schema)],
             tool_choice={"type": "tool", "name": name},
         )
         tu = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)

@@ -316,7 +316,7 @@ def _execute_one_step(s: DebugSession) -> dict[str, Any] | None:
                    "(each gated) to commit." if not s.execute_unsafe_ops
                    else "execute_unsafe_ops=True; commit via run_op."))
     elif stype == "set_variable":
-        sim_output: dict[str, Any] = {}
+        sim_output = {}
         arg_list = rendered.get("arg_list") or []
         if isinstance(arg_list, list) and arg_list:
             for item in arg_list:
