@@ -174,8 +174,8 @@ def test_autowarm_keeps_fatal_when_catalog_matches_and_warm_impossible(tmp_path,
 
 
 # -- write_connector live-warm provenance -----------------------------------
-FXINFO = Path("/Users/dylanspille/PycharmProjects/Miscellaneous/fortisoar/"
-              "fsr_connector_toolkit/tests/fixtures/threatconnect/info.json")
+# A stock connector's info.json, vendored so the test runs in any clone.
+FXINFO = Path(__file__).parent / "fixtures" / "threatconnect_info.json"
 
 
 def _live_cfg(base_url, label=""):
