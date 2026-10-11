@@ -165,4 +165,4 @@ bash "$ROOT/scripts/ci_watch.sh" --workflow publish.yml --ref "$TAG" \
 }
 echo ">> then bump the connector pin + ship. Prefer the one command that waits for"
 echo "   PyPI to actually serve the wheel before shipping:"
-echo "     cd ../../ConnectorsV2/fsr-playbook-builder && make release-ship FW=$VERSION"
+echo "     cd ../ConnectorsV2/conn_main && make release-ship FW=$VERSION"

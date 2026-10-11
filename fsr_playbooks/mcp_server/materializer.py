@@ -21,8 +21,7 @@ Discovery + execution both live on the live pyfsr ``FortiSOAR`` client
 (``client.mcp.list_tools`` / ``client.mcp.call_tool``); this consumer adds no
 new transport. The on-box worker reaches ``/mcp/*`` via the env-creds client
 (``EnvConfig.from_env().client()``), not the crudhub loopback (crudhub speaks
-Hydra REST, not MCP streamable-HTTP). ``make mcp-bridge-check`` proves
-reachability.
+Hydra REST, not MCP streamable-HTTP).
 
 Safety model (mirrors the platform's ``memory.yaml`` allow-list -- no
 auto-discovery): the connector calls :func:`configure` with an explicit
@@ -30,7 +29,7 @@ per-server allow-list at session setup; default empty → nothing materialized �
 no behavior change on upgrade. Each allow-list entry declares the server
 read-only (→ tier 1, auto-run) or mutating (→ tier 3, approval card).
 
-Phase-0 probe (``make mcp-bridge-check``) confirmed the substrate live on 8.0:
+Phase-0 probe confirmed the substrate live on 8.0:
 ``list_tools`` returns ``[{"name", "description", "input_schema"}, ...]`` with
 full JSON schemas -- passed straight into ``ToolSpec``.
 """
@@ -247,7 +246,7 @@ def _load_allowlist_from_env() -> None:
 def _build_client() -> Any:
     """Construct the live pyfsr FortiSOAR client. Priority: injected factory
     (tests) → EnvConfig.from_env().client() (production, the path the
-    mcp-bridge-check probe proved). Returns None if unavailable (offline /
+    phase-0 probe proved). Returns None if unavailable (offline /
     no creds)."""
     if _client_factory is not None:
         return _client_factory()

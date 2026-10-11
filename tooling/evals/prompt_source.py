@@ -121,7 +121,7 @@ def resolve_triage_prompt(*, mode: str | None = None,
     raise PromptUnresolvable(
         "No real triage prompt found. The shipped prompt lives in the "
         "connector; point FSR_CONNECTOR_REPO at the checkout, e.g.\n"
-        "  FSR_CONNECTOR_REPO=/path/to/fsr-playbook-builder\n"
+        "  FSR_CONNECTOR_REPO=/path/to/conn_main\n"
         "Without it this run would have scored a 583-char fallback stub and "
         "reported the result as if it measured the real prompt."
     )

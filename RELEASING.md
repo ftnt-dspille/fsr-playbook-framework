@@ -8,7 +8,7 @@ gone. Tag, push, release. That's it.
 ## Releasing in order to ship the connector? Use `make release-ship` instead
 
 Almost every release exists to get new framework code onto a box. For that, run
-**one command from the connector repo** (`ConnectorsV2/fsr-playbook-builder`):
+**one command from the connector repo** (`ConnectorsV2/conn_main`):
 
 ```sh
 make release-ship FW=next      # release the next patch, then ship the connector

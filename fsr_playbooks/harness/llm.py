@@ -17,7 +17,7 @@ from typing import Any
 
 #: The local default (chosen by measurement on the known-answer and sweep
 #: corpora: the only b200 backend 6/6 on known-answer, at ~240 tok/s). What a
-#: virtual key permits rotates; check `make models` before trusting it.
+#: virtual key permits rotates; check the gateway's model list before trusting it.
 DEFAULT_FRANK_MODEL = "coding-b200/qwen3.8-27b-nvfp4"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 

@@ -6,7 +6,7 @@
 #   make dev         -- both, in parallel; Ctrl-C kills the group
 #   make e2e         -- run every examples/*.test.yaml against the live FSR
 #   make tests       -- fast pytest (excludes live + slow)
-#   make tests-random-- every offline suite under 3 randomized orders
+#   make tests-random -- every offline suite under 3 randomized orders
 #
 # Notes:
 #   - Backend reads .env at the repo root (FSR_BASE_URL, ANTHROPIC_API_KEY, …).
@@ -14,10 +14,9 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate release ci-watch corpus-gate corpus-gen matrix tool-gate mypy-gate wire-audit wire-census test-effect-probes
+.PHONY: backend frontend dev e2e tests tests-random playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate enhance-live release ci-watch corpus-gate corpus-gen corpus-triage matrix tool-gate agreement mypy mypy-gate doctor db-restore wire-audit wire-census test-effect-probes
 
 PY        := uv run python
-BACKEND_DIR := web/backend
 FRONTEND_DIR := web/frontend
 PORT_BACKEND  := 47821
 PORT_FRONTEND := 47822
@@ -34,7 +33,9 @@ sync: ## create .venv (if missing) and install all editable deps via uv
 	@# Clear a stray VIRTUAL_ENV/conda env so deps land in THIS repo's .venv,
 	@# not whatever venv the caller happened to have active.
 	@# pytest-randomly powers `make tests-random` (the order-dependence gate).
-	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest pytest-randomly requests-mock anyio ruff
+	# mypy is the `typing` extra. `make verify` and `make mypy-gate` need it, pinned to
+	# the uv.lock version: the ratchet baseline was measured on that mypy, not on a newer one.
+	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest pytest-randomly requests-mock anyio ruff mypy==2.1.0
 
 preflight: ## check dev ports are free; print holders if not
 	@for p in $(PORT_BACKEND) $(PORT_FRONTEND); do \
@@ -71,7 +72,7 @@ e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
 	$(PY) -m pytest tooling/tests/ -q -m "not live and not slow"
 
-playbook-tests: ## fsr_playbooks offline suite (the shipped package: harness readers, compiler, llm) -- run with `make tests`
+playbook-tests: ## fsr_playbooks offline suite (the shipped package: harness readers, compiler, llm) -- also run by `make verify`
 	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q -p no:randomly
 
 # Order-dependence gate (PLAN_testing_that_can_fail 0.3). A suite whose tests
@@ -115,16 +116,13 @@ MSG ?=
 
 # The structure/contract suite -- deterministic order (no:randomly) so a prompt
 # edit that breaks assembly/routing reddens here in ~2s before any live spend.
-CHAT_FAST_TESTS := \
-	fsr_playbooks/tests/test_triage_prompt.py \
-	fsr_playbooks/tests/test_triage_prompt_enrichment_offer.py \
-	fsr_playbooks/tests/test_triage_preflight.py \
-	fsr_playbooks/tests/test_low_signal_gate.py \
+CHAT_FAST_LIB_TESTS := \
 	fsr_playbooks/tests/test_triage_discipline.py \
-	fsr_playbooks/tests/test_intent_slice_and_params.py \
 	fsr_playbooks/tests/test_build_prompt_skeleton.py \
 	fsr_playbooks/tests/test_playbook_offer.py \
 	fsr_playbooks/tests/test_enhancement_offer.py \
+
+CHAT_FAST_TOOLING_TESTS := \
 	tooling/tests/test_evals_enhance_delivery.py \
 	tooling/tests/test_run_turn.py \
 	tooling/tests/test_catalog_tools.py \
@@ -136,8 +134,10 @@ CHAT_FAST_TESTS := \
 	tooling/tests/test_build_fidelity_golden.py \
 	tooling/tests/test_hunt_depth.py
 
+# conftest refuses one pytest process over both trees (separate reference DBs).
 chat-fast: ## fast OFFLINE chat structure/contract guards (no API; ~2s)
-	$(PY) -m pytest $(CHAT_FAST_TESTS) -q -p no:randomly
+	$(PY) -m pytest $(CHAT_FAST_LIB_TESTS) -q -p no:randomly
+	$(PY) -m pytest $(CHAT_FAST_TOOLING_TESTS) -q -p no:randomly
 chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
 	@if [ -n "$(SCENARIO)" ]; then \
 		$(PY) tooling/cli.py chat-drive --task "$(SCENARIO)"; \
@@ -172,11 +172,7 @@ lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
 # (Do NOT use `uv run --extra test` in the connector: it builds an isolated env
 #  without fsr_playbooks, so its whole suite errors on ModuleNotFound.)
 VENV_PY  := $(CURDIR)/.venv/bin/python
-# conn_main is THE connector checkout (release-ship, make loop, the box all run
-# it). This used to name ../ConnectorsV2/fsr-playbook-builder, a separate clone
-# that stopped moving at the rename -- every screen-lane eval then scored the
-# current framework against a days-old connector (triage prompt, tool arg
-# models) and nothing said so.
+# conn_main is THE connector checkout (release-ship, make loop and the box all run it).
 CONNECTOR_DIR ?= ../ConnectorsV2/conn_main
 
 # The eval harness registers the connector's triage tools (get_record,
@@ -381,7 +377,6 @@ verify: ## green-check for the fsr_playbooks + connector axis (offline)
 	@echo "→ [4/5] connector suite (offline; live tests self-skip)"
 	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
 	@echo "✓ verify passed"
-	@echo "  (Angular widget has its own toolchain in WebStorm -- not verifiable here.)"
 
 clean: ## remove pycache + node_modules build leftovers (NOT node_modules itself)
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
