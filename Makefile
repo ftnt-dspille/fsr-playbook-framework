@@ -83,11 +83,14 @@ playbook-tests: ## fsr_playbooks offline suite (the shipped package: harness rea
 # `local_turn` rebinds and never restores, and the global approval-grant table.
 RANDOM_SEEDS ?= 1 7 42
 tests-random: ## run every offline suite under 3 randomized collection orders
+	@# The connector leg goes through the connector's own gate, as verify does:
+	@# a bare pytest lacked the widget-checkout env, so its parity tests skipped.
 	@for s in $(RANDOM_SEEDS); do \
 	  echo "→ seed $$s"; \
 	  $(VENV_PY) -m pytest fsr_playbooks/tests/ -q --randomly-seed=$$s || exit 1; \
 	  $(VENV_PY) -m pytest tooling/tests/ -q -m "not live and not slow" --randomly-seed=$$s || exit 1; \
-	  (cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q --randomly-seed=$$s) || exit 1; \
+	  $(MAKE) --no-print-directory -C $(CONNECTOR_DIR) test PY=$(VENV_PY) \
+	    PYTEST_ARGS="-p randomly --randomly-seed=$$s" || exit 1; \
 	done
 	@echo "✓ no order-dependent tests under seeds: $(RANDOM_SEEDS)"
 

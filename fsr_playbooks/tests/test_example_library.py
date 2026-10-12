@@ -14,12 +14,13 @@ from fsr_playbooks.mcp_server import tools_corpus, tools_recipe
 def temp_manifest(tmp_path: Path) -> Path:
     """Create a temporary manifest file pointing to fixture YAMLs."""
     manifest = tmp_path / "test_manifest.txt"
-    # Point to the framework examples directory
+    # Repo-relative paths: a `../fsr-playbook-framework/` prefix only resolved
+    # in a checkout with that directory name, so the test failed in a worktree.
     manifest.write_text(
         "# Test manifest\n"
-        "../fsr-playbook-framework/examples/demo_alert_on_create.yaml\n"
-        "../fsr-playbook-framework/examples/demo_record_create.yaml\n"
-        "../fsr-playbook-framework/examples/manual_input_then_act.yaml\n"
+        "examples/demo_alert_on_create.yaml\n"
+        "examples/demo_record_create.yaml\n"
+        "examples/manual_input_then_act.yaml\n"
     )
     return manifest
 
