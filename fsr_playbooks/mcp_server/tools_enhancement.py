@@ -295,6 +295,11 @@ def _diff_collections(before, after, user_message: str | None,
             bu, au = _uuid_of(b_steps[dn]), _uuid_of(a_steps[an])
             if uuids_ok and bu and au:
                 return bu == au
+            # Without uuids the name is the only link. An explicit rename_step
+            # says the two names are one step, whatever else the batch changed
+            # on it (an update in the same batch moves the projection).
+            if (op_renames or {}).get(dn) == an:
+                return True
             return _step_projection(a_steps[an]) == _step_projection(b_steps[dn])
 
         if dropped and added:
