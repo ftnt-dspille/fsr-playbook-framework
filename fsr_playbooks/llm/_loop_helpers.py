@@ -929,7 +929,7 @@ class TriageDiscipline:
                         f"re-attempted. Do not retry it. Either pick a "
                         f"configured alternative (`list_configured_connectors` "
                         f"shows what IS available), or surface the gap to the "
-                        f"analyst via `emit_card(card_type='capability_gap_card')` so they can "
+                        f"analyst via `emit_card(card_type='capability_gap')` so they can "
                         f"fix the connector and resume."
                     ),
                 }
