@@ -376,7 +376,11 @@ verify: ## green-check for the fsr_playbooks + connector axis (offline)
 	@echo "→ [3/5] fsr_playbooks tests"
 	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q
 	@echo "→ [4/5] connector suite (offline; live tests self-skip)"
-	cd $(CONNECTOR_DIR) && PYTHONPATH=. $(VENV_PY) -m pytest -q
+	@# The connector's own gate, run on THIS framework's interpreter. A bare
+	@# pytest here lacked the widget-checkout env the parity tests need, so
+	@# they skipped and the skip policy failed verify while `make test` in the
+	@# connector was green.
+	$(MAKE) --no-print-directory -C $(CONNECTOR_DIR) test PY=$(VENV_PY)
 	@echo "✓ verify passed"
 
 clean: ## remove pycache + node_modules build leftovers (NOT node_modules itself)
