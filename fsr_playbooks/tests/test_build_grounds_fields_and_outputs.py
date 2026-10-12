@@ -91,6 +91,21 @@ def test_find_field_names_what_is_missing(fields_db):
     assert find("field", module="nonsense").get("code") == "module_not_in_catalog"
 
 
+def test_a_known_module_with_no_fields_is_unwarmed_not_unknown(fields_db):
+    # The shipped DB names the module but ships its field list empty. That is
+    # a warm the box has not done, not a wrong name, and the answer must say so.
+    with sqlite3.connect(fields_db) as c:
+        c.execute("INSERT OR REPLACE INTO modules (name, label, plural, description) "
+                  "VALUES ('incidents', 'Incident', 'incidents', '')")
+        c.execute("DELETE FROM module_fields WHERE module_name='incidents'")
+    r = find("field", module="incidents")
+    assert r["ok"] is False
+    assert r["code"] == "module_fields_unwarmed"
+    assert r["module"] == "incidents"
+    assert "warm" in r["hint"] and "retry" in r["hint"]
+    assert "not warmed for this module" not in r["message"]
+
+
 def test_the_build_refusal_points_at_the_field_lookup():
     from fsr_playbooks.llm.turn_plan import _playbook_side_refusal
     r = _playbook_side_refusal("run_op", {})
