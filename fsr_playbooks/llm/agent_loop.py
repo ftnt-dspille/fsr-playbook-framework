@@ -257,7 +257,7 @@ class WireTurn(Protocol):
     def append_user(self, text: str) -> None: ...
     def append_tool_call(self, call: ToolCall) -> None: ...
     def append_tool_results(self, outcomes: list[ToolOutcome], *,
-                            note: str | None = None, note_role: str = "user") -> None: ...
+                            note: str | None = None) -> None: ...
     def result_wire(self, outcome: ToolOutcome) -> Any: ...
     def snapshot(self) -> list[Any]: ...
     def usage_extra(self) -> dict[str, Any]: ...
@@ -699,7 +699,7 @@ async def run_loop(
                         w.append_tool_results(
                             [ToolOutcome(call.call_id, stringify(result), is_error_result(result),
                                          call.name, call.args)],
-                            note=UNATTENDED_CONTAIN_DIRECTIVE, note_role="user")
+                            note=UNATTENDED_CONTAIN_DIRECTIVE)
                         contain.mark_fired()
                         # Marks that follow-through fired. Zero tokens: this
                         # round's usage was reported as verdict_guard_forced.
@@ -789,8 +789,9 @@ async def run_loop(
         # TurnPlan item 3: state the shrinking budget in the soft window before
         # the cliff (the forced wrap-up round handles exhaustion).
         note = budget_note(_turn + 1, turn_budget) if provider.emulation.task_budget else ""
-        w.append_tool_results(outcomes, note=f"[turn budget] {note}" if note else None,
-                              note_role="system")
+        # A user-role note: a mid-history system message is refused by
+        # OpenAI-compatible gateways ("System message must be at the beginning").
+        w.append_tool_results(outcomes, note=f"[turn budget] {note}" if note else None)
         any_tools_run = True
         yield usage_event(rnd.stop_reason or "tool_use")
 

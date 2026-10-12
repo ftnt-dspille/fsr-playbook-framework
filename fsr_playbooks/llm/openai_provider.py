@@ -442,10 +442,10 @@ class _OpenAITurn:
         return {"role": "tool", "tool_call_id": outcome.call_id, "content": outcome.content}
 
     def append_tool_results(self, outcomes: list[ToolOutcome], *,
-                            note: str | None = None, note_role: str = "user") -> None:
+                            note: str | None = None) -> None:
         self.history.extend(self.result_wire(o) for o in outcomes)
         if note:
-            self.history.append({"role": note_role, "content": note})
+            self.history.append({"role": "user", "content": note})
 
     def snapshot(self) -> list[Any]:
         # Without the leading system message: stream() re-prepends it.

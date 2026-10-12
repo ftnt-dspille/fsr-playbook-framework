@@ -512,7 +512,7 @@ class _FortiAITurn:
         return _text_pair(outcome)
 
     def append_tool_results(self, outcomes: list[ToolOutcome], *,
-                            note: str | None = None, note_role: str = "user") -> None:
+                            note: str | None = None) -> None:
         for o in outcomes:
             self.history += _text_pair(o)
         if note:

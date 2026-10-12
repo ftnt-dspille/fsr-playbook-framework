@@ -516,7 +516,9 @@ def _agentic_openai_compatible(*, base_url: str, model: str,
             if _TURN_PLAN is not None:
                 _note = _TURN_PLAN.budget.note(turns)
                 if _note:
-                    history.append({"role": "system",
+                    # A user-role note: gateways refuse a system message
+                    # that is not first.
+                    history.append({"role": "user",
                                     "content": f"[turn budget] {_note}"})
         return {"text": "\n".join(text_chunks), "trace": trace,
                 "turns": turns, "audit": _snap()}
