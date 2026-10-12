@@ -61,7 +61,7 @@ loop-delivery change in `c48e97f`. Figures marked "earlier" come from the
 | Failed edit | `failed_edit_forced` | 0 | The last edit still has required fixes: one directive | Keep; measure. |
 | Containment follow-through | `containment_follow_through` | 25 (since 2026-10-05) | Unattended (auto-triage) true positive with nothing staged: one directive | Keep; only auto-triage turns can fire it. |
 | Forced assessment | `assessment_forced` | 5 | Ran tools, wrote nothing | Keep. |
-| Self-repair | n/a | n/a | A fenced ```yaml block in prose that does not compile: one repair round | Keep while fenced YAML counts as a deliverable (`analyst_has_the_yaml`). |
+| Self-repair | n/a | n/a | The last fenced ```yaml block in a terminal round fails the compile or the connector check: one repair round, up to `MAX_SELF_REPAIR_TURNS` (2). Once the cap is spent, a failing fence is neutralised in the delivered text (a note naming what failed), in the terminal round, the tool-round prose and the wrap-up. | Keep. The widget saves the last fence and has no other signal, so the loop is the only place a failing fence can be stopped. |
 
 Delivery is decided on structure: the loop emits an offer only when a verify
 passed, the offer tool is advertised, the model has not already delivered, and
@@ -100,6 +100,11 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
 
 ## Changelog
 
+- 2026-10-12: self-repair. A failing fence is no longer delivered after the cap:
+  `_neutralise_failing_fences` replaces it with a note. The fence text is held
+  back from the stream until its round ends (`FenceHold`), so prose still
+  streams. Cap value measured on five live Frank build turns: two repairs, one
+  recovered on its first attempt; kept at 2.
 - 2026-10-11: inventory extended to the tools.py and arg_gate.py dispatch
   stages and TurnPlan.gate_refusal. Audit counts refreshed from the local
   session DB. The delivery rows now say what the loop does, not that a

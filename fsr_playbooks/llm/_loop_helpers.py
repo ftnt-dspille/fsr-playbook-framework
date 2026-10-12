@@ -1172,13 +1172,57 @@ class TriageDiscipline:
                     caps.noted_at = time.time()
 
 
+#: A closed ```yaml fence. The group is the YAML body; the whole match is the
+#: fence, so a caller can replace it.
+YAML_FENCE_RE = re.compile(r"```ya?ml\n([\s\S]*?)```", re.IGNORECASE)
+
+
 def extract_yaml_block(text: str) -> str | None:
     """Return the contents of the LAST fenced ```yaml block, or None.
     Mirrors the frontend's extractYamlBlock so the in-chat YAML the user
     sees and the YAML we self-repair against are exactly the same string.
     """
-    matches = list(re.finditer(r"```ya?ml\n([\s\S]*?)```", text, flags=re.IGNORECASE))
+    matches = list(YAML_FENCE_RE.finditer(text))
     return matches[-1].group(1) if matches else None
+
+
+class FenceHold:
+    """Streams a model round's text, holding back from its first code fence.
+
+    The prose before a fence goes out as it streams. The fence and everything
+    after it wait for the end of the round, so the loop can decide what the
+    reply delivers (`agent_loop._neutralise_failing_fences`). Trailing backticks
+    that could open a fence are held until the next delta settles them.
+
+    `feed` returns the text that may be sent now; `finish` returns the text
+    that was held and is still undelivered, and resets the hold."""
+
+    def __init__(self) -> None:
+        self._open = False
+        self._held = ""
+        self._ticks = ""
+
+    def feed(self, delta: str) -> str:
+        if self._open:
+            self._held += delta
+            return ""
+        buf = self._ticks + delta
+        at = buf.find("```")
+        if at != -1:
+            self._open = True
+            self._held = buf[at:]
+            self._ticks = ""
+            return buf[:at]
+        n = len(buf) - len(buf.rstrip("`"))
+        self._ticks = buf[len(buf) - n:]
+        return buf[:len(buf) - n]
+
+    def finish(self) -> str:
+        rest = self._held if self._open else self._ticks
+        self._open = False
+        self._held = ""
+        self._ticks = ""
+        return rest
 
 
 # Tools whose YAML argument actually REACHES THE ANALYST: the offer/patch cards
