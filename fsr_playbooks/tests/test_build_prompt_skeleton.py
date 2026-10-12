@@ -302,3 +302,54 @@ def test_prompt_forbids_a_yaml_fence_on_a_read_only_turn():
 def test_terminal_action_rule_is_scoped_to_change_requests():
     """The fence-required rule must not read as unconditional."""
     assert "Terminal action -- hard rule for a CHANGE request" in _PROMPT
+
+
+# --- One rule for a product the box does not have ------------------------
+# The prompt once said two things at once: "never put a connector name into a
+# playbook this box cannot run" and "offer a placeholder `connector` step". The
+# model improvised a different stand-in on each run (a connector step, then a
+# set_variable that reads like one), and a stand-in is indistinguishable from a
+# real step to anyone checking the playbook. The rule now lives once, under
+# "A product this box does not have", and says what to do instead.
+
+def _absent_product_section() -> str:
+    start = _FLAT.index("**a product this box does not have.**")
+    end = _FLAT.index("**configured is the bar for authoring")
+    return _FLAT[start:end]
+
+
+def test_absent_product_rule_is_stated_once():
+    assert _FLAT.count("**a product this box does not have.**") == 1
+
+
+def test_prompt_never_asks_for_a_placeholder_step():
+    # Every placeholder instruction was the contradiction. None may come back.
+    assert "placeholder" not in _FLAT
+
+
+def test_absent_product_rule_forbids_a_stand_in_for_the_missing_step():
+    section = _absent_product_section()
+    assert "no `connector` step on it" in section
+    assert "no stand-in in its place" in section
+    assert "`set_variable`" in section
+
+
+def test_absent_product_rule_says_what_to_do_instead():
+    section = _absent_product_section()
+    assert "deliver a playbook of only the steps this box can run" in section
+    assert "emit_card(card_type='capability_gap'" in section
+    assert "deliver no playbook" in section
+    assert "configured connector does the same job" in section
+
+
+def test_every_card_type_the_prompt_or_the_loop_names_is_a_real_card():
+    # `capability_gap_card` was named in a redirect the model reads, but the
+    # emitter knows only `capability_gap`: the redirect failed with
+    # unknown_card_type. Every `card_type='...'` literal must be a real key.
+    from fsr_playbooks.mcp_server.tools_emit import CARD_TYPES
+    llm_dir = Path(__file__).resolve().parents[1] / "llm"
+    sources = [_PROMPT] + [p.read_text() for p in sorted(llm_dir.glob("*.py"))]
+    named = {m for text in sources for m in re.findall(r"card_type='([a-z_]+)'", text)}
+    assert named, "no card_type literals found: the scan is looking in the wrong place"
+    unknown = sorted(named - set(CARD_TYPES))
+    assert not unknown, f"card_type literals the emitter does not know: {unknown}"
