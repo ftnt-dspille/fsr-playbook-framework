@@ -725,7 +725,7 @@ class _AnthropicTurn:
         return _result_block(outcome)
 
     def append_tool_results(self, outcomes: list[ToolOutcome], *,
-                            note: str | None = None, note_role: str = "user") -> None:
+                            note: str | None = None) -> None:
         # One user message answers every call; a note rides as a text block in
         # it (Anthropic has no mid-conversation system role).
         blocks: list[dict[str, Any]] = [_result_block(o) for o in outcomes]

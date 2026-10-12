@@ -60,11 +60,8 @@ backend: ## start FastAPI dev server (autoreload, :47821)
 frontend: ## start Vite dev server (Svelte, :47822)
 	cd $(FRONTEND_DIR) && pnpm install --silent && pnpm dev
 
-dev: preflight ## run backend + frontend together; if either dies, both stop
-	@trap 'kill 0' INT TERM EXIT; \
-	( $(MAKE) backend; echo "[dev] backend exited"; kill 0 ) & \
-	( $(MAKE) frontend; echo "[dev] frontend exited"; kill 0 ) & \
-	wait
+dev: preflight ## run backend + frontend together; if either dies, both stop (scripts/dev.sh)
+	@scripts/dev.sh
 
 e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
 	cd tooling && uv run --project .. python -m cli e2e all
