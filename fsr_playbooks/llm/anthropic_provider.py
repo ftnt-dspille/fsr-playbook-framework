@@ -568,8 +568,13 @@ class _AnthropicTurn:
         # before the cache stamp, since the flags are config-stable.
         if provider._turn_request.defer_tools and not provider.emulation.deferred_tools:
             req_tools, _n = apply_deferred_loading(req_tools, provider.model)
+        # The cache stamp goes on the last LOADED tool: Anthropic rejects a
+        # tool carrying both `defer_loading` and `cache_control`, and deferred
+        # tools are not part of the cached prefix anyway.
+        last = max((i for i, t in enumerate(req_tools) if not t.get("defer_loading")),
+                   default=None)
         self.request_tools = [({**t, "cache_control": {"type": "ephemeral"}}
-                               if i == len(req_tools) - 1 else t)
+                               if i == last else t)
                               for i, t in enumerate(req_tools)]
         # Stamped on every UsageEvent: a session whose fingerprint changes
         # between turns paid to rebuild the cache -- see cache_prefix.

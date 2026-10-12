@@ -288,3 +288,22 @@ def test_deferred_loading_is_not_applied_unless_asked() -> None:
     # function itself stays pure and callable either way.
     surface = [{"name": "find_connector"}, {"name": "mcp_soc__get_alert"}]
     assert apply_deferred_loading(surface, p.model)[1] == 1
+
+
+def test_cache_stamp_never_lands_on_a_deferred_tool() -> None:
+    """Anthropic 400s a tool that carries both `defer_loading` and
+    `cache_control`. Deferred tools sort last (mcp_* tail), so stamping the
+    final array entry put the cache marker on a deferred tool and every
+    deferred turn was rejected. The stamp goes on the last LOADED tool."""
+    p = AnthropicProvider(api_key="test-key")
+    p.request(TurnRequest(defer_tools=True))
+    surface = [{"name": "find_connector"}, {"name": "validate_yaml"},
+               {"name": "mcp_utility__global_search"}]
+    turn = p.open_turn(system="s", messages=[], tools=surface, turn_budget=4)
+    deferred = [t["name"] for t in turn.request_tools if t.get("defer_loading")]
+    assert deferred == ["mcp_utility__global_search"], turn.request_tools
+    both = [t["name"] for t in turn.request_tools
+            if t.get("defer_loading") and "cache_control" in t]
+    assert both == [], turn.request_tools
+    stamped = [t["name"] for t in turn.request_tools if "cache_control" in t]
+    assert stamped == ["validate_yaml"], turn.request_tools
