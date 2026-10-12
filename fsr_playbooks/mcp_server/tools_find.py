@@ -277,6 +277,7 @@ def _find_fields(module: str, query: str, *, limit: int) -> dict[str, Any]:
     `destinationIp`) because record reads are refused there and nothing else
     named the fields. Catalog-only: no record data, no box call."""
     import difflib  # noqa: PLC0415
+    import sqlite3  # noqa: PLC0415
 
     from fsr_playbooks import module_schema  # noqa: PLC0415
 
@@ -290,14 +291,32 @@ def _find_fields(module: str, query: str, *, limit: int) -> dict[str, Any]:
         rows = conn.execute(
             "SELECT field_name, title, type, picklist_name FROM module_fields "
             "WHERE module_name=? ORDER BY field_name", (name,)).fetchall()
+        known = False
+        if not rows:
+            try:
+                known = conn.execute(
+                    "SELECT 1 FROM modules WHERE name=?", (name,)).fetchone() is not None
+            except sqlite3.OperationalError:  # no modules table on an old DB
+                known = False
     finally:
         conn.close()
+    if not rows and known:
+        # The module is in the catalog (its name is a baseline) but its field
+        # list was never read from this box. Not a bad name: a warm fills it.
+        return {"ok": False, "code": "module_fields_unwarmed",
+                "module": name,
+                "message": (f"the catalog knows the module {name!r} but has no "
+                            "field list for it yet; fields are read from this "
+                            "FortiSOAR box by a warm, which has not filled them"),
+                "hint": ("retry in a minute: the warm runs in the background and "
+                         "the next lookup of this module should answer")}
     if not rows:
         return {"ok": False, "code": "module_not_in_catalog",
                 "module": name,
-                "message": (f"the catalog has no fields for {name!r} -- it is "
-                            "not warmed for this module, or the name is wrong "
-                            "(modules are plural: alerts, incidents, indicators)")}
+                "message": (f"the catalog has no module named {name!r} -- the "
+                            "name is wrong, or it is a custom module the catalog "
+                            "has not seen (modules are plural: alerts, incidents, "
+                            "indicators)")}
     fields = [{"name": r[0], "title": r[1] or "", "type": r[2] or "",
                **({"picklist": r[3]} if r[3] else {})} for r in rows]
     q = (query or "").strip().lower()
