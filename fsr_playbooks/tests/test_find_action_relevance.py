@@ -322,11 +322,21 @@ def _run_find_round_trip(result):
 def test_openai_turn_caps_a_huge_find_result_for_the_model():
     big = {"ok": True, "kind": "action", "blob": "x" * 30000}
     content, host = _run_find_round_trip(big)
-    assert len(content) <= 8000
+    assert len(content) <= 20000
     assert "[truncated" in content and "narrow the query" in content
     assert '"blob"' in content[:6000]
     # The host and widget still get the whole result.
     assert host and len(host[0].result["blob"]) == 30000
+
+
+def test_a_build_sized_result_reaches_the_model_whole():
+    """The cap is a backstop for outliers. Verify reports and edit_playbook
+    results run to ~17k on a real box and the model repairs from them, so a
+    result that size must not be clipped."""
+    mid = {"ok": True, "kind": "action", "blob": "y" * 15000}
+    content, _host = _run_find_round_trip(mid)
+    assert "[truncated" not in content
+    assert content.count("y") == 15000
 
 
 def test_openai_turn_leaves_a_small_find_result_alone():

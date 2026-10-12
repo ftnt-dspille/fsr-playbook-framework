@@ -178,13 +178,22 @@ def model_view(name: str, result: Any) -> Any:
     return result
 
 
-def clip_head_tail(body: str, marker: str) -> str:
+def clip_head_tail(body: str, marker: str, head: int = _RESULT_HEAD_CHARS,
+                   tail: int = _RESULT_TAIL_CHARS) -> str:
     """Head + tail preview of an over-cap body. `marker` takes the number of
-    clipped chars as `{n}`. The result is well under `_RESULT_CAP_CHARS`, so
-    clipping it again is a no-op (a fixed point)."""
-    clipped = len(body) - _RESULT_HEAD_CHARS - _RESULT_TAIL_CHARS
-    return (body[:_RESULT_HEAD_CHARS] + marker.format(n=clipped)
-            + body[-_RESULT_TAIL_CHARS:])
+    clipped chars as `{n}`. With the defaults the result is well under
+    `_RESULT_CAP_CHARS`, so clipping it again is a no-op (a fixed point)."""
+    clipped = len(body) - head - tail
+    return body[:head] + marker.format(n=clipped) + body[-tail:]
+
+
+#: The cap on the result the model reads THIS round. A backstop for outliers,
+#: not a budget: build results (verify reports, edit_playbook) run to ~17k on a
+#: real box and the model repairs from them, so the latest result stays whole up
+#: to here. Older results are clipped harder by shrink_history (_RESULT_CAP_CHARS).
+_LATEST_RESULT_CAP_CHARS = 20000
+_LATEST_RESULT_HEAD_CHARS = 15000
+_LATEST_RESULT_TAIL_CHARS = 4000
 
 
 def cap_model_content(content: str) -> str:
@@ -193,10 +202,11 @@ def cap_model_content(content: str) -> str:
     the host parses (a card, a verdict) keeps its full form in ToolResultEvent.
     shrink_history's pass 3 only ever ran on the Anthropic history shape, so
     an OpenAI or FortiAI turn had no cap at all."""
-    if len(content) <= _RESULT_CAP_CHARS:
+    if len(content) <= _LATEST_RESULT_CAP_CHARS:
         return content
     return clip_head_tail(
-        content, "\n… [truncated {n} chars; narrow the query] …\n")
+        content, "\n… [truncated {n} chars; narrow the query] …\n",
+        head=_LATEST_RESULT_HEAD_CHARS, tail=_LATEST_RESULT_TAIL_CHARS)
 
 
 def shrink_history(history: list[Any]) -> int:
