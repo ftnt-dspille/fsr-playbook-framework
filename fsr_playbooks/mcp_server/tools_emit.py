@@ -1774,7 +1774,7 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
             hints.append("`args` is the operation's parameter VALUES as an "
                          "object, filled from the request (e.g. {\"ip\": "
                          "\"<the IP>\"}) -- not the catalog's "
-                         "`required_params` list; get the names from "
+                         "`required` list; get the names from "
                          "get_op_schema(connector, operation)")
         if kt == "verdict":
             hints.append(verdict_contract())

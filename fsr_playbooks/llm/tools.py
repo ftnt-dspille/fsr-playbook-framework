@@ -859,7 +859,8 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
                        "description": "kind=field: the module whose fields "
                                       "to list; kind=action record writes: "
                                       "target module (alerts, incidents, ...)."},
-            "limit": {"type": "integer", "default": 10},
+            "limit": {"type": "integer", "default": 10, "minimum": 1,
+                      "maximum": 15},
         },
     },
     # The consolidated card emitter: the wire enforces the card_type

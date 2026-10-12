@@ -220,16 +220,100 @@ def _find_playbooks(query: str, limit: int, search_corpus) -> dict[str, Any]:
     return out
 
 
+# Action results shown to the model per call. Default 10 across all families;
+# the schema and the clamp both stop at ACTION_LIMIT_MAX.
+ACTION_LIMIT_DEFAULT = 10
+ACTION_LIMIT_MAX = 15
+# How many candidates each action catalog is asked for before the query ranks
+# them. Ranking happens on the full candidate set, so a relevant op past the
+# first `limit` of its catalog is still found.
+_ACTION_CANDIDATES = 50
+_ACTION_HINT = ("Each row is a summary. Parameter types and select options: "
+                "get_op_schema(connector, op).")
+
+# Words that carry no signal in an action query. Kept small: an action name
+# or title is short, so over-filtering the query only drops real matches.
+_QUERY_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "at", "by",
+    "with", "from", "into", "that", "this", "these", "those", "it", "its", "is",
+    "are", "be", "as", "do", "does", "get", "use", "my", "our", "your", "some",
+    "any", "all", "new", "one", "i", "we", "you", "me", "please", "need",
+    "want", "should", "can", "will", "just", "then", "than", "there", "what",
+    "which", "how", "when", "where", "not", "if", "about", "over", "up", "out",
+    "action", "actions", "op", "ops", "operation", "run", "target",
+})
+
+
+def _stem(word: str) -> str:
+    """`connections` -> `connection`. Enough for matching op and title words."""
+    return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+
+
+def _query_terms(query: str) -> set[str]:
+    from .tools_connector_discovery import _word_tokens  # noqa: PLC0415
+    return {_stem(w) for w in _word_tokens(query)
+            if len(w) > 1 and not w.isdigit() and w not in _QUERY_STOPWORDS}
+
+
+def _row_terms(row: dict[str, Any]) -> set[str]:
+    from .tools_connector_discovery import _word_tokens  # noqa: PLC0415
+    text = " ".join(str(row.get(k) or "") for k in ("op", "title", "category"))
+    return {_stem(w) for w in _word_tokens(text)}
+
+
+def _compact_action(row: dict[str, Any]) -> dict[str, Any]:
+    """The model-facing row. The full signature (`params`) stays with
+    get_op_schema: it is most of the bytes and the card path validates against
+    the catalog, not against this row. What stays is what the next call needs:
+    the names to fill, whether it needs approval, where it runs, and the
+    preferred branch of a multi-branch containment op."""
+    out: dict[str, Any] = {k: row[k] for k in ("action", "action_type", "connector",
+                                               "op", "title", "tier")
+                           if row.get(k) is not None}
+    if row.get("requires_approval"):
+        out["requires_approval"] = True
+    names = [p.get("name") if isinstance(p, dict) else p
+             for p in row.get("required_params") or []]
+    out["required"] = [n for n in names if n]
+    if row.get("runs_on_agent"):
+        out["runs_on_agent"] = True
+    if row.get("deprecated"):
+        out["deprecated"] = True
+    for k in ("preferred_params", "preferred_params_why", "indicator_param"):
+        if k in row:
+            out[k] = row[k]
+    if "action" in row:  # a record write: its body template is the thing to fill
+        for k in ("collection", "params", "notes"):
+            if k in row:
+                out[k] = row[k]
+    return out
+
+
+def _interleave(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Round-robin across families, so a cap of 10 cannot be spent entirely on
+    the first catalog. Used when there is no query to rank by."""
+    out: list[dict[str, Any]] = []
+    for i in range(max((len(g) for g in groups), default=0)):
+        out.extend(g[i] for g in groups if i < len(g))
+    return out
+
+
 def _find_actions(containment, enrichment, record, *, query: str,
                   target_type: str, action_type: str, module: str,
                   limit: int) -> dict[str, Any]:
-    """Merge the three action catalogs into one list with a typed field.
+    """Merge the three action catalogs into one ranked, capped list.
 
     The three-way split (containment / enrichment / record) was a boundary the
     model had to memorize; here it is data. `action_type` restricts to one
     family; otherwise containment + enrichment are both consulted (record only
     when explicitly asked or `module` names a write target), and every action
     is tagged with the family it came from.
+
+    With a `query`, containment and enrichment candidates are scored by word
+    overlap with their op name, title and category; the ones sharing no word
+    with the query are dropped and the rest are sorted by score. Without one
+    the families are interleaved. Either way the answer is capped at `limit`
+    (default 10, at most 15), and `more` says how many were cut.
     """
     fam = (action_type or "").strip().lower()
     valid = ("containment", "enrichment", "record")
@@ -237,8 +321,12 @@ def _find_actions(containment, enrichment, record, *, query: str,
         return {"ok": False, "code": "unknown_action_type",
                 "message": f"action_type {fam!r} not recognized",
                 "valid_action_types": list(valid)}
-    target = (target_type or query or "").strip()
-    merged: list[dict[str, Any]] = []
+    lim = max(1, min(int(limit or ACTION_LIMIT_DEFAULT), ACTION_LIMIT_MAX))
+    # The query ranks; it is never the target. Passed as one it made the
+    # catalogs reject a prose "target type" and return nothing.
+    target = (target_type or "").strip()
+    q_terms = _query_terms(query or "")
+    families: dict[str, list[dict[str, Any]]] = {}
     sections: dict[str, Any] = {}
 
     unavailable: list[dict[str, Any]] = []
@@ -248,23 +336,62 @@ def _find_actions(containment, enrichment, record, *, query: str,
         # Lifted to the top: a dropped-but-capable connector buried in
         # `sections` was never read live (see find_containment_actions).
         unavailable.extend(res.get("unavailable") or [])
-        for a in (res.get("actions") or [])[:limit]:
+        rows = families.setdefault(name, [])
+        for a in res.get("actions") or []:
             row = dict(a)
             row["action_type"] = name
-            merged.append(row)
+            rows.append(row)
 
     if fam in ("", "containment"):
-        _take("containment", containment(target_type=target, limit=limit))
+        _take("containment", containment(target_type=target,
+                                         limit=_ACTION_CANDIDATES))
     if fam in ("", "enrichment"):
-        _take("enrichment", enrichment(target_type=target, limit=limit))
+        _take("enrichment", enrichment(target_type=target,
+                                       limit=_ACTION_CANDIDATES))
     if fam == "record" or (not fam and module):
         res = record(action=query, module=module or "alerts")
         if res.get("ok") is False:      # query was prose, not an action name
             res = record(action="", module=module or "alerts")
         _take("record", res)
-    out = {"target_type": target, "action_type": fam or "all",
-           "actions": merged[: limit * 3 if not fam else limit],
-           "count": len(merged), "sections": sections}
+
+    dropped_by_query = 0
+    if q_terms:
+        # Containment and enrichment are matched by target, so the query is the
+        # only thing that narrows them to what was asked. Record writes are
+        # already matched by action name in find_record_actions: they keep
+        # their order and sort after the scored rows.
+        scored: list[tuple[int, dict[str, Any]]] = []
+        for name, rows in families.items():
+            for r in rows:
+                if name == "record":
+                    scored.append((0, r))
+                    continue
+                sc = len(q_terms & _row_terms(r))
+                if sc:
+                    scored.append((sc, r))
+                else:
+                    dropped_by_query += 1
+        ranked = [r for _, r in sorted(scored, key=lambda x: -x[0])]
+    else:
+        ranked = _interleave([families[k] for k in ("containment", "enrichment", "record")
+                              if k in families])
+
+    shown = [_compact_action(r) for r in ranked[:lim]]
+    more = len(ranked) - len(shown)
+    hint = _ACTION_HINT
+    if more > 0:
+        hint = (f"{more} more matched; narrow with query, target_type or "
+                f"action_type. " + hint)
+    out: dict[str, Any] = {"target_type": target, "action_type": fam or "all",
+                           "actions": shown, "count": len(ranked),
+                           "sections": sections, "hint": hint}
+    if more > 0:
+        out["more"] = more
+    if q_terms and not ranked and dropped_by_query:
+        out["message"] = (f"No action's name or title shares a word with the "
+                          f"query {query!r} ({dropped_by_query} candidates for "
+                          f"this target). Retry with fewer or different words, "
+                          f"or without a query.")
     if unavailable:
         out["unavailable"] = unavailable
     return out

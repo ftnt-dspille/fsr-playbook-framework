@@ -252,4 +252,4 @@ def test_an_action_card_built_from_a_find_row_names_the_missing_args():
     assert out["ok"] is False and out["code"] == "bad_payload"
     assert "['args']" in str(out)
     hints = " ".join(out["suggestions"])
-    assert "required_params" in hints and "get_op_schema" in hints
+    assert "`required` list" in hints and "get_op_schema" in hints

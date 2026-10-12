@@ -105,8 +105,8 @@ _NON_ACTION_PREFIXES: tuple[str, ...] = (
 
 _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "ip": ("ip", "address", "blacklist"),
-    "host": ("host", "endpoint", "device", "machine", "asset", "agent", "collector"),
-    "endpoint": ("endpoint", "host", "device", "agent", "machine", "collector"),
+    "host": ("host", "endpoint", "asset", "collector"),
+    "endpoint": ("endpoint", "host", "collector"),
     "user": ("user", "account", "identity", "credential", "password", "login"),
     "url": ("url", "link", "uri"),
     "domain": ("domain", "fqdn", "dns"),
@@ -115,6 +115,16 @@ _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "email": ("email", "mail", "message"),
     "process": ("process", "task", "service"),
 }
+
+
+# Bare nouns that name an endpoint only when the op also carries a response
+# verb (see `_names_target`). Kept out of `_TARGET_KEYWORDS` proper so the
+# enrichment indicator-param match is unchanged.
+_WEAK_TARGET_WORDS: dict[str, tuple[str, ...]] = {
+    "host": ("device", "agent", "machine"),
+    "endpoint": ("device", "agent", "machine"),
+}
+_RESPONSE_VERBS: tuple[str, ...] = _CONTAINMENT_VERBS + ("remediate",)
 
 
 # The model reaches for the FortiSOAR picklist *label* it just read off a record
@@ -161,13 +171,22 @@ def _word_tokens(text: str | None) -> list[str]:
 
 
 def _names_target(op: str | None, title: str | None,
-                  keywords: tuple[str, ...]) -> bool:
+                  keywords: tuple[str, ...],
+                  weak: tuple[str, ...] = ()) -> bool:
     """Does the op's name or title name the target? Matched on word prefixes,
     never raw substrings: `"ip" in "run_script"` offered NinjaOne's Run Script
     as IP containment, and "file" is inside "profile". A prefix still takes
-    `ipv4`, `hostname`, `files`."""
+    `ipv4`, `hostname`, `files`.
+
+    `weak` words name a host only beside a response verb: `isolate_machine`
+    and `quarantine_device` are containment, `add_device` and `update_device`
+    (fortigate-cloud, ninjaone) are not, and matched bare they filled the
+    endpoint slate with management ops."""
     words = _word_tokens(op) + _word_tokens(title)
-    return any(w.startswith(k) for w in words for k in keywords)
+    if any(w.startswith(k) for w in words for k in keywords):
+        return True
+    return (any(w.startswith(k) for w in words for k in weak)
+            and any(w.startswith(v) for w in words for v in _RESPONSE_VERBS))
 
 
 _CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
@@ -481,7 +500,8 @@ def _param_sig(conn: sqlite3.Connection, connector: str,
 def _connectors_that_could_contain(
         keywords: tuple[str, ...] | None,
         exclude: set[str],
-        limit: int = 4) -> list[dict[str, str]]:
+        limit: int = 4,
+        weak: tuple[str, ...] = ()) -> list[dict[str, str]]:
     """Across the WHOLE reference catalog (not just configured connectors),
     find connectors that carry a containment/response op matching the target --
     minus the ones already configured. This turns a dead end into a concrete
@@ -507,7 +527,7 @@ def _connectors_that_could_contain(
                      or any(v in nm for v in _CONTAINMENT_VERBS))
         if not is_action:
             continue
-        if keywords and not _names_target(op, title, keywords):
+        if keywords and not _names_target(op, title, keywords, weak):
             continue
         found[connector] = op or ""
         if len(found) >= limit:
@@ -712,6 +732,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
         return {"ok": False, "code": "unknown_target_type",
                 "message": f"target_type {target_type!r} not recognized",
                 "valid": sorted(_TARGET_KEYWORDS)}
+    weak = _WEAK_TARGET_WORDS.get(target, ())
 
     # 1. Configured + active connectors on the live box. NOTE: list WITHOUT
     # probing -- healthchecking all ~45 configured connectors here is the
@@ -764,7 +785,7 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
                          or any(v in nm for v in _CONTAINMENT_VERBS))
             if not is_action:
                 continue
-            if keywords and not _names_target(op, title, keywords):
+            if keywords and not _names_target(op, title, keywords, weak):
                 continue
             # The decisive guard: a real response action is one the dispatch
             # gate would force through approval (tier >= 3). This drops
@@ -861,7 +882,8 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
         # straight into emit_capability_gap_card; the prompt mandates it.
         scope = f" for target type {target!r}" if target else ""
         miss = f"{target} containment" if target else "containment / response"
-        could = _connectors_that_could_contain(keywords, set(configured))
+        could = _connectors_that_could_contain(
+            keywords, set(configured), weak=_WEAK_TARGET_WORDS.get(target, ()))
         if could:
             connector_names = ", ".join(c["connector"] for c in could)
             fix_steps = [

@@ -55,6 +55,7 @@ from ._loop_helpers import (
     analyst_has_the_yaml,
     budget_ask_card,
     budget_note,
+    cap_model_content,
     compile_errors,
     connector_errors_for_reply,
     drain_with_idle_timeout,
@@ -477,8 +478,9 @@ async def run_loop(
                tcu: list[ToolCallUsage]) -> ToolOutcome:
         success = not is_error_result(result)
         register_tool_result(call.call_id, call.name, success, call.args, result)
-        content = (evidence_id_line(call.call_id, call.name, call.args, success)
-                   + stringify(model_view(call.name, result)))
+        content = cap_model_content(
+            evidence_id_line(call.call_id, call.name, call.args, success)
+            + stringify(model_view(call.name, result)))
         try:
             args_chars = len(json.dumps(call.args, default=str))
         except Exception:
@@ -697,7 +699,8 @@ async def run_loop(
                         call, result = forced
                         w.append_tool_call(call)
                         w.append_tool_results(
-                            [ToolOutcome(call.call_id, stringify(result), is_error_result(result),
+                            [ToolOutcome(call.call_id, cap_model_content(stringify(result)),
+                                         is_error_result(result),
                                          call.name, call.args)],
                             note=UNATTENDED_CONTAIN_DIRECTIVE)
                         contain.mark_fired()
@@ -930,9 +933,10 @@ async def resume_loop(provider: Any, *, suspended: _approvals.SuspendedSession,
                            call_id=b.call_id, tier=b.tier, synthetic=True)
         yield ToolResultEvent(call_id=b.call_id, result=res)
 
-    outcomes = [ToolOutcome(suspended.tool_use_id, stringify(resolved),
+    outcomes = [ToolOutcome(suspended.tool_use_id, cap_model_content(stringify(resolved)),
                             is_error_result(resolved), suspended.tool, dict(suspended.args))]
-    outcomes += [ToolOutcome(b.call_id, stringify(res), is_error_result(res), b.name, dict(b.args))
+    outcomes += [ToolOutcome(b.call_id, cap_model_content(stringify(res)), is_error_result(res),
+                             b.name, dict(b.args))
                  for b, res in batch_results]
     outcomes += [ToolOutcome(s.call_id, _approvals.superseded_result_json(), True,
                              s.name, dict(s.args or {}))

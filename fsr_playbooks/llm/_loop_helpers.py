@@ -178,6 +178,27 @@ def model_view(name: str, result: Any) -> Any:
     return result
 
 
+def clip_head_tail(body: str, marker: str) -> str:
+    """Head + tail preview of an over-cap body. `marker` takes the number of
+    clipped chars as `{n}`. The result is well under `_RESULT_CAP_CHARS`, so
+    clipping it again is a no-op (a fixed point)."""
+    clipped = len(body) - _RESULT_HEAD_CHARS - _RESULT_TAIL_CHARS
+    return (body[:_RESULT_HEAD_CHARS] + marker.format(n=clipped)
+            + body[-_RESULT_TAIL_CHARS:])
+
+
+def cap_model_content(content: str) -> str:
+    """The per-result cap for every provider. Applied to the string the MODEL
+    reads back, never to the result the host and widget receive: a result
+    the host parses (a card, a verdict) keeps its full form in ToolResultEvent.
+    shrink_history's pass 3 only ever ran on the Anthropic history shape, so
+    an OpenAI or FortiAI turn had no cap at all."""
+    if len(content) <= _RESULT_CAP_CHARS:
+        return content
+    return clip_head_tail(
+        content, "\n… [truncated {n} chars; narrow the query] …\n")
+
+
 def shrink_history(history: list[Any]) -> int:
     """Compact the conversation in place to cut redundant tokens.
 
@@ -305,13 +326,9 @@ def shrink_history(history: list[Any]) -> int:
     to_clip = (oversized[:-_RESULT_KEEP_LATEST]
                if _RESULT_KEEP_LATEST > 0 else oversized)
     for block, body in to_clip:
-        clipped = len(body) - _RESULT_HEAD_CHARS - _RESULT_TAIL_CHARS
-        new_body = (
-            body[:_RESULT_HEAD_CHARS]
-            + f"\n… [+{clipped} chars capped by the output budgeter -- "
-              f"a later turn superseded this result] …\n"
-            + body[-_RESULT_TAIL_CHARS:]
-        )
+        new_body = clip_head_tail(
+            body, "\n… [+{n} chars capped by the output budgeter -- "
+                  "a later turn superseded this result] …\n")
         saved += len(body) - len(new_body)
         block["content"] = new_body
 
