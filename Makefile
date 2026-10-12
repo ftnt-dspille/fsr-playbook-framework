@@ -220,7 +220,11 @@ TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,s
 # a regression -- the run itself scored 20/20, cell for cell identical to its
 # predecessor. Current pin: offline, framework+connector tools,
 # soc_invest_surface records, lane=screen, scorer_version=2, 20/20.
-TOOL_GATE_BASELINE ?= 20260823T143020Z
+# Re-pinned after the fence-cap and edit_playbook fixes: a fresh screen-lane
+# run of the merged framework, 20/20, offline Frank, same scorer and substrate.
+# The 20260823T143020Z pin predated the current substrate and scorer and could
+# no longer be compared.
+TOOL_GATE_BASELINE ?= 20261012T020225Z
 
 # ── One testing story (docs/plans/AGENT_DESIGN_AND_TEST_UNIFICATION.md, B1) ──
 # Named lanes over ONE corpus and ONE scorer, instead of three scripts with

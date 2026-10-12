@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid as _uuid
 from collections.abc import AsyncIterator, Callable
@@ -40,10 +41,12 @@ from ._loop_helpers import (
     STREAM_TIMEOUT_SECS,
     UNATTENDED_CONTAIN_DIRECTIVE,
     UNVERIFIED_DRAFT_DIRECTIVE,
+    YAML_FENCE_RE,
     BuildProgressGuard,
     ContainmentFollowThrough,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
+    FenceHold,
     ProgressMeter,
     PromisedActionGuard,
     TriageDiscipline,
@@ -56,7 +59,6 @@ from ._loop_helpers import (
     connector_errors_for_reply,
     drain_with_idle_timeout,
     evidence_id_line,
-    extract_yaml_block,
     is_authoring_slice,
     is_verdict_evidence,
     latest_user_text,
@@ -136,6 +138,53 @@ _SELF_REPAIR_PREFIX = (
     "The YAML you just produced doesn't compile. Fix the errors and emit a "
     "corrected fenced ```yaml block.\n\nErrors:\n"
 )
+
+
+def _fence_problem(yaml_text: str) -> tuple[str, str] | None:
+    """Why a playbook fence must not be saved as it stands: the repair prompt
+    to send and the problems it names. None when the fence passes. Compile
+    first, then the connector check, as the offer gate does."""
+    errors = compile_errors(yaml_text)
+    if errors:
+        return _SELF_REPAIR_PREFIX, errors
+    connectors = connector_errors_for_reply(yaml_text)
+    if connectors:
+        return _CONNECTOR_REPAIR_PREFIX, connectors
+    return None
+
+
+def _last_yaml_fence(text: str) -> re.Match[str] | None:
+    found = list(YAML_FENCE_RE.finditer(text))
+    return found[-1] if found else None
+
+
+def _plain_problems(problems: str) -> list[str]:
+    """Compiler lines without their codes, paths or suggestions."""
+    out: list[str] = []
+    for line in problems.splitlines():
+        line = line.strip().removeprefix("-").strip()
+        line = re.sub(r"^\[[a-z_]+\]\s*", "", line)
+        line = re.split(r"\s+\(path:|\s+→", line)[0].strip()
+        if line:
+            out.append(line)
+    return out
+
+
+def _neutralise_failing_fences(text: str) -> str:
+    """The text a reply delivers once the repair cap is spent. The widget saves
+    the LAST yaml fence of the turn, so a failing last fence becomes a plain
+    note naming what failed. The loop stops at the first fence that passes:
+    that one is what the analyst gets, and it is good. Earlier fences are not
+    the saved one and stay as the model wrote them."""
+    while True:
+        m = _last_yaml_fence(text)
+        problem = _fence_problem(m.group(1)) if m else None
+        if m is None or problem is None:
+            return text
+        lines = _plain_problems(problem[1]) or ["the playbook did not pass its checks"]
+        note = ("This playbook did not pass its checks, so it is not offered here. "
+                "What failed:\n" + "\n".join(f"- {line}" for line in lines) + "\n")
+        text = text[:m.start()] + note + text[m.end():]
 
 
 # ───────────────────────────── wire seam ─────────────────────────────
@@ -379,13 +428,21 @@ async def run_loop(
         try:
             usage = RoundUsage()
             said = False
+            fence = FenceHold()
             async for kind, payload in w.wrapup_round(
                     max_tokens or provider.max_output_tokens):
                 if kind == "text":
                     said = said or bool((payload or "").strip())
-                    yield TextEvent(text=payload)
+                    shown = fence.feed(payload or "")
+                    if shown:
+                        yield TextEvent(text=shown)
                 else:
                     usage = payload
+            # The wrap-up is the last word of the turn: no repair follows it,
+            # so a failing fence in it is neutralised rather than held back.
+            tail = _neutralise_failing_fences(fence.finish())
+            if tail:
+                yield TextEvent(text=tail)
             if not said:
                 yield TextEvent(text=EMPTY_WRAPUP_TEXT)
             yield UsageEvent(
@@ -463,11 +520,14 @@ async def run_loop(
         history_chars = w.history_chars()
 
         rnd: Round | None = None
+        fence = FenceHold()   # a code fence waits for the end of the round
         try:
             async for kind, payload in drain_with_idle_timeout(
                     w.stream_round(), timeout=STREAM_TIMEOUT_SECS):
                 if kind == "text":
-                    yield TextEvent(text=payload)   # live delta
+                    shown = fence.feed(payload)     # live delta, before any fence
+                    if shown:
+                        yield TextEvent(text=shown)
                 else:
                     rnd = payload
         except asyncio.TimeoutError:
@@ -482,6 +542,7 @@ async def run_loop(
             yield ErrorEvent(message=provider.friendly_error(exc))
             return
         assert rnd is not None
+        held = fence.finish()   # the round's undelivered tail, from its first fence
         w.append_assistant(rnd)
         dropped_calls = rnd.dropped_calls
         tool_call_usage: list[ToolCallUsage] = []
@@ -502,24 +563,22 @@ async def run_loop(
 
         # ── terminal round: no executable tool calls ──────────────────
         if not rnd.tool_calls:
-            if self_repair_turns < MAX_SELF_REPAIR_TURNS and rnd.text:
-                yaml_block = extract_yaml_block(rnd.text)
-                errors_text = compile_errors(yaml_block) if yaml_block else None
-                if errors_text:
+            # A failing last fence is repaired while the cap allows. The reply
+            # is a delivery (the widget saves the last fence), so it gets the
+            # compile check and the connector check the offer card gets.
+            if self_repair_turns < MAX_SELF_REPAIR_TURNS and held:
+                last = _last_yaml_fence(held)
+                problem = _fence_problem(last.group(1)) if last else None
+                if problem:
                     self_repair_turns += 1
-                    w.append_user(_SELF_REPAIR_PREFIX + errors_text)
+                    w.append_user(problem[0] + problem[1])
                     yield usage_event(rnd.stop_reason or "", repair_delta=1)
                     continue
-                # A playbook that compiles can still call a connector this box
-                # does not have. The reply is a delivery (the widget saves the
-                # last fence), so it gets the check the offer card gets.
-                connector_text = (connector_errors_for_reply(yaml_block)
-                                  if yaml_block else None)
-                if connector_text:
-                    self_repair_turns += 1
-                    w.append_user(_CONNECTOR_REPAIR_PREFIX + connector_text)
-                    yield usage_event(rnd.stop_reason or "", repair_delta=1)
-                    continue
+            # The reply goes out. Once the cap is spent a failing fence must not
+            # stay saveable: it becomes a note naming what failed.
+            delivered = _neutralise_failing_fences(held)
+            if delivered:
+                yield TextEvent(text=delivered)
 
             # A draft the model checked (validate/compile) and then left: the
             # loop runs the verify itself. A pass is delivered below with no
@@ -670,6 +729,10 @@ async def run_loop(
             return
 
         # ── tool round: parallel up to the approval boundary ──────────
+        if held:   # prose that waited on a fence goes out before the tools run
+            # The widget saves the last fence of the whole turn, and a later
+            # round may print none, so a failing fence here is neutralised too.
+            yield TextEvent(text=_neutralise_failing_fences(held))
         calls = rnd.tool_calls
         tiers = [_tier_for(c.name, c.args) for c in calls]
         approval_idx = next((i for i, t in enumerate(tiers) if needs_approval(t)), len(calls))
