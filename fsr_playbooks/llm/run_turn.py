@@ -329,6 +329,9 @@ async def run_agent_turn(
     _ask = TurnRequest(
         reasoning=(reasoning if reasoning is not None
                    else getattr(_plan_ask, "reasoning", None)),
+        # An explicit depth for this call replaces the plan's default too.
+        reasoning_default=(None if reasoning is not None
+                           else getattr(_plan_ask, "reasoning_default", None)),
         max_tool_turns=(max_tool_turns
                         or getattr(_plan_ask, "max_tool_turns", None)
                         or MAX_TOOL_TURNS),

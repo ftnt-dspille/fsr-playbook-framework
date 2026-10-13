@@ -133,3 +133,56 @@ def test_a_provider_serving_a_primitive_stops_the_host_emulating_it() -> None:
     residue = p.request(p.asked)
     assert residue.task_budget is False
     assert residue.history_pruning is False
+
+
+# -- the triage default (measured on Anthropic Sonnet 5) ----------------------
+# A first-look FortiEDR investigation reached the same verdict and facts at
+# medium as at the model default, in about 40% less time. The default is its
+# own field so only the provider it was measured on applies it.
+
+def test_a_triage_turn_carries_the_measured_default(monkeypatch) -> None:
+    monkeypatch.delenv(REASONING_ENV, raising=False)
+    ask = plan_turn("triage").ask
+    assert ask.reasoning is None
+    assert ask.reasoning_default == "medium"
+    assert plan_turn("build").ask.reasoning_default is None
+
+
+def test_the_env_override_replaces_the_default(monkeypatch) -> None:
+    monkeypatch.setenv(REASONING_ENV, "high")
+    ask = plan_turn("triage").ask
+    assert ask.reasoning == "high" and ask.reasoning_default is None
+
+
+def test_the_default_reaches_the_provider_and_an_argument_replaces_it(monkeypatch) -> None:
+    monkeypatch.delenv(REASONING_ENV, raising=False)
+    p = _RecordingProvider()
+    token = set_turn_plan(plan_turn("triage"))
+    try:
+        _drive(p)
+        assert p.asked.reasoning_default == "medium"
+        _drive(p, reasoning="low")
+        assert p.asked.reasoning == "low" and p.asked.reasoning_default is None
+    finally:
+        reset_turn_plan(token)
+
+
+def test_anthropic_sends_the_default_as_effort() -> None:
+    from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
+    p = AnthropicProvider(api_key="k", model="claude-sonnet-5")
+    p.request(TurnRequest(reasoning_default="medium"))
+    kwargs, _ = p._native_request_kwargs(tool_turns=None)
+    assert kwargs["output_config"]["effort"] == "medium"
+    p.request(TurnRequest(reasoning="high", reasoning_default="medium"))
+    kwargs, _ = p._native_request_kwargs(tool_turns=None)
+    assert kwargs["output_config"]["effort"] == "high"
+
+
+def test_the_fortiai_proxy_ignores_the_default() -> None:
+    """Any effort there switches the proxy to its LARGE model; a default
+    calibrated on another provider must not do that."""
+    from fsr_playbooks.llm.fortiai_proxy_provider import FortiAIProxyProvider
+    p = FortiAIProxyProvider.__new__(FortiAIProxyProvider)
+    p.reasoning_effort = None
+    p.request(TurnRequest(reasoning_default="medium"))
+    assert p.reasoning_effort is None

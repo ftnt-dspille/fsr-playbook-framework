@@ -120,15 +120,18 @@ class TurnContext:
     preferred_tools: tuple[str, ...] = ()
 
 
-#: Env override for the requested reasoning depth (`low`..`max`). Unset means
-#: SEND NOTHING, which is not the same as "default": on the 4.6+ family
-#: omitting `thinking` already runs adaptive at effort `high`, so asking for
-#: `high` changes the wire to buy exactly nothing. The lever with real value is
-#: asking for LESS on turns that are genuinely cheap -- and which those are is
-#: not something this module knows yet. Calibrating it by guess is how the #128
-#: budget numbers got set the first time; leave it unset until a lane run says
-#: which intents can take it.
+#: Env override for the requested reasoning depth (`low`..`max`), every
+#: intent, every provider. Unset means the per-intent default below.
 REASONING_ENV = "FSR_TURN_REASONING"
+
+#: Reasoning depth per intent, measured on Anthropic Sonnet 5 (applied only
+#: by the Anthropic provider; see `TurnRequest.reasoning_default`). Triage at
+#: `medium`: a first-look investigation of a FortiEDR alert, two runs per
+#: depth, reached the same verdict and named the same facts at the model
+#: default (high) and at medium, in about 40% less time (135/147s vs
+#: 97/92s); `low` skipped pivots and once wrote its assessment twice. Build
+#: is not measured, so it keeps the model default.
+INTENT_REASONING_DEFAULT: dict[str, str] = {"triage": "medium"}
 
 
 def _has_deferrable_tail(tools: list[dict[str, Any]]) -> bool:
@@ -141,7 +144,8 @@ def _has_deferrable_tail(tools: list[dict[str, Any]]) -> bool:
     return any(str(t.get("name", "")).startswith("mcp_") for t in tools)
 
 
-def _ask_for(budget: TurnBudget, tools: list[dict[str, Any]]) -> TurnRequest:
+def _ask_for(budget: TurnBudget, tools: list[dict[str, Any]],
+             intent: str = "") -> TurnRequest:
     """The capability ASK this turn makes of whatever provider serves it.
 
     Provider-neutral by construction: this says what the turn WANTS, and
@@ -160,12 +164,15 @@ def _ask_for(budget: TurnBudget, tools: list[dict[str, Any]]) -> TurnRequest:
       results server-side does it instead, and we stop paying to resend what
       it would have cleared. Never both (see `HostEmulation`).
     * deferred tools -- only when there IS a tail (see above).
-    * reasoning depth -- NOT asked by default; see `REASONING_ENV`.
+    * reasoning depth -- the env override when set (`REASONING_ENV`), else
+      the intent's measured default (`INTENT_REASONING_DEFAULT`), which only
+      the provider it was measured on applies.
     """
     import os
     depth = (os.environ.get(REASONING_ENV, "") or "").strip().lower() or None
     return TurnRequest(
         reasoning=depth,
+        reasoning_default=None if depth else INTENT_REASONING_DEFAULT.get(intent),
         max_tool_turns=budget.max_tool_turns,
         prune_history=True,
         defer_tools=_has_deferrable_tail(tools),
@@ -456,7 +463,7 @@ def plan_turn(
     return TurnPlan(
         intent=intent, prompt=prompt, tools=tools, base_prompt=base_prompt,
         tier_policy=tier_policy, budget=budget, context=ctx,
-        ask=_ask_for(budget, tools), intent_stated=stated,
+        ask=_ask_for(budget, tools, intent), intent_stated=stated,
     )
 
 

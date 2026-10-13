@@ -213,7 +213,14 @@ class TurnRequest:
     honours it is not."""
 
     #: Reasoning depth to request ("low" / "medium" / "high"); None = default.
+    #: Every provider that serves depth honours it (the FortiAI proxy also
+    #: switches to its LARGE model for any effort).
     reasoning: str | None = None
+    #: A depth MEASURED for this kind of turn on a specific provider, applied
+    #: only by a provider whose own calibration it is (Anthropic) and only when
+    #: `reasoning` is unset. Kept apart from `reasoning` so a calibrated
+    #: default never flips another provider's model choice.
+    reasoning_default: str | None = None
     #: Bound on tool turns. None = the loop's own MAX_TOOL_TURNS.
     max_tool_turns: int | None = None
     #: Keep the transcript inside the context window. TRI-STATE, and the

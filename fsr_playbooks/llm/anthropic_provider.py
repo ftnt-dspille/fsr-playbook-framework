@@ -450,7 +450,9 @@ class AnthropicProvider(CapabilityMixin):
         which is what keeps this landing free of a blast radius.
         """
         req = self._turn_request
-        reasoning = reasoning_kwargs(self.model, req.reasoning)
+        # The intent's default was measured on this provider; an explicit
+        # depth always wins over it.
+        reasoning = reasoning_kwargs(self.model, req.reasoning or req.reasoning_default)
         # Native budget only when the loop handed one over; `tool_turns` is
         # this stream's own bound, used as the value once asked. Without an
         # ask, `emulation.task_budget` stays True and `budget_note` runs.
