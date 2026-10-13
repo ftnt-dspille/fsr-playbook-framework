@@ -115,3 +115,85 @@ def test_an_unknown_action_names_the_valid_ones(offline_box):
     out = find_record_actions(action="delete_everything")
     assert out.get("code") == "unknown_action"
     assert "comment" in out["valid"]
+
+
+# ---- the persona's record-write tools are the one way ----------------------
+#
+# Live (Frank, ka_policy_would_close_fp): asked how to close an alert, this
+# offered only cyops_utilities ops, never the host's update_record. The model
+# either staged a cyops_utilities write -- no before/after card, no picklist
+# check, and an autonomy rule naming update_record never matches it -- or,
+# where it read cyops_utilities as missing, gave up with a capability gap.
+
+class _Persona:
+    def __init__(self, may_write=(), tools_allow=()):
+        self.may_write = list(may_write)
+        self.tools_allow = list(tools_allow)
+
+    def may_write_module(self, module):
+        return module in self.may_write
+
+
+@pytest.fixture
+def persona():
+    from fsr_playbooks.llm import session_state
+    tokens = []
+
+    def bind(**kw):
+        tokens.append(session_state.update(profile=_Persona(**kw)))
+    yield bind
+    for t in reversed(tokens):
+        session_state.reset(t)
+
+
+def test_a_persona_that_writes_the_module_gets_its_own_tools(offline_box, persona):
+    persona(may_write=["alerts"], tools_allow=["update_record", "create_record"])
+    got = _actions(find_record_actions(module="alerts", uuid="54f25f1f"))
+    upd = got["update_field"]
+    assert upd["tool"] == "update_record" and "connector" not in upd
+    assert upd["args"] == {"module": "alerts", "uuid": "54f25f1f",
+                           "fields": {"<field>": "<new value>"}}
+    assert upd["requires_approval"] is True and "IRI" in upd["notes"]
+    assert got["create_record"]["tool"] == "create_record"
+    assert got["create_record"]["args"]["module"] == "alerts"
+    # No tool for comments: that one stays the connector op (when the store
+    # knows the comments link field; see the comment tests above).
+    if "comment" in got:
+        assert got["comment"]["connector"] == "cyops_utilities"
+
+
+def test_a_single_tool_action_needs_no_connector(offline_box, persona, monkeypatch):
+    persona(may_write=["alerts"], tools_allow=["update_record"])
+    monkeypatch.setattr(offline_box, "list_configured_connectors",
+                        lambda **_kw: {"configured": []})
+    out = find_record_actions(action="update_field", module="alerts", uuid="u1")
+    assert [a["tool"] for a in out["actions"]] == ["update_record"]
+    assert "message" not in out
+
+
+@pytest.mark.parametrize("kw", [
+    {},                                                     # no write scope
+    {"may_write": ["incidents"], "tools_allow": ["update_record"]},  # other module
+    {"may_write": ["alerts"], "tools_allow": ["get_record"]},        # tool not offered
+])
+def test_without_the_tool_for_this_module_the_connector_op_stays(offline_box, persona, kw):
+    persona(**kw)
+    got = _actions(find_record_actions(module="alerts", uuid="54f25f1f"))
+    assert got["update_field"]["connector"] == "cyops_utilities"
+    assert "tool" not in got["update_field"]
+
+
+def test_no_persona_keeps_the_connector_ops(offline_box):
+    got = _actions(find_record_actions(module="alerts", uuid="54f25f1f"))
+    assert got["update_field"]["op"] == "update_cyops_resource"
+
+
+def test_find_keeps_the_tool_call_on_its_compact_row(offline_box, persona):
+    """`find` trims rows to what the next call needs; a tool row's next call
+    is the tool and its args."""
+    from fsr_playbooks.mcp_server.tools_find import _compact_action
+    persona(may_write=["alerts"], tools_allow=["update_record"])
+    out = find_record_actions(action="update_field", module="alerts", uuid="u1")
+    row = _compact_action({**out["actions"][0], "action_type": "record"})
+    assert row["tool"] == "update_record"
+    assert row["args"]["uuid"] == "u1"

@@ -283,7 +283,7 @@ def _compact_action(row: dict[str, Any]) -> dict[str, Any]:
         if k in row:
             out[k] = row[k]
     if "action" in row:  # a record write: its body template is the thing to fill
-        for k in ("collection", "params", "notes"):
+        for k in ("tool", "args", "collection", "params", "notes"):
             if k in row:
                 out[k] = row[k]
     return out

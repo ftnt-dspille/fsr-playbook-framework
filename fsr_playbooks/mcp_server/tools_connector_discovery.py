@@ -1513,6 +1513,53 @@ def _comment_link_field(conn: sqlite3.Connection, module: str) -> str:
     return row[0] if row else ""
 
 
+# record action -> the host's record-write tool that does it. When the turn's
+# persona offers that tool for the module, it is the one way: its card shows
+# the analyst the record and each field's before/after, it checks picklist
+# values before the card, and an autonomy rule names it. A cyops_utilities
+# update reached the same record past all of that.
+_RECORD_TOOLS = {"update_field": "update_record", "create_record": "create_record"}
+
+
+def _persona_record_tools(module: str) -> set[str]:
+    """The record-write tools this turn's persona offers for ``module``: those
+    in its tools allowlist, when its may_write scope includes the module. Empty
+    with no persona. Read from the turn's session state, duck-typed, so the
+    framework needs no host persona model."""
+    try:
+        from fsr_playbooks.llm import session_state
+        profile = session_state.current().profile
+    except Exception:  # noqa: BLE001
+        return set()
+    may_write = getattr(profile, "may_write_module", None)
+    if profile is None or not callable(may_write) or not may_write(module):
+        return set()
+    allow = set(getattr(profile, "tools_allow", None) or [])
+    return allow & set(_RECORD_TOOLS.values())
+
+
+def _record_tool_row(spec: dict[str, Any], module: str, uuid: str) -> dict[str, Any]:
+    """A record action expressed as the record-write tool's own call."""
+    tool = _RECORD_TOOLS[spec["action"]]
+    args: dict[str, Any] = {"module": module}
+    if tool == "update_record":
+        args["uuid"] = uuid or "<uuid>"
+    args["fields"] = dict(spec["body"])
+    return {
+        "action": spec["action"],
+        "tool": tool,
+        "title": spec["summary"],
+        "tier": 3,
+        "requires_approval": True,
+        "args": args,
+        "required_params": [k for k in args],
+        "notes": (f"Call {tool} directly; it puts the change on a card for the "
+                  f"analyst to approve. A picklist field (status, severity, "
+                  f"closureReason, ...) takes the picklist item's IRI from "
+                  f"`picklist`, never its label."),
+    }
+
+
 def _run_op_tier(connector: str, op: str) -> int:
     """The approval tier `dispatch` would put this op behind, or 4 if the tier
     table cannot be read. Erring HIGH is the safe direction: an action listed
@@ -1553,9 +1600,14 @@ def find_record_actions(action: str = "", module: str = "alerts",
         uuid: the target record's uuid. When given, the collection IRI and the
             comment link are filled in for you rather than left as templates.
 
+    When the turn's persona offers ``update_record`` / ``create_record`` for
+    the module, update_field and create_record come back as that tool's call
+    (``tool`` + ``args``) instead of a connector op: call the tool directly.
+
     Returns:
         {"module", "actions": [{action, connector, op, tier,
-         requires_approval, collection, body, required_params, notes}],
+         requires_approval, collection, body, required_params, notes}
+         or {action, tool, args, tier, requires_approval, notes}],
          "count"}
     """
     module = (module or "alerts").strip().strip("/")
@@ -1577,6 +1629,15 @@ def find_record_actions(action: str = "", module: str = "alerts",
                     "message": f"no module {module!r} in the reference store",
                     "hint": "call list_modules or describe_module first"}
 
+    persona_tools = _persona_record_tools(module)
+    tool_rows = [_record_tool_row(spec, module, uuid) for spec in _RECORD_ACTIONS
+                 if (not want or spec["action"] == want)
+                 and _RECORD_TOOLS.get(spec["action"]) in persona_tools]
+    covered = {r["action"] for r in tool_rows}
+    if want and want in covered:
+        return {"ok": True, "module": module, "actions": tool_rows,
+                "count": len(tool_rows)}
+
     listing = list_configured_connectors(probe=False, verbose=True)
     if "error" in listing:
         return {"ok": False, "code": "no_fsr_configured",
@@ -1588,19 +1649,22 @@ def find_record_actions(action: str = "", module: str = "alerts",
         # Not a dead end -- say what is missing and what it costs, per the
         # never-dead-end rule. The ops are stock FortiSOAR utilities, so this
         # is a configuration gap, not an absent capability.
-        return {"ok": True, "module": module, "actions": [], "count": 0,
+        return {"ok": True, "module": module, "actions": tool_rows,
+                "count": len(tool_rows),
                 "message": (f"{connector} is not configured on this instance, "
                             f"so record writes cannot be staged through it. "
                             f"It ships with FortiSOAR -- configuring it "
                             f"restores comment/update/create.")}
 
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, Any]] = list(tool_rows)
     with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
         have_ops = {r[0] for r in conn.execute(
             "SELECT op_name FROM operations WHERE connector_name=?",
             (connector,)).fetchall()}
         for spec in _RECORD_ACTIONS:
             if want and spec["action"] != want:
+                continue
+            if spec["action"] in covered:
                 continue
             if spec["op"] not in have_ops:
                 continue
