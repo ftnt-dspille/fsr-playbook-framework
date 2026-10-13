@@ -825,6 +825,30 @@ def _fresh128():
     return TriageDiscipline()
 
 
+def test_paging_and_resorting_a_search_is_not_a_repeat():
+    """Live (a device's automation history, 1930 rows): the model sorted the
+    search, then asked for pages 2-4, and each page was refused as a repeat
+    with "returns its full result in one shot". The calls below are the
+    session's, in order."""
+    d = _fresh128()
+    base = {"module": "ztpf_device_automation_steps", "q": "FG1"}
+    sort = [{"field": "stepStartTimestamp", "order": "asc"}]
+    calls = [dict(base, limit=5),
+             dict(base, limit=50, sort=sort),
+             dict(base, limit=25, page=2, sort=sort),
+             dict(base, limit=25, page=3, sort=sort),
+             dict(base, limit=25, page=4, sort=sort)]
+    for c in calls:
+        assert d.evaluate("search_module_records", c) is None, c
+    # The identical call again is still a repeat, and says so truthfully.
+    r = d.evaluate("search_module_records", dict(calls[3]))
+    assert r is not None and r.get("duplicate_search_guard")
+    assert "one shot" not in r["error"] and "next page" in r["error"]
+    # Case of the query and module does not make a new search.
+    assert d.evaluate("search_module_records",
+                      dict(calls[3], q="fg1", module="ZTPF_device_automation_steps"))
+
+
 def test_duplicate_correlation_search_is_refused():
     d = _fresh128()
     assert d.evaluate("search_module_records",

@@ -510,6 +510,20 @@ def credit_as_investigation(*names: str) -> None:
     """Register extra tool names as hunt-floor evidence (used by the connector's
     triage registry so its hunt tools aren't invisible to the floor)."""
     _INVESTIGATION_TOOLS.update(n for n in names if n)
+def _search_sig(args: Any) -> str:
+    """The identity of a search_module_records call: every argument, with the
+    module and query case-folded. Empty for a search with no query (a listing
+    is not a correlation search and is never refused as a repeat)."""
+    a = dict(args or {})
+    q = str(a.pop("q", None) or a.pop("query", None) or "").strip().lower()
+    a.pop("q", None)
+    a.pop("query", None)
+    if not q:
+        return ""
+    a["module"] = str(a.get("module") or "").strip().lower()
+    return q + "\x00" + json.dumps(a, sort_keys=True, default=str)
+
+
 # Discovery tools that return their full set in one shot FOR A GIVEN INDICATOR
 # TYPE -- a second call with the SAME target_type is pure waste, but these tools
 # are `target_type`-scoped (ip/domain/hash/endpoint/…) and filter their result
@@ -960,24 +974,25 @@ class TriageDiscipline:
                         f"fix the connector and resume."
                     ),
                 }
-        # 1b. Duplicate-search discipline (#128). A `search_module_records`
-        # with the SAME (module, query) already run this turn is refused: the
-        # correlation search returns its full result in one shot.
+        # 1b. Duplicate-search discipline (#128). The SAME search_module_records
+        # call already run this turn is refused. "The same" is every argument:
+        # keyed on (module, query) alone it refused pages 2-4 of a 1930-row
+        # result as repeats, and told the model the first page was the whole
+        # set (live, a device's automation history).
         if name == "search_module_records":
-            q = str((args or {}).get("q")
-                    or (args or {}).get("query") or "").strip()
-            module = str((args or {}).get("module") or "").strip().lower()
-            sig = f"{module}\x00{q.lower()}"
-            if q and sig in self._corr_searched:
+            sig = _search_sig(args)
+            if sig and sig in self._corr_searched:
+                q = str((args or {}).get("q") or (args or {}).get("query") or "")
+                module = str((args or {}).get("module") or "")
                 return {
                     "ok": False,
                     "kind": "guard_redirect",
                     "duplicate_search_guard": True,
                     "error": (
-                        f"Skipped: you already searched `{module}` for "
-                        f"{q!r} this turn and correlation search returns its "
-                        f"full result in one shot. Do not repeat it -- use the "
-                        f"result you already have."
+                        f"Skipped: you already ran this exact search of "
+                        f"`{module}` for {q!r} this turn. Use the result you "
+                        f"already have; for more rows, ask for the next page "
+                        f"or a narrower filter."
                     ),
                 }
         # 1c. Enrichment source cap (#128). Once an external indicator holds
@@ -1117,11 +1132,9 @@ class TriageDiscipline:
             if name in _CALL_ONCE_DISCOVERY:
                 self._called.add(_call_once_sig(name, args))
             if name == "search_module_records":
-                _q = str((args or {}).get("q")
-                         or (args or {}).get("query") or "").strip()
-                _m = str((args or {}).get("module") or "").strip().lower()
-                if _q:
-                    self._corr_searched.add(f"{_m}\x00{_q.lower()}")
+                _sig = _search_sig(args)
+                if _sig:
+                    self._corr_searched.add(_sig)
             if name == "run_op":
                 _conn = str((args or {}).get("connector") or "").lower()
                 _op = str((args or {}).get("op")
