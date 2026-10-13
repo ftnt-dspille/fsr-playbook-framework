@@ -2251,8 +2251,9 @@ def close_directive(disposition: str, rule: Any) -> str:
         "watching this triage, and the admin's policy closes records like "
         "this one, so a close you do not stage now never happens. Stage it "
         f"now with update_record on the record this turn is about (module "
-        f"{a.module or 'of that record'}), changing only these fields: "
-        f"{fields}. Use the evidence you already have; do not re-investigate. "
+        f"{a.module or 'of that record'}), setting each of these fields and "
+        f"no others: {fields}. Use the evidence you already have; do not "
+        "re-investigate. "
         "If the record should not be closed, say why in one sentence.")
 
 

@@ -321,7 +321,10 @@ def test_a_false_positive_under_a_close_rule_is_asked_to_stage_the_close():
         reason, text = g.directive(_CLOSE_ALLOWED)
     assert reason == "close_follow_through"
     assert "update_record" in text and "module alerts" in text
-    assert "status (to Closed), closureReason, closureNotes" in text
+    # Every field the rule lists, not "only these": live, a close that set
+    # status alone left the alert Closed with no closure reason.
+    assert "setting each of these fields and no others: " \
+        "status (to Closed), closureReason, closureNotes" in text
 
 
 def test_benign_is_asked_too():
