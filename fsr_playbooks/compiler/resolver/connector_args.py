@@ -1010,3 +1010,14 @@ class ConnectorArgsMixin:
                     message=f"unlabeled_next target {target!r} does not match any step id",
                     path=f"{path}.unlabeled_next[{i}]",
                 ))
+
+
+def renamed_param(strays: list[str], missing: str) -> str | None:
+    """The one sent param that is a misspelling of the ``missing`` required
+    one, or None. One stray is the rename whatever its spelling (``ip`` for
+    ``ip_addresses``); among several, the one whose name prefixes the missing
+    one or vice versa. Used by the run_op preflight and the compiler alike, so
+    a step and a direct call get the same "send your 'x' value as 'y'"."""
+    pick = strays if len(strays) == 1 else [
+        s for s in strays if missing.startswith(s) or s.startswith(missing)]
+    return pick[0] if len(pick) == 1 else None

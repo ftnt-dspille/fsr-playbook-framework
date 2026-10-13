@@ -691,13 +691,13 @@ def _validate_op_params(connector: str, op: str,
         # (`ip_type`, `ip_group_name`, ...) -- and must not block it.
         issues = [i for i in issues if i["problem"] != "inactive_branch"]
     if len(missing) == 1 and stray:
+        from ..compiler.resolver.connector_args import renamed_param
         want = missing[0]["param"]
-        pick = stray if len(stray) == 1 else [
-            s for s in stray if want.startswith(s) or s.startswith(want)]
-        if len(pick) == 1:
-            missing[0]["detail"] += (f" -- send your '{pick[0]}' value as "
+        renamed = renamed_param(stray, want)
+        if renamed:
+            missing[0]["detail"] += (f" -- send your '{renamed}' value as "
                                      f"'{want}'")
-            missing[0]["rename_from"] = pick[0]
+            missing[0]["rename_from"] = renamed
 
     # 3. Select-option membership + loose type checks.
     for name, candidates in rows_by_name.items():

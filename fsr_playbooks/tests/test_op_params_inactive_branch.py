@@ -90,3 +90,44 @@ def test_off_branch_params_do_not_block_a_complete_call():
         "fgt", "block", {"method": "Quarantine Based",
                          "ip_addresses": "198.51.100.7",
                          "ip_type": "IPv4", "ip": ""}) is None
+
+
+# --- the same rename, said by the compiler for a playbook step --------------
+# Live: edit_playbook refused a FortiGate block step's `ip` ten times with
+# "only valid when ip_type=..." and the turn never found `ip_addresses`.
+
+from fsr_playbooks.compiler.resolver.connector_args import renamed_param  # noqa: E402
+from fsr_playbooks.compiler.resolver.normalizers import NormalizerMixin  # noqa: E402
+
+
+class _Rules(NormalizerMixin):
+    def operation_param_required_rules(self, connector, op):
+        return [(name, parent, cond, bool(req), None)
+                for name, _t, _ty, req, _o, parent, cond in _ROWS]
+
+
+def _step_errors(params):
+    errors = []
+    _Rules()._check_conditional_required("fgt", "block", params, "steps[0]", errors)
+    return errors
+
+
+def test_a_step_with_the_other_branchs_param_is_told_the_rename():
+    (err,) = _step_errors({"method": "Quarantine Based", "ip": "198.51.100.7"})
+    assert err.path.endswith(".ip_addresses")
+    assert "send your 'ip' value as 'ip_addresses'" in err.message
+    assert err.suggestion == "rename 'ip' to 'ip_addresses'"
+
+
+def test_a_step_missing_a_param_with_nothing_stray_gets_no_rename():
+    (err,) = _step_errors({"method": "Quarantine Based"})
+    assert "send your" not in err.message
+
+
+def test_both_paths_pick_the_same_rename():
+    for strays, want, pick in ((["ip"], "ip_addresses", "ip"),
+                               (["ip", "ttl"], "ip_addresses", "ip"),
+                               (["a", "b"], "ip_addresses", None)):
+        assert renamed_param(strays, want) == pick
+    got = _issues({"method": "Quarantine Based", "ip": "198.51.100.7"})
+    assert got["ip_addresses"]["rename_from"] == renamed_param(["ip"], "ip_addresses")

@@ -2539,6 +2539,7 @@ class NormalizerMixin:
             active_cache[param] = result
             return result
 
+        missing: list[CompileError] = []
         for name, entries in rows_by_name.items():
             # Top-level required params (every row has parent None) used to be
             # deferred to the run_op preflight (_validate_op_params). But the
@@ -2572,7 +2573,7 @@ class NormalizerMixin:
                     break
             if not req_here:
                 continue
-            errors.append(CompileError(
+            missing.append(CompileError(
                 code=ErrorCode.MISSING_FIELD,
                 message=(
                     f"required param {name!r} on {connector}.{operation} is "
@@ -2582,6 +2583,23 @@ class NormalizerMixin:
                 suggestion=f"add {name!r} to arguments.params",
                 severity="error" if pure_top_level else "warning",
             ))
+
+        # One sent param the chosen branch hides + one required param missing
+        # is a rename (`ip` for block_ip_new's `ip_addresses`): say it, as the
+        # run_op preflight does. Live, edit_playbook refused `ip` ten times
+        # with "only valid when ip_type=..." and the turn never found
+        # `ip_addresses`.
+        if len(missing) == 1:
+            stray = [p for p, v in provided.items()
+                     if v not in (None, "") and p in rows_by_name
+                     and not active(p, frozenset())]
+            from .connector_args import renamed_param
+            want = missing[0].path.rsplit(".", 1)[-1]
+            renamed = renamed_param(stray, want) if stray else None
+            if renamed:
+                missing[0].message += f" -- send your {renamed!r} value as {want!r}"
+                missing[0].suggestion = f"rename {renamed!r} to {want!r}"
+        errors.extend(missing)
 
 
 # Catalog step types written by their raw FSR name that have no short alias
