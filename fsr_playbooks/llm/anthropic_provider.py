@@ -85,6 +85,27 @@ def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
     return out
 
 
+_THINKING_TYPES = ("thinking", "redacted_thinking")
+
+
+def _without_thinking(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`msgs` with thinking blocks removed, for the side requests (the forced
+    call, the wrap-up) that pin `tool_choice` or send no tools: those are not
+    part of the tool loop the reasoning belongs to, and they went out without
+    it before thinking was kept."""
+    out: list[dict[str, Any]] = []
+    for m in msgs:
+        c = m.get("content")
+        if isinstance(c, list):
+            kept = [b for b in c
+                    if not (isinstance(b, dict) and b.get("type") in _THINKING_TYPES)]
+            if not kept:
+                continue
+            m = {**m, "content": kept}
+        out.append(m)
+    return out
+
+
 def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Add a rolling cache breakpoint on the last block of the last message.
 
@@ -121,7 +142,8 @@ def _with_history_breakpoint(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]
     else:
         return msgs
     tail = blocks[-1]
-    if not isinstance(tail, dict):
+    # A thinking block takes no cache_control.
+    if not isinstance(tail, dict) or tail.get("type") in _THINKING_TYPES:
         return msgs
     blocks[-1] = {**tail, "cache_control": {"type": "ephemeral"}}
     last["content"] = blocks
@@ -614,6 +636,10 @@ class _AnthropicTurn:
     def _messages_param(self) -> list[MessageParam]:
         return cast("list[MessageParam]", self._messages())
 
+    def _plain_messages_param(self) -> list[MessageParam]:
+        return cast("list[MessageParam]", _with_history_breakpoint(
+            _without_thinking(_to_anthropic_messages(self.history))))
+
     def _tools_param(self) -> list[ToolUnionParam]:
         return cast("list[ToolUnionParam]", self.request_tools)
 
@@ -661,6 +687,14 @@ class _AnthropicTurn:
         for b in final.content:
             if b.type == "text":
                 blocks.append({"type": "text", "text": b.text})
+            elif b.type == "thinking":
+                # Kept verbatim (signature included) and in order: within a
+                # tool loop the next request needs the reasoning that chose
+                # these calls. Dropping it made every round re-derive it.
+                blocks.append({"type": "thinking", "thinking": b.thinking,
+                               "signature": b.signature})
+            elif b.type == "redacted_thinking":
+                blocks.append({"type": "redacted_thinking", "data": b.data})
             elif b.type == "tool_use":
                 blocks.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
                 calls.append(ToolCall(b.id, b.name, dict(b.input)))
@@ -674,15 +708,21 @@ class _AnthropicTurn:
                 raw = json.dumps(c.args, default=str)
                 dropped.append(DroppedCall(name=c.name, arg_chars=len(raw), tail=raw[-200:]))
             blocks = [b for b in blocks if b["type"] != "tool_use"]
-            if not blocks:
-                blocks = [{"type": "text", "text": unexecuted_tool_calls_note(
-                    final.stop_reason, [c.name for c in calls])}]
+            if not any(b["type"] not in _THINKING_TYPES for b in blocks):
+                blocks.append({"type": "text", "text": unexecuted_tool_calls_note(
+                    final.stop_reason, [c.name for c in calls])})
             calls = []
+        thinking = "\n\n".join(b["thinking"] for b in blocks
+                                if b["type"] == "thinking" and b.get("thinking"))
         return Round(text=text, tool_calls=calls, stop_reason=final.stop_reason or "",
                      usage=_round_usage(final), dropped_calls=dropped,
+                     thinking=thinking,
                      # An empty reply is not history: Anthropic refuses a
-                     # message with empty content.
-                     assistant=Message(role="assistant", content=blocks) if blocks else None)
+                     # message with empty content, and reasoning alone is not
+                     # a reply either.
+                     assistant=(Message(role="assistant", content=blocks)
+                                if any(b["type"] not in _THINKING_TYPES for b in blocks)
+                                else None))
 
     async def wrapup_round(self, max_tokens: int) -> AsyncIterator[tuple[str, Any]]:
         p = self.p
@@ -690,7 +730,7 @@ class _AnthropicTurn:
             model=p.model,
             max_tokens=max_tokens,
             system=self._system_param(),
-            messages=self._messages_param(),
+            messages=self._plain_messages_param(),
         ) as stream:
             async for ev in stream:
                 if ev.type == "content_block_delta" and ev.delta.type == "text_delta":
@@ -704,7 +744,7 @@ class _AnthropicTurn:
         resp = await p._client.messages.create(
             model=p.model, max_tokens=p.max_output_tokens,
             system=self._system_param(),
-            messages=self._messages_param(),
+            messages=self._plain_messages_param(),
             tools=[cast("ToolUnionParam", schema)],
             tool_choice={"type": "tool", "name": name},
         )

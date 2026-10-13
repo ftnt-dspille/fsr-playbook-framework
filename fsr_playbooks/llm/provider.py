@@ -142,6 +142,10 @@ class UsageEvent:
     prefix_fingerprint: str = ""
     #: Calls this round started but never ran -- see `DroppedCall`.
     dropped_calls: list[DroppedCall] = field(default_factory=list)
+    #: The model's reasoning for this round, when the provider returns it
+    #: (Anthropic thinking blocks). For the audit row only: it is not a frame
+    #: and never reaches the chat.
+    thinking: str = ""
     kind: Literal["usage"] = "usage"
 
 

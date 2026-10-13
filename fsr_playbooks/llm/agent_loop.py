@@ -223,6 +223,8 @@ class Round:
     #: Wire-format assistant message for history; None when the reply was
     #: empty (an empty message replayed fails the next request on both APIs).
     assistant: Any = None
+    #: The round's reasoning text, when the provider returns any.
+    thinking: str = ""
 
 
 @dataclass
@@ -559,6 +561,7 @@ async def run_loop(
                 history_chars=_hc, stop_reason=stop_reason,
                 self_repair_turn=self_repair_turns - repair_delta,
                 tool_calls=_tcu, tags=tags, dropped_calls=_rnd.dropped_calls,
+                thinking=_rnd.thinking,
                 **w.usage_extra(),
             )
 
