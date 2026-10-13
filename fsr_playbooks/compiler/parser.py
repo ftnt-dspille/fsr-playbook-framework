@@ -167,6 +167,23 @@ def _parse_exported_tags(raw: Any, errors: list[CompileError]) -> list[str] | No
     return [str(t).strip() for t in raw if str(t).strip()]
 
 
+def _not_a_playbook_hint(doc: dict) -> str:
+    """What to do when ``doc`` has no ``playbooks:`` list. Live, a turn sent a
+    ZTPF template (name, outputType, script) to validate_yaml, was told only
+    "at least one playbook is required", and stopped."""
+    if not doc or "playbooks" in doc:
+        return ""
+    if "steps" in doc:
+        return (" -- this looks like one playbook without the wrapper: put it "
+                "under `playbooks:` as a list item (playbooks: [{name: ..., "
+                "steps: ...}])")
+    keys = ", ".join(sorted(str(k) for k in doc)[:8])
+    return (f" -- this text has no `playbooks:` list or `steps:`, so it is not "
+            f"playbook YAML (its keys: {keys}). validate_yaml checks playbooks "
+            "only; to create or change a record such as a template, send these "
+            "fields with create_record or update_record instead")
+
+
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
     errors: list[CompileError] = []
     # Strip control chars the model may have introduced while re-emitting a
@@ -235,7 +252,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
     if not isinstance(pbs_raw, list) or not pbs_raw:
         errors.append(CompileError(
             code=ErrorCode.MISSING_FIELD,
-            message="at least one playbook is required",
+            message="at least one playbook is required" + _not_a_playbook_hint(doc),
             path="playbooks",
         ))
         if errors:
