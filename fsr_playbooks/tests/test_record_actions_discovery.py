@@ -139,8 +139,10 @@ def persona():
     from fsr_playbooks.llm import session_state
     tokens = []
 
-    def bind(**kw):
-        tokens.append(session_state.update(profile=_Persona(**kw)))
+    def bind(offered=None, **kw):
+        tokens.append(session_state.update(
+            profile=_Persona(**kw),
+            offered_tools=None if offered is None else frozenset(offered)))
     yield bind
     for t in reversed(tokens):
         session_state.reset(t)
@@ -197,3 +199,23 @@ def test_find_keeps_the_tool_call_on_its_compact_row(offline_box, persona):
     row = _compact_action({**out["actions"][0], "action_type": "record"})
     assert row["tool"] == "update_record"
     assert row["args"]["uuid"] == "u1"
+
+
+def test_an_empty_allowlist_with_the_tool_offered_gets_it(offline_box, persona):
+    """The live shape (.159's alerts persona): may_write includes alerts, the
+    tools allowlist is empty (= the host's default tools, which include the
+    record writes). Reading the allowlist answered "no tool" there."""
+    persona(may_write=["alerts"], tools_allow=[],
+            offered=["get_record", "find", "update_record", "create_record"])
+    got = _actions(find_record_actions(module="alerts", uuid="u1"))
+    assert got["update_field"]["tool"] == "update_record"
+    assert got["create_record"]["tool"] == "create_record"
+
+
+def test_a_tool_the_host_did_not_offer_is_not_named(offline_box, persona):
+    """A read-only turn withholds the record writes; naming update_record
+    there would send the model to a tool it does not have."""
+    persona(may_write=["alerts"], tools_allow=["update_record"],
+            offered=["get_record", "find"])
+    got = _actions(find_record_actions(module="alerts", uuid="u1"))
+    assert got["update_field"]["connector"] == "cyops_utilities"

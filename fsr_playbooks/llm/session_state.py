@@ -51,6 +51,10 @@ class SessionState:
     #: The host's persona for the turn and the record it is mounted on.
     profile: Any = None
     record_iri: str | None = None
+    #: Names of the tools the host offered the model this turn; None when the
+    #: host does not say. A tool that points the model at another tool reads
+    #: this rather than re-deriving the host's slicing.
+    offered_tools: frozenset[str] | None = None
 
 
 _STATE: ContextVar[SessionState] = ContextVar("_session_state", default=SessionState())

@@ -1522,20 +1522,30 @@ _RECORD_TOOLS = {"update_field": "update_record", "create_record": "create_recor
 
 
 def _persona_record_tools(module: str) -> set[str]:
-    """The record-write tools this turn's persona offers for ``module``: those
-    in its tools allowlist, when its may_write scope includes the module. Empty
-    with no persona. Read from the turn's session state, duck-typed, so the
-    framework needs no host persona model."""
+    """The record-write tools this turn can use on ``module``: the ones the
+    host offered the model this turn (``offered_tools``), when the turn's
+    write profile may write the module. Empty with no write profile. Read
+    from the turn's session state, duck-typed, so the framework needs no host
+    persona model.
+
+    The offered list, not the persona's allowlist: an empty allowlist means
+    the host's default tools, which include the record writes, so reading the
+    allowlist answered "no tool" on a box whose persona could write alerts.
+    A host that does not report its offered tools falls back to the
+    allowlist."""
     try:
         from fsr_playbooks.llm import session_state
-        profile = session_state.current().profile
+        state = session_state.current()
     except Exception:  # noqa: BLE001
         return set()
+    profile = state.profile
     may_write = getattr(profile, "may_write_module", None)
     if profile is None or not callable(may_write) or not may_write(module):
         return set()
-    allow = set(getattr(profile, "tools_allow", None) or [])
-    return allow & set(_RECORD_TOOLS.values())
+    offered = getattr(state, "offered_tools", None)
+    if offered is None:
+        offered = set(getattr(profile, "tools_allow", None) or [])
+    return set(offered) & set(_RECORD_TOOLS.values())
 
 
 def _record_tool_row(spec: dict[str, Any], module: str, uuid: str) -> dict[str, Any]:
