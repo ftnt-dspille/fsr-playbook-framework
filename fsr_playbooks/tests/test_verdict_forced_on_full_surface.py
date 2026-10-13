@@ -51,7 +51,7 @@ def _forced_verdict_response(disposition="true_positive"):
     return MagicMock(choices=[MagicMock(message=MagicMock(tool_calls=[call]))])
 
 
-def _run(rounds):
+def _run(rounds, tags=None):
     streams = [_FakeStream(r) for r in rounds]
 
     async def _create(*_a, **kw):
@@ -67,7 +67,7 @@ def _run(rounds):
          patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="investigate this alert")],
-            tools=_TOOLS, tags={})))
+            tools=_TOOLS, tags=dict(tags or {}))))
     return events, disp
 
 
@@ -233,3 +233,18 @@ def test_a_failed_lookup_is_not_evidence():
     g = VerdictDeliveryGuard()
     g.note_result("get_record", {"iri": "/api/3/alerts/x"}, {"ok": True, "name": "C2"})
     assert g.outstanding(allowed)
+
+
+
+def test_a_turn_the_host_says_is_not_an_investigation_gets_no_forced_verdict():
+    """Live (a ZTPF device assistant): "what was the latest automation on this
+    device" read records, answered, and was then forced into a needs_more_info
+    verdict card restating the answer. The host marks such a turn."""
+    events, disp = _run([_hunt_round(), _prose()], tags={"verdicts": False})
+    verdicts = [c for c in disp.call_args_list
+                if c.args[0] == "emit_card" and c.args[1].get("card_type") == "verdict"]
+    assert verdicts == []
+    # Any other tag value leaves the guard on.
+    events, disp = _run([_hunt_round(), _prose()], tags={"verdicts": True})
+    assert [c for c in disp.call_args_list
+            if c.args[0] == "emit_card" and c.args[1].get("card_type") == "verdict"]

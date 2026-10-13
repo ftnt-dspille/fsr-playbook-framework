@@ -2192,9 +2192,15 @@ class VerdictDeliveryGuard:
     AND when the turn ran ≥1 evidence/enrichment tool. A triage turn with pure
     research (no evidence tools called, just planning or asking questions) stays
     inert -- there is nothing to verdict on yet.
+
+    ``enabled`` False turns it off for a turn whose host says a verdict is not
+    its conclusion (the ``verdicts`` turn tag): live, a ZTPF device assistant
+    asked "what was the latest automation on this device" got a forced
+    needs_more_info verdict card restating its answer.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, enabled: bool = True) -> None:
+        self._enabled = enabled
         self._ran_evidence_tool = False
         self._emitted_verdict = False
         self._forced = False
@@ -2226,6 +2232,8 @@ class VerdictDeliveryGuard:
     def outstanding(self, allowed_names: set[str]) -> bool:
         """True when this turn gathered evidence, authored nothing, and ended
         without a verdict. Fires at most once."""
+        if not self._enabled:
+            return False
         if "emit_card" not in allowed_names and "emit_verdict" not in allowed_names:
             return False
         if self._authored or not self._ran_evidence_tool:

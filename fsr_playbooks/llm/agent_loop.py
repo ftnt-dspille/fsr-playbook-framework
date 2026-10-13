@@ -352,7 +352,8 @@ async def run_loop(
     delivery = EnhanceDeliveryGuard()
     create = CreateDeliveryGuard()
     build = BuildProgressGuard()
-    verdict = VerdictDeliveryGuard()
+    # A host turns the verdict off for a turn that is not an investigation.
+    verdict = VerdictDeliveryGuard(enabled=tags.get("verdicts") is not False)
     promise = PromisedActionGuard()
     progress = ProgressMeter()
     contain = ContainmentFollowThrough(enabled=bool(tags.get("unattended")))
