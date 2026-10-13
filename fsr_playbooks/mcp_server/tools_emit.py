@@ -1457,6 +1457,16 @@ def verdict_contract() -> str:
     )
 
 
+#: Rides the verdict's result back to the model. Live, a triage turn wrote a
+#: 3,300-character assessment, then the same verdict as a card, then a closing
+#: "bottom line": the conclusion three times, about 40 seconds of output the
+#: analyst had already been handed (the widget folds the prose away).
+VERDICT_SHOWN_NOTE = (
+    "The analyst now sees this card with its findings and unknowns. It is the "
+    "write-up: do not restate it in prose. If there is an action to stage, "
+    "stage it; otherwise end with at most one sentence on the next step.")
+
+
 def emit_verdict(
     disposition: str,
     severity: str,
@@ -1602,7 +1612,7 @@ def emit_verdict(
         card["recommended_actions"] = recommended_actions
     from ._citation_validator import record_delivered_verdict
     record_delivered_verdict(card)
-    return {"ok": True, "card": card}
+    return {"ok": True, "card": card, "shown": VERDICT_SHOWN_NOTE}
 
 
 # ---------------------------------------------------------------------------
