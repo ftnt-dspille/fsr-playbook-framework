@@ -39,7 +39,6 @@ from ._loop_helpers import (
     MAX_SELF_REPAIR_TURNS,
     MAX_TOOL_TURNS,
     STREAM_TIMEOUT_SECS,
-    UNATTENDED_CONTAIN_DIRECTIVE,
     UNVERIFIED_DRAFT_DIRECTIVE,
     YAML_FENCE_RE,
     BuildProgressGuard,
@@ -655,11 +654,12 @@ async def run_loop(
                 yield DoneEvent(stop_reason="end_turn")
                 return
 
-            if contain.outstanding(allowed):
+            follow = contain.directive(allowed)
+            if follow:
                 contain.mark_fired()
-                yield usage_event("containment_follow_through")
+                yield usage_event(follow[0])
                 turn_idx += 1
-                w.append_user(UNATTENDED_CONTAIN_DIRECTIVE)
+                w.append_user(follow[1])
                 continue
 
             # Verdict: a triage turn that gathered evidence and never concluded
@@ -693,23 +693,24 @@ async def run_loop(
                             forced = (call, result)
                             break
                         directive = verdict_repair_directive(result, call.args)
-                    if forced is not None and contain.outstanding(allowed):
+                    follow = contain.directive(allowed) if forced is not None else None
+                    if forced is not None and follow:
                         # The forced verdict is real history now, so the model
-                        # stages containment against what it decided.
+                        # stages what it calls for against what it decided.
                         call, result = forced
                         w.append_tool_call(call)
                         w.append_tool_results(
                             [ToolOutcome(call.call_id, cap_model_content(stringify(result)),
                                          is_error_result(result),
                                          call.name, call.args)],
-                            note=UNATTENDED_CONTAIN_DIRECTIVE)
+                            note=follow[1])
                         contain.mark_fired()
                         # Marks that follow-through fired. Zero tokens: this
                         # round's usage was reported as verdict_guard_forced.
                         yield UsageEvent(
                             session_id=trace_id, turn=turn_idx, model=provider.model,
                             input_tokens=0, output_tokens=0, cache_read=0, cache_write=0,
-                            history_chars=0, stop_reason="containment_follow_through",
+                            history_chars=0, stop_reason=follow[0],
                             self_repair_turn=self_repair_turns, tool_calls=[], tags=tags,
                             **w.usage_extra())
                         turn_idx += 1

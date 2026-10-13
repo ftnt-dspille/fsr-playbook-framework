@@ -56,7 +56,7 @@ async def _drain(gen):
     return [ev async for ev in gen]
 
 
-def _run(rounds, *, unattended=True, forced=None):
+def _run(rounds, *, unattended=True, forced=None, tools=_TOOLS):
     """Drive the OpenAI loop. Returns (events, dispatch mock, the messages each
     streamed round was sent)."""
     streams = [_FakeStream(r) for r in rounds]
@@ -79,7 +79,7 @@ def _run(rounds, *, unattended=True, forced=None):
          patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=0):
         events = asyncio.run(_drain(p.stream(
             system="s", messages=[Message(role="user", content="triage this")],
-            tools=_TOOLS, tags=tags)))
+            tools=tools, tags=tags)))
     return events, disp, sent
 
 
@@ -270,3 +270,121 @@ def test_the_loop_hands_each_run_op_result_to_the_evidence_reader():
     finally:
         cv.set_result_reader(None)
     assert seen == [("virustotal", "query_ip", {"ok": True})]
+
+
+# --- a false positive under the admin's close rule --------------------------
+# Live on .159 an enforced close rule never closed anything: the box model
+# delivered a false_positive verdict at 0.98 and ended the turn, so no close
+# was staged for the policy to judge and the alert stayed open.
+
+from contextlib import contextmanager  # noqa: E402
+
+from fsr_playbooks.llm import session_state  # noqa: E402
+from fsr_playbooks.llm.autonomy import parse_policy  # noqa: E402
+
+_CLOSE_ALLOWED = _ALLOWED | {"update_record"}
+
+
+def _close_policy(*, enabled=True, min_confidence=0.9):
+    policy, err = parse_policy({
+        "version": 1, "enabled": enabled, "mode": "enforce",
+        "rules": [{"id": "close-false-positive",
+                   "action": {"tool": "update_record", "module": "alerts",
+                              "fields": ["status", "closureReason", "closureNotes"],
+                              "values": {"status": ["Closed"]}},
+                   "when": {"verdict": {"disposition": ["false_positive", "benign"],
+                                        "min_confidence": min_confidence},
+                            "target": {"kind": "record"},
+                            "evidence": {"cites_tool_kind": "read"}}}]})
+    assert err is None, err
+    return policy
+
+
+@contextmanager
+def _policy(policy):
+    tok = session_state.update(autonomy_policy=policy)
+    try:
+        yield
+    finally:
+        session_state.reset(tok)
+
+
+def _fp(disposition="false_positive", confidence=0.95):
+    return {"card_type": "verdict",
+            "payload": {"disposition": disposition, "confidence": confidence}}
+
+
+def test_a_false_positive_under_a_close_rule_is_asked_to_stage_the_close():
+    g = ContainmentFollowThrough(enabled=True)
+    g.note_result("emit_card", _fp(), {"ok": True})
+    with _policy(_close_policy()):
+        reason, text = g.directive(_CLOSE_ALLOWED)
+    assert reason == "close_follow_through"
+    assert "update_record" in text and "module alerts" in text
+    assert "status (to Closed), closureReason, closureNotes" in text
+
+
+def test_benign_is_asked_too():
+    g = ContainmentFollowThrough(enabled=True)
+    g.note_result("emit_card", _fp("benign"), {"ok": True})
+    with _policy(_close_policy()):
+        assert g.outstanding(_CLOSE_ALLOWED)
+
+
+def test_no_close_is_asked_without_a_rule_that_would_take_it():
+    cases = {
+        "no policy": (None, _fp(), _CLOSE_ALLOWED),
+        "switched off": (_close_policy(enabled=False), _fp(), _CLOSE_ALLOWED),
+        "below the bar": (_close_policy(), _fp(confidence=0.7), _CLOSE_ALLOWED),
+        "no confidence": (_close_policy(), {"card_type": "verdict", "payload": {
+            "disposition": "false_positive"}}, _CLOSE_ALLOWED),
+        "not a close verdict": (_close_policy(), _fp("suspicious"), _CLOSE_ALLOWED),
+        "write tool not offered": (_close_policy(), _fp(), _ALLOWED),
+    }
+    for why, (policy, verdict, allowed) in cases.items():
+        g = ContainmentFollowThrough(enabled=True)
+        g.note_result("emit_card", verdict, {"ok": True})
+        with _policy(policy):
+            assert not g.outstanding(allowed), why
+
+
+def test_an_attended_false_positive_is_never_asked_to_close():
+    g = ContainmentFollowThrough(enabled=False)
+    g.note_result("emit_card", _fp(), {"ok": True})
+    with _policy(_close_policy()):
+        assert not g.outstanding(_CLOSE_ALLOWED)
+
+
+def _fp_round():
+    return [_delta_chunk(tool_calls=[_tc(index=0, id="v1", name="emit_card",
+                                         args=json.dumps(_fp()))]),
+            _delta_chunk(finish="tool_calls"), _usage_chunk()]
+
+
+def _close_round():
+    return [_delta_chunk(tool_calls=[_tc(
+                index=0, id="u1", name="update_record",
+                args='{"module": "alerts", "uuid": "a", "fields": {"status": "Closed"}}')]),
+            _delta_chunk(finish="tool_calls"), _usage_chunk()]
+
+
+_CLOSE_TOOLS = _TOOLS + [{"type": "function", "function": {
+    "name": "update_record", "description": "update_record",
+    "parameters": {"type": "object", "properties": {}}}}]
+
+
+def test_the_loop_asks_a_false_positive_to_stage_the_close_in_turn():
+    with _policy(_close_policy()):
+        events, disp, sent = _run([_hunt_round(), _fp_round(), _prose(),
+                                   _close_round(), _prose()], tools=_CLOSE_TOOLS)
+    reasons = [e.stop_reason for e in events if isinstance(e, UsageEvent)]
+    assert reasons.count("close_follow_through") == 1
+    assert "containment_follow_through" not in reasons
+    ask = sent[3][-1]
+    assert ask["role"] == "user" and "update_record" in ask["content"]
+    assert any(c.args[0] == "update_record" for c in disp.call_args_list)
+
+
+def test_the_loop_ends_a_false_positive_with_no_close_rule():
+    events, _, sent = _run([_hunt_round(), _fp_round(), _prose()], tools=_CLOSE_TOOLS)
+    assert len(sent) == 3

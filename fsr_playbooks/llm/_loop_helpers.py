@@ -2236,21 +2236,46 @@ UNATTENDED_CONTAIN_DIRECTIVE = (
     "say why in one sentence.")
 
 
+def close_directive(disposition: str, rule: Any) -> str:
+    """The ask for a close the admin's ``rule`` would take: which fields the
+    write may change and the values it must use, read from the rule itself."""
+    a = rule.action
+    values = a.values or {}
+    parts = []
+    for f in a.fields or []:
+        allowed = values.get(f)
+        parts.append(f"{f} (to {' or '.join(allowed)})" if allowed else f)
+    fields = ", ".join(parts) if parts else "the fields a close sets"
+    return (
+        f"Your verdict is {disposition} and nothing is staged. No analyst is "
+        "watching this triage, and the admin's policy closes records like "
+        "this one, so a close you do not stage now never happens. Stage it "
+        f"now with update_record on the record this turn is about (module "
+        f"{a.module or 'of that record'}), changing only these fields: "
+        f"{fields}. Use the evidence you already have; do not re-investigate. "
+        "If the record should not be closed, say why in one sentence.")
+
+
 class ContainmentFollowThrough:
-    """Unattended triage only: a delivered true_positive verdict with nothing
-    staged gets ONE directive to stage the containment it calls for.
+    """Unattended triage only: a delivered verdict with nothing staged gets
+    ONE directive to stage what that verdict calls for -- the containment of a
+    true_positive, or the close of a false positive when the admin's autonomy
+    policy has a rule that closes it.
 
     Live on .159 the box model ended 5 of 5 confirmed C2 auto-triage turns on
     the verdict card, so no block was ever proposed and no autonomy policy had
-    anything to act on. The directive goes into the SAME turn on purpose: the
-    policy judges a staged action against this turn's delivered verdict and
-    cited lookups, which a new turn would not carry. Any staged approval ends
-    the turn before this is consulted, so reaching it means nothing is staged.
+    anything to act on; a false positive under an enforced close rule ended
+    the same way, so the alert stayed open. The directive goes into the SAME
+    turn on purpose: the policy judges a staged action against this turn's
+    delivered verdict and cited lookups, which a new turn would not carry. Any
+    staged approval ends the turn before this is consulted, so reaching it
+    means nothing is staged.
     """
 
     def __init__(self, enabled: bool = False) -> None:
         self._enabled = bool(enabled)
         self._disposition: str | None = None
+        self._confidence: float | None = None
         self._fired = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
@@ -2266,15 +2291,49 @@ class ContainmentFollowThrough:
             self._disposition = str(
                 card.get("disposition")
                 or payload.get("disposition") or "").strip().lower() or None
+            conf = card.get("confidence", payload.get("confidence"))
+            try:
+                self._confidence = float(conf) if conf is not None else None
+            except (TypeError, ValueError):
+                self._confidence = None
+
+    def _close_rule(self, allowed_names: set[str]) -> Any:
+        """The bound policy's first rule that would close a record on this
+        verdict, or None. No policy, a switched-off one, or a verdict below
+        the rule's bar asks for nothing: the close would only wait for a
+        person, who can close the record as easily."""
+        if "update_record" not in allowed_names or self._disposition is None:
+            return None
+        from . import session_state
+        policy = session_state.current().autonomy_policy
+        if policy is None or not getattr(policy, "enabled", False):
+            return None
+        for rule in policy.rules:
+            v = rule.when.verdict
+            if (rule.action.tool == "update_record"
+                    and self._disposition in v.disposition
+                    and self._confidence is not None
+                    and self._confidence >= v.min_confidence):
+                return rule
+        return None
+
+    def directive(self, allowed_names: set[str]) -> tuple[str, str] | None:
+        """(usage stop reason, directive) once, or None."""
+        if not self._enabled or self._fired:
+            return None
+        if self._disposition == "true_positive":
+            if "run_op" not in allowed_names and "emit_card" not in allowed_names:
+                return None
+            return "containment_follow_through", UNATTENDED_CONTAIN_DIRECTIVE
+        rule = self._close_rule(allowed_names)
+        if rule is not None and self._disposition:
+            return "close_follow_through", close_directive(self._disposition, rule)
+        return None
 
     def outstanding(self, allowed_names: set[str]) -> bool:
-        """True once: unattended, a true_positive delivered, and a tool that
-        can stage containment is advertised."""
-        if not self._enabled or self._fired:
-            return False
-        if "run_op" not in allowed_names and "emit_card" not in allowed_names:
-            return False
-        return self._disposition == "true_positive"
+        """True once: unattended, a verdict delivered that calls for a staged
+        action, and a tool that can stage it is advertised."""
+        return self.directive(allowed_names) is not None
 
     def mark_fired(self) -> None:
         self._fired = True
