@@ -1762,7 +1762,9 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     edit to the OPEN playbook (terminal action of an enhance turn; needs
     `verified_id` from edit_playbook). `verdict` =
     structured investigation conclusion with disposition, severity, confidence,
-    and cited findings (evidence tied to tool_call_ids).
+    and cited findings (evidence tied to tool_call_ids). The verdict card IS
+    the written assessment: call it instead of writing the findings out in
+    prose first (never restate it in prose either).
     """
     kt = (card_type or "").strip().lower()
     fn_name = CARD_TYPES.get(kt)

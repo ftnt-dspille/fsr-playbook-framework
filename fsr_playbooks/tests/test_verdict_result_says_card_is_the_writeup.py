@@ -94,3 +94,13 @@ def test_the_model_reads_the_note_on_its_next_request():
                for b in m["content"] if b.get("type") == "tool_result"]
     assert results, "no tool result followed the verdict"
     assert VERDICT_SHOWN_NOTE in json.dumps(results[-1]["content"])
+
+
+def test_the_advertised_description_says_the_card_replaces_prose():
+    """Live, with the rule only in the system prompt, the model still wrote a
+    2,444-character assessment before the card. The tool description is what
+    it reads when it decides to call the card."""
+    from fsr_playbooks.llm.tools import REGISTRY
+    desc = " ".join(REGISTRY["emit_card"].description.split())
+    assert "IS the written assessment" in desc
+    assert "instead of writing the findings out in prose" in desc
