@@ -314,23 +314,24 @@ def _model_supports_task_budget(model: str) -> bool:
 
 
 def reasoning_kwargs(model: str, effort: str | None) -> dict[str, Any]:
-    """The request kwargs that carry a REQUESTED reasoning depth, or `{}`.
+    """The request kwargs for reasoning on a model that takes adaptive thinking.
 
-    Empty when nothing was asked or the model cannot take it -- so the default
-    path sends no `thinking` / `output_config` at all and behaves exactly as it
-    did before this landed. That matters: on the 4.6+ family, omitting
-    `thinking` already runs adaptive, so sending it unasked would change the
-    wire for every turn to buy nothing.
+    These models think whether or not `thinking` is sent, but by default the
+    thinking blocks come back EMPTY (text omitted, signature only) -- probed
+    on Sonnet 5 -- so the audit row had nothing to keep. `display:
+    "summarized"` returns a readable summary of the same thinking, so it is
+    sent on every request to such a model. `output_config.effort` rides along
+    only when a depth was asked for (`TurnRequest.reasoning`); an unrecognised
+    one is dropped rather than sent. `{}` for any other model, and for every
+    model when `FSR_ANTHROPIC_NATIVE` is off.
     """
+    if not _native_enabled() or not _model_supports_reasoning_depth(model):
+        return {}
+    out: dict[str, Any] = {"thinking": {"type": "adaptive", "display": "summarized"}}
     depth = (effort or "").strip().lower() or None
-    if not depth or depth not in _EFFORT_LEVELS:
-        return {}
-    if not _model_supports_reasoning_depth(model):
-        return {}
-    return {
-        "thinking": {"type": "adaptive"},
-        "output_config": {"effort": depth},
-    }
+    if depth in _EFFORT_LEVELS:
+        out["output_config"] = {"effort": depth}
+    return out
 
 
 def task_budget_kwargs(model: str, tool_turns: int | None) -> dict[str, Any]:

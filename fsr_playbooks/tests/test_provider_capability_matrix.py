@@ -61,11 +61,16 @@ def _probe_fortiai_reasoning(p: FortiAIProxyProvider) -> None:
     assert overlay.get("model") == FEATURE_LARGE, overlay
 
 
+#: Sent on every request to an adaptive-thinking model: without it the thinking
+#: blocks come back empty (signature only), so there was nothing to audit.
+_SUMMARIZED = {"type": "adaptive", "display": "summarized"}
+
+
 def _probe_anthropic_reasoning(p: AnthropicProvider) -> None:
     """Anthropic serves depth with adaptive thinking + `output_config.effort`."""
     p.request(TurnRequest(reasoning="high"))
     kwargs, betas = p._native_request_kwargs(tool_turns=8)
-    assert kwargs.get("thinking") == {"type": "adaptive"}, kwargs
+    assert kwargs.get("thinking") == _SUMMARIZED, kwargs
     assert kwargs["output_config"]["effort"] == "high", kwargs
     # Effort is GA -- asking for depth alone must not drag in a beta flag.
     assert betas == [], betas
@@ -127,9 +132,10 @@ def _probe_anthropic_history_pruning(p: AnthropicProvider) -> None:
     assert CONTEXT_EDIT_BETA in betas, betas
     # NOT compaction -- a different feature with a different beta flag.
     assert "compact-2026-01-12" not in betas, betas
-    # Nobody asked -> nothing on the wire, and `shrink_history` stays on.
+    # Nobody asked -> no context editing on the wire (summarized thinking is
+    # sent regardless), and `shrink_history` stays on.
     p.request(TurnRequest())
-    assert p._native_request_kwargs(tool_turns=8) == ({}, [])
+    assert p._native_request_kwargs(tool_turns=8) == ({"thinking": _SUMMARIZED}, [])
     assert p.emulation.history_pruning is True
     # A model that predates the family emulates instead of eating a 400.
     old = AnthropicProvider(api_key="test-key", model="claude-sonnet-4-5-20250929")
@@ -153,7 +159,7 @@ def test_prune_history_false_prunes_nowhere() -> None:
     p = AnthropicProvider(api_key="test-key")
     residue = p.request(TurnRequest(prune_history=False))
     assert residue.history_pruning is False
-    assert p._native_request_kwargs(tool_turns=8) == ({}, [])
+    assert p._native_request_kwargs(tool_turns=8) == ({"thinking": _SUMMARIZED}, [])
 
 
 #: (provider name, capability) -> probe. A declared-true capability with no
@@ -269,11 +275,26 @@ def test_every_provider_is_in_the_matrix() -> None:
 def test_task_budget_is_not_sent_unless_the_loop_hands_one_over() -> None:
     """The blast-radius guard. Declaring the capability must not change the
     wire for callers that never asked: no `output_config`, no beta endpoint,
-    and the host-side budget note still running."""
+    and the host-side budget note still running. (Summarized thinking is sent
+    regardless; it asks for no depth and no budget.)"""
     p = AnthropicProvider(api_key="test-key")
     assert p.capabilities.task_budget is True
-    assert p._native_request_kwargs(tool_turns=16) == ({}, [])
+    assert p._native_request_kwargs(tool_turns=16) == ({"thinking": _SUMMARIZED}, [])
     assert p.emulation.task_budget is True
+
+
+def test_summarized_thinking_rides_every_request_to_an_adaptive_model() -> None:
+    p = AnthropicProvider(api_key="test-key", model="claude-sonnet-5")
+    kwargs, betas = p._native_request_kwargs(tool_turns=None)
+    assert kwargs == {"thinking": _SUMMARIZED} and betas == []
+    old = AnthropicProvider(api_key="test-key", model="claude-sonnet-4-5-20250929")
+    assert old._native_request_kwargs(tool_turns=None) == ({}, [])
+
+
+def test_the_native_kill_switch_also_stops_summarized_thinking(monkeypatch) -> None:
+    monkeypatch.setenv("FSR_ANTHROPIC_NATIVE", "0")
+    p = AnthropicProvider(api_key="test-key", model="claude-sonnet-5")
+    assert p._native_request_kwargs(tool_turns=None) == ({}, [])
 
 
 def test_deferred_loading_is_not_applied_unless_asked() -> None:
