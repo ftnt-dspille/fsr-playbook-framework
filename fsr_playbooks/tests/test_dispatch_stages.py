@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 
 from fsr_playbooks.llm import tools as T
-from fsr_playbooks.llm.tool_models import coerce_json_string_args
+from fsr_playbooks.llm.tool_models import coerce_scalar_args
 
 
 def _call(name, args, internal=False):
@@ -47,11 +47,12 @@ def test_emit_card_fields_fold_into_payload():
 
 
 def test_run_op_params_as_json_or_blank_string():
-    assert coerce_json_string_args("run_op", {"connector": "c", "op": "o",
-                                              "params": '{"ip": "1.2.3.4"}'})["params"] == \
+    schema = T.REGISTRY["run_op"].input_schema
+    assert coerce_scalar_args(schema, {"connector": "c", "op": "o",
+                                       "params": '{"ip": "1.2.3.4"}'})["params"] == \
         {"ip": "1.2.3.4"}
-    assert "params" not in coerce_json_string_args(
-        "run_op", {"connector": "c", "op": "o", "params": "  "})
+    assert "params" not in coerce_scalar_args(
+        schema, {"connector": "c", "op": "o", "params": "  "})
 
 
 def test_verify_defaults_to_the_live_probe_unless_told():

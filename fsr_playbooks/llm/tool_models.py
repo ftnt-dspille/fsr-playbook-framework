@@ -1,14 +1,26 @@
-"""Pydantic models for tool argument validation.
+"""Argument rules that sit beside each tool's advertised `input_schema`.
 
-Validates tool arguments at the provider boundary so malformed LLM tool
-calls are caught early. Internal logic remains unchanged.
+The schema is the ONE contract for a tool's arguments: it is built from the
+function's typed signature (or a hand-written override), the model is shown it,
+and `arg_gate` checks every call against it in dispatch. Two pydantic copies of
+the same signatures used to re-check the call (one here, one in the connector);
+replayed over 34,336 recorded calls they refused 6 that the schema passed, and
+each of those was a gap in the schema, now closed at its source (a Literal, a
+typed union).
+
+What remains here is what a JSON schema cannot say:
+
+  * `coerce_scalar_args` -- lossless repair of the strings some providers send
+    for every argument, keyed on the schema;
+  * `CROSS_FIELD_RULES` -- rules across arguments (get_record needs an iri, or a
+    module plus an id).
 """
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Callable
 from typing import Any
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Distinguishes "no coercion applies" from a legitimately coerced falsy value
 # (False, 0, 0.0, [], {}) -- a plain `if coerced:` check would drop exactly the
@@ -16,247 +28,24 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 _MISSING = object()
 
 
-class GetRecordArgs(BaseModel):
-    """Arguments for the get_record tool.
-
-    Mirrors the REAL registered signature: get_record(iri="", module="",
-    uuid="", relationships=True, full=False, record_id=""). The old model
-    here required module+record_id(str) -- a stale gate that rejected every
-    legitimate form the agent tried on a live matrix run (iri-only,
-    module+uuid, integer record_id), 3 tool errors in one turn.
-    `coerce_numbers_to_str` accepts an integer id instead of bouncing it.
-    """
-    model_config = ConfigDict(extra="allow", coerce_numbers_to_str=True)
-
-    iri: str | None = None
-    module: str | None = None
-    uuid: str | None = None
-    record_id: str | None = None
-    # Accept a bool OR a list of relationship names. The registered tool takes a
-    # bool ("hydrate related records inline"), but the agent naturally reaches
-    # for `relationships=["ztpfArtifacts"]` to expand a *named* relationship --
-    # which used to bounce at this gate with "Input should be a valid boolean",
-    # dead-ending the very "summarize the related steps" turn ztpf devices need.
-    # A name-list is coerced to True (hydrate all) in the tool; a bad value can
-    # never regress a lookup into a validation error.
-    relationships: bool | list[str] | None = None
-    full: bool | None = None
-    include: list[str] | None = None
-
-    @model_validator(mode="after")
-    def _one_identifier(self) -> GetRecordArgs:
-        if not (self.iri or (self.module and (self.uuid or self.record_id))):
-            raise ValueError(
-                "identify the record via `iri` alone, or `module` plus "
-                "`uuid`/`record_id` -- e.g. "
-                'get_record(iri="/api/3/alerts/<uuid>") or '
-                'get_record(module="alerts", uuid="<uuid>"). '
-                "get_record fetches ONE record -- to find records by a field or "
-                "relationship (e.g. every step on a device), use "
-                "search_module_records(module=..., filters={...})."
-            )
-        return self
+def _get_record_identifies_one(args: dict[str, Any]) -> str | None:
+    if args.get("iri") or (args.get("module")
+                           and (args.get("uuid") or args.get("record_id"))):
+        return None
+    return ("identify the record via `iri` alone, or `module` plus "
+            "`uuid`/`record_id` -- e.g. "
+            'get_record(iri="/api/3/alerts/<uuid>") or '
+            'get_record(module="alerts", uuid="<uuid>"). '
+            "get_record fetches ONE record -- to find records by a field or "
+            "relationship (e.g. every step on a device), use "
+            "search_module_records(module=..., filters={...}).")
 
 
-class SearchModuleRecordsArgs(BaseModel):
-    """Arguments for the search_module_records tool.
-
-    ``filters`` accepts BOTH shapes the agent emits: the ``{field: value}`` map
-    the tool documents, AND the list-of-conditions form
-    ``[{"field": ..., "op": ..., "value": ...}]`` (or ``{"key":..,"value":..}``)
-    it instinctively reaches for. The list form used to bounce here with
-    "filters: Input should be a valid dictionary" -- the single most frequent
-    tool error in live ztpf sessions (the agent retried it 4+ times per session,
-    never finding records that plainly existed). The tool normalizes whichever
-    shape arrives; this gate must not reject either.
-    """
-    model_config = ConfigDict(extra="allow")
-
-    module: str
-    filters: dict[str, Any] | list[dict[str, Any]] | None = None
-    limit: int | None = None
-    # DECLARED, not left to `extra="allow"`, and not decoration: only declared
-    # fields get JSON-string coercion (see `coerce_json_string_args`), and the
-    # agent emits `fields` as a JSON string in the same breath as `filters`.
-    # Mirrors the real signature: search_module_records(module, q, limit,
-    # filters, fields, sort). `sort` and `q` admit a plain string, so they are
-    # never coerced -- `sort="stepNumber"` is the common, correct form.
-    q: str | None = None
-    fields: list[str] | None = None
-    sort: str | list | None = None
-
-
-class RunOpArgs(BaseModel):
-    """Arguments for the run_op tool."""
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
-
-    connector: str = Field(...)
-    op: str = Field(...)
-    params: dict[str, Any] | None = None
-    confirm: bool | None = None
-
-
-class EmitActionCardArgs(BaseModel):
-    """Arguments for the emit_action_card tool.
-
-    Mirrors the REAL registered signature: emit_action_card(id, connector,
-    operation, summary, args, editable_fields). The old model here required
-    `title` -- a field the registered tool does not accept -- while omitting
-    id/connector/args/editable_fields entirely. So every live containment card
-    the agent staged (correctly passing summary/operation/args) bounced with
-    "title: Field required" and the turn ended with no action card (matrix
-    run 7 T1). Same drift class as GetRecordArgs (run 5).
-    """
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    connector: str
-    operation: str
-    summary: str
-    args: dict[str, Any]
-    editable_fields: list[str]
-    # Declared intent (tracker #60). "analyst" means the user explicitly ordered
-    # this containment, which exempts the card from the hunt floor -- see
-    # `_loop_helpers.TriageDiscipline`. Optional and defaulted so an unset field
-    # keeps the pre-#60 behavior exactly.
-    requested_by: str | None = None
-    # The connector configuration to run on (name or id); unset = the default.
-    # str in the schema; a dict is tolerated (the model has sent notes here).
-    config: str | dict | None = None
-
-
-class EmitChoiceCardArgs(BaseModel):
-    """Arguments for the emit_choice_card tool.
-
-    Mirrors the REAL registered signature: emit_choice_card(id, prompt,
-    options, multi, min_select, max_select). The old model required `title`
-    (not a real param) and omitted id/prompt/multi/min_select/max_select.
-    """
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    prompt: str
-    options: list[dict[str, Any]]
-    multi: bool | None = None
-    min_select: int | None = None
-    max_select: int | None = None
-    # A free-text box under the chips (single-pick only): the analyst answers
-    # in their own words. Missing here silently DISABLED arg validation for
-    # the whole tool (the registry refuses a model that lacks a real param).
-    allow_text: bool | None = None
-
-
-class ValidateYamlArgs(BaseModel):
-    """Arguments for the validate_yaml tool."""
-    model_config = ConfigDict(extra="allow")
-
-    yaml_text: str = Field(...)
-
-
-class CompileYamlArgs(BaseModel):
-    """Arguments for the compile_yaml tool."""
-    model_config = ConfigDict(extra="allow")
-
-    yaml_text: str = Field(...)
-    name: str | None = None
-    collection: str | None = None
-
-
-class ResolveYamlArgs(BaseModel):
-    """Arguments for the resolve_yaml tool."""
-    model_config = ConfigDict(extra="allow")
-
-    yaml_text: str = Field(...)
-
-
-class ListConfiguredConnectorsArgs(BaseModel):
-    """Arguments for the list_configured_connectors tool."""
-    model_config = ConfigDict(extra="allow")
-
-
-class SearchAlerts(BaseModel):
-    """Arguments for the search_alerts tool."""
-    model_config = ConfigDict(extra="allow")
-
-    query: str | None = None
-    limit: int | None = None
-
-
-# Mapping of tool names to their argument models
-TOOL_MODELS: dict[str, type[BaseModel]] = {
-    "get_record": GetRecordArgs,
-    "search_module_records": SearchModuleRecordsArgs,
-    "run_op": RunOpArgs,
-    "emit_action_card": EmitActionCardArgs,
-    "emit_choice_card": EmitChoiceCardArgs,
-    "validate_yaml": ValidateYamlArgs,
-    "compile_yaml": CompileYamlArgs,
-    "resolve_yaml": ResolveYamlArgs,
-    "list_configured_connectors": ListConfiguredConnectorsArgs,
-    "search_alerts": SearchAlerts,
+#: tool -> rule over the (coerced, schema-valid) arguments: None, or why the
+#: call cannot identify what it acts on.
+CROSS_FIELD_RULES: dict[str, Callable[[dict[str, Any]], str | None]] = {
+    "get_record": _get_record_identifies_one,
 }
-
-
-# ---------------------------------------------------------------------------
-# JSON-string argument coercion
-# ---------------------------------------------------------------------------
-# A model that emits a structured argument as a JSON *string* cannot recover
-# from being told no. Observed, six calls in one turn:
-#
-#   filters: "{\"ztpfDevices.uuid\": \"5b23...\"}"   -> rejected
-#   filters: "[{\"field\": ..., \"value\": ...}]"    -> rejected
-#
-# Both STRUCTURES are correct -- dict form and list form are exactly what the
-# model above accepts. The only thing wrong is the string wrapper, and the
-# error ("Input should be a valid dictionary; Input should be a valid list")
-# names the two accepted types without ever saying "you sent a string". So the
-# model reads it as "my structure is wrong", permutes structure until it gives
-# up, falls back to a free-text `q=`, gets `total: 0`, and answers from that.
-#
-# The cost is not the wasted calls. It is that a FILTERED READ SILENTLY
-# RETURNED NOTHING and the turn continued as though the device had no steps.
-#
-# This is the same defect as run_op's stringified `params`, one tool over --
-# which is why the fix is here and generic rather than a third per-model patch.
-# `SearchModuleRecordsArgs` was ALREADY widened once for the list-vs-dict shape
-# ("the single most frequent tool error in live ztpf sessions"); the failure
-# came straight back one layer out. Widening models one shape at a time loses
-# this race.
-#
-# Scope, deliberately narrow:
-#   * Only DECLARED fields. An `extra="allow"` field's intended type is unknown
-#     and guessing at it is how a coercion layer starts corrupting data.
-#   * Never a field that can be a `str`. A summary or a YAML body that happens
-#     to start with `{` must arrive exactly as sent.
-#   * Only a value that both looks like JSON and parses to a container. A
-#     string that merely starts with `{` and does not parse is left alone to
-#     fail validation with its own error.
-import json  # noqa: E402
-import types  # noqa: E402
-import typing  # noqa: E402
-
-
-def _accepts_str(annotation: Any) -> bool:
-    """True when `annotation` admits a plain `str` anywhere in its union.
-
-    Conservative by construction: an annotation this cannot decompose returns
-    True, so the field is left untouched.
-    """
-    if annotation is str or annotation is Any:
-        return True
-    if annotation is None or annotation is type(None):
-        # `Optional[...]` puts NoneType in every union. Counting it as
-        # str-accepting would disable coercion on every optional field, which
-        # is all of them.
-        return False
-    origin = typing.get_origin(annotation)
-    if origin is typing.Union or origin is types.UnionType:
-        # Only a UNION's members are alternatives. Recursing into a generic's
-        # type PARAMETERS instead would read `dict[str, Any]` as "accepts str"
-        # (because its key type is `str`) and quietly disable coercion on the
-        # one field this whole layer exists for.
-        return any(_accepts_str(a) for a in typing.get_args(annotation))
-    return origin is None and annotation not in (dict, list, tuple, set)
 
 
 # Exact spellings only. A model that means False writes one of these; anything
@@ -305,11 +94,7 @@ def coerce_scalar_args(schema: dict[str, Any] | None,
     """Return `args` with string scalars coerced to the types `schema` declares.
 
     Keyed on the tool's JSON Schema -- i.e. the contract we handed the model --
-    rather than on `TOOL_MODELS`, which covers only a handful of tools. The two
-    tools that first exhibited this (`find_enrichment_actions`,
-    `find_containment_actions`) have no pydantic model, so a TOOL_MODELS-keyed
-    fix would not have touched them. Every registered tool has an
-    `input_schema`; this therefore protects all of them.
+    so every registered tool is covered with no second list to keep in step.
 
     **Why this is not the model's problem to solve.** Some providers emit every
     argument as a string (`{"limit": "25", "probe": "False"}`) regardless of the
@@ -339,15 +124,33 @@ def coerce_scalar_args(schema: dict[str, Any] | None,
         if not isinstance(declared, dict):
             continue
         jtype = _declared_type(declared, schema)
-        # A schema that also permits a string (`type` absent, or a list of
-        # types including "string") means the string may well be what the tool
-        # wants. Never second-guess that.
+        # A union of containers (`dict | list`) is advertised as a type list.
+        # Any other list, or one that admits a string, is left alone: the
+        # string may well be what the tool wants. Never second-guess that.
+        if isinstance(jtype, list):
+            kinds = set(jtype) - {"null"}
+            jtype = "container" if kinds and kinds <= {"object", "array"} else None
         if not isinstance(jtype, str) or jtype == "string":
             continue
 
         text = value.strip()
         coerced: Any = _MISSING
-        if jtype == "boolean":
+        if not text and jtype in ("object", "array", "container"):
+            # A blank string for a structured argument means "not given", the
+            # same as null (run_op(params="") used to reach the tool as "").
+            if out is None:
+                out = dict(args)
+            out.pop(key, None)
+            continue
+        if jtype == "container":
+            if text[:1] in ("{", "["):
+                try:
+                    decoded = json.loads(text)
+                except (ValueError, TypeError):
+                    decoded = None
+                if isinstance(decoded, (dict, list)):
+                    coerced = decoded
+        elif jtype == "boolean":
             low = text.lower()
             if low in _TRUE_STRINGS:
                 coerced = True
@@ -362,10 +165,10 @@ def coerce_scalar_args(schema: dict[str, Any] | None,
             except ValueError:
                 pass
         elif jtype in ("array", "object"):
-            # `coerce_json_string_args` does this too, but only for the ~11
-            # tools with a pydantic model. Repeat it here so the other ~90 get
-            # the same treatment; running twice is harmless (the second pass
-            # sees a non-str and skips).
+            # A structured argument sent as a JSON string (run_op
+            # params='{...}', search filters='[...]'): the structure is right,
+            # only the wrapper is wrong, and the refusal would name types,
+            # never "you sent a string".
             opener = "[" if jtype == "array" else "{"
             want = list if jtype == "array" else dict
             if text[:1] == opener:
@@ -393,43 +196,3 @@ def coerce_scalar_args(schema: dict[str, Any] | None,
     return out if out is not None else args
 
 
-def coerce_json_string_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Return `args` with JSON-string values decoded for `name`'s declared,
-    non-``str`` fields. Unknown tool, or nothing to do, returns `args` itself.
-
-    Call this BEFORE validation *and* before invoking the tool: coercing only
-    for the gate would let a string past the gate and hand it to the tool body,
-    which is a worse failure than the rejection it replaced -- silent instead
-    of loud.
-    """
-    model = TOOL_MODELS.get(name)
-    if model is None or not isinstance(args, dict) or not args:
-        return args
-    out: dict[str, Any] | None = None
-    for key, field in model.model_fields.items():
-        value = args.get(key)
-        if not isinstance(value, str):
-            continue
-        stripped = value.strip()
-        if not stripped:
-            # A blank string for a structured field means "not given", the
-            # same as null (run_op(params="") used to reach the tool as "").
-            if not _accepts_str(field.annotation):
-                if out is None:
-                    out = dict(args)
-                out.pop(key, None)
-            continue
-        if not stripped[:1] in ("{", "["):
-            continue
-        if _accepts_str(field.annotation):
-            continue
-        try:
-            decoded = json.loads(stripped)
-        except (ValueError, TypeError):
-            continue  # not JSON after all -- let it fail with its own error
-        if not isinstance(decoded, (dict, list)):
-            continue
-        if out is None:
-            out = dict(args)
-        out[key] = decoded
-    return out if out is not None else args

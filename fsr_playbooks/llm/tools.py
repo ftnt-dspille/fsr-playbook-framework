@@ -716,6 +716,32 @@ class ToolSpec:
 _UNION_TYPE = getattr(__import__("types"), "UnionType", object())
 
 
+def _union_to_json(members: list[Any]) -> dict[str, Any]:
+    """A union of distinct types as one JSON type list: `dict | list` is
+    `{"type": ["object", "array"]}`. These used to be advertised with no type
+    at all, so the arg gate passed anything and the type check lived in a
+    second, pydantic copy of the signature. `items` is kept from the one array
+    member when there is one. A member with no JSON form (Any, an unknown
+    class) leaves the whole union loose, as before."""
+    types: list[str] = []
+    items: Any = None
+    arrays = 0
+    for m in members:
+        sch = _py_type_to_json(m)
+        t = sch.get("type")
+        if not isinstance(t, str):
+            return {}
+        if t not in types:
+            types.append(t)
+        if t == "array":
+            arrays += 1
+            items = sch.get("items")
+    out: dict[str, Any] = {"type": types}
+    if arrays == 1 and items:
+        out["items"] = items
+    return out
+
+
 def _py_type_to_json(tp: Any) -> dict[str, Any]:
     """Map a Python annotation to a minimal JSON Schema fragment."""
     if tp is inspect.Parameter.empty or tp is Any:
@@ -727,12 +753,18 @@ def _py_type_to_json(tp: Any) -> dict[str, Any]:
     # a reader but NOT to `get_origin`: the latter yields `types.UnionType`
     # (3.10+), which this branch used to miss entirely -- so every `X | None`
     # parameter fell through and was advertised to the model with no type.
+    if origin is typing.Literal:
+        # The allowed values ARE the contract: `by: Literal["ip", "host"]`
+        # advertised as a bare string let `by="id"` through to the body.
+        kinds = {type(a) for a in args}
+        jt = {str: "string", int: "integer", bool: "boolean"}.get(
+            kinds.pop()) if len(kinds) == 1 else None
+        return {"type": jt, "enum": list(args)} if jt else {"enum": list(args)}
     if origin is typing.Union or origin is _UNION_TYPE or (origin is None and args):
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
             return _py_type_to_json(non_none[0])
-        # union of primitives → leave loose
-        return {}
+        return _union_to_json(non_none)
     # JSON has no set/tuple: both cross the wire as an array, and the tool's
     # own signature converts on the way in. Omitting them advertised
     # `set[str]` parameters with no type at all.
@@ -1762,40 +1794,32 @@ def _coerce_args(c: _Call) -> Any:
     tier resolution too, so the approval card previews -- and its hash binds --
     the values that will execute: coercing later would let a human approve
     `probe="False"` and the tool then run with probe=True."""
-    from .tool_models import coerce_json_string_args, coerce_scalar_args
-    c.args = coerce_json_string_args(c.name, c.args)
+    from .tool_models import coerce_scalar_args
     c.args = coerce_scalar_args(getattr(c.spec, "input_schema", None), c.args)
     return None
 
 
 def _check_args(c: _Call) -> Any:
     """One argument gate for every tool (`arg_gate`: unknown keys, required
-    keys, types/enums/nested shape against input_schema), then the pydantic
-    model where a tool has one (cross-field rules). Before authorization, so
-    a call that cannot run never raises a card. `null` means "not given"."""
+    keys, types/enums/nested shape against input_schema), then the tool's
+    cross-field rule if it has one. Before authorization, so a call that
+    cannot run never raises a card. `null` means "not given"."""
     from . import arg_gate
-    from .tool_models import TOOL_MODELS
+    from .tool_models import CROSS_FIELD_RULES
     c.args = arg_gate.normalize_nulls(c.spec.input_schema, c.spec.fn, c.args)
     refusal = arg_gate.check(c.name, c.spec.input_schema, c.spec.fn, c.args)
     if refusal is not None:
         return refusal
-    model = TOOL_MODELS.get(c.name)
-    if model is None:
+    rule = CROSS_FIELD_RULES.get(c.name)
+    why = rule(c.args) if rule is not None else None
+    if why is None:
         return None
-    from pydantic import ValidationError
-    try:
-        model(**c.args)
-    except ValidationError as e:
-        problems = [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
-                    for err in e.errors()]
-        return {
-            "ok": False, "code": arg_gate.CODE, "tool": c.name,
-            "error": (f"invalid arguments for {c.name} -- the call was NOT "
-                      f"run. {'; '.join(problems)}"),
-            "problems": problems,
-            "suggestions": [f"resend {c.name} with the arguments fixed"],
-        }
-    return None
+    return {
+        "ok": False, "code": arg_gate.CODE, "tool": c.name,
+        "error": f"invalid arguments for {c.name} -- the call was NOT run. {why}",
+        "problems": [why],
+        "suggestions": [f"resend {c.name} with the arguments fixed"],
+    }
 
 
 def _default_live_probe(c: _Call) -> Any:

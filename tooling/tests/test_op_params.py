@@ -181,7 +181,7 @@ def test_emit_action_card_rejects_incomplete_args(store):
     from fsr_playbooks.mcp_server.tools_emit import emit_action_card
     out = emit_action_card(
         id="c1", connector="virustotal", operation="get_ip_reputation",
-        summary="Look up", args={"limit": 10}, editable_fields=["limit"],
+        summary="Look up the indicator", args={"limit": 10}, editable_fields=["limit"],
     )
     assert out["ok"] is False and out["code"] == "bad_params"
 
@@ -190,7 +190,7 @@ def test_emit_action_card_allows_valid_args(store):
     from fsr_playbooks.mcp_server.tools_emit import emit_action_card
     out = emit_action_card(
         id="c1", connector="virustotal", operation="get_ip_reputation",
-        summary="Look up", args={"ip": "1.2.3.4"}, editable_fields=["ip"],
+        summary="Look up the indicator", args={"ip": "1.2.3.4"}, editable_fields=["ip"],
     )
     assert out["ok"] is True
 

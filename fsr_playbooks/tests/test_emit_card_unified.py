@@ -190,11 +190,11 @@ def test_a_payload_already_in_the_declared_vocabulary_is_untouched():
     payload must not be rewritten by it."""
     from fsr_playbooks.mcp_server.tools_emit import emit_card
     r = emit_card("action", {
-        "id": "a1", "connector": "c", "operation": "o", "summary": "real",
+        "id": "a1", "connector": "c", "operation": "o", "summary": "real action summary",
         "args": {"ip": "1.2.3.4"}, "editable_fields": ["ip"],
         "title": "decoy"})
     assert r["ok"] is True
-    assert r["card"]["summary"] == "real"
+    assert r["card"]["summary"] == "real action summary"
     assert r["card"]["editable_fields"] == ["ip"]
     assert r["ignored_fields"] == ["title"]
 

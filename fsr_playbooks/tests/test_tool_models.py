@@ -1,113 +1,89 @@
-"""Gate models in llm/tool_models.py must mirror the REAL registered tool
-signatures -- a stale model silently rejects legitimate calls at dispatch.
+"""The advertised input_schema is the one argument contract, and dispatch holds
+every call to it.
 
-Regression source: a live matrix run where get_record's model required
-module+record_id(str) while the registered tool accepts iri / module+uuid /
-module+record_id; every form the agent tried bounced (3 tool errors in one
-turn, turn ended with no deliverable). The same drift class later hit the
-emit_action_card / emit_choice_card models (required `title`, a field neither
-registered tool accepts).
+Regression source: two pydantic copies of the tool signatures used to re-check
+calls after the schema gate. Copies drift: a live matrix run had get_record's
+copy require module+record_id(str) while the tool accepts iri / module+uuid /
+module+record_id (every form the agent tried bounced), and the emit_* card
+copies demanded a `title` neither tool accepts. The schema is built from the
+signature itself, so it cannot drift that way; what a schema cannot say lives
+in tool_models.CROSS_FIELD_RULES.
 """
 import inspect
 import json
-import typing
-from typing import Any
+from typing import Any, Literal
 
 import pytest
-from pydantic import ValidationError
 
-from fsr_playbooks.llm.tool_models import (
-    EmitActionCardArgs,
-    EmitChoiceCardArgs,
-    GetRecordArgs,
-)
-from fsr_playbooks.mcp_server import tools_emit
+from fsr_playbooks.llm import tools as T
+from fsr_playbooks.llm.tool_models import CROSS_FIELD_RULES, coerce_scalar_args
 
 
-def test_iri_only_is_valid():
-    GetRecordArgs(iri="/api/3/alerts/e035f3f3-4ff3-4036-a625-bc66d48846e5")
+def _dispatch_refusal(name, args):
+    """What dispatch's argument stages say about ``args`` (None = accepted)."""
+    c = T._Call(name=name, spec=T.REGISTRY[name], args=dict(args), internal=False,
+                session_id=None, approved_by=None, summary=None)
+    T._coerce_args(c)
+    return T._check_args(c)
 
 
-def test_module_plus_uuid_is_valid():
-    GetRecordArgs(module="alerts", uuid="e035f3f3-4ff3-4036-a625-bc66d48846e5")
+# --- get_record: the cross-field rule ---------------------------------------
+
+@pytest.mark.parametrize("args", [
+    {"iri": "/api/3/alerts/e035f3f3-4ff3-4036-a625-bc66d48846e5"},
+    {"module": "alerts", "uuid": "e035f3f3-4ff3-4036-a625-bc66d48846e5"},
+    {"module": "alerts", "record_id": "30369"},
+    {"iri": "/api/3/alerts/x", "module": "alerts", "uuid": "x",
+     "relationships": False, "full": True, "record_id": "1"},
+])
+def test_every_real_way_to_name_a_record_passes(args):
+    assert CROSS_FIELD_RULES["get_record"](args) is None
 
 
-def test_module_plus_int_record_id_coerces():
-    # The live agent passed record_id as a bare integer; the gate must
-    # coerce, not bounce.
-    args = GetRecordArgs(module="alerts", record_id=30369)
-    assert args.record_id == "30369"
+@pytest.mark.parametrize("args", [
+    {"relationships": True}, {"module": "alerts"}, {"record_id": "f879"},
+    {"iri": "", "module": "", "uuid": ""},
+])
+def test_a_call_that_names_no_record_is_refused_with_an_example(args):
+    why = CROSS_FIELD_RULES["get_record"](args)
+    assert why and "get_record(iri=" in why
 
 
-def test_no_identifier_rejected_with_example():
-    with pytest.raises(ValidationError) as exc:
-        GetRecordArgs(relationships=True)
-    assert "get_record(iri=" in str(exc.value)
+def test_dispatch_applies_the_rule_before_any_card_or_body(monkeypatch):
+    assert _dispatch_refusal("search_playbooks", {"q": "x"}) is None
+    monkeypatch.setitem(CROSS_FIELD_RULES, "search_playbooks", lambda a: "needs y")
+    out = _dispatch_refusal("search_playbooks", {"q": "x"})
+    assert out["ok"] is False and out["code"] == "invalid_tool_args"
+    assert "needs y" in out["error"]
 
 
-def test_module_alone_rejected():
-    with pytest.raises(ValidationError):
-        GetRecordArgs(module="alerts")
+# --- the card emitters: the schema demands exactly the real parameters ------
+
+def test_emit_action_card_accepts_its_real_signature():
+    assert _dispatch_refusal("emit_action_card", {
+        "id": "block_c2_ip", "connector": "fortigate-firewall",
+        "operation": "block_ip_new", "summary": "Block C2 IP 51.15.43.205 on FortiGate",
+        "args": {"ip": "51.15.43.205", "ip_type": "IPv4"}, "editable_fields": ["ip"],
+    }) is None
 
 
-def test_real_signature_kwargs_all_accepted():
-    # Full real signature: get_record(iri, module, uuid, relationships,
-    # full, record_id) -- the model must not reject any real param.
-    GetRecordArgs(iri="/api/3/alerts/x", module="alerts", uuid="x",
-                  relationships=False, full=True, record_id="1")
+def test_emit_action_card_names_what_is_missing_and_never_title():
+    out = _dispatch_refusal("emit_action_card", {
+        "id": "block_c2_ip", "connector": "fortigate-firewall",
+        "operation": "block_ip_new", "summary": "Block C2 IP"})
+    assert out["code"] == "invalid_tool_args"
+    assert "args" in out["error"] and "editable_fields" in out["error"]
+    assert "title" not in out["error"]
 
 
-# --- emit_action_card ------------------------------------------------------
-# The live agent staged a containment card with the REAL tool's args
-# (id, connector, operation, summary, args) and the old gate bounced it with
-# "title: Field required" -- title is not a param the tool accepts. The gate
-# must accept exactly the registered signature.
-
-
-def test_emit_action_card_accepts_real_signature():
-    # The exact shape a grounded containment card uses: the agent fills
-    # args from find_containment_actions' params, editable_fields from the
-    # params it wants the analyst to tweak.
-    EmitActionCardArgs(
-        id="block_c2_ip",
-        connector="fortigate-firewall",
-        operation="block_ip_new",
-        summary="Block C2 IP 51.15.43.205 on FortiGate",
-        args={"ip": "51.15.43.205", "ip_type": "IPv4"},
-        editable_fields=["ip"],
-    )
-
-
-def test_emit_action_card_rejects_missing_required():
-    with pytest.raises(ValidationError) as exc:
-        EmitActionCardArgs(
-            id="block_c2_ip", connector="fortigate-firewall",
-            operation="block_ip_new", summary="Block C2 IP",
-        )  # missing args + editable_fields
-    msg = str(exc.value)
-    assert "args" in msg and "editable_fields" in msg
-    # The drift symptom must NOT recur: the gate must not demand `title`.
-    assert "title" not in msg
-
-
-# --- emit_choice_card ------------------------------------------------------
-
-
-def test_emit_choice_card_accepts_real_signature():
-    EmitChoiceCardArgs(
-        id="branch",
-        prompt="Contain now or build a playbook?",
-        options=[{"label": "Contain", "value": "contain"},
-                 {"label": "Build", "value": "build"}],
-    )
-
-
-def test_emit_choice_card_rejects_missing_required():
-    with pytest.raises(ValidationError) as exc:
-        EmitChoiceCardArgs(id="branch")  # missing prompt + options
-    msg = str(exc.value)
-    assert "prompt" in msg and "options" in msg
-    assert "title" not in msg
+def test_emit_choice_card_accepts_its_real_signature_and_names_what_is_missing():
+    assert _dispatch_refusal("emit_choice_card", {
+        "id": "branch", "prompt": "Contain now or build a playbook?",
+        "options": [{"label": "Contain", "value": "contain"},
+                    {"label": "Build", "value": "build"}]}) is None
+    out = _dispatch_refusal("emit_choice_card", {"id": "branch"})
+    assert "prompt" in out["error"] and "options" in out["error"]
+    assert "title" not in out["error"]
 
 
 # --- retired: patch_proposal ----------------------------------------------
@@ -117,168 +93,130 @@ def test_the_retired_patch_proposal_is_refused_toward_its_replacement():
     """patch_proposal was retired 2026-09: the model had stopped choosing it,
     and its snippet-match apply was fragile. A call that still asks for it is
     refused at the arg gate, which names enhancement_offer."""
-    from fsr_playbooks.llm import tools
-    assert "emit_patch_proposal" not in tools.REGISTRY
-    r = tools.dispatch("emit_card", {"card_type": "patch_proposal",
-                                     "payload": {"title": "Fix ip"}})
+    assert "emit_patch_proposal" not in T.REGISTRY
+    r = T.dispatch("emit_card", {"card_type": "patch_proposal",
+                                 "payload": {"title": "Fix ip"}})
     assert r["ok"] is False and r["code"] == "invalid_tool_args"
     assert "enhancement_offer" in r["error"]
 
 
-# --- signature-sync guard --------------------------------------------------
-# The guard that was MISSING when GetRecordArgs, then the emit_* card models,
-# drifted from their registered signatures. Introspects each registered tool
-# the gate covers (that lives in tools_emit) and asserts the gate declares
-# every real required param -- so a stale gate can't silently bounce a
-# legitimate call again. Extend REAL_FNS as more gated tools are pinned down.
+# --- schema <-> signature parity ---------------------------------------------
+
+def test_every_schema_requires_exactly_the_signature_required_params():
+    """The guard the pydantic copies never had: a schema that asks for a
+    parameter the function lacks (or omits one it requires) is a contract the
+    model cannot satisfy. Holds for every registered tool."""
+    drift = []
+    for name, spec in T.REGISTRY.items():
+        try:
+            sig = inspect.signature(spec.fn)
+        except (TypeError, ValueError):
+            continue
+        params = sig.parameters
+        if any(p.kind is p.VAR_KEYWORD for p in params.values()):
+            continue
+        real_required = {p for p, v in params.items()
+                         if v.default is inspect.Parameter.empty
+                         and v.kind in (v.POSITIONAL_OR_KEYWORD, v.KEYWORD_ONLY)}
+        schema = spec.input_schema or {}
+        advertised = set(schema.get("properties") or {})
+        required = set(schema.get("required") or [])
+        if required - set(params):
+            drift.append(f"{name}: requires {sorted(required - set(params))} "
+                         "the function does not take")
+        if real_required - required:
+            drift.append(f"{name}: does not require {sorted(real_required - required)}")
+        if advertised - set(params):
+            drift.append(f"{name}: advertises {sorted(advertised - set(params))} "
+                         "the function does not take")
+    assert not drift, drift
 
 
-REAL_FNS = {
-    "emit_action_card": tools_emit.emit_action_card,
-    "emit_choice_card": tools_emit.emit_choice_card,
-}
+# --- the schema builder: Literal and unions ------------------------------------
+
+def test_a_literal_is_advertised_as_its_allowed_values():
+    assert T._py_type_to_json(Literal["ip", "host"]) == {
+        "type": "string", "enum": ["ip", "host"]}
 
 
-@pytest.mark.parametrize("tool_name", sorted(REAL_FNS))
-def test_gate_model_covers_all_real_required_params(tool_name):
-    from fsr_playbooks.llm import tool_models as tm
-
-    fn = REAL_FNS[tool_name]
-    model = tm.TOOL_MODELS[tool_name]
-    sig = inspect.signature(fn)
-    real_required = {
-        p for p, v in sig.parameters.items()
-        if v.default is inspect.Parameter.empty
-        and v.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                       inspect.Parameter.KEYWORD_ONLY)
-    }
-    declared = set(model.model_fields)
-    missing = real_required - declared
-    assert not missing, (
-        f"{tool_name}: gate {model.__name__} is missing required real params "
-        f"{sorted(missing)}; declared={sorted(declared)}"
-    )
-
+def test_a_union_of_types_is_advertised_as_a_type_list():
+    """`dict | list` used to be advertised with no type, so the gate passed
+    anything and a second pydantic copy did the type check."""
+    assert T._py_type_to_json(dict[str, Any] | list[str] | None) == {
+        "type": ["object", "array"], "items": {"type": "string"}}
+    assert T._py_type_to_json(str | dict) == {"type": ["string", "object"]}
+    assert T._py_type_to_json(Any | int) == {}
 
 
 # ---------------------------------------------------------------------------
-# JSON-string argument coercion.
+# JSON-string arguments.
 #
 # Observed live: the agent emitted `filters` as a JSON STRING six times in one
 # turn. Both structures it tried were valid; only the string wrapper was wrong,
 # and the error never said so. It gave up, fell back to free-text `q=`, got
 # `total: 0`, and answered from that -- a filtered read that silently returned
-# nothing. These tests are about that, not about the parsing.
+# nothing. Coercion is keyed on the advertised schema, so every tool gets it.
 # ---------------------------------------------------------------------------
-from fsr_playbooks.llm.tool_models import coerce_json_string_args as _coerce
+_CONTAINERS = {"type": "object", "properties": {
+    "q": {"type": "string"},
+    "filters": {"type": ["object", "array"]},
+    "params": {"type": "object"},
+    "sort": {"type": ["string", "array"]},
+}}
 
 
-def test_a_stringified_dict_filter_is_decoded():
-    out = _coerce("search_module_records",
-                  {"module": "m", "filters": '{"ztpfDevices.uuid": "abc"}'})
-    assert out["filters"] == {"ztpfDevices.uuid": "abc"}
+def test_a_stringified_dict_or_list_for_a_container_union_is_decoded():
+    assert coerce_scalar_args(_CONTAINERS, {"filters": '{"ztpfDevices.uuid": "abc"}'}) \
+        == {"filters": {"ztpfDevices.uuid": "abc"}}
+    assert coerce_scalar_args(
+        _CONTAINERS, {"filters": '[{"field": "status", "value": "R"}]'}) \
+        == {"filters": [{"field": "status", "value": "R"}]}
 
 
-def test_a_stringified_list_filter_is_decoded():
-    """The other shape the agent alternates between when the first is refused."""
-    out = _coerce("search_module_records",
-                  {"module": "m",
-                   "filters": '[{"field": "status", "op": "eq", "value": "R"}]'})
-    assert out["filters"] == [{"field": "status", "op": "eq", "value": "R"}]
+def test_run_op_params_as_json_or_blank_string():
+    schema = T.REGISTRY["run_op"].input_schema
+    assert coerce_scalar_args(schema, {"connector": "c", "op": "o",
+                                       "params": '{"ip": "1.2.3.4"}'})["params"] \
+        == {"ip": "1.2.3.4"}
+    assert "params" not in coerce_scalar_args(
+        schema, {"connector": "c", "op": "o", "params": "  "})
+    assert "filters" not in coerce_scalar_args(_CONTAINERS, {"filters": ""})
 
 
-def test_a_stringified_run_op_params_is_decoded():
-    """The same defect one tool over -- the reason this is generic."""
-    out = _coerce("run_op", {"connector": "c", "op": "o",
-                             "params": '{"ip": "1.2.3.4"}'})
-    assert out["params"] == {"ip": "1.2.3.4"}
-
-
-def test_a_string_field_is_never_touched():
+def test_a_field_that_admits_a_string_is_never_touched():
     """A summary or YAML body that happens to start with `{` must arrive
-    exactly as sent. Coercion that guessed here would corrupt data to fix a
-    validation error."""
-    out = _coerce("search_module_records",
-                  {"module": "m", "q": '{"looks": "like json"}'})
-    assert out["q"] == '{"looks": "like json"}'
-    assert _coerce("search_module_records",
-                   {"module": "m", "sort": "stepNumber"})["sort"] == "stepNumber"
+    exactly as sent."""
+    args = {"q": '{"looks": "like json"}', "sort": '["a"]'}
+    assert coerce_scalar_args(_CONTAINERS, args) == args
 
 
 def test_an_undeclared_field_is_never_touched():
-    """`extra="allow"` fields have no known intended type. Guessing at one is
-    how a coercion layer starts corrupting data."""
-    args = {"module": "m", "not_a_declared_field": '{"a": 1}'}
-    assert _coerce("search_module_records", args)["not_a_declared_field"] \
-        == '{"a": 1}'
+    args = {"not_declared": '{"a": 1}'}
+    assert coerce_scalar_args(_CONTAINERS, args) is args
 
 
 def test_a_string_that_is_not_json_is_left_to_fail_with_its_own_error():
-    args = {"module": "m", "filters": "{not json at all"}
-    assert _coerce("search_module_records", args)["filters"] == "{not json at all"
+    assert coerce_scalar_args(_CONTAINERS, {"filters": "{not json"}) == {"filters": "{not json"}
 
 
-def test_a_json_scalar_is_not_a_container_and_is_left_alone():
-    assert _coerce("run_op", {"connector": "c", "op": "o",
-                              "params": "[1, 2, 3]"})["params"] == [1, 2, 3]
-    # ... but a bare scalar never looks like JSON to us in the first place.
-    assert _coerce("run_op", {"connector": "c", "op": "o",
-                              "params": "12"})["params"] == "12"
-
-
-def test_an_unknown_tool_and_an_untouched_call_return_the_input_unchanged():
-    args = {"filters": '{"a": 1}'}
-    assert _coerce("no_such_tool", args) is args
-    clean = {"module": "m", "filters": {"a": 1}}
-    assert _coerce("search_module_records", clean) is clean
-
-
-def test_the_stringified_filter_now_passes_the_gate_it_used_to_bounce_off():
-    """End-to-end at the boundary: the model that rejected this is the one the
-    agent hit six times."""
-    from fsr_playbooks.llm.tool_models import TOOL_MODELS, SearchModuleRecordsArgs
-    raw = {"module": "m", "filters": '{"ztpfDevices.uuid": "abc"}',
-           "fields": '["id", "name"]'}
-    with pytest.raises(Exception):
-        SearchModuleRecordsArgs(**raw)
-    ok = TOOL_MODELS["search_module_records"](
-        **_coerce("search_module_records", raw))
-    assert ok.filters == {"ztpfDevices.uuid": "abc"}
-    assert ok.fields == ["id", "name"]
-
-
-def test_every_container_field_in_every_model_survives_a_stringified_value():
-    """The parity guard. This defect has now arrived twice (run_op `params`,
-    search `filters`) and been patched per-model once already -- widening models
-    one shape at a time loses that race. So assert the PROPERTY across the whole
-    registry: any declared field that cannot be a plain string must accept its
-    own JSON-string form after coercion. A new tool with a dict argument
-    inherits the fix, or fails here."""
-    from fsr_playbooks.llm.tool_models import TOOL_MODELS, _accepts_str
-
+def test_every_container_param_in_the_registry_survives_a_stringified_value():
+    """The parity guard. This defect arrived twice (run_op `params`, search
+    `filters`) and was patched per-model once -- widening one shape at a time
+    loses that race. Any advertised object/array parameter (or a union of
+    them) must accept its own JSON-string form."""
     checked = 0
-    for tool, model in TOOL_MODELS.items():
-        for fname, field in model.model_fields.items():
-            if _accepts_str(field.annotation):
+    for name, spec in T.REGISTRY.items():
+        schema = spec.input_schema or {}
+        for pname, prop in (schema.get("properties") or {}).items():
+            t = prop.get("type") if isinstance(prop, dict) else None
+            kinds = set(t) if isinstance(t, list) else {t}
+            if not kinds or not kinds <= {"object", "array"}:
                 continue
-            origin = typing.get_origin(field.annotation)
-            members = typing.get_args(field.annotation) or (field.annotation,)
-            sample: Any
-            if any(typing.get_origin(m) is dict or m is dict for m in members):
-                sample = {"k": "v"}
-            elif any(typing.get_origin(m) is list or m is list for m in members):
-                sample = [{"k": "v"}] if fname == "filters" else ["a"]
-            else:
-                continue  # int/bool fields: not a container, not this class
-            del origin
-            out = _coerce(tool, {fname: json.dumps(sample)})
-            assert out[fname] == sample, (
-                f"{tool}.{fname} is a container field that does not survive "
-                f"being sent as a JSON string -- the agent WILL send it that "
-                f"way, and the error it gets back names types, never the string")
+            sample = {"k": "v"} if "object" in kinds else [{"k": "v"}]
+            out = coerce_scalar_args(schema, {pname: json.dumps(sample)})
+            assert out[pname] == sample, f"{name}.{pname}"
             checked += 1
-    assert checked >= 4, f"the guard checked only {checked} fields; it should " \
-                         f"cover run_op.params and search.filters at minimum"
+    assert checked >= 10, f"the guard checked only {checked} params"
 
 
 # ---------------------------------------------------------------------------
@@ -398,3 +336,25 @@ def test_string_parameters_are_never_coerced():
     schema = REGISTRY["find_containment_actions"].input_schema
     args = {"target_type": "25", "requested_by": "true"}
     assert coerce_scalar_args(schema, args) == args
+
+
+# --- a content-free action card --------------------------------------------
+# Live: a staged card whose whole summary was "." rendered an empty body with a
+# live Confirm button. The refusal lived only in the connector's pydantic copy,
+# which the emit_card path never reached.
+
+@pytest.mark.parametrize("summary", [".", "block", "  ok    "])
+def test_an_action_card_that_says_nothing_is_refused_on_the_emit_card_path(summary):
+    r = T.dispatch("emit_card", {"card_type": "action", "payload": {
+        "id": "c1", "connector": "fortigate-firewall", "operation": "block_ip_new",
+        "summary": summary, "args": {"ip": "10.0.0.1"}, "editable_fields": ["ip"]}})
+    assert r["ok"] is False and r["code"] == "missing_field", r
+    assert "summary" in r["message"]
+
+
+def test_a_real_summary_stages():
+    r = T.dispatch("emit_card", {"card_type": "action", "payload": {
+        "id": "c1", "connector": "fortigate-firewall", "operation": "block_ip_new",
+        "summary": "Block 10.0.0.1 on FortiGate", "args": {"ip": "10.0.0.1"},
+        "editable_fields": ["ip"]}})
+    assert r.get("code") != "missing_field", r

@@ -68,7 +68,7 @@ def test_a_single_config_needs_no_picker(monkeypatch):
     monkeypatch.setattr(tools_execution, "_live_client_for_grounding", lambda: object())
     monkeypatch.setattr(tools_execution, "_preflight_connector", lambda *a, **k: None)
     card = _fn(id="c1", connector="fortigate-firewall", operation="block_ip_new",
-               summary="Block", args={"method": "Quarantine Based",
+               summary="Block 203.0.113.9", args={"method": "Quarantine Based",
                                       "ip_addresses": "203.0.113.9", "time_to_live": "1 Hour"},
                editable_fields=[])["card"]
     assert card["config"]["id"] == "loc-1" and "config_options" not in card
@@ -79,7 +79,7 @@ def test_emit_card_passes_config_through(options, monkeypatch):
     monkeypatch.setattr(tools_execution, "_preflight_connector", lambda *a, **k: None)
     fn = getattr(tools_emit.emit_card, "fn", tools_emit.emit_card)
     out = fn("action", {"connector": "fortigate-firewall", "op": "block_ip_new",
-                        "title": "Block", "config": "agt-1",
+                        "title": "Block 203.0.113.9", "config": "agt-1",
                         "params": {"method": "Quarantine Based",
                                    "ip_addresses": "203.0.113.9", "time_to_live": "1 Hour"}})
     assert out["ok"], out

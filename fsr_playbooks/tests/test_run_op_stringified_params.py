@@ -25,10 +25,12 @@ def fake_run_op(monkeypatch):
         seen.append(params)
         return {"ok": True, "echo_params": params}
 
+    # The real run_op contract: coercion and the gate are keyed on the
+    # advertised schema, so a fake with an empty one would test nothing.
     spec = ToolSpec(
         name="run_op",
         description="test-only run_op",
-        input_schema={"type": "object", "properties": {}},
+        input_schema=REGISTRY["run_op"].input_schema,
         fn=_fn,
         tier=0,
     )

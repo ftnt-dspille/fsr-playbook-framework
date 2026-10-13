@@ -264,6 +264,10 @@ def _config_name(config: Any) -> str:
     return ""
 
 
+#: The shortest summary that can say what an action card runs.
+_MIN_ACTION_SUMMARY = 8
+
+
 @mcp.tool()
 def emit_action_card(
     id: str,
@@ -298,6 +302,15 @@ def emit_action_card(
                        ("operation", operation), ("summary", summary)):
         if not isinstance(val, str) or not val.strip():
             return _err("missing_field", f"{label} must be a non-empty string")
+    if len(summary.strip()) < _MIN_ACTION_SUMMARY:
+        # Live: a card whose whole summary was "." rendered an empty body with
+        # a live Confirm button, an approval that says nothing about what runs.
+        # Only the connector's pydantic copy refused it, on a path the model
+        # does not use (emit_card calls this function directly).
+        return _err("missing_field",
+                    f"summary must say in a sentence what will run (got "
+                    f"{summary.strip()!r}), e.g. 'Block 203.0.113.9 on the "
+                    f"perimeter FortiGate'")
     if not isinstance(args, dict):
         return _err("bad_args", "args must be an object")
     if not isinstance(editable_fields, list) or not all(

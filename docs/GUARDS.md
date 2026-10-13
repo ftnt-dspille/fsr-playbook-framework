@@ -16,7 +16,7 @@ new one.
 | `fsr_playbooks/llm/agent_loop.py` | The loop driver. End-of-turn nudges and loop-delivered offers, the verdict round, containment follow-through, assessment, and `guarded_dispatch` (bad-arguments envelope, not-in-slice refusal, repeated-failed-call refusal). |
 | `fsr_playbooks/llm/_loop_helpers.py` | The guard classes: `TriageDiscipline` (dispatch envelopes), `EnhanceDeliveryGuard`, `CreateDeliveryGuard`, `BuildProgressGuard`, `VerdictDeliveryGuard`, `ContainmentFollowThrough`, `PromisedActionGuard`, `ProgressMeter`. |
 | `fsr_playbooks/llm/tools.py` | The dispatch stages `_DISPATCH_STAGES`: `_refuse_for_turn` (the read-only-turn refusal, then `TurnPlan.gate_refusal`), `_fold_emit_card_payload`, `_redirect_run_not_author`, `_coerce_args`, `_check_args`, `_default_live_probe`. Also the `_approved` wire-key refusal (`reserved_key_rejected`) when a call is built. |
-| `fsr_playbooks/llm/arg_gate.py` | The one argument gate for every tool (unknown keys, required keys, types, enums, nested shape), plus the pydantic `TOOL_MODELS` cross-field rules that `_check_args` runs after it. Code `invalid_tool_args`. |
+| `fsr_playbooks/llm/arg_gate.py` | The one argument gate for every tool (unknown keys, required keys, types, enums, nested shape), plus the `tool_models.CROSS_FIELD_RULES` (rules across arguments a schema cannot say) that `_check_args` runs after it. Code `invalid_tool_args`. |
 | `fsr_playbooks/llm/turn_plan.py` | `TurnPlan.gate_refusal`: the playbook-side rule on build turns (`not_a_playbook_tool`), the fail-closed `state_unresolved` failsafe, and the open-playbook frontier (`not_afforded`). |
 
 The approval decision is not a guard in this sense. `fsr_playbooks/llm/authorization.py`
@@ -89,7 +89,7 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
 
 | Guard | Where | Code | Recorded | Decision |
 |---|---|---|---|---|
-| Argument gate (`arg_gate` plus `TOOL_MODELS`) | `tools._check_args` | `invalid_tool_args` (message "invalid arguments") | 183 | Keep. The one gate for every tool; runs before authorization so a bad call never raises a card. |
+| Argument gate (`arg_gate` plus `CROSS_FIELD_RULES`) | `tools._check_args` | `invalid_tool_args` (message "invalid arguments") | 183 | Keep. The one gate for every tool; runs before authorization so a bad call never raises a card. |
 | Read-only turn refusal | `tools._refuse_for_turn` / `turn_refusal` | `read_only_turn` | 0 | Keep. Refused rather than carded (tracker #117). |
 | Run, not author | `tools._redirect_run_not_author` | `run_not_author` (or redirect to `run_playbook`) | 0 | Keep. Keyed on the call's shape. |
 | Playbook side is playbook tools only | `TurnPlan.gate_refusal` | `not_a_playbook_tool` | 104 | Keep. See `CLAUDE.md`. Structural, not prompt wording. |
