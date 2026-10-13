@@ -1440,6 +1440,9 @@ VERDICT_DISPOSITIONS = tuple(DISPOSITION_MEANINGS)
 VERDICT_SEVERITIES = ("critical", "high", "medium", "low", "info")
 
 
+VERDICT_SUMMARY_MAX = 600
+
+
 def verdict_contract() -> str:
     """The verdict payload contract in one sentence, from the validator's own
     constants. Read by the refusal (so a repair is one retry) and by the
@@ -1449,7 +1452,7 @@ def verdict_contract() -> str:
         + "; ".join(f"{k} = {v}" for k, v in DISPOSITION_MEANINGS.items())
         + "; severity: one of "
         + ", ".join(VERDICT_SEVERITIES) + "; confidence: a number 0.0-1.0; "
-        "summary: plain English, at most 600 characters; findings: a non-empty "
+        f"summary: plain English, at most {VERDICT_SUMMARY_MAX} characters; findings: a non-empty "
         "list of {claim: string, evidence: [evidence ids -- the id shown as "
         "[evidence id: ...] atop each tool result this turn, never a description]}; "
         "unknowns: a list of open questions, required when confidence < 0.8; "
@@ -1520,8 +1523,8 @@ def emit_verdict(
         bad("bad_confidence", "confidence must be between 0.0 and 1.0")
     if not isinstance(summary, str) or not summary.strip():
         bad("missing_summary", "summary must be a non-empty string")
-    elif len(summary) > 600:
-        bad("summary_too_long", "summary must be ≤600 chars")
+    elif len(summary) > VERDICT_SUMMARY_MAX:
+        bad("summary_too_long", f"summary must be ≤{VERDICT_SUMMARY_MAX} chars")
     if not isinstance(findings, list) or not findings:
         bad("no_findings", "findings must be a non-empty list of {claim, evidence}")
         findings = []
@@ -1729,6 +1732,22 @@ CARD_TYPES: dict[str, str] = {
 
 
 @mcp.tool()
+def _clip_summary(text: str) -> tuple[str, int | None]:
+    """`text` within VERDICT_SUMMARY_MAX, cut at the last sentence end that
+    keeps at least a third of it (else the last word), plus the original
+    length when it was cut."""
+    if len(text) <= VERDICT_SUMMARY_MAX:
+        return text, None
+    head = text[:VERDICT_SUMMARY_MAX]
+    ends = [head.rfind(p) for p in (". ", "! ", "? ")]
+    cut = max(ends)
+    if cut >= VERDICT_SUMMARY_MAX // 3:
+        return head[:cut + 1].rstrip(), len(text)
+    room = head[:VERDICT_SUMMARY_MAX - 3]
+    sp = room.rfind(" ")
+    return (room[:sp] if sp > 0 else room).rstrip(" ,;:") + "...", len(text)
+
+
 def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     """ONE card emitter -- pick `card_type`, pass that card's fields as
     `payload`; the turn halts on the rendered card.
@@ -1761,6 +1780,12 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # Speak the model's dialect before validating (see _CARD_SYNONYMS).
     payload, _ = _normalize_card_payload(kt, payload)
+    # A verdict summary a little over the cap is trimmed, not refused: the
+    # cap is not advertised up front (the payload is a bare object), and live
+    # a 612-character summary cost a whole re-emit round.
+    clipped_from = None
+    if kt == "verdict" and isinstance(payload.get("summary"), str):
+        payload["summary"], clipped_from = _clip_summary(payload["summary"])
 
     # Keys the card function has no parameter for would TypeError below. The
     # refusal is honest but expensive -- the model's repair drops these keys
@@ -1817,4 +1842,8 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         out.setdefault("card_type", kt)
         if ignored and out.get("ok"):
             out["ignored_fields"] = ignored
+        if clipped_from and out.get("ok"):
+            out["summary_clipped"] = (
+                f"The summary was {clipped_from} characters; the card shows the "
+                f"first {len(payload['summary'])} (cap {VERDICT_SUMMARY_MAX}).")
     return out
