@@ -142,9 +142,11 @@ class UsageEvent:
     prefix_fingerprint: str = ""
     #: Calls this round started but never ran -- see `DroppedCall`.
     dropped_calls: list[DroppedCall] = field(default_factory=list)
-    #: The model's reasoning for this round, when the provider returns it
-    #: (Anthropic thinking blocks). For the audit row only: it is not a frame
-    #: and never reaches the chat.
+    #: The model's reasoning summary for this round, when the provider returns
+    #: it (Anthropic summarized thinking). Written to the audit row, and the
+    #: connector also carries it on the usage wire frame so the widget can fold
+    #: it into a per-turn "How I worked this out" panel. It rides the usage
+    #: frame, never an inline `text` frame: the chat prose stays the answer.
     thinking: str = ""
     kind: Literal["usage"] = "usage"
 
