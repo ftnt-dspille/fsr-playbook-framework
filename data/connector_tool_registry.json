@@ -1,11 +1,12 @@
 {
   "source": "fsr_soc_triage.registry -- register_triage_tools + register_record_tools + register_ztpf_tools + register_playbook_tools",
-  "note": "The 22 tools the connector registers into the framework's SAFE_TOOLS/TOOL_TIERS at runtime. The framework advertises 40 at import (fsr_playbooks.llm.tools.SAFE_TOOLS); a deployed agent sees 65. This manifest lets the census and lint know the truth without a live turn (tracker #67). Regenerate with scripts/export_registry_manifest.py in the connector repo.",
-  "framework_safe_tools_count": 40,
-  "connector_registered_count": 25,
-  "runtime_total": 65,
+  "note": "The 26 tools the connector registers into the framework's SAFE_TOOLS/TOOL_TIERS at runtime. The framework advertises 45 at import (fsr_playbooks.llm.tools.SAFE_TOOLS); a deployed agent sees 71. This manifest lets the census and lint know the truth without a live turn (tracker #67). Regenerate with scripts/export_registry_manifest.py in the connector repo.",
+  "framework_safe_tools_count": 45,
+  "connector_registered_count": 26,
+  "runtime_total": 71,
   "tools": [
     "create_record",
+    "edr_host",
     "faz_event_summary",
     "faz_get_alerts",
     "faz_raw_query",
@@ -33,6 +34,7 @@
   ],
   "tiers": {
     "create_record": 3,
+    "edr_host": 1,
     "faz_event_summary": 1,
     "faz_get_alerts": 1,
     "faz_raw_query": 1,
@@ -63,13 +65,9 @@
       "get_record",
       "search_module_records",
       "siem_search",
-      "siem_events_for_incident",
-      "siem_raw_query",
       "faz_search",
-      "faz_get_alerts",
-      "faz_event_summary",
-      "faz_raw_query",
-      "fmg_device"
+      "fmg_device",
+      "edr_host"
     ],
     "register_record_tools": [
       "create_record",
