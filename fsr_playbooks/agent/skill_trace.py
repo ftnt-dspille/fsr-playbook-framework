@@ -183,6 +183,21 @@ class SkillTrace:
         step carries it as `arguments.agent` -- a playbook connector step for an
         agent-routed connector needs the agent binding too, not just the
         config id, or the workflow engine can't reach the connector."""
+        # A call_mcp_tool step is enveloped at runtime exactly like a connector
+        # step -- its output sits under `vars.steps.<name>.data.*` (the grounded
+        # walker and Accept compile both model it that way). But the pivot
+        # recorders that emit these steps (siem_search / siem_raw_query /
+        # edr_host in the connector) hand a FLAT payload and pass no ref_prefix,
+        # so the wire came out as the bare `vars.steps.siem_search_2.events`:
+        # it resolved against the recorded raw output (the trace resolve-check
+        # passed) yet FAILED the Accept compile, which demanded `.data.events`
+        # (save-as-playbook, 2026-10-14). Normalize the call_mcp_tool case here,
+        # at the one recorder, so no pivot recorder can reintroduce the flat
+        # wire. A genuine `run_connector_action` keeps the caller's prefix --
+        # some connector ops really are flat (crudhub-/shodan-style), and the
+        # run_op sites set it from the actual response shape.
+        if op == "call_mcp_tool" and not ref_prefix:
+            ref_prefix = "data"
         # An AI-supplied step_name is sanitized to the charset; the op-derived
         # title is the fallback. EITHER way the base goes through _unique_name so
         # repeats get a stable numeric suffix -- an AI label can't break the

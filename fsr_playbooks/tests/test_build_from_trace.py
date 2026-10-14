@@ -528,3 +528,23 @@ def test_an_edited_trace_build_stays_a_yaml_offer():
     else:
         assert res["code"] == "offer_not_verified", res
         assert all(f.get("environment") for f in res["required_fixes"]), res
+
+
+def test_call_mcp_tool_wire_goes_through_data_envelope():
+    # Regression (save-as-playbook, 2026-10-14): a siem_search pivot recorded a
+    # call_mcp_tool step with a flat {events:[...]} payload and no ref_prefix, so
+    # the trace wired vars.steps.<siem>.events -- which resolved against the raw
+    # recorded output (the trace check passed) but FAILED the Accept compile,
+    # which models the step's runtime .data envelope. The recorder now marks
+    # call_mcp_tool as "data", so the wire goes through .data and compiles.
+    t = SkillTrace()
+    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+                    {"tool": "siem_search", "args": {"by": "ip", "value": "9.9.9.9"}},
+                    {"events": [{"srcIp": "9.9.9.9"}]}, step_name="siem_search")
+    t.record_run_op("virustotal", "query_ip", {"ip": "9.9.9.9"},
+                    {"attributes": {}}, ref_prefix="data")
+    out = build_playbook_from_trace(t.to_json(), name="Hunt then enrich")
+    assert out["ok"] is True, out
+    y = out["yaml"]
+    assert "vars.steps.siem_search.data.events" in y, y
+    assert "vars.steps.siem_search.events" not in y, y

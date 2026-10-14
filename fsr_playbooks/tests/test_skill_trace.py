@@ -197,3 +197,39 @@ def test_set_active_trace_module_normalizes_iri():
 def test_set_active_trace_module_noop_without_active():
     skill_trace.clear_active_trace()
     skill_trace.set_active_trace_module("incidents")  # must not raise
+
+
+# ─── ref_prefix: executed ops record as enveloped (.data) ──────────────────
+# Regression (save-as-playbook, 2026-10-14): a connector pivot recorded its
+# output flat (ref_prefix=""), so build wired vars.steps.<step>.events. That
+# resolved against the recorded raw output (trace check passed) but FAILED the
+# Accept compile, which models the connector envelope and wants .data.events.
+
+def test_call_mcp_tool_without_prefix_records_data_envelope():
+    # The connector pivot recorders (siem_search / edr_host) record a
+    # call_mcp_tool step with a flat envelope and pass no ref_prefix; the step
+    # is enveloped at runtime, so the recorder must still mark "data".
+    t = SkillTrace()
+    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+                    {"tool": "siem_search", "args": {"by": "ip", "value": "1.2.3.4"}},
+                    {"events": [{"srcIp": "1.2.3.4"}]}, step_name="siem_search")
+    assert t.calls[-1].ref_prefix == "data"
+
+
+def test_explicit_prefix_is_honored():
+    # An explicit "data" is unchanged (the 85 existing callers pass it).
+    t = SkillTrace()
+    t.record_run_op("virustotal", "query_ip", {"ip": "1.2.3.4"},
+                    {"attributes": {}}, ref_prefix="data")
+    assert t.calls[-1].ref_prefix == "data"
+
+
+def test_connector_op_prefix_is_not_forced():
+    # The normalization is scoped to call_mcp_tool. A genuine connector op
+    # keeps the caller's prefix -- some connectors (crudhub-/shodan-style)
+    # really do return flat output, and the run_op sites set the prefix from
+    # the actual response shape. Forcing "data" here would corrupt those wires.
+    t = SkillTrace()
+    t.record_run_op("shodan", "host_information", {"ip": "1.2.3.4"},
+                    {"org": "Acme"})  # no ref_prefix
+    assert t.calls[-1].ref_prefix == ""
