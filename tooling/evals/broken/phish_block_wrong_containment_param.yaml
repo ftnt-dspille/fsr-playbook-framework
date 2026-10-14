@@ -50,7 +50,7 @@ playbooks:
         params:
           ip: "{{ vars.item }}"
         for_each:
-          item: "{{ vars.input.records[0].sender_ips }}"
+          item: "{{ vars.input.records[0].iPAddresses }}"
           parallel: false
 
       - name: Collect High Scores
@@ -62,7 +62,7 @@ playbooks:
                | selectattr('data.reputation', 'gt', 50)
                | map(attribute='data.ip')
                | list }}
-          scored_ips: "{{ vars.input.records[0].sender_ips }}"
+          scored_ips: "{{ vars.input.records[0].iPAddresses }}"
 
       - name: Any IP Above Threshold
         type: decision

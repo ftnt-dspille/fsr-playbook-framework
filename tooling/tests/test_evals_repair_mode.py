@@ -185,7 +185,7 @@ def test_fixture_40_deleting_the_block_is_caught_only_by_collateral_damage():
 
 # --- fixture 41: the tier no static gate can see ---------------------------
 #
-# Iterating `vars.input.records` instead of `records[0].sender_ips` is a
+# Iterating `vars.input.records` instead of `records[0].iPAddresses` is a
 # perfectly legal playbook: it compiles, it verifies, and it scores exactly one
 # thing per run. `for_each_over` is the only gate that can tell.
 
@@ -208,9 +208,9 @@ def test_fixture_41_unrolling_the_loop_disagrees_with_the_collateral_gate():
     _, _, gold, _, go = _calibrate("repair_loop_over_wrong_field")
     unrolled = gold.replace("""          ip: "{{ vars.item }}"
         for_each:
-          item: "{{ vars.input.records[0].sender_ips }}"
+          item: "{{ vars.input.records[0].iPAddresses }}"
           parallel: false
-""", """          ip: "{{ vars.input.records[0].sender_ips }}"
+""", """          ip: "{{ vars.input.records[0].iPAddresses }}"
 """)
     assert "vars.item" not in unrolled.split("Collect High Scores")[0]
 

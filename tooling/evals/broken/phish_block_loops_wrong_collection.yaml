@@ -7,7 +7,7 @@
 # always took its default arm.
 #
 # Cause: the enrichment loops `vars.input.records` (the alert records the
-# trigger delivered, one of them) instead of `vars.input.records[0].sender_ips`
+# trigger delivered, one of them) instead of `vars.input.records[0].iPAddresses`
 # (the IPs on that alert). `vars.item` is then a whole alert record, so
 # `query_ip` is handed an object and scores nothing.
 #
@@ -16,7 +16,7 @@
 # playbook. Only `behavior` -- the `for_each_over` assertion -- can see it.
 #
 # The tempting wrong fix is to drop the loop entirely and score
-# `records[0].sender_ips` in one call. That silences the symptom, changes what
+# `records[0].iPAddresses` in one call. That silences the symptom, changes what
 # the step does, and is what `no_collateral_damage` plus the `for_each_over`
 # assertion exist to catch.
 
@@ -60,7 +60,7 @@ playbooks:
                | selectattr('data.reputation', 'gt', 50)
                | map(attribute='data.ip')
                | list }}
-          scored_ips: "{{ vars.input.records[0].sender_ips }}"
+          scored_ips: "{{ vars.input.records[0].iPAddresses }}"
 
       - name: Any IP Above Threshold
         type: decision

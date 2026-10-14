@@ -3,7 +3,7 @@
 WHY THIS EXISTS. Until now a `build` fixture was `{name, notes, prompt}` and the
 grading was `draft` (it compiles) + `verified` (it is statically sound). Both
 are real, and neither asks the question the fixture's prompt actually poses.
-Fixture 17 asks for a loop over `sender_ips`, a VirusTotal lookup, a threshold,
+Fixture 17 asks for a loop over `iPAddresses`, a VirusTotal lookup, a threshold,
 and an approval gate BEFORE the block. A playbook that loops the wrong field,
 or blocks before the gate, compiled and verified exactly as well as a correct
 one -- so "the agent got better at building playbooks" had no way to show up.
