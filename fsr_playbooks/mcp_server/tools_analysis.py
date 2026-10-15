@@ -310,14 +310,20 @@ def step_through_playbook(yaml_text: str = "",
                     # 'post'" and the model chased a defect that was not there.
                     r = _render_local(value, path)
                     if r["unrendered"]:
-                        # Box renderer unreachable AND no offline sample to
-                        # render this reference from: a render-sim GAP, not a
-                        # broken playbook. `_render_local` already recorded it
-                        # as `unrendered` (a diagnostic); promoting it to a
-                        # render_error would flip first_error -> ok:false, which
-                        # is exactly the false "failed read" the comment above
-                        # warns against. The offline path (client is None)
-                        # treats an unrendered read the same non-fatal way.
+                        # Box renderer unreachable. Tell a genuinely BROKEN
+                        # template (a Jinja SYNTAX error, which fails to parse
+                        # regardless of data) apart from a render-sim GAP (a
+                        # valid template that just lacks offline sample data,
+                        # e.g. `vars.input.records[0]` with no record mounted):
+                        #  - syntax-broken -> a real defect, stays a render_error
+                        #    (-> first_error -> ok:false), as it did before.
+                        #  - gap -> `_render_local` already logged it as an
+                        #    `unrendered` diagnostic; do NOT promote it, or a
+                        #    pure transport gap reads as the false "failed read"
+                        #    seen live on .159. The offline path treats it the
+                        #    same non-fatal way.
+                        if _template_syntax_broken(value):
+                            render_errors.append(f"{path}: {exc}")
                         return value
                     rendered_locally.append(path)
                     return r["value"]
@@ -910,6 +916,25 @@ def _offline_module_record(module: str | None) -> Any:
     return sample_record([(r[0], r[1], r[2]) for r in rows], module)
 
 
+def _template_syntax_broken(value: str) -> bool:
+    """True when `value` is a Jinja template that fails to PARSE -- a syntax
+    error (unclosed `}}`, a bad token), which is data-independent and so a real
+    authoring defect. A valid template that merely can't render offline for lack
+    of sample data parses fine and returns False (a render-sim gap, not a
+    defect). Used to decide whether a render fault under an unreachable box
+    renderer is a broken playbook or a benign gap."""
+    if not isinstance(value, str) or ("{{" not in value and "{%" not in value):
+        return False
+    try:
+        from jinja2 import Environment, TemplateSyntaxError  # noqa: PLC0415
+        Environment().parse(value)
+        return False
+    except TemplateSyntaxError:
+        return True
+    except Exception:  # noqa: BLE001 - a non-syntax failure is not "broken here"
+        return False
+
+
 def _offline_trigger_record(start: dict[str, Any] | None) -> Any:
     return _offline_module_record(
         _step_module_name(start or {}, {}) if isinstance(start, dict) else None)
@@ -1007,13 +1032,22 @@ def analyze_playbook(yaml_text: str = "",
     diagnostics = diagnostics_dict(sim["trace"], pb_node,
                                    picklist_validator=pv)
     errs = [d for d in diagnostics if d["severity"] == "error"]
-    ok = sim["ok"] and not errs
-    # ok:false with no `error` read as a blank failure in every session report
-    # (and to the model): name the cause.
-    why = (sim.get("error") if not sim["ok"] else
-           f"step {errs[0].get('step_id')!r}: {errs[0].get('message')}" if errs else None)
+    # `ok` means "the analysis RAN", not "the playbook is clean". Finding
+    # playbook errors is a SUCCESSFUL analysis -- reporting it as ok:false made
+    # a successful read render as a failed tool (a red chip) and counted it as a
+    # failing tool call in session health. Reserve ok:false for "could not
+    # analyze": a syntax-broken template or a live-op failure, which set
+    # sim["first_error"] -> sim["ok"] is False. The found errors ride in
+    # error_count / diagnostics; `playbook_clean` states the old meaning for any
+    # consumer that wants "ran and found nothing wrong".
+    ok = sim["ok"]
+    playbook_clean = sim["ok"] and not errs
+    # When the analysis could not run, name the cause (a blank ok:false reads as
+    # a mystery failure in session reports and to the model).
+    why = sim.get("error") if not sim["ok"] else None
     return {
         "ok": ok,
+        "playbook_clean": playbook_clean,
         **({"error": why} if not ok and why else {}),
         "playbook": sim.get("playbook"),
         "trace": sim["trace"],

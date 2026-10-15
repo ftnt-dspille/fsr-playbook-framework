@@ -704,7 +704,11 @@ def test_analyze_playbook_mcp_tool_returns_diagnostics():
                 name: Stop
         """)
     r = mcp_server.analyze_playbook(yaml)
-    assert r["ok"] is False
+    # Finding a playbook error is a SUCCESSFUL analysis: ok stays True (the
+    # analysis ran), the defects ride in error_count/diagnostics, and
+    # playbook_clean is False. Reserve ok:false for "could not analyze".
+    assert r["ok"] is True
+    assert r["playbook_clean"] is False
     assert r["error_count"] >= 1
     assert any(d["kind"] == "unreachable_var_path" for d in r["diagnostics"])
 
