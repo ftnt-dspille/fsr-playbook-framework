@@ -169,4 +169,7 @@ def test_turn_that_already_authored_is_not_nudged():
             system="s", messages=[Message(role="user", content="build a playbook")],
             tools=_BUILD_TOOLS, tags={})))
     assert isinstance(events[-1], DoneEvent)
-    assert create.await_count == 4  # no extra nudged round
+    # research -> verify -> offer, then the turn ENDS on the delivered offer:
+    # no nudge round, and no post-offer narration round (the 'close' stream is
+    # never consumed, since the connector would truncate it anyway).
+    assert create.await_count == 3
