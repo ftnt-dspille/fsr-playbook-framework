@@ -1951,6 +1951,13 @@ _RUN_INTENT_TOOLS = frozenset({
     "run_playbook", "list_playbook_runs", "why_did_playbook_fail",
     "get_run_env", "dry_run_playbook", "step_through_playbook",
     "diagnose_yaml_against_pb_execution",
+    # analyze_playbook ("Read the playbook") READS/diagnoses an existing
+    # playbook; it wraps step_through_playbook (already here). A turn that runs
+    # it is diagnosing, not authoring -- without this, a "why is my YAML
+    # invalid" turn that gave a complete explanation got hijacked by
+    # BuildProgressGuard into authoring an edit + offer cards it was never
+    # asked for (observed: Frank build-matrix row B2, +8 rounds).
+    "analyze_playbook",
 })
 
 

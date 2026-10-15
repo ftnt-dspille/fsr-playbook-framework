@@ -136,3 +136,16 @@ def test_diagnose_turn_is_not_nudged():
     g = BuildProgressGuard()
     g.note_result("why_did_playbook_fail", {}, {"ok": True})
     assert g.outstanding(BUILD_SLICE) is False
+
+
+def test_analyze_playbook_is_diagnose_not_stalled_build():
+    """A "why is my YAML invalid" turn runs research + analyze_playbook and
+    explains the result. analyze_playbook READS/diagnoses an existing playbook
+    (it wraps step_through_playbook), so the turn must NOT be forced to author
+    an edit/offer. Regression: Frank build-matrix B2 gave a complete round-3
+    explanation, then the guard hijacked it into authoring over +8 rounds."""
+    g = BuildProgressGuard()
+    _research_only(g)
+    g.note_result("analyze_playbook", {"yaml_text": "playbooks: []"},
+                  {"ok": False, "error": "step 'X': ..."})
+    assert g.outstanding(BUILD_SLICE) is False
