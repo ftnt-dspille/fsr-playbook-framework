@@ -61,6 +61,7 @@ from ._loop_helpers import (
     evidence_id_line,
     is_authoring_slice,
     is_delivered_offer,
+    is_offer_attempt,
     is_verdict_evidence,
     latest_user_text,
     model_view,
@@ -372,6 +373,11 @@ async def run_loop(
     # P4 -- repeated-error guard: an identical (name, args) call that already
     # failed this turn is not re-run.
     failed_signatures: set[str] = set()
+    # An offer card is the turn's terminal action AND its own save prompt, so a
+    # second offer in the same turn renders a duplicate card. Once one is
+    # delivered, further offer attempts this turn are refused (never-offer-twice
+    # bar). Set after a successful delivery; read before the next dispatch.
+    offer_delivered = False
 
     trace_id = _uuid.uuid4().hex[:8]   # telemetry correlation, not the chat id
     turn_idx = 0
@@ -381,6 +387,7 @@ async def run_loop(
     dropped_calls: list[DroppedCall] = []
 
     def guarded_dispatch(name: str, args: dict[str, Any]) -> Any:
+        nonlocal offer_delivered
         if isinstance(args, dict) and BAD_ARGS_KEY in args:
             return {
                 "ok": False, "code": "bad_tool_arguments",
@@ -409,6 +416,17 @@ async def run_loop(
                     f"report the blocker in your assessment."
                 ),
             }
+        if offer_delivered and is_offer_attempt(name, args):
+            return {
+                "ok": False,
+                "code": "duplicate_offer",
+                "message": (
+                    "An offer card was already delivered this turn, and the "
+                    "offer card is itself the save prompt -- the analyst clicks "
+                    "Create/Apply on it. Do not emit a second offer. End your "
+                    "turn."
+                ),
+            }
         guard = discipline.evaluate(name, args)
         if guard is not None:
             # Terminal guards (call-once) can never succeed; remembering the
@@ -421,6 +439,8 @@ async def run_loop(
         discipline.note_result(name, args, result)
         if is_error_result(result):
             failed_signatures.add(sig)
+        if is_delivered_offer(name, args, result):
+            offer_delivered = True
         return result
 
     async def wrapup(directive: str, label: str,
@@ -753,6 +773,15 @@ async def run_loop(
         card_idx = next((i for i, c in enumerate(calls)
                          if _effective_tool_name(c.name, c.args) == "emit_action_card"), None)
         batch_end = approval_idx if card_idx is None else min(approval_idx, card_idx + 1)
+        # An offer card closes the batch for the same reason an action card does:
+        # the dedup guard (`offer_delivered`) refuses a SECOND offer this turn,
+        # but a sibling running concurrently would read the flag before the first
+        # offer sets it. Closing the batch at the first offer sends any further
+        # offer through the sequential guard, after the flag is set.
+        offer_idx = next((i for i, c in enumerate(calls)
+                          if is_offer_attempt(c.name, c.args)), None)
+        if offer_idx is not None:
+            batch_end = min(batch_end, offer_idx + 1)
         parallel = calls[:batch_end]
         outcomes: list[ToolOutcome] = []
         delivered_offer = False

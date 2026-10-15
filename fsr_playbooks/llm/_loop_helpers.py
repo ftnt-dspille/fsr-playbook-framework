@@ -797,6 +797,25 @@ def is_delivered_offer(name: str, args: Any, result: Any) -> bool:
     return False
 
 
+def is_offer_attempt(name: str, args: Any) -> bool:
+    """True when a call is TRYING to emit a terminal offer card -- known from
+    the call shape alone, before it is dispatched.
+
+    The mirror of `is_delivered_offer`, which can only judge a call AFTER it
+    ran (it reads the result). This judges the attempt up front so a SECOND
+    offer in the same turn can be refused before it renders a duplicate card:
+    the offer card is itself the save prompt, so a model that re-emits the same
+    playbook as a "save"/"confirm" follow-up would put two identical cards in
+    front of the analyst. Scoped to the two offer cards, exactly like
+    `is_delivered_offer`."""
+    if name in ("emit_playbook_offer", "emit_enhancement_offer"):
+        return True
+    if name == "emit_card":
+        ct = str((args or {}).get("card_type") or "").strip().lower()
+        return ct in _TERMINAL_OFFER_CARD_TYPES
+    return False
+
+
 def _is_verdict_emit(name: str, args: Any) -> bool:
     """True for a verdict-card emission, under either the retired or the
     consolidated name."""
