@@ -310,7 +310,14 @@ def step_through_playbook(yaml_text: str = "",
                     # 'post'" and the model chased a defect that was not there.
                     r = _render_local(value, path)
                     if r["unrendered"]:
-                        render_errors.append(f"{path}: {exc}")
+                        # Box renderer unreachable AND no offline sample to
+                        # render this reference from: a render-sim GAP, not a
+                        # broken playbook. `_render_local` already recorded it
+                        # as `unrendered` (a diagnostic); promoting it to a
+                        # render_error would flip first_error -> ok:false, which
+                        # is exactly the false "failed read" the comment above
+                        # warns against. The offline path (client is None)
+                        # treats an unrendered read the same non-fatal way.
                         return value
                     rendered_locally.append(path)
                     return r["value"]

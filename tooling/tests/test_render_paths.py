@@ -215,3 +215,41 @@ def test_consumed_paths_attached_to_trace(monkeypatch):
     emit_paths = {p["path"] for p in by["emit"]["consumed_paths"]}
     assert "vars.steps.Fetch.data.id" in emit_paths
     assert "vars.input.params.alert_id" in emit_paths
+
+
+def test_box_render_fault_with_no_sample_does_not_read_as_broken(monkeypatch):
+    """A step body that reads `vars.input.records[0]` must not come back
+    ok:false just because the BOX renderer was unreachable. Seeding sample
+    trigger data (even when a client object exists) lets the local render
+    resolve the reference, so a pure transport fault stays a non-error.
+    Regression: analyst-sim saw every connector-step analyze come back
+    ok:false "'_CassetteClient' object has no attribute 'post'"."""
+    class _BrokenRenderClient:
+        def post(self, *a, **k):
+            raise AttributeError(
+                "'_CassetteClient' object has no attribute 'post'")
+
+    monkeypatch.setattr(mcp_server._shared, "_live_client",
+                        lambda: _BrokenRenderClient())
+    yaml = textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: emit
+              - id: emit
+                type: set_variable
+                name: Emit
+                arg_list:
+                  - name: alert
+                    value: "{{ vars.input.records[0].items() }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """)
+    r = mcp_server.step_through_playbook(yaml)
+    assert r["first_error"] is None, r.get("first_error")
+    assert r["ok"] is True
