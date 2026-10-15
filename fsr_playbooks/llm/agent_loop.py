@@ -51,6 +51,7 @@ from ._loop_helpers import (
     TriageDiscipline,
     VerdictDeliveryGuard,
     _effective_tool_name,
+    is_delivered_offer,
     analyst_has_the_yaml,
     budget_ask_card,
     budget_note,
@@ -754,6 +755,7 @@ async def run_loop(
         batch_end = approval_idx if card_idx is None else min(approval_idx, card_idx + 1)
         parallel = calls[:batch_end]
         outcomes: list[ToolOutcome] = []
+        delivered_offer = False
 
         for call, tier in zip(parallel, tiers):
             yield ToolUseEvent(name=call.name, arguments=call.args,
@@ -771,6 +773,8 @@ async def run_loop(
             for call, (result, dur_ms) in zip(parallel, results):
                 yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
                 outcomes.append(record(call, result, dur_ms, tool_call_usage))
+                if is_delivered_offer(call.name, call.args, result):
+                    delivered_offer = True
 
         pending: ApprovalRequestEvent | None = None
         for i in range(batch_end, len(calls)):
@@ -787,6 +791,8 @@ async def run_loop(
                 break
             yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
             outcomes.append(record(call, result, dur_ms, tool_call_usage))
+            if is_delivered_offer(call.name, call.args, result):
+                delivered_offer = True
 
         if pending is not None:
             yield pending
@@ -802,6 +808,15 @@ async def run_loop(
         w.append_tool_results(outcomes, note=f"[turn budget] {note}" if note else None)
         any_tools_run = True
         yield usage_event(rnd.stop_reason or "tool_use")
+
+        # The model delivered a terminal offer card: the turn is done. The
+        # connector truncates the wire after a gating card, so a further round
+        # would only narrate text that is discarded -- end here instead of
+        # spending it. (Unifies the model-emitted path with the loop's own
+        # forced-delivery paths, which already return on these cards.)
+        if delivered_offer:
+            yield DoneEvent(stop_reason="end_turn")
+            return
 
         # No progress (repetition / sustained failure): answer now rather than
         # spending the ceiling. See ProgressMeter.

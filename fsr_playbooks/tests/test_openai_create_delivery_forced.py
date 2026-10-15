@@ -173,9 +173,12 @@ def test_forced_create_delivery_fires_at_most_once():
     assert len(emits) == 1
 
 
-def test_offer_already_delivered_is_not_forced():
+def test_offer_already_delivered_ends_the_turn_without_a_narration_round():
     # The happy path (also seen live): the model calls the offer itself. The
-    # guard must stay out of the way -- no second, duplicate card.
+    # guard must stay out of the way -- no second, duplicate card -- AND the
+    # turn must END on the delivered offer. The connector truncates the wire
+    # after a gating card, so a further model round only narrates text that is
+    # discarded; the loop no longer spends it.
     # Now the model calls emit_card (the consolidated offer tool).
     turn1 = [
         _delta_chunk(tool_calls=[_tool_call_delta(
@@ -205,8 +208,10 @@ def test_offer_already_delivered_is_not_forced():
     offer_uses = [e for e in events
                   if isinstance(e, ToolUseEvent) and e.name == "emit_card"]
     assert len(offer_uses) == 1, "guard forced a duplicate offer"
-    # No forced round: exactly the three modelled turns.
-    assert create.await_count == 3
+    # The turn ends on the delivered offer: the narration round (turn3) is
+    # never spent, so only the first two modelled turns ran.
+    assert create.await_count == 2
+    assert isinstance(events[-1], DoneEvent)
 
 
 def test_trace_build_then_prose_is_forced_into_a_trace_offer():

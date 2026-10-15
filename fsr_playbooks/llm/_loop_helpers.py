@@ -769,6 +769,34 @@ def _effective_tool_name(name: str, args: Any) -> str:
     return name
 
 
+_TERMINAL_OFFER_CARD_TYPES = frozenset({"playbook_offer", "enhancement_offer"})
+
+
+def is_delivered_offer(name: str, args: Any, result: Any) -> bool:
+    """True when the model just delivered a terminal OFFER card successfully.
+
+    A playbook_offer / enhancement_offer is the turn's terminal action -- the
+    analyst clicks Create/Apply on it. The connector truncates the turn's wire
+    at a gating card (ops_turn_io `_close_on`), so any further model round only
+    narrates text that is then discarded. Ending the turn here saves that round
+    (measured ~13-14% of a build turn's input, Frank build-matrix).
+
+    Scoped to the two offer cards on purpose: a verdict card is NON-gating (it
+    may be followed by an action card), so it must not end the turn. The loop's
+    own forced-delivery paths already end the turn on these same cards; this
+    unifies the model-emitted path with them.
+    """
+    if not (isinstance(result, dict) and result.get("ok") is True
+            and isinstance(result.get("card"), dict)):
+        return False
+    if name in ("emit_playbook_offer", "emit_enhancement_offer"):
+        return True
+    if name == "emit_card":
+        ct = str((args or {}).get("card_type") or "").strip().lower()
+        return ct in _TERMINAL_OFFER_CARD_TYPES
+    return False
+
+
 def _is_verdict_emit(name: str, args: Any) -> bool:
     """True for a verdict-card emission, under either the retired or the
     consolidated name."""
