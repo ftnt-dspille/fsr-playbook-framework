@@ -89,6 +89,19 @@ class ErrorEvent:
 
 
 @dataclass
+class NoticeEvent:
+    """A non-terminal status line -- the turn is still running. Unlike
+    ErrorEvent (which ends the turn), a NoticeEvent tells the analyst something
+    transient is happening and more will follow, e.g. the loop is waiting out a
+    provider rate limit before retrying. The connector renders it as an
+    `activity` frame; it is never written to the chat transcript as prose."""
+    message: str
+    #: A short machine tag for the kind of notice, e.g. "throttled".
+    reason: str = ""
+    kind: Literal["notice"] = "notice"
+
+
+@dataclass
 class ToolCallUsage:
     """Per-tool-call accounting emitted with each UsageEvent. Lets the
     consumer attribute context bloat to a specific tool result."""
@@ -160,7 +173,7 @@ class UsageEvent:
 # stale -- see CLAUDE.md.)
 Event = (
     TextEvent | ToolUseEvent | ToolResultEvent
-    | DoneEvent | ErrorEvent | UsageEvent
+    | DoneEvent | ErrorEvent | NoticeEvent | UsageEvent
     | ApprovalRequestEvent
 )
 

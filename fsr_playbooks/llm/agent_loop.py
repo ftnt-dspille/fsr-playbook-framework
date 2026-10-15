@@ -30,6 +30,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from . import _throttle
 from . import approvals as _approvals
 from ._loop_helpers import (
     DEFAULT_MAX_OUTPUT_TOKENS,
@@ -79,6 +80,7 @@ from .provider import (
     ErrorEvent,
     Event,
     Message,
+    NoticeEvent,
     TextEvent,
     ToolCallUsage,
     ToolResultEvent,
@@ -546,26 +548,60 @@ async def run_loop(
 
         rnd: Round | None = None
         fence = FenceHold()   # a code fence waits for the end of the round
-        try:
-            async for kind, payload in drain_with_idle_timeout(
-                    w.stream_round(), timeout=STREAM_TIMEOUT_SECS):
-                if kind == "text":
-                    shown = fence.feed(payload)     # live delta, before any fence
-                    if shown:
-                        yield TextEvent(text=shown)
-                else:
-                    rnd = payload
-        except asyncio.TimeoutError:
-            log.warning("%s stream timed out after %ss", provider.label, STREAM_TIMEOUT_SECS)
-            yield ErrorEvent(
-                message=f"The request to {provider.label} timed out after "
-                        f"{STREAM_TIMEOUT_SECS}s. The API may be slow or "
-                        f"unreachable -- please try again.")
-            return
-        except Exception as exc:
-            log.exception("%s stream failed", provider.label)
-            yield ErrorEvent(message=provider.friendly_error(exc))
-            return
+        # A request failure is handled, not dumped raw: a transient rate limit
+        # is waited out and retried (narrated so the analyst knows why the turn
+        # paused); an exhausted balance fails fast with a message naming the fix;
+        # everything else takes the provider's friendly-error path. Retry only
+        # when NOTHING streamed this attempt -- a 429 lands at request admission,
+        # so a mid-stream failure cannot be safely replayed.
+        throttle_attempt = 0
+        while True:
+            rnd = None
+            fence = FenceHold()
+            streamed_any = False
+            try:
+                async for kind, payload in drain_with_idle_timeout(
+                        w.stream_round(), timeout=STREAM_TIMEOUT_SECS):
+                    if kind == "text":
+                        streamed_any = True
+                        shown = fence.feed(payload)   # live delta, before any fence
+                        if shown:
+                            yield TextEvent(text=shown)
+                    else:
+                        rnd = payload
+                break
+            except asyncio.TimeoutError:
+                log.warning("%s stream timed out after %ss",
+                            provider.label, STREAM_TIMEOUT_SECS)
+                yield ErrorEvent(
+                    message=f"The request to {provider.label} timed out after "
+                            f"{STREAM_TIMEOUT_SECS}s. The API may be slow or "
+                            f"unreachable -- please try again.")
+                return
+            except Exception as exc:  # noqa: BLE001 -- classified below
+                outcome, retry_after = _throttle.classify(exc)
+                if outcome == "out_of_credit":
+                    log.warning("%s out of credit", provider.label)
+                    yield ErrorEvent(
+                        message=_throttle.out_of_credit_message(provider.label))
+                    return
+                if (outcome == "throttled" and not streamed_any
+                        and throttle_attempt < _throttle.MAX_THROTTLE_RETRIES):
+                    throttle_attempt += 1
+                    wait = _throttle.wait_for(throttle_attempt, retry_after)
+                    log.warning("%s throttled; retry %d after %.1fs",
+                                provider.label, throttle_attempt, wait)
+                    yield NoticeEvent(
+                        message=_throttle.throttle_notice(provider.label, wait),
+                        reason="throttled")
+                    await asyncio.sleep(wait)
+                    continue
+                log.exception("%s stream failed", provider.label)
+                msg = (_throttle.throttled_give_up_message(provider.label)
+                       if outcome == "throttled"
+                       else provider.friendly_error(exc))
+                yield ErrorEvent(message=msg)
+                return
         assert rnd is not None
         held = fence.finish()   # the round's undelivered tail, from its first fence
         w.append_assistant(rnd)
