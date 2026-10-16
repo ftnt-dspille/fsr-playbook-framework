@@ -2041,9 +2041,11 @@ UNVERIFIED_DRAFT_DIRECTIVE = (
 
 # Research only an AUTHORING turn does. Triage and build advertise the same full
 # surface, so "the slice has verify_playbook" cannot tell them apart; what the
-# turn looked up can. A triage turn (get_record, siem_search ...) never needs a
-# step type or an op schema. `find` counts only for its authoring kinds --
-# kind=action/operation/connector are shared with triage.
+# turn looked up can. A triage turn (get_record, siem_search ...) rarely needs a
+# step type, but an enrichment turn does look at an op schema before it runs the
+# op -- so `get_op_schema` counts here only while the turn has executed no
+# investigation (BuildProgressGuard.outstanding). `find` counts only for its
+# authoring kinds -- kind=action/operation/connector are shared with triage.
 _BUILD_RESEARCH_TOOLS = frozenset({
     "get_step_type", "get_op_schema", "find_step_examples",
     "find_jinja_pattern", "get_filter_examples",
@@ -2065,6 +2067,7 @@ class BuildProgressGuard:
         self._any_tool = False
         self._authored = False
         self._run_intent = False
+        self._investigated = False
         self._forced = False
         self._build_research = False
         # Second stage -- see `unverified_draft`.
@@ -2084,6 +2087,10 @@ class BuildProgressGuard:
             self._authored = True
         if name in _RUN_INTENT_TOOLS:
             self._run_intent = True
+        # The hunt floor's own rule: an answered op run or evidence read means
+        # the turn is looking at data, not stalled on a playbook.
+        if counts_as_investigation(name) and _answered(result):
+            self._investigated = True
         if name in _BUILD_RESEARCH_TOOLS or (
                 name == "find" and isinstance(args, dict)
                 and args.get("kind") in _BUILD_RESEARCH_FIND_KINDS):
@@ -2144,6 +2151,13 @@ class BuildProgressGuard:
             return False
         # A run/diagnose turn is not a stalled build -- see _RUN_INTENT_TOOLS.
         if self._run_intent:
+            return False
+        # Nor is a turn that executed an op or read hunt evidence. Live, a
+        # reputation question ran get_op_schema x2 and run_op x2 and was forced
+        # into authoring: get_op_schema is build research, but an op that ran
+        # means the turn is investigating. A build turn that executed nothing
+        # keeps the guard (see _BUILD_RESEARCH_TOOLS).
+        if self._investigated:
             return False
         # Nor is a triage turn. Live, every turn advertises verify_playbook, so
         # without this a triage turn that pulled the record and searched the
