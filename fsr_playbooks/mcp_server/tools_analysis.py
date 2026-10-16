@@ -1446,6 +1446,10 @@ def synthesize_http_step(entry_id: int,
     response_path for nested payloads, and any body shape for write ops.
     """
     with _db() as conn:
+        if _shared.catalog_missing_tables(conn, ("entries", "products")):
+            return {"error": "catalog DB unavailable",
+                    "code": "catalog_unavailable",
+                    "hint": _shared.CATALOG_UNAVAILABLE_HINT}
         try:
             row = conn.execute(
                 "SELECT e.id, p.name AS product, e.action, e.http_method, "

@@ -503,6 +503,12 @@ def search_api_examples(query: str, product: str | None = None,
     auth_method, description, source_url, code_snippet (if any)}.
     """
     with _db() as conn:
+        missing = _shared.catalog_missing_tables(conn)
+        if missing:
+            return [{"error": "catalog DB unavailable",
+                     "code": "catalog_unavailable",
+                     "missing_tables": missing,
+                     "hint": _shared.CATALOG_UNAVAILABLE_HINT}]
         try:
             sql = (
                 "SELECT e.id AS entry_id, p.name AS product, e.action, "
