@@ -55,6 +55,11 @@ class SessionState:
     #: host does not say. A tool that points the model at another tool reads
     #: this rather than re-deriving the host's slicing.
     offered_tools: frozenset[str] | None = None
+    #: The IRIs of the records this conversation created, oldest first, as a
+    #: zero-argument callable; None when the host does not say. A source, not
+    #: a snapshot, so a record created earlier in the same turn counts. A tier
+    #: hook reads it to card a run aimed at some OTHER record of that module.
+    created_records: Callable[[], list[str]] | None = None
 
 
 _STATE: ContextVar[SessionState] = ContextVar("_session_state", default=SessionState())
