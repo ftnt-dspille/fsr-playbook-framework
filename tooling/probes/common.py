@@ -239,7 +239,7 @@ def conditional_refetch(
     Pure protocol/bookkeeping -- the caller owns per-collection table writes,
     which differ by shape (picklists vs connector_configs vs …).
 
-    **Live behavior on FortiSOAR 8.0 (probed 2026-07-02 on .159):** the 304
+    **Live behavior on FortiSOAR 8.0 (live-verified on a dev appliance):** the 304
     ``unchanged`` path is effectively dead. FSR's Hydra collections
     (``picklist_names`` / ``teams`` / ``staging_model_metadatas``) return an
     ``ETag`` but **do not honor ``If-None-Match``** -- a conditional GET always

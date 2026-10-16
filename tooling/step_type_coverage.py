@@ -184,7 +184,7 @@ COVERAGE: dict[str, StepCoverage] = {
              "operationTitle from the catalog. G10 Tier-2 DONE: decompiler "
              "minimification strips the connector envelope + unwraps params back "
              "to flat email fields (mirror of code_snippet). FORWARD-MAP FLIPPED "
-             "(live-proven 2026-07-02 on 8.0/.159): the dedicated SendEmail "
+             "(live-proven on 8.0): the dedicated SendEmail "
              "handler (/wf/workflow/tasks/send_email, occ=0) RUNS BUT FAILS "
              "(\"Error message: 'smtp'\" -- can't resolve the configured SMTP "
              "connector), so the compiler now targets SendMail (occ=22, the "

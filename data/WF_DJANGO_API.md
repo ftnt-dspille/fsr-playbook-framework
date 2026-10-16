@@ -19,7 +19,7 @@ Source-of-truth: runtime introspection (`inspect.getmembers` + `manage.py
 show_urls`) of `/opt/cyops-workflow/sealab/`. The Django views are
 shipped as compiled Cython (`.so`) so source isn't readable, but the
 public surface -- class names, method signatures, docstrings, attributes
--- is fully recoverable. Captured 2026-05-03 from the dev appliance.
+-- is fully recoverable. Captured from a dev appliance.
 
 Companion files:
 - `store/incoming/wf_django_urls.txt` -- full `manage.py show_urls` table (239 routes).
