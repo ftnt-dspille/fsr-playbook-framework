@@ -77,6 +77,7 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
 | Repeated failed call | `agent_loop.guarded_dispatch` | `repeated_call_guard` | 133 | Keep. |
 | Not in the advertised slice | `agent_loop.guarded_dispatch` | "not available in this session" error | 3 (earlier) | Keep; defense in depth for the intent slice. |
 | Unreadable tool arguments | `agent_loop.guarded_dispatch` | `bad_tool_arguments` | 34 | Keep; structural. |
+| Duplicate card in one turn | `agent_loop.guarded_dispatch` | `duplicate_card` | new | Keep; structural. Same (card_type, id) already delivered, or any second capability_gap (#170). |
 | Hunt floor | `TriageDiscipline` | `guard_defer` / `hunt_floor_guard` | 47 | Keep. |
 | Defer (`guard_defer` on `emit_card`) | `TriageDiscipline` | `guard_defer` | 59 | Keep. |
 | Call-once discovery | `TriageDiscipline` | `guard_redirect` / `call_once_guard` | 13 | Keep. Terminal; the signature is remembered. |
