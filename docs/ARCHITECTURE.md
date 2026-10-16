@@ -17,7 +17,7 @@ summary: 'Architecture & end-state: three authoring surfaces (CLI/agent/visual) 
 
 # fsr-playbook-framework -- architecture & end state
 
-**Status**: living doc. Last updated 2026-05-03. Compiler v1, reference store, live e2e (push/run/poll/env), MCP server (16 tools), and corpus-mined Jinja docs are all live. Open: demo MVP + Phase 8 frontend research (Monaco YAML editor + LLM chat).
+**Status**: living doc. The compiler, reference store, live e2e (push/run/poll/env), MCP server and the agent-in-the-loop authoring flow are all live and shipped in the SOC Assistant connector. The compiler has grown well past the original `parser -> resolver -> validator -> emitter` sketch into a multi-stage pipeline with a verification layer (typed walker, effect inventory, `verify_playbook` / `verify_enhancement`) and a save-time prewrite guard; those are described under Components below.
 
 ## North star
 
@@ -40,9 +40,10 @@ There are three authoring surfaces, all targeting the same compiler:
                        └───────────┬────────────┘
                                    ▼
                        ┌────────────────────────┐
-                       │  Compiler (parser →    │
-                       │  resolver → validator  │
-                       │  → emitter)            │
+                       │  Compiler (parse → lint │
+                       │  → resolve → typed-arg  │
+                       │  → corpus → graph/jinja │
+                       │  → emit) + verify layer │
                        └───────────┬────────────┘
                                    ▼
                        ┌────────────────────────┐
@@ -80,15 +81,81 @@ if tool-use authoring plateaus.
 SQLite + bundled JSON snapshot. Trust-tracked. Source of truth for every
 "does this exist / what shape" question.
 
-### 2. Compiler (TODO #4 -- next)
-- `parser.py` -- YAML → IR
-- `resolver.py` -- connector/op/param/step/jinja-ref lookups against store
-- `validator.py` -- strict mode, "did you mean…" suggestions
-- `emitter.py` -- IR → FSR JSON
-- **Returns structured error objects, not stderr strings** -- MCP needs
-  machine-readable diagnostics.
-- Acceptance: bambenek-feed YAML → JSON byte-equivalent (modulo
-  UUIDs/timestamps) to vendor original.
+### 2. Compiler (built)
+
+The compiler is a fixed sequence of stages (`compiler/pipeline.py`). Each
+stage appends structured diagnostics to a shared list; a blocking error
+stops the emit, warnings do not. The order is load-bearing: resolve must
+run before anything can be type-checked against the catalog, and the graph
+checks run last because they need the whole resolved playbook.
+
+```
+parse -> raw lint -> reference lint -> resolve -> typed arg validate
+      -> corpus validate -> connector output refs
+      -> graph / jinja / cycle validate -> emit -> teaching(enrich)
+```
+
+| Stage | What it checks / does | Catches | Module |
+|---|---|---|---|
+| Parse | YAML text into the step model (IR) | Malformed YAML, a step with no type or name | `compiler/pipeline.py` |
+| Raw lint | Foot-gun rules on raw text + IR, pre-catalog | YAML "Norway problem" (`no`->false), illegal step-name chars, a mock step with no `mock_result`; each rule sets its own severity | `compiler/linter.py` |
+| Reference lint | Existence-only subset of the typed walk, in every compile as **warnings** | Connector/op/module not in the catalog, surfaced cheaply without the heavy verify path | `compiler/reference_lint.py` |
+| Resolve | Binds connector/op/module/picklist to the real catalog entry | Unknown connector or op, a picklist value absent on this box | `compiler/resolver/` |
+| Typed arg validate | Each step's params against the canonical handler's `inspect.signature()` | Missing required param, unknown param (unless handler takes `**kwargs`); framework-injected params excluded | `compiler/arg_validator.py` |
+| Corpus validate | Draft against patterns mined from real playbooks | Shapes that compile but no working playbook has used | `compiler/corpus_validator.py` |
+| Connector output refs | Rewrites + checks references to a connector step's output | Reads of an output field the op does not produce | `compiler/connector_output_refs.py` |
+| Graph / jinja / cycle | Whole-playbook invariants, post-resolve | Not exactly one Start, a path that never reaches End, a decision branch condition that is not boolean, a cycle, a reserved vars key, a bad Jinja block | `compiler/validator.py` |
+| Emit | IR -> FSR `WorkflowCollection` JSON | (only when no blocking errors) | `compiler/emitter.py` |
+
+A final **teaching** pass (`enrich_diagnostics`) rewrites raw diagnostics
+into messages the model can act on, and a **self-check** (`E10`) catches an
+installed wheel older than the reference DB it reads. The **decompiler**
+(`compiler/decompiler.py`) runs the pipeline in reverse so a live playbook
+can be edited and diffed as friendly YAML.
+
+- **Returns structured error objects, not stderr strings.** Every
+  diagnostic carries a code, a path, a severity and an optional suggested
+  fix; the compiler never prints (`compiler/errors.py`). This is what lets
+  the agent repair its own draft and a UI show a precise badge.
+
+#### Verification layer (beyond compile)
+
+Compile proves the playbook is well-formed and every reference exists.
+Verification asks whether data actually flows: does every value a step
+reads get produced upstream, and does every write trace to something the
+playbook computed. These are offline and pure (no box, no HTTP, no DB).
+
+- **Typed walker** (`compiler/typed_walker.py`) -- walks the playbook as a
+  DAG, synthesizes the output shape of every step (`vars.steps.<step>`),
+  accumulates it per branch, and checks every downstream `vars.steps.X.y`
+  read against the shape that exists at that point.
+- **Offline walk** (`compiler/render_paths.py`) -- renders the playbook's
+  Jinja down the default path and once per decision branch / manual-input
+  option, reporting reads that come out empty. Branches are pinned, so it
+  proves each path is wired, not that a branch fires at runtime.
+- **Effect inventory** (`compiler/effect_inventory.py`) -- lifts every
+  record write and connector action into an inventory and records which
+  upstream steps feed each written value. Flags a verdict/write built only
+  from literals after the playbook computed something, and a containment
+  playbook with no effect step. Proves linkage, not runtime truth;
+  `make eval-effect` reads the real value back on a box.
+- **Grounded output shapes** (`compiler/grounded_shapes.py`) -- output
+  shapes measured from real runs, so a read like
+  `data.attributes.last_analysis_stats` is checked against what the
+  connector actually returns.
+
+Two MCP tools package this as the forcing function before a draft is
+offered, and one guard stands at the save:
+
+| Gate | When | What it runs | Module |
+|---|---|---|---|
+| `verify_playbook` | Before offering a **new** playbook | Four-stage fan-out: compile, typed DAG walk, per-step schema check, live safe-op probe. Returns `ready_to_push` + the fix list. Check groups toggle-able | `mcp_server/tools_verify.py` |
+| `verify_enhancement` | Before offering an **edit** to an open playbook | Everything `verify_playbook` does, plus a structural diff vs the before-YAML to catch a dropped/renamed step or stripped annotation. Baseline is FortiSOAR's copy, not one the model typed | `mcp_server/tools_enhancement.py` |
+| Prewrite guard (`would_drop_fields`) | At **save**, in the connector | Semantic diff of the pending save vs the live playbook. Fails closed and names every dropped step/route/field/param; a deliberate delete must be acknowledged. Additions and in-place changes never refused | `compiler/prewrite.py` |
+
+> The guide at `fortisoar-widget-harness/docs/system-guide/` (chapter 04,
+> in the all-widgets repo) explains this same pipeline and verification
+> layer in prose with diagrams, for a reader who is not in the code.
 
 ### 3. MCP server (new -- after compiler v1)
 Wraps compiler + reference store + live FSR. Exposes tools any
