@@ -444,8 +444,14 @@ def _diff_collections(before, after, user_message: str | None,
             # Only flag as a regression if the user didn't explicitly
             # name this step. When referenced is None we skip the flag
             # (no user_message context) but still report it in
-            # diff_summary.
-            if referenced is not None and n not in referenced:
+            # diff_summary. A step an explicit edit_playbook op targeted is
+            # the request in structured form (like `op_renames`), whatever
+            # words the model's `user_message` summary used. Analyst sim: the
+            # analyst asked for "malicious only", the model update_step'd the
+            # decision, this fired on the name not being in the summary, and
+            # it vetoed the step's ack -- every Apply refused would_drop_fields.
+            if (referenced is not None and n not in referenced
+                    and n not in (_OP_TOUCHED.get() or frozenset())):
                 regressions.append({
                     "kind": "behavior_changed_outside_diff",
                     "step": n,

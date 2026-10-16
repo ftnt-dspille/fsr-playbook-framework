@@ -804,3 +804,28 @@ def test_a_retyped_document_gets_no_modified_step_acknowledgement():
     finally:
         reset_grounded_yaml(tok)
     assert not [t for t in res.get("acknowledged_drops") or [] if t.endswith(".*")]
+
+
+def test_a_branch_relabel_the_op_named_is_acknowledged_whatever_the_summary_says(open_yaml):
+    # Analyst sim (reputation gate): "malicious only please" -- the model
+    # update_step'd the decision, relabelling its branch, with a user_message
+    # that did not repeat the step's name. The name-mention check called the
+    # step changed "outside the diff", that vetoed its `<step>.*` ack, and Apply
+    # refused would_drop_fields on the old branch twice; the edit never landed.
+    from fsr_playbooks.compiler.prewrite import check_prewrite
+    res = edit_playbook([{"op": "update_step", "name": "Check", "set": {"conditions": [
+        {"display": "huge", "when": "{{ vars.input.records[0].severity == 'Critical' }}",
+         "next": "Note A"},
+        {"display": "Else", "default": True, "next": "Note B"}]}}],
+        user_message="only the critical ones")
+    assert res["ready_to_push"], res.get("required_fixes")
+    assert "behavior_changed_outside_diff" not in {r["kind"] for r in res["regressions"]}
+    assert "Check.*" in res["acknowledged_drops"]
+    live = compile_yaml(open_yaml, DB_PATH)
+    after = compile_yaml(res["after_yaml"], DB_PATH)
+    assert live.ok and after.ok
+    verdict = check_prewrite(live.fsr_json, after.fsr_json, res["acknowledged_drops"])
+    assert verdict.ok, verdict.dropped
+    # Without the ack the guard still refuses the old branch: the ack is what
+    # lets it through, not a loosened guard.
+    assert not check_prewrite(live.fsr_json, after.fsr_json, []).ok
