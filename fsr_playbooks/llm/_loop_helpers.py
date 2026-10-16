@@ -187,6 +187,127 @@ def clip_head_tail(body: str, marker: str, head: int = _RESULT_HEAD_CHARS,
     return body[:head] + marker.format(n=clipped) + body[-tail:]
 
 
+# A JSON result is compacted by structure before it is ever cut by position.
+# Head+tail keeps the first and last few KB, so a verdict that sits in the
+# middle is lost: live, a VirusTotal report's last_analysis_stats came after a
+# 10 KB per-engine map and whois/rdap, and the model told the analyst the vote
+# counts "were cut off" while the card showed 0/92. Compaction keeps every key
+# and every small value; only long strings, long lists and the bulkiest
+# sub-objects shrink, each with a note saying how much went.
+#: Floor for the string cap; the cap starts at half the budget so the result
+#: the model reads THIS round keeps as much of a long field as the old head did.
+_COMPACT_STRING_CHARS = 600
+_COMPACT_LIST_ITEMS = 20
+#: A container whose children are all at most this size is a map/list of small
+#: things (per-engine verdicts, rows) and is elided whole; otherwise its largest
+#: child goes first, so a small verdict dict beside a bulky sibling survives.
+_COMPACT_SMALL_CHILD_CHARS = 300
+_COMPACT_MAX_ELISIONS = 200
+
+
+def _json_len(v: Any) -> int:
+    return len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str))
+
+
+def _shorten(v: Any, cap: int) -> Any:
+    if isinstance(v, str) and len(v) > cap:
+        return v[:cap] + f"... [+{len(v) - cap} chars]"
+    if isinstance(v, list):
+        kept = [_shorten(x, cap) for x in v[:_COMPACT_LIST_ITEMS]]
+        if len(v) > _COMPACT_LIST_ITEMS:
+            kept.append(f"... [+{len(v) - _COMPACT_LIST_ITEMS} more items]")
+        return kept
+    if isinstance(v, dict):
+        return {k: _shorten(x, cap) for k, x in v.items()}
+    return v
+
+
+def _children(node: Any) -> list[tuple[Any, Any]]:
+    if isinstance(node, dict):
+        return list(node.items())
+    if isinstance(node, list):
+        return list(enumerate(node))
+    return []
+
+
+def _elide_one(root: Any) -> bool:
+    """Replace the bulkiest sub-object with a size note. Walks down while one
+    child holds most of its parent; then elides that node's largest child, or
+    the node itself when every child is small. Never elides the root."""
+    parent: Any = None
+    pkey: Any = None
+    node = root
+    while True:
+        kids = [(k, v, _json_len(v)) for k, v in _children(node)
+                if isinstance(v, (dict, list))]
+        if not kids:
+            break
+        k, v, n = max(kids, key=lambda t: t[2])
+        if n * 2 > _json_len(node):
+            parent, pkey, node = node, k, v
+            continue
+        break
+    sized = [(k, v, _json_len(v)) for k, v in _children(node)]
+    big = [t for t in sized if t[2] > _COMPACT_SMALL_CHILD_CHARS
+           and isinstance(t[1], (dict, list))]
+    if big:
+        k, v, n = max(big, key=lambda t: t[2])
+        node[k] = _elided(v, n)
+        return True
+    if parent is None:
+        return False
+    parent[pkey] = _elided(node, _json_len(node))
+    return True
+
+
+def _elided(v: Any, n: int) -> str:
+    what = (f"{len(v)} keys" if isinstance(v, dict)
+            else f"{len(v)} items" if isinstance(v, list) else "value")
+    return f"[omitted for size: {what}, {n} chars]"
+
+
+def compact_json_body(body: str, target: int,
+                      note: str = "[+{n} chars compacted by the output budgeter]"
+                      ) -> str | None:
+    """`body` compacted by structure to at most `target` chars, or None when
+    it is not JSON or cannot get there (the caller then clips by position).
+    Keys and small values are never dropped. `note` (with `{n}` = chars
+    removed) rides along as `_budget_note`, so the model knows it is partial."""
+    try:
+        parsed = json.loads(body)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, (dict, list)):
+        return None
+    room = target - len(note) - 80
+    cap = max(_COMPACT_STRING_CHARS, room // 2)
+    while True:
+        data = _shorten(parsed, cap)
+        for _ in range(_COMPACT_MAX_ELISIONS):
+            if _json_len(data) <= room or not _elide_one(data):
+                break
+        if _json_len(data) <= room or cap == _COMPACT_STRING_CHARS:
+            break
+        cap = max(_COMPACT_STRING_CHARS, cap // 2)
+    removed = max(0, len(body) - _json_len(data))
+    text = note.strip().strip("\u2026").strip().format(n=removed)
+    if isinstance(data, dict):
+        data["_budget_note"] = text
+    else:
+        data.append(text)
+    out = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
+    return out if len(out) <= target else None
+
+
+def clip_tool_body(body: str, marker: str, head: int, tail: int) -> str:
+    """The over-cap body the model reads: compacted by structure when it is
+    JSON, else (or when compaction cannot fit) the head + tail preview."""
+    compact = compact_json_body(body, head + tail, note=marker)
+    if compact is not None:
+        return compact
+    return clip_head_tail(body, marker, head=head, tail=tail)
+
+
 #: The cap on the result the model reads THIS round. A backstop for outliers,
 #: not a budget: build results (verify reports, edit_playbook) run to ~17k on a
 #: real box and the model repairs from them, so the latest result stays whole up
@@ -204,7 +325,7 @@ def cap_model_content(content: str) -> str:
     an OpenAI or FortiAI turn had no cap at all."""
     if len(content) <= _LATEST_RESULT_CAP_CHARS:
         return content
-    return clip_head_tail(
+    return clip_tool_body(
         content, "\n… [truncated {n} chars; narrow the query] …\n",
         head=_LATEST_RESULT_HEAD_CHARS, tail=_LATEST_RESULT_TAIL_CHARS)
 
@@ -336,9 +457,10 @@ def shrink_history(history: list[Any]) -> int:
     to_clip = (oversized[:-_RESULT_KEEP_LATEST]
                if _RESULT_KEEP_LATEST > 0 else oversized)
     for block, body in to_clip:
-        new_body = clip_head_tail(
+        new_body = clip_tool_body(
             body, "\n… [+{n} chars capped by the output budgeter -- "
-                  "a later turn superseded this result] …\n")
+                  "a later turn superseded this result] …\n",
+            head=_RESULT_HEAD_CHARS, tail=_RESULT_TAIL_CHARS)
         saved += len(body) - len(new_body)
         block["content"] = new_body
 
