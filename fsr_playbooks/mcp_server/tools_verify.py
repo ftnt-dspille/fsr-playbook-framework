@@ -27,6 +27,10 @@ from pathlib import Path
 from typing import Any
 
 from fsr_playbooks import module_schema
+from fsr_playbooks.compiler.effect_inventory import (
+    effect_inventory,
+    unlinked_effects,
+)
 from fsr_playbooks.compiler.record_op_checks import (
     check_connector_config,
     check_op_params,
@@ -81,6 +85,9 @@ CHECK_GROUPS: dict[str, frozenset[str]] = {
     "picklist": frozenset({"picklist_drift"}),
     "param_type": frozenset({"param_type"}),
     "snippet": frozenset({"snippet_sandbox"}),
+    # Effect inventory nudges (both warnings): a record write built only from
+    # literals, and a playbook with no effect step at all.
+    "effect": frozenset({"effect_value_unlinked", "no_effect_step"}),
     # Usually fatal structural problems; offered for completeness.
     "structure": frozenset({
         "elided_document",
@@ -674,6 +681,17 @@ def verify_playbook(
       - var_read_before_definition       (branch-scoped vars.<name>)
       - var_defined_other_branch         (branch-scoped vars.<name>)
       - loop_var_outside_for_each        (vars.item outside a for_each step)
+      - effect_value_unlinked            (a record write whose values are all
+                                         literals -- an enrichment/decision
+                                         result may have been dropped)
+      - no_effect_step                   (the playbook reads/enriches but never
+                                         writes a record or runs a changing
+                                         action -- missing its effect step?)
+
+    `evidence.effects` carries the effect inventory: per record-write /
+    connector-action step, the module/op, whether it is mutating, the fields
+    written, and which upstream steps feed each written value. A grader (or the
+    box-run) reads this to know what the playbook does and which field to verify.
     """
     # Optional catalog override: an SDK (pyfsr) compiles/verifies against a
     # warmed per-install catalog, not the packaged slim one. `_db()` and the
@@ -789,6 +807,58 @@ def verify_playbook(
         "name": "per_step_schema",
         "ok": not any(i["severity"] == "error" for i in schema_issues),
         "summary": f"{len(schema_issues)} schema issue(s)",
+    })
+
+    # 4b. Effect inventory -- what the playbook writes/does, and whether each
+    # written value is carried forward from an upstream step. This is evidence,
+    # not a blocker: static analysis with branch-pinning cannot prove an effect
+    # fires on the real happy path (the box-run does that), but it can surface
+    # the two shapes worth a human's eye -- a record write built only from
+    # literals (an enrichment computed and then dropped), and a playbook with no
+    # effect step at all. It also tells the box-run which field to read back.
+    try:
+        inventory = effect_inventory(coll, _op_safety_fn())
+    except Exception:  # noqa: BLE001 -- the inventory never fails a verify
+        inventory = []
+    if inventory:
+        evidence["effects"] = inventory
+    for e in unlinked_effects(inventory):
+        warnings.append({
+            "code": "effect_value_unlinked",
+            "message": (f"step {e['step']!r} writes to {e.get('module')!r} using "
+                        "only literal values -- no field carries a result from an "
+                        "earlier enrichment or decision. Confirm the outcome you "
+                        "computed is actually written."),
+            "path": None,
+            "step": e["step_id"],
+            "suggestion": ("reference the producing step in the written value, "
+                           "e.g. {{ vars.steps.<step>.data.<field> }}"),
+            "severity": "warning",
+        })
+    # A playbook that enriches and ends -- no write, no changing action -- may be
+    # pure triage by design, so this is a nudge, not a fix, and only when there
+    # is real work past the trigger. A connector op of unknown safety counts as
+    # a possible action, so this fires only for playbooks with no record write
+    # and no connector step at all.
+    non_trivial = sum(1 for pb in coll.playbooks for s in pb.steps
+                      if s.type not in {"start", "end"}
+                      and not str(s.type).startswith("start_on"))
+    has_effect = any(e["kind"] == "record_write"
+                     or e.get("mutating") is not False
+                     for e in inventory)
+    if not has_effect and non_trivial >= 2:
+        warnings.append({
+            "code": "no_effect_step",
+            "message": ("this playbook reads or enriches but never writes a record "
+                        "or runs a changing action -- intended for pure triage? If "
+                        "it should record or contain an outcome, its effect step is "
+                        "missing."),
+            "path": None,
+            "severity": "warning",
+        })
+    checks_run.append({
+        "name": "effect_inventory", "ok": True,
+        "summary": f"{len(inventory)} effect step(s)",
     })
 
     # 5. Live probe summary
