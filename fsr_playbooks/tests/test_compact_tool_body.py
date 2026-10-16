@@ -105,3 +105,19 @@ def test_every_key_survives_compaction():
     report = _vt_report()
     out = json.loads(compact_json_body(json.dumps(report), 6500))
     assert set(report["data"]["attributes"]) <= set(out["data"]["attributes"])
+
+
+def test_hostile_shapes_fall_back_to_head_and_tail():
+    """Tool output is third-party data: deep nesting or a huge body must not
+    raise out of the budgeter (it would break the turn) or stall it."""
+    from fsr_playbooks.llm._loop_helpers import clip_tool_body
+
+    deep = "[" * 5000 + "]" * 5000 + " " * 30000
+    nested = json.dumps(_vt_report())
+    for _ in range(80):
+        nested = '{"a":' + nested + "}"
+    huge = json.dumps({"rows": ["z" * 100] * 20000})
+    for body in (deep, nested, huge):
+        out = clip_tool_body(body, "<<{n}>>", head=5000, tail=1500)
+        assert len(out) < _RESULT_CAP_CHARS
+        assert "<<" in out

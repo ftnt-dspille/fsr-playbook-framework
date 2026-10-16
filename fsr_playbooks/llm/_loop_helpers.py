@@ -203,6 +203,24 @@ _COMPACT_LIST_ITEMS = 20
 #: child goes first, so a small verdict dict beside a bulky sibling survives.
 _COMPACT_SMALL_CHILD_CHARS = 300
 _COMPACT_MAX_ELISIONS = 200
+#: Tool output is third-party data. Past these, compaction is skipped and the
+#: body gets the plain head + tail: a huge body would make the repeated sizing
+#: slow, and deep nesting would recurse past Python's stack.
+_COMPACT_MAX_BODY_CHARS = 1_000_000
+_COMPACT_MAX_DEPTH = 60
+
+
+def _too_deep(v: Any, limit: int) -> bool:
+    stack = [(v, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > limit:
+            return True
+        if isinstance(node, dict):
+            stack.extend((x, depth + 1) for x in node.values())
+        elif isinstance(node, list):
+            stack.extend((x, depth + 1) for x in node)
+    return False
 
 
 def _json_len(v: Any) -> int:
@@ -273,11 +291,13 @@ def compact_json_body(body: str, target: int,
     it is not JSON or cannot get there (the caller then clips by position).
     Keys and small values are never dropped. `note` (with `{n}` = chars
     removed) rides along as `_budget_note`, so the model knows it is partial."""
+    if len(body) > _COMPACT_MAX_BODY_CHARS:
+        return None
     try:
         parsed = json.loads(body)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         return None
-    if not isinstance(parsed, (dict, list)):
+    if not isinstance(parsed, (dict, list)) or _too_deep(parsed, _COMPACT_MAX_DEPTH):
         return None
     room = target - len(note) - 80
     cap = max(_COMPACT_STRING_CHARS, room // 2)
@@ -302,7 +322,10 @@ def compact_json_body(body: str, target: int,
 def clip_tool_body(body: str, marker: str, head: int, tail: int) -> str:
     """The over-cap body the model reads: compacted by structure when it is
     JSON, else (or when compaction cannot fit) the head + tail preview."""
-    compact = compact_json_body(body, head + tail, note=marker)
+    try:
+        compact = compact_json_body(body, head + tail, note=marker)
+    except (RecursionError, MemoryError, ValueError, TypeError):
+        compact = None  # never let the budgeter break a turn
     if compact is not None:
         return compact
     return clip_head_tail(body, marker, head=head, tail=tail)
