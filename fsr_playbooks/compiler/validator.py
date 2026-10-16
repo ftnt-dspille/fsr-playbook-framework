@@ -15,6 +15,13 @@ from .jinja_checks import check_jinja, to_compile_errors
 
 # Find every Jinja expression. Non-greedy; tolerates whitespace.
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
+
+# A decision branch condition that evaluates to a boolean carries a Jinja
+# block or a comparison/logical operator. A bare literal (e.g. `else`) does
+# not, and FSR rejects it at runtime as "not boolean".
+_COND_BOOLEAN_RE = re.compile(
+    r"\{\{|==|!=|<=|>=|[<>|~]| and | or | not | in | is "
+)
 # vars.steps.<key>.<path...> -- capture the step jinja-key + the trailing
 # attribute chain. Stops at any non-attribute character (operators,
 # whitespace, brackets, pipes).
@@ -739,6 +746,38 @@ def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
                         path=f"{cpath}.condition",
                         severity="error",
                     ))
+                elif isinstance(c.get("condition"), str):
+                    # The condition must evaluate to a boolean. A bare word
+                    # with no jinja and no comparison/logical operator is a
+                    # literal string; FSR raises "Condition: '<x>' is not
+                    # boolean" at RUNTIME, so it must be caught here. The
+                    # classic slip is writing the fall-through branch as
+                    # `condition: else` (or default/otherwise) instead of
+                    # `default: true`. A real expression (`x != 'block'`, a
+                    # `{{ ... }}` block) always carries an operator or braces.
+                    cond = c["condition"].strip()
+                    low = cond.lower()
+                    if (low not in ("true", "false")
+                            and not _COND_BOOLEAN_RE.search(cond)):
+                        if low in ("else", "otherwise", "default", "any",
+                                   "elif", "endif"):
+                            hint = ("use `default: true` on this branch and "
+                                    "omit `condition:` -- the default branch "
+                                    "fires when every other condition is false")
+                        else:
+                            hint = ("write a boolean expression, e.g. "
+                                    "{{ vars.steps.<Step>.finalDisposition "
+                                    "== 'block' }}")
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"decision {s.id!r}: branch condition {cond!r} "
+                                f"is not a boolean expression and fails at run "
+                                f"time (\"{cond!r} is not boolean\"); {hint}"
+                            ),
+                            path=f"{cpath}.condition",
+                            severity="error",
+                        ))
             if "option" in c:
                 option_labels.append(c["option"])
         if n_default > 1:
