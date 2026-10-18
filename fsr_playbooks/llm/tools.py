@@ -40,6 +40,8 @@ SAFE_TOOLS: list[str] = [
     "find_jinja_pattern",
     "get_filter_examples",
     "search_playbooks",
+    # E5: plan-then-ground, one read-only pass over the intended steps.
+    "plan_playbook",
     "verify_playbook",
     "verify_enhancement",
     "edit_playbook",
@@ -132,6 +134,7 @@ TOOL_TIERS: dict[str, int] = {
     "find_operation": 0,
     "get_op_schema": 0,
     "get_step_type": 0,
+    "plan_playbook": 0,
     "find_step_examples": 0,
     "find_jinja_filter": 0,
     "find_jinja_pattern": 0,

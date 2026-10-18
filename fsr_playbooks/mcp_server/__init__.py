@@ -35,6 +35,7 @@ from . import (
     tools_execution,
     tools_jinja,
     tools_picklists,
+    tools_plan,
     tools_recipe,
     tools_verify,
 )
@@ -167,6 +168,7 @@ from .tools_recipe import (
 )
 
 # Verify
+from .tools_plan import plan_playbook
 from .tools_verify import verify_playbook
 
 # =========================================================================
@@ -250,6 +252,7 @@ __all__ = [
     "why_did_playbook_fail",
     "set_failed_run_provider",
     # Verify
+    "plan_playbook",
     "verify_playbook",
     # Emit / card tools
     "emit_card",

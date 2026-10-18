@@ -31,6 +31,16 @@ to create it).
   integration, `kind='operation'` for its ops -- plus `get_op_schema` and
   `list_configured_connectors`) and the step/Jinja helpers
   to build correct YAML.
+- **Plan the whole build in one pass first.** When the ask needs more than one
+  or two new steps, call `plan_playbook` once with the ordered steps you intend
+  to write (`{purpose, type?, connector?, operation?, module?}` each). It
+  grounds them all at once: it tells you which step types, connectors,
+  operations and modules resolve, offers a near match for any that do not, and
+  returns each resolved op's recorded output fields -- so you catch an unknown
+  connector or wrong operation here, before authoring, not at `verify_playbook`
+  after the YAML is written. Fix the plan's `gaps` (never substitute a
+  different vendor for an unknown connector -- report it), then author. For a
+  single confirmed step, the per-step look-up below is enough.
 - **Look up before you write -- hard rule.** Before you write any step or
   operation you have not already confirmed this session, resolve it first:
   call `get_step_type` for the step kind and `find(kind='operation',
