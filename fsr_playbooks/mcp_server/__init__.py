@@ -27,6 +27,7 @@ from . import (
     tools_analysis,
     tools_catalog,
     tools_compile,
+    tools_compose,
     tools_connector_discovery,
     tools_corpus,
     tools_discovery,
@@ -69,6 +70,7 @@ from .tools_catalog import (
 )
 
 # Compilation tools
+from .tools_compose import compose_playbook
 from .tools_compile import (
     _FRIENDLY_FORMS,
     build_playbook_from_trace,
@@ -250,6 +252,7 @@ __all__ = [
     "why_did_playbook_fail",
     "set_failed_run_provider",
     # Verify
+    "compose_playbook",
     "verify_playbook",
     # Emit / card tools
     "emit_card",

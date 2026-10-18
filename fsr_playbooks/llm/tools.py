@@ -64,6 +64,8 @@ SAFE_TOOLS: list[str] = [
     # tool is never advertised/dispatchable and the agent silently falls back
     # to hand-authoring (losing trace grounding + staged-action coverage).
     "build_playbook_from_trace",
+    # E6: declare a typed plan, code compiles+verifies the YAML.
+    "compose_playbook",
     # "find_step_recipe",  # hidden -- recipes corpus not populated yet; revisit later
     # Widget card emitters -- drive the chat UI's awaiting_* halts.
     # Phase 1 consolidation: one emitter over the seven card tools. The
@@ -132,6 +134,7 @@ TOOL_TIERS: dict[str, int] = {
     "find_operation": 0,
     "get_op_schema": 0,
     "get_step_type": 0,
+    "compose_playbook": 0,
     "find_step_examples": 0,
     "find_jinja_filter": 0,
     "find_jinja_pattern": 0,

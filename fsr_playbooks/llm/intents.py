@@ -28,6 +28,7 @@ DEFAULT_INTENT = "build"
 # and run-history diagnostics.
 BUILD_ONLY_TOOLS = frozenset({
     "validate_yaml", "compile_yaml", "build_playbook_from_trace",
+    "compose_playbook",
     "analyze_playbook",
     "verify_playbook", "verify_enhancement", "edit_playbook",
     "emit_decision_step",
