@@ -1883,8 +1883,9 @@ _FRIENDLY_FORMS: dict[str, dict[str, Any]] = {
     "decision": {
         "accepted_keys": ["conditions"],
         "shape": (
-            "`conditions:` lives at the step level (sugar) or under "
-            "`arguments:` (wire form). Each non-default entry has "
+            "`conditions:` lives at the step level. Do NOT wrap it in "
+            "`arguments:` -- the compiler rejects the wrapper (hoist every "
+            "step argument to the step level). Each non-default entry has "
             "`display`, `when`, `next`. Exactly one entry must be the "
             "default (`default: true`, no `when`) and supply `next:` for "
             "the else branch. Do NOT use a step-level `branches:` dict -- "
