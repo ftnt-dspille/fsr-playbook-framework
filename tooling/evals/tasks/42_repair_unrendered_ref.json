@@ -1,0 +1,32 @@
+{
+  "name": "repair_unrendered_ref",
+  "mode": "repair",
+  "prompt": "This playbook ran on the box and reported success, but the FortiGate step blocked the wrong thing -- the run log shows it was handed the literal text `vars.steps.Analyst_IP_Action.input.target_ip` as the address, not the IP the analyst typed. Find the defect and return the corrected complete YAML. Change nothing else.",
+  "broken_yaml_path": "tooling/evals/broken/manual_input_block_ip_unrendered_ref.yaml",
+  "gold_yaml_path": "tooling/evals/golds/manual_input_block_ip_rendered.yaml",
+  "notes": "Fourth repair defect class and a near-twin of repair_bad_step_ref, deliberately kept separate so the two do not collapse: there the braces are present and the NAME inside is wrong (empty value); here the path is right but the `{{ }}` are absent, so FSR never renders it and passes the template source through verbatim. Empty vs literal are different symptoms with different fixes. Compiles and verifies clean -- a bare string is a legal param value -- so only a diagnosis that names the missing render, not a static gate, catches it. The tempting wrong fix is to delete the reference or the step, caught by no_collateral_damage.",
+  "ir_assertions": [
+    {
+      "kind": "arg_text_contains",
+      "type": "connector",
+      "contains": "{{ vars.steps.Analyst_IP_Action.input.target_ip }}",
+      "note": "the block reads the analyst's IP through a RENDERED reference"
+    },
+    {
+      "kind": "connector_op",
+      "connector": "fortigate",
+      "operation_contains": "block_ip",
+      "note": "the block step is still there"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "manual_input"
+      },
+      "to": {
+        "type": "connector"
+      },
+      "note": "the gate still precedes the block -- a fix must not reroute it"
+    }
+  ]
+}

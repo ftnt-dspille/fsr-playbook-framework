@@ -1,0 +1,78 @@
+# BROKEN on purpose -- the before-state of the `repair_decision_inverted` fixture.
+#
+# Symptom on the box: the run succeeds, but malicious sender IPs are never
+# blocked while clean ones ARE -- the containment branch fires on exactly the
+# wrong alerts. Cause: the decision's threshold comparison is inverted. It routes
+# to the block when the reputation is BELOW the threshold (`< 50`) instead of
+# above it (`> 50`), so a high-reputation (malicious) IP takes the default arm
+# and a low one gets blocked.
+#
+# Like `repair_wrong_containment_param` and `repair_loop_over_wrong_field`, this
+# COMPILES and VERIFIES clean: a backwards comparison is a legal decision. Only
+# the behavioral path -- which arm a malicious verdict actually takes -- can see
+# it. The defect is in the ROUTING LOGIC, not a parameter shape or a loop target,
+# so it does not collapse into the other repair classes.
+#
+# The tempting wrong fix is to drop the decision and always block; symptom gone,
+# but every alert now contains, which `no_collateral_damage` is there to catch.
+
+collection: Eval Repair Fixtures
+description: Deliberately broken playbooks -- the before-state of a repair task.
+visible: true
+
+playbooks:
+  - name: Phishing Sender IP Block With Approval
+    description: Score a sender IP, block it when its reputation is high.
+    steps:
+      - name: On Phishing Alert
+        type: start_on_create
+        next: Score Sender IP
+        module: alerts
+        when:
+          logic: AND
+          filters:
+            - field: recordTags
+              op: in
+              value: ["/api/3/tags/phishing"]
+
+      - name: Score Sender IP
+        type: connector
+        next: Reputation Gate
+        connector: virustotal
+        operation: query_ip
+        config: ""
+        params:
+          ip: "{{ vars.input.records[0].iPAddresses[0] }}"
+
+      - name: Reputation Gate
+        type: decision
+        conditions:
+          - display: Malicious
+            when: "{{ vars.steps.Score_Sender_IP.data.reputation < 50 }}"
+            next: Block Sender IP
+          - display: Clean
+            default: true
+            next: Comment On Alert
+
+      - name: Block Sender IP
+        type: connector
+        next: Comment On Alert
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Quarantine Based
+          ip_addresses: "{{ vars.input.records[0].iPAddresses[0] }}"
+
+      - name: Comment On Alert
+        type: create_record
+        next: Done
+        module: comments
+        operation: Overwrite
+        fields:
+          content: >-
+            Scored sender IP, reputation {{ vars.steps.Score_Sender_IP.data.reputation }}.
+          alerts: "{{ vars.input.records[0]['@id'] }}"
+
+      - name: Done
+        type: end

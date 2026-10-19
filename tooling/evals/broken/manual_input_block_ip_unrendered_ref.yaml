@@ -1,0 +1,62 @@
+# BROKEN on purpose -- the before-state of the `repair_unrendered_ref` fixture.
+#
+# Symptom on the box: the FortiGate step runs and the run "succeeds", but the
+# appliance received the literal text `vars.steps.Analyst_IP_Action.input.target_ip`
+# as the address to block -- not the IP the analyst typed -- so it bans nothing
+# meaningful. Cause: the reference is missing its `{{ }}`, so FSR never renders
+# it and passes the template source through as a plain string.
+#
+# Unlike `repair_bad_step_ref` (right syntax, wrong NAME inside the braces, which
+# yields an EMPTY value), here the path is correct but the braces are absent, so
+# the raw text arrives verbatim. The two look alike and are not: empty vs literal.
+#
+# Compiles and verifies clean -- a bare string is a legal param value.
+#
+# The tempting wrong fix is to delete the reference or the step; that clears the
+# diagnostic and leaves the playbook useless, which `no_collateral_damage` catches.
+
+collection: Eval Repair Fixtures
+description: Deliberately broken playbooks -- the before-state of a repair task.
+visible: true
+
+playbooks:
+  - name: Analyst IP Block Or Allow
+    description: Prompt for an IP, block it on approval, otherwise log.
+    steps:
+      - name: start
+        type: start
+        next: Analyst IP Action
+
+      - name: Analyst IP Action
+        type: manual_input
+        title: Block or allow this IP?
+        description: Enter the IP address and choose an action.
+        inputs:
+          - name: target_ip
+            label: IP address
+            kind: ipv4
+        options:
+          - display: block
+            primary: true
+            next: Block IP
+          - display: allow
+            next: Note Allowed
+
+      - name: Block IP
+        type: connector
+        next: Done
+        connector: fortigate-firewall
+        operation: block_ip_new
+        config: ""
+        params:
+          method: Quarantine Based
+          ip_addresses: "vars.steps.Analyst_IP_Action.input.target_ip"
+
+      - name: Note Allowed
+        type: set_variable
+        next: Done
+        vars:
+          note: "Analyst allowed {{ vars.steps.Analyst_IP_Action.input.target_ip }}; no block issued."
+
+      - name: Done
+        type: end
