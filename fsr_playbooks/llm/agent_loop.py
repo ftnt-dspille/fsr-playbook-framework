@@ -685,6 +685,28 @@ async def run_loop(
                 w.append_user(nudge[1])
                 continue
 
+            # A build turn that ended on a compile-clean fence it never verified
+            # and never offered: the loop verifies those bytes itself, so the
+            # delivery guard below can offer them. A prose nudge does not force a
+            # tool call -- a connector-less playbook (loop / decision /
+            # set_variable) whose only research is get_step_type gets authored in
+            # prose and the turn ends on a bare fence with no Create prompt. The
+            # verify result flows through the observers into CreateDeliveryGuard,
+            # exactly like the validated-draft path above. Localized live:
+            # for_each_loop on the production model delivered nothing this way.
+            if (not verified_by_loop and held
+                    and is_authoring_slice(allowed)
+                    and create.outstanding(allowed) is None
+                    and w.has_tool("verify_playbook") and w.has_tool("emit_card")):
+                _fence = _last_yaml_fence(held)
+                if _fence is not None and _fence_problem(_fence.group(1)) is None:
+                    yield usage_event("terminal_fence_verified")
+                    _fout: list[Any] = []
+                    async for ev in loop_call(
+                            "verify_playbook", {"yaml_text": _fence.group(1)},
+                            _fout, tool_call_usage):
+                        yield ev
+
             # Delivery. A verify passed and the turn is ending without the offer
             # card: the loop delivers it with the bytes the verify blessed. No
             # model round -- there is nothing left for the model to decide, and
