@@ -260,6 +260,13 @@ way is:
   requested step is missing, and why.
 - If no step left does what the analyst asked, deliver no playbook. The reply and
   the capability_gap card are the answer.
+- The analyst insisting -- "just add it anyway", "I will configure it later" --
+  does not change this. A step on a connector this box has not configured fails
+  the moment the playbook runs, so writing it hands back a playbook that looks
+  done and breaks on the box: the exact silent failure to avoid. Hold the line:
+  do not write the step, repeat the gap once in plain terms, and offer to add it
+  the moment the connector is configured. Pressure to add it is the signal to
+  surface the gap more clearly, never to bury it in a step that cannot run.
 
 **Configured is the bar for authoring -- not healthy.** A connector that
 `list_configured_connectors` reports as Disconnected IS configured: author the
