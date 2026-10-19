@@ -2367,6 +2367,40 @@ for _entry in _FRIENDLY_FORMS.values():
         if _y:
             _entry["yaml_example"] = _y
 
+def _to_authoring_step(snippet: Any) -> Any:
+    """A corpus step is stored in the native wire shape -- ``{name, arguments:
+    {...}}``. The author must never see the ``arguments:`` wrapper: the compiler
+    rejects it for every step (hoist each argument to the step level), so an
+    example that keeps it teaches a shape the draft gate fails. Return the step
+    in authoring shape, reusing the decompiler's Phase-G hoist so there is one
+    source of truth for how a wire step flattens. A non-dict snippet, or one
+    with no wrapper, passes through unchanged; a corpus oddity that the hoist
+    cannot handle is returned as-is rather than failing the read."""
+    if not isinstance(snippet, dict) or "arguments" not in snippet:
+        return snippet
+    try:
+        from fsr_playbooks.compiler.decompiler import (
+            _EDITOR_NOISE_KEYS, _hoist_args)
+        out = {k: v for k, v in snippet.items() if k != "arguments"}
+        _hoist_args(out, {"arguments": snippet["arguments"]})
+        # Utility / child-playbook steps nest `arguments.arguments`, so one hoist
+        # can leave a wrapper behind. Flatten until none remains -- the authoring
+        # form has no `arguments:` at any depth. Bounded by the finite nesting.
+        for _ in range(8):
+            if "arguments" not in out:
+                break
+            inner = out.pop("arguments")
+            if not isinstance(inner, dict):
+                break
+            for k, v in inner.items():
+                out.setdefault(k, v)
+        for _noise in _EDITOR_NOISE_KEYS:
+            out.pop(_noise, None)
+    except Exception:
+        return snippet
+    return out
+
+
 @mcp.tool()
 def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
     """Schema and examples for a NON-connector playbook step type --
@@ -2474,7 +2508,8 @@ def get_step_type(name: str, verbose: bool = False) -> dict[str, Any]:
         for ex in examples:
             if ex.get("snippet_json"):
                 try:
-                    ex["snippet_json"] = json.loads(ex["snippet_json"])
+                    ex["snippet_json"] = _to_authoring_step(
+                        json.loads(ex["snippet_json"]))
                 except (json.JSONDecodeError, TypeError):
                     pass
             if not verbose:
