@@ -39,8 +39,8 @@ dependencies = [
 [project.optional-dependencies]
 # LLM providers -- real imports only in fsr_playbooks/llm/*_provider.py.
 llm = [
-    "openai>=1.0",
-    "anthropic>=0.40",
+    "openai>=3,<4",
+    "anthropic>=1,<2",
     # The FortiAI proxy provider hard-imports httpx at MODULE level, so this is
     # a real dependency of the extra, not a transitive convenience. It was
     # undeclared when that provider landed and rode in on whatever the SDKs
@@ -52,7 +52,7 @@ llm = [
 # MCP server -- mcp_server hard-imports fsr_playbooks.llm, so [mcp] implies [llm].
 mcp = [
     "fsr_playbooks[llm]",
-    "mcp>=1.0",
+    "mcp>=2,<3",
 ]
 
 [project.urls]

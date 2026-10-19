@@ -40,7 +40,7 @@ dependencies = [
     # build predated `pyfsr.config` and broke collection of the offline suite.
     # The floor + [tool.uv.sources] below make the intent machine-enforced.
     "pyfsr>=0.7.9",
-    "mcp>=1.0",
+    "mcp>=2,<3",
 ]
 
 [project.scripts]
