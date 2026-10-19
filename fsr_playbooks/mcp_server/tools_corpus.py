@@ -316,9 +316,10 @@ def find_step_examples(step_type: str,
                 conn, step_type, contains, limit
             )
 
+    from fsr_playbooks.mcp_server.tools_discovery import _to_authoring_step
     for r in rows:
         try:
-            r["arguments"] = json.loads(r.pop("arguments_json"))
+            r["arguments"] = _to_authoring_step(json.loads(r.pop("arguments_json")))
         except (json.JSONDecodeError, KeyError):
             pass
     return rows
