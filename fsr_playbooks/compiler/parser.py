@@ -363,20 +363,45 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 ))
 
             # Phase G: all step args are at the step's top level -- the
-            # `arguments:` wrapper is gone. Collect every non-IR, non-sugar
-            # key as a step argument.
+            # `arguments:` wrapper is gone. A step authored with the legacy
+            # wrapper is AUTO-HOISTED here rather than hard-errored: the hoist
+            # is lossless and well defined (the exact inverse of what the
+            # decompiler emits, so it reuses `_hoist_args`), and the production
+            # model's prior is full of the wrapper. Fixing it once, mechanically,
+            # beats a prompt rule plus a correction round in the agent loop --
+            # the same choice the `stop`->`end` auto-rewrite above makes
+            # ("Mechanical translation > prompt rule"). A key the author also
+            # wrote at the step level keeps the step-level value; a nested
+            # `arguments.arguments` (utility steps) flattens too.
             if "arguments" in s_raw:
+                from fsr_playbooks.compiler.decompiler import _hoist_args
+                explicit = {k: v for k, v in s_raw.items() if k != "arguments"}
+                # Hoist into a separate accumulator (seeded with `type` so the
+                # child-playbook branch of `_hoist_args` can see the step kind),
+                # then fold it in so the author's EXPLICIT step-level keys win
+                # over a colliding wrapper key.
+                acc: dict = {"type": explicit.get("type")}
+                wrapper = s_raw["arguments"]
+                for _ in range(8):   # bound the finite nesting
+                    if not isinstance(wrapper, dict):
+                        break
+                    _hoist_args(acc, {"arguments": wrapper})
+                    wrapper = acc.pop("arguments", None)
+                acc.pop("type", None)
+                for k, v in acc.items():
+                    explicit.setdefault(k, v)
+                s_raw.clear()
+                s_raw.update(explicit)
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
+                    severity="warning",
                     message=(
-                        "the `arguments:` wrapper is no longer used -- "
-                        "hoist all step arguments to the step's top level "
-                        "(e.g. `module:`, `connector:`, `operation:` etc. "
-                        "are step-level keys now, not nested under arguments:)"
+                        "`arguments:` wrapper auto-hoisted to the step level "
+                        "(the wrapper is deprecated; write step arguments as "
+                        "top-level keys)"
                     ),
                     path=f"{sp}.arguments",
                 ))
-                continue
             _reserved = _STEP_IR_KEYS | _STEP_SUGAR_KEYS | {"arguments"}
             args = {
                 k: v for k, v in s_raw.items()

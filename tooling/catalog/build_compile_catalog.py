@@ -101,6 +101,7 @@ CONNECTOR_BASELINE: tuple[str, ...] = (
     "ipinfo",
     "ipstack",
     "openai",
+    "servicenow",
     "smtp",
     "ssh",
     "virustotal",

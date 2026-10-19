@@ -68,12 +68,18 @@ def test_top_level_envelope_keys_hoisted():
     assert a["agent"] == "lab-collector"
 
 
-def test_top_level_and_arguments_conflict_errors():
-    """Phase G: no `arguments:` wrapper, so the step-level vs
-    `arguments:`-level conflict scenario is moot. Duplicate keys at
-    the same YAML level are silently overwritten by the YAML parser.
-    This test now verifies that a step with `arguments:` is rejected."""
-    res, _ = _emit("""
+def _warns(res):
+    return [e.message for e in res.warnings]
+
+
+def test_legacy_arguments_wrapper_is_auto_hoisted():
+    """Phase G deprecated the `arguments:` wrapper, but the production model's
+    prior is full of it. Rather than hard-error and send the loop back to
+    correct it, the parser AUTO-HOISTS the wrapper to the step level (lossless,
+    the inverse of the decompiler) and emits a warning -- the same
+    mechanical-translation choice the `stop`->`end` rewrite makes. The wrapped
+    form must compile to the SAME wire as the hoisted form."""
+    wrapped, steps_w = _emit("""
 collection: T
 playbooks:
   - name: P
@@ -82,11 +88,47 @@ playbooks:
       - name: Upd
         type: update_record
         module: incidents
+        record: "{{ vars.input.records[0]['@id'] }}"
         arguments:
           resource: {status: Closed}
 """)
-    assert not res.ok
-    assert any("arguments:" in m for m in _errs(res))
+    hoisted, steps_h = _emit("""
+collection: T
+playbooks:
+  - name: P
+    steps:
+      - {name: Start, type: start, next: Upd}
+      - name: Upd
+        type: update_record
+        module: incidents
+        record: "{{ vars.input.records[0]['@id'] }}"
+        resource: {status: Closed}
+""")
+    assert wrapped.ok, _errs(wrapped)       # no longer rejected
+    assert any("arguments:" in m for m in _warns(wrapped)), \
+        "the auto-hoist should warn that the wrapper is deprecated"
+    assert steps_w["Upd"] == steps_h["Upd"]  # identical wire either way
+
+
+def test_arguments_wrapper_conflict_keeps_the_step_level_value():
+    """A key written BOTH at the step level and inside the wrapper: the
+    author's explicit step-level value wins (the hoist never overwrites it)."""
+    res, steps = _emit("""
+collection: T
+playbooks:
+  - name: P
+    steps:
+      - {name: Start, type: start, next: Upd}
+      - name: Upd
+        type: update_record
+        module: incidents
+        record: "{{ vars.input.records[0]['@id'] }}"
+        resource: {status: Open}
+        arguments:
+          resource: {status: Closed}
+""")
+    assert res.ok, _errs(res)
+    assert steps["Upd"]["resource"] == {"status": "Open"}
 
 
 # ---- retry sugar -----------------------------------------------------------
