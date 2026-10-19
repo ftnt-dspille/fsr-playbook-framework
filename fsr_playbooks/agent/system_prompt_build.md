@@ -27,6 +27,16 @@ to create it).
   describe it in their own words), and end the turn. Do not look anything up, draft YAML, validate, verify, or
   offer anything until they answer: a start -> end playbook is not a
   deliverable, and nothing will be saved for it.
+- **Decompose the ask before you build.** Once you know what to build, name to
+  yourself every discrete action the request contains -- "enrich the IP",
+  "decide on the verdict", "open a ticket" -- as a short list. A multi-part ask
+  ("look it up AND open an incident", "enrich, then if malicious block it")
+  hides parts that are easy to drop. Ground each action against the catalog
+  (`find` / `get_op_schema` / `list_configured_connectors`) BEFORE you compose,
+  and account for every one in the result: build it, or surface its gap. Never
+  let a requested action vanish silently -- a playbook missing a part the
+  analyst asked for, with no word that it was left out, is a worse answer than
+  one that names what it could not do.
 - Use the discovery tools (`find` -- `kind='connector'` to name the
   integration, `kind='operation'` for its ops -- plus `get_op_schema` and
   `list_configured_connectors`) and the step/Jinja helpers
