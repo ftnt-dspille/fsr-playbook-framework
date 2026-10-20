@@ -210,8 +210,9 @@ playbooks:
     assert any("step-level `branches:`" in e.message for e in errs)
 
 
-def test_arguments_wrapper_rejected():
-    # Phase G: `arguments:` wrapper is no longer used -- hard error.
+def test_arguments_wrapper_auto_hoisted():
+    # The deprecated `arguments:` wrapper is auto-hoisted to the step level
+    # with a warning (it is no longer a hard error): the step still parses.
     text = """
 collection: A
 playbooks:
@@ -223,8 +224,9 @@ playbooks:
           connector: foo
 """
     coll, errs = parse_yaml(text)
-    assert coll is None
-    assert any("`arguments:` wrapper" in e.message for e in errs)
+    assert coll is not None
+    assert any(e.severity == "warning" and "`arguments:` wrapper" in e.message
+               and "auto-hoisted" in e.message for e in errs)
 
 
 def test_set_variable_with_bare_key_rejected():
@@ -258,7 +260,10 @@ playbooks:
 """
     coll, errs = parse_yaml(text)
     assert coll is not None
-    assert coll.playbooks[0].steps[0].type == "end"
+    # A manual trigger is auto-inserted ahead of the authored step, so find
+    # the `stop`/`bye` step by name rather than assuming it is first.
+    bye = next(s for s in coll.playbooks[0].steps if s.name == "bye")
+    assert bye.type == "end"
     assert any(e.severity == "warning" and "auto-rewritten" in e.message
                for e in errs)
 
@@ -351,7 +356,10 @@ def _loop_for_each(max_parallel_line: str):
         "        module: alerts\n"
     )
     coll, errs = parse_yaml(text)
-    fe = coll.playbooks[0].steps[0].for_each if coll else None
+    # A manual trigger is auto-inserted ahead of the authored loop step, so
+    # pick the step that actually carries `for_each` rather than steps[0].
+    fe = next((s.for_each for s in coll.playbooks[0].steps if s.for_each),
+              None) if coll else None
     return fe, errs
 
 
@@ -384,7 +392,7 @@ def test_for_each_max_parallel_on_sequential_loop_warns():
         "        module: alerts\n"
     )
     coll, errs = parse_yaml(text)
-    fe = coll.playbooks[0].steps[0].for_each
+    fe = next(s.for_each for s in coll.playbooks[0].steps if s.for_each)
     # still emitted, but a warning flags that the cap is ignored on a sequential loop
     assert fe["concurrencyCount"] == 3
     assert any(e.severity == "warning" and "parallel" in e.message for e in errs)
