@@ -48,10 +48,14 @@ NORWAY_OK = NORWAY_BAD.replace("display: yes", 'display: "yes"')
 
 
 def test_norway_bare_yes_in_display_caught(db_path):
+    # The Norway foot-gun is auto-fixed at the compile entry now: the bare
+    # `yes` is quoted for the author and a warning flags it, so the compile
+    # succeeds instead of hard-failing.
     r = compile_yaml(NORWAY_BAD, db_path)
-    assert not r.ok
-    msgs = " ".join(_messages(r))
-    assert "display value 'yes'" in msgs
+    assert r.ok, [e.to_dict() for e in r.errors]
+    warnings = [e for e in r.errors if e.severity == "warning"]
+    assert any("Norway problem" in (w.message or "") for w in warnings), \
+        [e.to_dict() for e in r.errors]
 
 
 def test_norway_quoted_yes_passes(db_path):

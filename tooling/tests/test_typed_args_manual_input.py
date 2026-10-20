@@ -215,7 +215,7 @@ playbooks:
     assert _ask_step_type(r.fsr_json).endswith(_APPROVAL_MI_UUID)
 
 
-def test_is_approval_set_both_places_is_conflict_error(db_path):
+def test_is_approval_set_both_places_defers_to_step_level(db_path):
     text = """
 collection: T
 playbooks:
@@ -230,8 +230,17 @@ playbooks:
         options: [Approve]
         title: "Approve?"
         arguments:
-          is_approval: true
+          is_approval: false
 """
+    # is_approval is set at the step level (true) and again inside the
+    # deprecated `arguments:` wrapper with a different value (false). The
+    # universal step envelope hoists the wrapper but never overwrites an
+    # explicit step-level key, so the step-level `true` wins and the step
+    # compiles as an approval manual-input, with only the wrapper-deprecation
+    # warning (see test_universal_step_envelope.py).
     r = compile_yaml(text, db_path)
-    codes = [e.code for e in r.errors if e.severity == "error"]
-    assert ErrorCode.BAD_VALUE in codes, [e.to_dict() for e in r.errors]
+    assert not [e for e in r.errors if e.severity == "error"], \
+        [e.to_dict() for e in r.errors]
+    assert any(e.severity == "warning" and "`arguments:` wrapper" in e.message
+               for e in r.errors), [e.to_dict() for e in r.errors]
+    assert _ask_step_type(r.fsr_json).endswith(_APPROVAL_MI_UUID)

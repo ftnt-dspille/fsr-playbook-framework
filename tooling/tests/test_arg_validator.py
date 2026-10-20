@@ -313,9 +313,10 @@ def test_decision_no_default_warns(db_path):
 
 # ---- I28 -- set_variable typo trap (2026-05-06) -----------------------
 
-def test_set_variable_legacy_arguments_rejected(db_path):
-    """Set-variable steps must use the top-level `vars:` mapping.
-    `arguments:` wrapper is rejected at parse time."""
+def test_set_variable_legacy_arguments_auto_hoisted(db_path):
+    """Set-variable steps use the top-level `vars:` mapping. A legacy
+    `arguments:` wrapper is auto-hoisted to the step level with a deprecation
+    warning (not a hard error), so the step still compiles."""
     text = """
 collection: T
 playbooks:
@@ -331,9 +332,10 @@ playbooks:
             greeting: hi
 """
     r = compile_yaml(text, db_path)
-    assert not r.ok
-    assert any("arguments:" in e.message or "vars:" in e.message
-               for e in r.errors)
+    assert r.ok, [e.to_dict() for e in r.errors]
+    assert any(e.severity == "warning" and "`arguments:` wrapper" in e.message
+               and "auto-hoisted" in e.message for e in r.errors), \
+        [e.to_dict() for e in r.errors]
 
 
 def test_set_variable_canonical_vars_works(db_path):
