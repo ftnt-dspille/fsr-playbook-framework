@@ -209,6 +209,81 @@ class RewriterMixin:
                     path=f"playbooks[{pi}].steps[{si}].arguments",
                 ))
 
+    def _steer_manual_input_param_refs(
+        self, pb, pi: int, errors: list[CompileError],
+    ) -> None:
+        """Steer `vars.input.params.<name>` to the manual_input step that
+        collects `<name>`.
+
+        The model commonly reads an analyst-entered value off the trigger
+        params bag (`vars.input.params.ip_address`) when the value is actually
+        collected by a manual_input step and lives at
+        `vars.steps.<step>.input.<name>`. When `<name>` is NOT a declared
+        playbook parameter but EXACTLY ONE manual_input step declares an input
+        field of that name, the right target is derivable -- steer the
+        reference there with a warning rather than erroring. Ambiguous (more
+        than one manual_input declares the field) or unmatched names fall
+        through to `_validate_input_param_refs`, which still errors. Runs
+        BEFORE that validation. Mechanical translation > prompt rule.
+        """
+        declared = {p for p in (pb.parameters or [])
+                    if isinstance(p, str) and p}
+        field_steps: dict[str, list[str]] = {}
+        for step in pb.steps:
+            if (getattr(step, "type", "") or "") != "manual_input":
+                continue
+            inputs = (step.arguments or {}).get("inputs")
+            if not isinstance(inputs, list):
+                continue
+            for item in inputs:
+                if isinstance(item, dict) and isinstance(item.get("name"), str):
+                    fn = item["name"]
+                    bucket = field_steps.setdefault(fn, [])
+                    if step.name and step.name not in bucket:
+                        bucket.append(step.name)
+        steerable = {n: s[0] for n, s in field_steps.items()
+                     if n not in declared and len(s) == 1}
+        if not steerable:
+            return
+
+        done: dict[tuple[str, str], set[int]] = {}
+        _cur = [-1]
+
+        def patch(text: str) -> str:
+            for name, stepname in steerable.items():
+                repl = f"vars.steps.{stepname.replace(' ', '_')}.input.{name}"
+                esc = _re.escape(name)
+                for pat in (
+                    _re.compile(r"\bvars\.input\.params\." + esc
+                                + r"(?=\b|[^A-Za-z0-9_])"),
+                    _re.compile(r"\bvars\.input\.params\[\s*['\"]" + esc
+                                + r"['\"]\s*\]"),
+                ):
+                    new_text, n = pat.subn(repl, text)
+                    if n:
+                        done.setdefault((name, stepname), set()).add(_cur[0])
+                        text = new_text
+            return text
+
+        for si, step in enumerate(pb.steps):
+            _cur[0] = si
+            self._walk_strings_inplace(step.arguments, patch)
+
+        for (name, stepname), sis in done.items():
+            slug = stepname.replace(" ", "_")
+            for si in sorted(i for i in sis if i >= 0):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message=(
+                        f"`vars.input.params.{name}` steered to "
+                        f"`vars.steps.{slug}.input.{name}` -- that value is "
+                        f"collected by the manual input step {stepname!r}, not "
+                        f"a trigger parameter."
+                    ),
+                    path=f"playbooks[{pi}].steps[{si}].arguments",
+                ))
+
     # Reserved trigger inputs that exist at runtime WITHOUT a declared
     # `parameters:` entry: `vars.input.records` / `vars.input.record` are
     # the selected record(s) the trigger fired on; `vars.input.params` is
