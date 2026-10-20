@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
+pytest.importorskip("mcp.server.mcpserver", reason="mcp package not installed")
 
 from fsr_playbooks.mcp_server.tools_emit import _trigger_summary  # noqa: E402
 

@@ -128,7 +128,7 @@ def test_op_safety_classifies_connector_actions():
 
 @pytest.fixture
 def verify():
-    pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
+    pytest.importorskip("mcp.server.mcpserver", reason="mcp package not installed")
     from fsr_playbooks.mcp_server.tools_verify import verify_playbook
     return verify_playbook
 

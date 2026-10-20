@@ -13,7 +13,7 @@ import sqlite3
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
+pytest.importorskip("mcp.server.mcpserver", reason="mcp package not installed")
 
 from fsr_playbooks.compiler import local_render  # noqa: E402
 from fsr_playbooks.mcp_server import _shared  # noqa: E402
