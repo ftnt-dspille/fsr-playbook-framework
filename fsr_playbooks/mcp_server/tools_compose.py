@@ -28,6 +28,12 @@ _KIND_TO_SKILL = {
     "manual_input": "manual_input",
     "set_variable": "set_variable",
 }
+# A `record` plan step selects its skill by `action` (the FSR record step type).
+_RECORD_ACTION_TO_SKILL = {
+    "create": "create_record",
+    "update": "update_record",
+    "find": "find_record",
+}
 # The connector envelope defaults to `.data` (get_op_schema's binding rule); the
 # other skills publish their outputs at the step root.
 _DEFAULT_REF_PREFIX = {"connector": "data"}
@@ -106,15 +112,35 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
             continue
         kind = str(step.get("kind") or "").strip()
         name = str(step.get("name") or "").strip() or f"Step {i + 1}"
-        skill_id = _KIND_TO_SKILL.get(kind)
-        if not skill_id:
-            errors.append(f"step {i} ({name!r}): unknown kind {kind!r}; "
-                          f"use one of {sorted(_KIND_TO_SKILL)}")
-            continue
+        if kind == "record":
+            action = str(step.get("action") or "").strip().lower()
+            skill_id = _RECORD_ACTION_TO_SKILL.get(action)
+            if not skill_id:
+                errors.append(f"step {i} ({name!r}): a record step needs "
+                              f"`action` one of {sorted(_RECORD_ACTION_TO_SKILL)}")
+                continue
+        else:
+            skill_id = _KIND_TO_SKILL.get(kind)
+            if not skill_id:
+                errors.append(
+                    f"step {i} ({name!r}): unknown kind {kind!r}; use one of "
+                    f"{sorted(list(_KIND_TO_SKILL) + ['record'])}")
+                continue
         ref_prefix = _DEFAULT_REF_PREFIX.get(kind, "")
         ref_prefix_by_step[name] = ref_prefix
 
-        if kind == "connector":
+        if kind == "record":
+            resolved = {"module": step.get("module") or module or "",
+                        "operation": step.get("operation") or "Create"}
+            raw_fields = step.get("fields") or {}
+            resolved["fields"] = _resolve_inputs(dict(raw_fields),
+                                                 ref_prefix_by_step)
+            if step.get("query") is not None:
+                resolved["query"] = step["query"]
+            if not resolved["module"]:
+                errors.append(f"step {i} ({name!r}): a record step needs a "
+                              "`module`")
+        elif kind == "connector":
             inputs = dict(step.get("inputs") or {})
             inputs["connector"] = step.get("connector") or ""
             inputs["operation"] = step.get("operation") or ""
@@ -135,9 +161,9 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
         for_each = None
         raw_fe = step.get("for_each")
         if isinstance(raw_fe, dict) and raw_fe:
-            if kind not in ("connector", "set_variable"):
-                errors.append(f"step {i} ({name!r}): for_each loops a connector "
-                              "or set_variable step, not a "
+            if kind not in ("connector", "set_variable", "record"):
+                errors.append(f"step {i} ({name!r}): for_each loops a connector, "
+                              "record or set_variable step, not a "
                               f"{kind!r} step")
             elif not raw_fe.get("item"):
                 errors.append(f"step {i} ({name!r}): for_each needs an `item` "

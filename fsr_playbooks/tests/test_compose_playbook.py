@@ -139,3 +139,36 @@ def test_for_each_on_a_non_loopable_kind_is_an_honest_plan_error():
     assert r["ok"] is False
     assert r["code"] == "bad_plan"
     assert any("for_each" in e for e in r["errors"])
+
+
+def test_record_action_kind_loops_create_record_over_a_staged_list():
+    # for_each_loop shape: stage a list, then create one record per element.
+    # A record action is its own FSR step type (create_record), reached via the
+    # `record` plan kind + `action`, and it loops with the same for_each modifier.
+    plan = [
+        {"kind": "set_variable", "name": "Build Alert List",
+         "values": {"alerts_to_create": [{"name": "A", "severity": "High"}]}},
+        {"kind": "record", "name": "Create Alert Per Item", "action": "create",
+         "module": "alerts", "operation": "Create",
+         "fields": {"name": "{{ vars.item.name }}",
+                    "severity": "{{ vars.item.severity }}"},
+         "for_each": {"item": {"from_step": "Build Alert List",
+                               "output": "alerts_to_create"}}},
+    ]
+    r = compose_playbook(steps=plan, name="Create Alerts From Static List",
+                         module="alerts")
+    assert r["ok"] is True
+    assert r["compile_summary"]["ok"] is True
+    y = r["yaml"]
+    assert "type: create_record" in y
+    assert "for_each:" in y
+    assert "{{ vars.steps.Build_Alert_List.alerts_to_create }}" in y
+
+
+def test_record_kind_without_action_is_an_honest_plan_error():
+    r = compose_playbook(
+        steps=[{"kind": "record", "name": "X", "module": "alerts"}],
+        name="Bad Record", module="alerts")
+    assert r["ok"] is False
+    assert r["code"] == "bad_plan"
+    assert any("action" in e for e in r["errors"])

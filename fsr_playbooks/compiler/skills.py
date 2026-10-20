@@ -120,6 +120,29 @@ def _compile_run_connector_action(
     return step
 
 
+def _make_record_compile(step_type: str) -> CompileHook:
+    """A record action (create / update / find). FSR models these as their own
+    step types -- `create_record`, `update_record`, `find_record` -- not as a
+    connector op, so give each its own skill. `inputs` carries `module`,
+    `operation` (the record mode, e.g. Create / Replace), and a `fields` map
+    whose values may be wired from an earlier step's output."""
+    def _compile(inputs: dict[str, Any], wired_refs: dict[str, str],
+                 step_name: str) -> dict[str, Any]:
+        merged = _apply_wires(inputs, wired_refs)
+        step: dict[str, Any] = {"type": step_type, "name": step_name}
+        for k in ("module", "operation"):
+            if merged.get(k) is not None:
+                step[k] = merged[k]
+        fields = merged.get("fields")
+        if isinstance(fields, dict) and fields:
+            step["fields"] = fields
+        # find_record carries a query rather than fields.
+        if merged.get("query") is not None:
+            step["query"] = merged["query"]
+        return step
+    return _compile
+
+
 def _compile_set_variable(
     inputs: dict[str, Any], wired_refs: dict[str, str], step_name: str
 ) -> dict[str, Any]:
@@ -241,6 +264,23 @@ register(Skill(
     },
     description="Route on a true/false condition over prior outputs.",
 ))
+
+
+for _rt in ("create_record", "update_record", "find_record"):
+    register(Skill(
+        id=_rt,
+        step_type=_rt,
+        compile=_make_record_compile(_rt),
+        input_schema={
+            "module": ParamSpec(type="string", jinja_bindable=False, required=True),
+            "operation": ParamSpec(type="string", jinja_bindable=False, required=False),
+            "fields": ParamSpec(type="dict", jinja_bindable=False, required=False),
+        },
+        description=(
+            "A record action on an FSR module (create / update / find). Its own "
+            "step type, not a connector op."
+        ),
+    ))
 
 
 # ---------------------------------------------------------------------------
