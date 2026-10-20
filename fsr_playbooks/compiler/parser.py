@@ -256,6 +256,53 @@ def _autofix_yaml_footguns(text: str, errors: list[CompileError]) -> str:
     return text
 
 
+_TRIGGER_TYPES = frozenset({"start", "start_on_create", "start_on_update",
+                            "start_on_delete", "api_endpoint"})
+
+
+def _insert_missing_trigger(steps: list[Step], pb_name: str,
+                            errors: list[CompileError]) -> None:
+    """A playbook with steps but no trigger step is invalid -- it has no entry
+    point. When the entry is unambiguous (exactly one step is the target of no
+    other step's `next` / branch / unlabeled route), prepend a manual `start`
+    routed to it and warn. A manual start only fills a TOTAL absence; it never
+    flips an existing trigger, so it cannot corrupt intent -- the author changes
+    it to an on-create / on-update trigger if the playbook should run
+    automatically. Ambiguous (no single entry) stays the honest NO_TRIGGER
+    error downstream.
+
+    Mechanical fix over prompt rule: the model routinely omits the required
+    trigger on a connector-less loop/decision playbook (localized live on
+    for_each_loop), which blocked the whole compile and bounced the agent loop
+    back to re-author a playbook that was otherwise complete."""
+    if not steps or any(s.type in _TRIGGER_TYPES for s in steps):
+        return
+    targets: set[str] = set()
+    for s in steps:
+        if s.next:
+            targets.add(s.next)
+        targets.update(s.branches.values())
+        targets.update(s.unlabeled_next)
+    entries = [s for s in steps if s.id not in targets]
+    if len(entries) != 1:
+        return  # ambiguous or cyclic -- let the validator report NO_TRIGGER
+    entry = entries[0]
+    used = {s.id for s in steps} | {s.name for s in steps}
+    sid = "Start"
+    n = 1
+    while sid in used:
+        n += 1
+        sid = f"Start_{n}"
+    steps.insert(0, Step(id=sid, type="start", name=sid, next=entry.id))
+    errors.append(CompileError(
+        code=ErrorCode.NO_TRIGGER, severity="warning",
+        message=(f"playbook {pb_name!r} had no trigger step; added a manual "
+                 f"'start' routed to {entry.name or entry.id!r}. Change it to "
+                 "an on-create / on-update trigger if this should run "
+                 "automatically."),
+        path=f"playbooks[{pb_name}]"))
+
+
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
     errors: list[CompileError] = []
     # Strip control chars the model may have introduced while re-emitting a
@@ -1286,6 +1333,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
                 ))
             is_private = False
 
+        _insert_missing_trigger(steps, pb_name, errors)
         playbooks.append(Playbook(
             name=pb_name,
             description=pb_raw.get("description", "") or "",
