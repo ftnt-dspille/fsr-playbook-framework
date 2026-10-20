@@ -36,6 +36,7 @@ from . import (
     tools_execution,
     tools_jinja,
     tools_picklists,
+    tools_plan,
     tools_recipe,
     tools_verify,
 )
@@ -68,9 +69,6 @@ from .tools_catalog import (
     find_api_product,
     propose_http_fallback,
 )
-
-# Compilation tools
-from .tools_compose import compose_playbook
 from .tools_compile import (
     _FRIENDLY_FORMS,
     build_playbook_from_trace,
@@ -78,6 +76,9 @@ from .tools_compile import (
     resolve_yaml,
     validate_yaml,
 )
+
+# Compilation tools
+from .tools_compose import compose_playbook
 
 # Re-export public tool names
 # (Users import these via `from mcp_server import <tool_name>`)
@@ -158,6 +159,9 @@ from .tools_picklists import (
     resolve_picklist_value,
 )
 
+# Verify
+from .tools_plan import plan_playbook
+
 # Recipe tools
 from .tools_recipe import (
     assert_playbook_outcome,
@@ -167,8 +171,6 @@ from .tools_recipe import (
     set_failed_run_provider,
     why_did_playbook_fail,
 )
-
-# Verify
 from .tools_verify import verify_playbook
 
 # =========================================================================
@@ -253,6 +255,7 @@ __all__ = [
     "set_failed_run_provider",
     # Verify
     "compose_playbook",
+    "plan_playbook",
     "verify_playbook",
     # Emit / card tools
     "emit_card",

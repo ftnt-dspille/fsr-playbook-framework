@@ -140,5 +140,13 @@ def test_a_failing_fence_is_not_offered():
             system="s",
             messages=[Message(role="user", content="build a looping playbook")],
             tools=_OPENAI_TOOLS, tags={})))
-    assert "emit_card" not in _names(events)
+    # A failing fence must never be delivered as a playbook OFFER -- no broken
+    # YAML is pushed. The unfinished-build behavior (exp/playbook-loop-e1-e3) may
+    # still end the turn on a `choice` card that guides the analyst to a fix
+    # instead of leaving bare prose; that is allowed. The invariant is only that
+    # the failing fence is not OFFERED.
+    offers = [e for e in events
+              if getattr(e, "name", None) == "emit_card"
+              and (getattr(e, "arguments", {}) or {}).get("card_type") == "playbook_offer"]
+    assert not offers, "a failing fence was delivered as a playbook offer"
     assert isinstance(events[-1], DoneEvent)

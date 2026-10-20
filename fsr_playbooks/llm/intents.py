@@ -32,7 +32,7 @@ BUILD_ONLY_TOOLS = frozenset({
     "analyze_playbook",
     "verify_playbook", "verify_enhancement", "edit_playbook",
     "emit_decision_step",
-    "search_playbooks", "get_step_type",
+    "search_playbooks", "get_step_type", "plan_playbook",
     "find_jinja_filter", "find_jinja_pattern", "get_filter_examples",
     "step_through_playbook", "dry_run_playbook",
     "diagnose_yaml_against_pb_execution",
