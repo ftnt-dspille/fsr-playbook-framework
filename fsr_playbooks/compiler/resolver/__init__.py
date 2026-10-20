@@ -174,6 +174,7 @@ class Resolver(
             renames = self._auto_rename_reserved_set_var_keys(pb, pi, errors)
             self._auto_rewrite_set_var_step_refs(pb, pi, errors, renames)
             self._auto_rewrite_input_param_refs(pb, pi, errors)
+            self._steer_manual_input_param_refs(pb, pi, errors)
             self._validate_input_param_refs(pb, pi, errors)
             self._validate_input_record_refs(pb, pi, errors)
             seen_ids = {s.id for s in pb.steps}
