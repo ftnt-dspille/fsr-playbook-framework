@@ -101,3 +101,41 @@ def test_registered_tier0_build_only_not_triage():
     build = {t["name"] for t in intents.tools_for_intent("build")}
     triage = {t["name"] for t in intents.tools_for_intent("triage")}
     assert "compose_playbook" in build and "compose_playbook" not in triage
+
+
+def test_for_each_emits_a_step_modifier_not_a_loop_step_type():
+    # The model mis-modeling `for_each` as a step TYPE with nested steps was a
+    # live failure (UNKNOWN_STEP_TYPE). In the plan it is a per-step modifier:
+    # the looped step keeps its real type, and `item` is wired structurally so
+    # the model never types the jinja list path.
+    plan = [
+        {"kind": "set_variable", "name": "Stage IPs",
+         "values": {"ip_list": "{{ vars.input.records[0].iPAddresses }}"}},
+        {"kind": "connector", "name": "Check IP Reputation",
+         "connector": "virustotal", "operation": "query_ip",
+         "inputs": {"ip": "{{ vars.item }}"},
+         "for_each": {"item": {"from_step": "Stage IPs", "output": "ip_list"},
+                      "parallel": False}},
+    ]
+    r = compose_playbook(steps=plan, name="Loop VT Over IPs", module="alerts")
+    assert r["ok"] is True
+    assert r["compile_summary"]["ok"] is True
+    y = r["yaml"]
+    # for_each is a key on the connector step, and its type is still connector.
+    assert "for_each:" in y
+    assert "type: connector" in y
+    assert "type: for_each" not in y  # never a standalone loop step type
+    # the item list was rendered to the one correct vars.steps path.
+    assert "{{ vars.steps.Stage_IPs.ip_list }}" in y
+
+
+def test_for_each_on_a_non_loopable_kind_is_an_honest_plan_error():
+    plan = [
+        {"kind": "decision", "name": "Branch",
+         "conditions": [{"condition": "{{ true }}", "next": ""}], "default": "",
+         "for_each": {"item": "{{ vars.x }}"}},
+    ]
+    r = compose_playbook(steps=plan, name="Bad Loop", module="alerts")
+    assert r["ok"] is False
+    assert r["code"] == "bad_plan"
+    assert any("for_each" in e for e in r["errors"])

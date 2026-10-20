@@ -73,6 +73,26 @@ def _resolve_inputs(raw: dict[str, Any],
     return out
 
 
+def _resolve_for_each(raw: dict[str, Any],
+                      ref_prefix_by_step: dict[str, str]) -> dict[str, Any]:
+    """Translate a plan `for_each` into the step-level loop modifier. `item` is
+    the list to iterate: a literal jinja string, or a `{from_step, output}` ref
+    that we render to the one correct `vars.steps...` path -- the author never
+    types jinja. `parallel` / `condition` / `__bulk` pass through."""
+    out: dict[str, Any] = {}
+    item = raw.get("item")
+    if isinstance(item, dict) and "from_step" in item:
+        src = str(item.get("from_step") or "")
+        out["item"] = _wire_ref(src, str(item.get("output") or ""),
+                                ref_prefix_by_step.get(src, "data"))
+    elif item is not None:
+        out["item"] = item
+    for k in ("parallel", "condition", "__bulk", "batch_size"):
+        if raw.get(k) is not None:
+            out[k] = raw[k]
+    return out
+
+
 def _plan_to_trace(steps: list[dict[str, Any]], module: str):
     from fsr_playbooks.agent.skill_trace import SkillCall, SkillTrace
 
@@ -112,8 +132,22 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
             resolved = _resolve_inputs(dict(step.get("values") or {}),
                                        ref_prefix_by_step)
 
+        for_each = None
+        raw_fe = step.get("for_each")
+        if isinstance(raw_fe, dict) and raw_fe:
+            if kind not in ("connector", "set_variable"):
+                errors.append(f"step {i} ({name!r}): for_each loops a connector "
+                              "or set_variable step, not a "
+                              f"{kind!r} step")
+            elif not raw_fe.get("item"):
+                errors.append(f"step {i} ({name!r}): for_each needs an `item` "
+                              "list to iterate")
+            else:
+                for_each = _resolve_for_each(raw_fe, ref_prefix_by_step)
+
         calls.append(SkillCall(skill_id=skill_id, step_name=name,
-                               resolved_inputs=resolved, ref_prefix=ref_prefix))
+                               resolved_inputs=resolved, ref_prefix=ref_prefix,
+                               for_each=for_each))
 
     return SkillTrace(calls=calls, module=module or None), errors
 
