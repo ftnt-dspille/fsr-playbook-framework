@@ -244,6 +244,7 @@ def compose_playbook(steps: list[dict[str, Any]],
     compile_summary: dict[str, Any]
     try:
         from fsr_playbooks.compiler import compile_yaml as _compile
+
         from . import _shared
         result = _compile(yaml_text, _shared.DB_PATH)
         if result.ok:

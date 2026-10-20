@@ -2379,8 +2379,7 @@ def _to_authoring_step(snippet: Any) -> Any:
     if not isinstance(snippet, dict) or "arguments" not in snippet:
         return snippet
     try:
-        from fsr_playbooks.compiler.decompiler import (
-            _EDITOR_NOISE_KEYS, _hoist_args)
+        from fsr_playbooks.compiler.decompiler import _EDITOR_NOISE_KEYS, _hoist_args
         out = {k: v for k, v in snippet.items() if k != "arguments"}
         _hoist_args(out, {"arguments": snippet["arguments"]})
         # Utility / child-playbook steps nest `arguments.arguments`, so one hoist
