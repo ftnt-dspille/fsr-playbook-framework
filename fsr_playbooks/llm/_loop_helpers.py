@@ -2075,6 +2075,12 @@ class BuildProgressGuard:
         self._closed = False
         self._verify_forced = False
         self._asked = False
+        # The most recent required_fixes a check reported, and whether any draft
+        # check ever failed -- used only at the terminal exit, to tell the
+        # analyst what is left instead of ending a build turn on bare prose.
+        self.last_fixes: list[str] = []
+        self._incomplete_shown = False
+        self._delivered = False
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         self._any_tool = True
@@ -2099,6 +2105,46 @@ class BuildProgressGuard:
                 name == "emit_card" and isinstance(args, dict)
                 and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES):
             self._closed = True
+        # An offer actually went out (the turn is not a dead-end).
+        if isinstance(result, dict) and result.get("ok") is not False and (
+                name in ("emit_playbook_offer", "emit_enhancement_offer")
+                or (name == "emit_card" and isinstance(args, dict)
+                    and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES)):
+            self._delivered = True
+        # Remember the latest unmet fixes from any check (verify_playbook or the
+        # verify inside edit_playbook), so a turn that ends still-broken can say
+        # what is left rather than dead-ending.
+        if isinstance(result, dict):
+            fixes = result.get("required_fixes")
+            if isinstance(fixes, list) and fixes:
+                self.last_fixes = [
+                    (f.get("message") or f.get("fix") or str(f))
+                    if isinstance(f, dict) else str(f)
+                    for f in fixes
+                ]
+            elif result.get("ready_to_push") is True:
+                self.last_fixes = []
+
+    def incomplete(self, allowed_names: set[str]) -> bool:
+        """True when a build turn is ending with a drafted-but-unfinished
+        playbook and nothing to deliver -- the model authored or edited, a check
+        still reports fixes, and it neither offered nor asked. The terminal
+        branch turns this into a `choice` card listing the fixes, so the analyst
+        is never left on bare prose (the "never dead-end" house rule). Fires at
+        most once, and only on a build slice that can emit a card."""
+        if self._incomplete_shown or self._delivered or self._asked:
+            return False
+        if not (self._drafted or self._authored):
+            return False
+        if self.clean_draft is not None or not self.last_fixes:
+            return False
+        if "emit_card" not in allowed_names:
+            return False
+        return is_authoring_slice(allowed_names)
+
+    def mark_incomplete_shown(self) -> None:
+        self._incomplete_shown = True
+        record_guard_fire("BuildProgressGuard.incomplete")
 
     def unverified_draft(self, allowed_names: set[str]) -> bool:
         """True when a build turn drafted YAML but is ending without ever

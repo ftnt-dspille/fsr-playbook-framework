@@ -149,3 +149,51 @@ def test_analyze_playbook_is_diagnose_not_stalled_build():
     g.note_result("analyze_playbook", {"yaml_text": "playbooks: []"},
                   {"ok": False, "error": "step 'X': ..."})
     assert g.outstanding(BUILD_SLICE) is False
+
+
+# ─── incomplete(): a drafted-but-unfinished build must not dead-end ──────────
+
+INCOMPLETE_SLICE = BUILD_SLICE | {"emit_card"}
+
+
+def test_incomplete_when_a_draft_still_has_fixes():
+    g = BuildProgressGuard()
+    g.note_result("verify_playbook", {"yaml_text": "playbooks: [...]"},
+                  {"ok": True, "ready_to_push": False,
+                   "required_fixes": [{"message": "step 'Block' is unreachable"},
+                                      {"message": "connector 'x' not configured"}]})
+    assert g.incomplete(INCOMPLETE_SLICE) is True
+    assert g.last_fixes == ["step 'Block' is unreachable",
+                            "connector 'x' not configured"]
+
+
+def test_not_incomplete_when_the_draft_verified_clean():
+    g = BuildProgressGuard()
+    g.note_result("verify_playbook",
+                  {"yaml_text": "playbooks:\n- name: p\n  steps:\n  - {name: Block, type: connector}\n"},
+                  {"ok": True, "ready_to_push": True, "required_fixes": []})
+    assert g.incomplete(INCOMPLETE_SLICE) is False
+
+
+def test_not_incomplete_when_the_model_asked_a_choice():
+    g = BuildProgressGuard()
+    g.note_result("verify_playbook", {}, {"ok": True, "ready_to_push": False,
+                  "required_fixes": [{"message": "needs a target IP"}]})
+    g.note_result("emit_card", {"card_type": "choice"}, {"ok": True})
+    assert g.incomplete(INCOMPLETE_SLICE) is False
+
+
+def test_incomplete_fires_once():
+    g = BuildProgressGuard()
+    g.note_result("verify_playbook", {}, {"ok": True, "ready_to_push": False,
+                  "required_fixes": [{"message": "x"}]})
+    assert g.incomplete(INCOMPLETE_SLICE) is True
+    g.mark_incomplete_shown()
+    assert g.incomplete(INCOMPLETE_SLICE) is False
+
+
+def test_triage_turn_never_incomplete():
+    g = BuildProgressGuard()
+    g.note_result("get_record", {}, {"ok": True})
+    g.note_result("run_op", {}, {"ok": True})
+    assert g.incomplete(TRIAGE_SLICE | {"emit_card"}) is False

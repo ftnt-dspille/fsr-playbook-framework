@@ -811,6 +811,33 @@ async def run_loop(
                 yield DoneEvent(stop_reason=provider.contract_stop(rnd.stop_reason))
                 return
 
+            # No offer, no verdict, but the turn drafted a playbook that still
+            # has unmet fixes: do not end on bare prose. Deliver a choice card
+            # naming what is left, so the analyst can say keep going or stop --
+            # the "never dead-end the analyst" rule, enforced in code.
+            if build.incomplete(allowed) and w.has_tool("emit_card"):
+                build.mark_incomplete_shown()
+                yield usage_event("build_incomplete_shown")
+                fixes = build.last_fixes[:6]
+                lines = "\n".join(f"- {m}" for m in fixes)
+                prompt = ("The playbook is not ready to save yet. "
+                          f"{len(build.last_fixes)} item(s) still need attention:\n"
+                          f"{lines}\n\nKeep working on it, or stop here?")
+                card = {"card_type": "choice", "payload": {
+                    "id": f"build-incomplete-{_uuid.uuid4().hex[:8]}",
+                    "prompt": prompt,
+                    "options": [
+                        {"label": "Keep going", "value": "continue"},
+                        {"label": "Stop here", "value": "stop"},
+                    ]}}
+                try:
+                    async for ev in loop_call("emit_card", card, [], tool_call_usage):
+                        yield ev
+                except Exception:
+                    log.exception("loop incomplete-build delivery failed")
+                yield DoneEvent(stop_reason="end_turn")
+                return
+
             yield usage_event(rnd.stop_reason or "")
             yield DoneEvent(stop_reason=provider.contract_stop(rnd.stop_reason))
             return
