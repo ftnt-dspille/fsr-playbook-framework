@@ -15,7 +15,7 @@ from .emitter import emit
 from .errors import CompileError, ErrorCode
 from .ir import Collection
 from .linter import lint
-from .parser import parse_yaml
+from .parser import _autofix_yaml_footguns, parse_yaml
 from .reference_lint import reference_lint
 from .resolver import Resolver
 from .teaching import enrich_diagnostics
@@ -160,6 +160,14 @@ def compile_yaml(
                 e.severity = "warning"
         return errs
 
+    # Fix mechanically-fixable YAML foot-guns ONCE, at the entry, so the
+    # corrected text flows to BOTH the parser and the raw-text linter. Doing it
+    # only inside parse_yaml left the linter reading the original text, so a
+    # quoted Norway boolean (`display: Yes`) still tripped the lint. Each fix is
+    # surfaced as a warning -- never silent.
+    autofix_warnings: list[CompileError] = []
+    text = _autofix_yaml_footguns(text, autofix_warnings)
+
     coll, errs = parse_yaml(text)
     errs = _demote(errs)
     parse_blocking = [e for e in errs if e.severity != "warning"]
@@ -168,9 +176,10 @@ def compile_yaml(
         # caller sees the foot-gun cause when the parser bails out on
         # a derived symptom (e.g. branches mapping that became {True:}).
         lint_errs = lint(text, coll, db_path=db_path)
-        return CompileResult(errors=errs + lint_errs, ir=coll)
+        return CompileResult(errors=autofix_warnings + errs + lint_errs, ir=coll)
 
-    all_warnings: list[CompileError] = [e for e in errs if e.severity == "warning"]
+    all_warnings: list[CompileError] = autofix_warnings + [
+        e for e in errs if e.severity == "warning"]
 
     def _blocked(errs: list[CompileError]) -> CompileResult:
         # Attach teaching examples to errors on high-foot-gun step types (0b).

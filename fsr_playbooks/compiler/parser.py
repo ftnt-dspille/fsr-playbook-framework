@@ -184,6 +184,78 @@ def _not_a_playbook_hint(doc: dict) -> str:
             "fields with create_record or update_record instead")
 
 
+_SCALAR_LINE_RE = re.compile(r"^(\s*(?:- )?[\w.$@-]+:[ \t]+)(.*\S)[ \t]*$")
+
+
+def _quote_scalar_on_line(text: str, line0: int) -> str | None:
+    """Double-quote the unquoted mapping value on `line0` (0-based) whose inner
+    `: ` makes YAML read a second mapping value. Returns the new text, or None
+    when the line is not a simple `key: <unquoted scalar>` (never touch a block
+    scalar, a flow collection, an anchor, or a parent key with children)."""
+    lines = text.split("\n")
+    if not 0 <= line0 < len(lines):
+        return None
+    m = _SCALAR_LINE_RE.match(lines[line0])
+    if not m:
+        return None
+    prefix, val = m.group(1), m.group(2)
+    if val[:1] in ('"', "'", "|", ">", "{", "[", "&", "*", "#"):
+        return None
+    # Only a value whose colon actually breaks the mapping needs quoting.
+    if ": " not in val and not val.endswith(":"):
+        return None
+    esc = val.replace("\\", "\\\\").replace('"', '\\"')
+    lines[line0] = f'{prefix}"{esc}"'
+    return "\n".join(lines)
+
+
+def _autofix_yaml_footguns(text: str, errors: list[CompileError]) -> str:
+    """Return `text` with mechanically-fixable YAML foot-guns corrected, adding
+    one warning per fix to `errors`.
+
+    Stage 1 (parse recovery): an unquoted scalar value whose `: ` breaks the
+    mapping (`description: scores above 50: {{ x }}`) is quoted, using the
+    parser's own error position, and retried. Stage 2: `display: Yes` and the
+    other YAML 1.1 booleans are quoted so the branch label keys off the literal
+    string (`_fix_norway`). Both are no-ops on clean YAML."""
+    for _ in range(12):   # bound: one pass per breaking line
+        try:
+            yaml.safe_load(text)
+            break
+        except yaml.YAMLError as e:
+            if "mapping values are not allowed" not in str(
+                    getattr(e, "problem", "") or ""):
+                break
+            pm = getattr(e, "problem_mark", None)
+            if pm is None:
+                break
+            fixed = _quote_scalar_on_line(text, pm.line)
+            if fixed is None or fixed == text:
+                break
+            text = fixed
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE, severity="warning",
+                message=(f"line {pm.line + 1}: an unquoted value contains a "
+                         "colon that YAML reads as a second mapping key; "
+                         "auto-quoted the whole value."),
+                path=f"<line {pm.line + 1}>"))
+    try:
+        from fsr_playbooks.compiler.source_fixer import _fix_norway, apply_fixes
+        norway = _fix_norway(text)
+        if norway:
+            fixed = apply_fixes(text, norway)
+            if fixed != text:
+                text = fixed
+                for f in norway:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE, severity="warning",
+                        message=f"line {f.line}: {f.message}",
+                        path=f"<line {f.line}>"))
+    except Exception:  # noqa: BLE001 -- advisory; never block the parse
+        pass
+    return text
+
+
 def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
     errors: list[CompileError] = []
     # Strip control chars the model may have introduced while re-emitting a
@@ -197,6 +269,10 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
     # substituting the open playbook would make that always succeed and
     # mis-classify every snippet as a whole-doc patch.
     text, _ = sanitize_yaml_text(text)
+    # Auto-fix mechanically-fixable YAML foot-guns at the source so a single
+    # typo does not fail the whole compile and bounce the agent loop back to
+    # re-author. Each applied fix is surfaced as a warning -- never silent.
+    text = _autofix_yaml_footguns(text, errors)
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError as e:
