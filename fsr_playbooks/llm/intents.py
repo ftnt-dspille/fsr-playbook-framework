@@ -28,6 +28,7 @@ DEFAULT_INTENT = "build"
 # and run-history diagnostics.
 BUILD_ONLY_TOOLS = frozenset({
     "validate_yaml", "compile_yaml", "build_playbook_from_trace",
+    "compose_playbook",
     "analyze_playbook",
     "verify_playbook", "verify_enhancement", "edit_playbook",
     "emit_decision_step",
@@ -288,6 +289,87 @@ def load_intent_prompt(intent: str) -> str:
     return text
 
 
+# --- Create strategy: Guided (plan->compiler) vs Freeform (free-text YAML) ---
+#
+# The build census + the Frank runs showed the failure tail lives in free-text
+# YAML authoring: the model types/validates raw YAML and spends the turn catching
+# the ways text goes wrong. `compose_playbook` (plan->compiler) is valid-by-
+# construction, but advertising it + prompting "prefer it" does NOT stop a model
+# free-writing YAML while the free-text tools stay in the slice -- the slice IS
+# the policy. So a `guided` create REMOVES the free-text authoring surface,
+# leaving compose_playbook as the only path to a deliverable. `freeform` keeps
+# today's full authoring slice (a capable model authors clean YAML in few rounds).
+# `auto` picks per the resolved model's capability.
+CREATE_STRATEGIES = ("auto", "guided", "freeform")
+DEFAULT_CREATE_STRATEGY = "auto"
+
+# The free-text YAML construction/validation surface that compose_playbook
+# replaces. Dropped from a guided create slice. compose_playbook itself,
+# discovery (find_*/get_op_schema/picklists), the run verbs, playbook search,
+# verify_playbook, and emit_card stay -- the model still plans and delivers,
+# it just cannot hand-author or re-validate raw YAML.
+FREEFORM_AUTHORING_TOOLS = frozenset({
+    "validate_yaml", "compile_yaml", "build_playbook_from_trace",
+    "analyze_playbook", "edit_playbook", "emit_decision_step",
+    "step_through_playbook", "dry_run_playbook",
+    "diagnose_yaml_against_pb_execution", "get_step_type",
+})
+
+# Auto's capability axis. There is no existing "intelligence" tier (the catalog
+# Tier is trust: tested/supported/discouraged; eco/balanced/max are Frank proxy
+# names), so this is explicit: a model is create-capable only on evidence it
+# authors clean YAML few-shot. An "incapable" substring wins over a "capable"
+# one (so `gpt-4.1-mini` -> Guided despite matching `gpt-4.1`), and an unknown/
+# empty model is NOT capable -- valid-by-construction is the default floor.
+_CREATE_CAPABLE_SUBSTRINGS = (
+    "opus", "gpt-4.1", "gpt-4o", "gpt-5", "gpt-6",
+    "claude-sonnet-4", "sonnet-4",
+)
+_CREATE_INCAPABLE_SUBSTRINGS = (
+    "mini", "nano", "haiku", "eco", "qwen", "glm", "coding-b200",
+)
+
+
+def is_create_capable_model(model: Any, provider: Any = None) -> bool:
+    """True iff `model` has demonstrated clean few-shot YAML authoring, so Auto
+    may hand it the Freeform (free-text) create path. Conservative: an unknown
+    or empty model id is NOT capable (Guided is the floor)."""
+    m = str(model or "").lower()
+    if not m:
+        return False
+    if any(s in m for s in _CREATE_INCAPABLE_SUBSTRINGS):
+        return False
+    return any(s in m for s in _CREATE_CAPABLE_SUBSTRINGS)
+
+
+def resolve_create_strategy(strategy: Any, model: Any = None,
+                            provider: Any = None) -> str:
+    """Resolve a create strategy to a concrete `guided`/`freeform`.
+
+    `auto` (and any unknown value) resolves by model capability. An explicit
+    `guided`/`freeform` is honored as-is -- the analyst's toggle overrides Auto.
+    """
+    s = str(strategy or DEFAULT_CREATE_STRATEGY).strip().lower()
+    if s not in CREATE_STRATEGIES:
+        s = DEFAULT_CREATE_STRATEGY
+    if s != "auto":
+        return s
+    return "freeform" if is_create_capable_model(model, provider) else "guided"
+
+
+def apply_create_strategy(tools: list[dict[str, Any]],
+                          strategy: str) -> list[dict[str, Any]]:
+    """Narrow a build tool slice for a RESOLVED create strategy. `guided` drops
+    the free-text YAML authoring surface; anything else (freeform) is a no-op.
+
+    Pass the output of `resolve_create_strategy` -- a raw `auto` is treated as a
+    no-op here, not silently resolved, so callers choose the capability model
+    explicitly rather than defaulting to Guided by accident."""
+    if str(strategy or "").strip().lower() != "guided":
+        return tools
+    return [t for t in tools if t["name"] not in FREEFORM_AUTHORING_TOOLS]
+
+
 def tools_for_intent(intent: str) -> list[dict[str, Any]]:
     """The tool slice advertised to the model for this intent.
 
@@ -316,4 +398,6 @@ __all__ = [
     "resolve_intent", "load_intent_prompt", "tools_for_intent",
     "classify_message", "gate_directive",
     "TRIVIAL", "CONTINUE", "DIRECTIVE",
+    "CREATE_STRATEGIES", "DEFAULT_CREATE_STRATEGY", "FREEFORM_AUTHORING_TOOLS",
+    "is_create_capable_model", "resolve_create_strategy", "apply_create_strategy",
 ]

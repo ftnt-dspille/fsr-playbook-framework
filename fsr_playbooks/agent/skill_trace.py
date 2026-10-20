@@ -74,6 +74,13 @@ class SkillCall:
     # The wiring compiler (§3) uses this so generated paths match runtime,
     # and the verify loop (§4) keys its render context the same way.
     ref_prefix: str = ""
+    # Per-step loop modifier. FSR's for_each is a step-level KEY (sibling of
+    # arguments), not a step type: the step body runs once per element of
+    # `item` (a jinja list expression), with the element bound as
+    # `{{ vars.item }}`. None means the step does not loop. The compiler
+    # attaches it verbatim to the emitted step dict, so this must already hold
+    # the rendered jinja `item` (compose does the structural -> jinja wiring).
+    for_each: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -87,6 +94,8 @@ class SkillCall:
         # the shape they always did.
         if self.staged:
             d["staged"] = True
+        if self.for_each:
+            d["for_each"] = self.for_each
         return d
 
     @classmethod
@@ -98,6 +107,7 @@ class SkillCall:
             observed_output=d.get("observed_output"),
             ref_prefix=d.get("ref_prefix") or "",
             staged=bool(d.get("staged")),
+            for_each=d.get("for_each") or None,
         )
 
 

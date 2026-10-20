@@ -160,6 +160,10 @@ def compile_and_verify(
             continue
         wired = compiled["wiring"].get(call.step_name, {})
         step = skill.compile(call.resolved_inputs, wired, call.step_name)
+        # A loop modifier the plan declared: FSR's for_each is a step-level key
+        # (not a step type), so attach it verbatim to the emitted step dict.
+        if getattr(call, "for_each", None):
+            step["for_each"] = call.for_each
         dropped = sc.prune_hidden_params(step, rules_for)
         if dropped:
             compiled.setdefault("pruned", {})[call.step_name] = dropped

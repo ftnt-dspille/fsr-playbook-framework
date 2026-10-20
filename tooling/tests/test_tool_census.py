@@ -121,16 +121,17 @@ def test_manifest_is_loaded_and_has_the_connector_tools():
 
 
 def test_census_includes_connector_tools_without_runtime():
-    """A census with no --runtime and no --probe must still see all 71 tools
-    (45 framework - emit_patch_proposal + 26 connector-registered from the manifest), not what
+    """A census with no --runtime and no --probe must still see all 72 tools
+    (46 framework - emit_patch_proposal + 26 connector-registered from the manifest), not what
     the framework advertises at import.
 
-    45, not 41, since Phase 1 added the consolidated `find` / `picklist` /
+    46, not 41, since Phase 1 added the consolidated `find` / `picklist` /
     `connector_health` / `emit_card` entry points; their constituents stay
     registered (census counts the registry -- CONSOLIDATED_AWAY names are
-    dispatchable, just no longer advertised)."""
+    dispatchable, just no longer advertised). +1 for E6 `compose_playbook`
+    (build a playbook from a typed plan)."""
     rep = tc.census(runtime=None, probe=None)
-    assert rep["meta"]["tools"] == 71  # +edit_playbook -emit_patch_proposal +edr_host
+    assert rep["meta"]["tools"] == 72  # +edit_playbook -emit_patch_proposal +edr_host +compose_playbook
     assert rep["meta"]["connector_registered"] == 26
     names = {t["tool"] for t in rep["tools"]}
     # A sample of the P1/P2 tools the connector registers (post-merge)

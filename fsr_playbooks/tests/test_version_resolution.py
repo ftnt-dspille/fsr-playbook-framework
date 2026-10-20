@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import fsr_playbooks
 
 _REPO_ROOT = Path(fsr_playbooks.__file__).resolve().parent.parent
@@ -28,7 +30,29 @@ def _version_from(cwd: Path) -> str:
     return out.stdout.strip()
 
 
+def _git_tree_is_dirty() -> bool:
+    """True if the repo has staged or unstaged changes. A dirty tree makes
+    setuptools_scm append a `.dYYYYMMDD` dirtiness marker to the git-derived
+    version, which only the repo-root (git-aware) resolution sees -- the
+    non-git tmp_path resolution reads the clean installed metadata. The two
+    then legitimately differ, so the cross-directory comparison below is only
+    meaningful on a clean tree. This matters at COMMIT time: the pre-commit
+    pytest hook runs with the commit's own changes staged (so the tree is
+    always dirty then), and without this guard every commit would trip it."""
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False  # not a git checkout (installed wheel): nothing to skip for
+    return bool(out.stdout.strip())
+
+
 def test_version_is_the_same_from_any_working_directory(tmp_path):
+    if _git_tree_is_dirty():
+        pytest.skip("working tree dirty: the git-derived version carries a "
+                    "dirtiness marker the installed-metadata path cannot see")
     assert _version_from(_REPO_ROOT) == _version_from(tmp_path)
 
 
