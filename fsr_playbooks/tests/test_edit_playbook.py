@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
+pytest.importorskip("mcp.server.mcpserver", reason="mcp package not installed")
 
 from ruamel.yaml import YAML  # noqa: E402
 

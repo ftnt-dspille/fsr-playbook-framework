@@ -13,12 +13,13 @@ from .._yaml_hygiene import sanitize_yaml_text  # re-exported: see below
 
 
 class _FallbackFastMCP:
-    """No-op FastMCP shim for connector runtimes.
+    """No-op MCP-server shim for connector runtimes.
 
     FortiSOAR's connector sandbox only calls these functions directly; it
     doesn't run the stdio MCP server. Some sandbox builds expose import stubs
-    that satisfy `from mcp.server.fastmcp import FastMCP` but are not callable,
-    so we validate the imported object before using it.
+    that satisfy the server import but are not callable, so we validate the
+    imported object before using it. The class name is kept for continuity with
+    callers/tests that probe for it.
     """
 
     def __init__(self, *args, **kwargs):
@@ -36,15 +37,19 @@ class _FallbackFastMCP:
             "`python -m mcp_server` / `fsrpb mcp` need the real SDK.")
 
 
-# Either the real class or the fallback shim; the two are unrelated types, so
-# the name is declared as the common `type[Any]` before either branch assigns it.
+# The MCP server class. mcp 2.x renamed `mcp.server.fastmcp.FastMCP` to
+# `mcp.server.mcpserver.MCPServer` (same `.tool()` decorator, `_tool_manager`
+# and `run(transport=...)` surface). We require mcp>=2 (see pyproject), so we
+# import MCPServer directly and fall back only to the no-op shim for the
+# connector sandbox, where the real `mcp` package is not importable at all. The
+# two are unrelated types, so the name is declared as `type[Any]` first.
 FastMCP: type[Any]
 try:
-    from mcp.server.fastmcp import FastMCP as _ImportedFastMCP
+    from mcp.server.mcpserver import MCPServer as _ImportedServer  # mcp 2.x
 except Exception:  # noqa: BLE001
     FastMCP = _FallbackFastMCP
 else:
-    FastMCP = _ImportedFastMCP if callable(_ImportedFastMCP) else _FallbackFastMCP
+    FastMCP = _ImportedServer if callable(_ImportedServer) else _FallbackFastMCP
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -67,9 +72,9 @@ def _make_mcp():
         ),
     )
     if not callable(getattr(server, "tool", None)):
-        raise TypeError("FastMCP.tool is not callable")
+        raise TypeError("MCP server .tool is not callable")
     if not callable(server.tool()):
-        raise TypeError("FastMCP.tool() did not return a decorator")
+        raise TypeError("MCP server .tool() did not return a decorator")
     return server
 
 

@@ -3,7 +3,7 @@ authorizes removing steps they never named, or a second playbook while one is
 open. Structural (a bound session answer), never a parse of their wording."""
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
+pytest.importorskip("mcp.server.mcpserver", reason="mcp package not installed")
 
 from fsr_playbooks.llm.turn_plan import TurnContext, plan_turn  # noqa: E402
 from fsr_playbooks.mcp_server._shared import (  # noqa: E402

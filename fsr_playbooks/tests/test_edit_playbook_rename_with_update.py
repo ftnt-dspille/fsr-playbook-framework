@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
+pytest.importorskip("mcp.server.mcpserver", reason="mcp package not installed")
 
 from fsr_playbooks.mcp_server import _verified_yaml  # noqa: E402
 from fsr_playbooks.mcp_server._shared import (  # noqa: E402
