@@ -191,11 +191,19 @@ def compose_playbook(steps: list[dict[str, Any]],
         maps each parameter to a literal, or to `{from_step, output}` to read an
         earlier step's output (this writes the correct `vars.steps...` path for
         you; never type jinja yourself).
+      - `record`: `{kind, name, action, module, operation?, fields?}` where
+        `action` is `create` / `update` / `find` -- a record action on an FSR
+        module. `fields` values may also be `{from_step, output}` refs.
       - `decision`: `{kind, name, conditions, default?}` -- route on conditions
         over earlier outputs.
       - `manual_input`: `{kind, name, message?, options?, fields?}` -- a human
         confirmation or extra input a following decision consumes.
       - `set_variable`: `{kind, name, values}` -- stage/normalize values.
+      - loop any `connector` / `record` / `set_variable` step by adding
+        `for_each: {item, parallel?}`, where `item` is the list to iterate
+        (a `{from_step, output}` ref, or a jinja string); the element is bound as
+        `{{ vars.item }}` in that step's inputs. `for_each` is a step MODIFIER --
+        there is no standalone loop step type.
     `module` is the trigger module (alerts, incidents, ...). Resolve each
     connector/operation with `plan_playbook` or `find` first.
 
