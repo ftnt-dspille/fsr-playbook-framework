@@ -53,7 +53,7 @@ loop-delivery change in `c48e97f`. Figures marked "earlier" come from the
 | Fabricated call (`PromisedActionGuard`) | `promised_action_forced` | 30 | The model wrote `[called x(...)]` / `[tool result: ...]` as prose: one directive | Keep the structural half (our own marker syntax). The phrase-regex half that matched promises was deleted: it was intent detection over wording. |
 | Stall (`ProgressMeter`) | none (`record_guard_fire`) | 14 (earlier) | Rounds that only repeat or only fail: one no-tools wrap-up | Keep. |
 | Budget cliff | `max_tool_turns` | 36 | Out of tool rounds: wrap-up when nothing is delivered, else the budget-ask card | Keep. |
-| Build progress | `build_progress_forced` | 37 | Researched step types / op schemas and never drafted: one directive | Keep. No tool change removes "stopped before starting". |
+| Build progress | `build_progress_forced` | 37 | Researched step types / op schemas and never drafted, and executed no op or hunt tool: one directive. A turn that ran an op is investigating and stands down. | Keep. No tool change removes "stopped before starting". |
 | Unverified draft (never clean) | `unverified_draft_forced` | 10 (last 2026-09-28) | A build turn ran validate/compile, the draft never checked clean, and the turn stopped: one directive to verify and offer | Keep. Reachable: `test_draft_then_stop_is_nudged_into_verify_and_offer` drives it. Its replacement covers only the clean case (below). |
 | Unverified draft (clean) | `unverified_draft_verified` | 0 (since 2026-10-09) | The last validate/compile passed clean with action steps and the turn ends: the loop runs `verify_playbook` itself. A pass is delivered with no model round; a fail goes back with the verify result in history | Replacement for the row above. Covered by `test_a_clean_draft_is_verified_and_delivered_by_the_loop` and `test_a_clean_draft_that_fails_verify_goes_back_with_its_fixes`. |
 | Create delivery | `create_delivery_forced` | 28 (last 2026-10-06) | A verify passed and the turn ends without the offer card: the loop emits `playbook_offer` with the verified bytes. No model round | Keep. This is the replacement contract, not a fallback nudge. |
@@ -77,6 +77,7 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
 | Repeated failed call | `agent_loop.guarded_dispatch` | `repeated_call_guard` | 133 | Keep. |
 | Not in the advertised slice | `agent_loop.guarded_dispatch` | "not available in this session" error | 3 (earlier) | Keep; defense in depth for the intent slice. |
 | Unreadable tool arguments | `agent_loop.guarded_dispatch` | `bad_tool_arguments` | 34 | Keep; structural. |
+| Duplicate card in one turn | `agent_loop.guarded_dispatch` | `duplicate_card` | new | Keep; structural. Same (card_type, id) already delivered, or any second capability_gap (#170). |
 | Hunt floor | `TriageDiscipline` | `guard_defer` / `hunt_floor_guard` | 47 | Keep. |
 | Defer (`guard_defer` on `emit_card`) | `TriageDiscipline` | `guard_defer` | 59 | Keep. |
 | Call-once discovery | `TriageDiscipline` | `guard_redirect` / `call_once_guard` | 13 | Keep. Terminal; the signature is remembered. |

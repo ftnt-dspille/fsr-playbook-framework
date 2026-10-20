@@ -15,6 +15,8 @@ from fsr_playbooks.llm._loop_helpers import (
     _CREATE_OFFER_TOOL,
     _CREATE_VERIFY_TOOL,
     BuildProgressGuard,
+    VerdictDeliveryGuard,
+    is_authoring_slice,
 )
 
 BUILD_SLICE = {_CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL,
@@ -197,3 +199,65 @@ def test_triage_turn_never_incomplete():
     g.note_result("get_record", {}, {"ok": True})
     g.note_result("run_op", {}, {"ok": True})
     assert g.incomplete(TRIAGE_SLICE | {"emit_card"}) is False
+# The live triage turn: every turn advertises the full surface, verify_playbook
+# and the offer tool included, so the authoring-slice check passes. What the turn
+# ran is the only thing that tells it apart from a build.
+LIVE_SLICE = FULL_SLICE | {_CREATE_OFFER_TOOL, _CREATE_VERIFY_TOOL}
+
+
+def test_reputation_lookup_is_not_a_stalled_build():
+    """Live on a box, alert page: "whats the reputation of 1.1.1.1". The model
+    ran find(kind=action, action_type=enrichment), get_op_schema x2, run_op x2
+    (VirusTotal, OTX) and answered in prose. BuildProgressGuard counted the
+    get_op_schema calls as build research and forced a playbook nobody asked
+    for. The turn executed enrichment ops, so it is investigating."""
+    assert is_authoring_slice(LIVE_SLICE)
+    g = BuildProgressGuard()
+    g.note_result("find", {"kind": "action", "action_type": "enrichment"},
+                  {"ok": True, "data": [{"name": "Get IP Reputation"}]})
+    g.note_result("get_op_schema", {"connector": "virustotal", "operation": "get_ip"},
+                  {"ok": True, "params": []})
+    g.note_result("get_op_schema", {"connector": "otx", "operation": "get_indicator"},
+                  {"ok": True, "params": []})
+    g.note_result("run_op", {"connector": "virustotal", "operation": "get_ip",
+                             "params": {"ip": "1.1.1.1"}},
+                  {"ok": True, "data": {"malicious": 0, "harmless": 80}})
+    g.note_result("run_op", {"connector": "otx", "operation": "get_indicator",
+                             "params": {"ip": "1.1.1.1"}},
+                  {"ok": True, "data": {"pulse_count": 0}})
+    assert g.outstanding(LIVE_SLICE) is False
+
+
+def test_genuine_build_research_still_fires_on_the_live_slice():
+    """The narrowing above must not hollow out the guard: a build turn that
+    researched op schemas and step types, executed nothing, and stopped is still
+    a stalled build on the same full surface."""
+    assert is_authoring_slice(LIVE_SLICE)
+    g = BuildProgressGuard()
+    g.note_result("find", {"kind": "action", "action_type": "containment"},
+                  {"ok": True, "data": []})
+    g.note_result("get_op_schema", {"connector": "fortigate", "operation": "block_ip"},
+                  {"ok": True, "params": []})
+    g.note_result("get_op_schema", {"connector": "fortigate", "operation": "unblock_ip"},
+                  {"ok": True, "params": []})
+    g.note_result("get_step_type", {"type": "connector"}, {"ok": True})
+    assert g.outstanding(LIVE_SLICE) is True
+
+
+def test_reputation_lookup_gets_one_verdict_round_not_a_playbook():
+    """What the reputation turn should get instead: the triage verdict guard
+    sees an answered enrichment and no authoring, so it asks for one verdict
+    card. The build guard stays out of it."""
+    g = BuildProgressGuard()
+    v = VerdictDeliveryGuard()
+    calls = [
+        ("find", {"kind": "action", "action_type": "enrichment"}, {"ok": True, "data": []}),
+        ("get_op_schema", {"connector": "virustotal", "operation": "get_ip"}, {"ok": True}),
+        ("run_op", {"connector": "virustotal", "operation": "get_ip"},
+         {"ok": True, "data": {"malicious": 0}}),
+    ]
+    for name, args, result in calls:
+        g.note_result(name, args, result)
+        v.note_result(name, args, result)
+    assert g.outstanding(LIVE_SLICE) is False
+    assert v.outstanding(LIVE_SLICE) is True

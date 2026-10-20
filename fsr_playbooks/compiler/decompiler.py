@@ -179,6 +179,10 @@ _API_ENDPOINT_DEFAULT_STEP_VARS = {
 }
 
 
+#: Triggers whose wire `resources` is the friendly `module:` / `modules:`.
+_MODULE_TRIGGER_TYPES = ("start", "start_on_create", "start_on_update", "start_on_delete")
+
+
 def _step_modules(out: dict) -> list[str]:
     """The module list a decompiled step is bound to, from its hoisted
     `module`/`modules` surface (set by the resources->module lift)."""
@@ -497,7 +501,10 @@ def _decompile_step(s, pb_name: str | None = None,
     # button identity. Lift `resources` back to a friendly `module:` (single) /
     # `modules:` (list) so the round-trip is non-lossy. `module` already set by the
     # universal hoist above wins (an authored `module:` is the source of truth).
-    if s.type == "start" and isinstance(args, dict) and "resources" in args \
+    # The record triggers carry their module the same way; without the lift
+    # their branch below pops `resources` as a default and recompile widens the
+    # trigger to [alerts, incidents] (#186).
+    if s.type in _MODULE_TRIGGER_TYPES and isinstance(args, dict) and "resources" in args \
             and "module" not in out and "modules" not in out:
         resources = args.pop("resources")
         if isinstance(resources, list) and len(resources) == 1:

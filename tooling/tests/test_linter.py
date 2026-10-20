@@ -5,6 +5,10 @@ input passes) case so future refactors can't silently weaken the linter.
 """
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from fsr_playbooks.compiler import compile_yaml
 
 
@@ -339,6 +343,98 @@ def test_post_comment_sugar_warns(db_path):
     warns = [e for e in r.errors if e.severity == "warning"]
     msgs = " ".join(w.message for w in warns)
     assert any("message:" in msgs and "record:" in msgs for w in warns), msgs
+
+
+# ---- update_record on the trigger record overwrites a free-text field -----
+
+_TRIGGER_UPDATE_HEAD = """
+collection: C
+playbooks:
+  - name: pb
+    parameters: [ip, target]
+    steps:
+      - name: trigger
+        type: start
+        next: Block
+      - name: Block
+        type: update_record
+        module: alerts
+        record: "{{ vars.input.records[0]['@id'] }}"
+        FIELDS_KEY:
+          FIELD_LINE
+        next: Done
+      - name: Done
+        type: end
+"""
+
+
+def _trigger_update(fields_key: str, field_line: str) -> str:
+    return (_TRIGGER_UPDATE_HEAD
+            .replace("FIELDS_KEY", fields_key)
+            .replace("FIELD_LINE", field_line))
+
+
+def _description_warnings(r) -> list:
+    return [e for e in r.errors
+            if e.severity == "warning" and "description" in (e.message or "")]
+
+
+def test_trigger_description_overwrite_warns(db_path):
+    """Live: a model-authored playbook set the alert's description to a constant
+    string on the trigger record, wiping the original narrative. Warn (not
+    error): a constant write is sometimes intended, but it should be a choice."""
+    text = _trigger_update("fields",
+                           'description: "Blocked {{ vars.input.params.ip }} on FortiGate after approval."')
+    r = compile_yaml(text, db_path)
+    assert r.ok, [e.to_dict() for e in r.errors]
+    assert not [e for e in r.errors if e.severity != "warning"]
+    warns = _description_warnings(r)
+    assert len(warns) == 1, [e.message for e in r.errors]
+    assert warns[0].code.value == "bad_value"
+    assert "record that started this playbook" in warns[0].message
+    assert "original description is lost" in warns[0].message
+    assert "comment" in warns[0].message.lower()
+    assert warns[0].path.endswith("arguments.fields.description")
+
+
+def test_trigger_description_overwrite_warns_on_wire_resource_key(db_path):
+    # `resource:` is the wire spelling of `fields:`; the rule reads both.
+    text = _trigger_update("resource",
+                           'description: "Closed by playbook."')
+    r = compile_yaml(text, db_path)
+    assert r.ok, [e.to_dict() for e in r.errors]
+    assert len(_description_warnings(r)) == 1
+
+
+@pytest.mark.parametrize("value", [
+    "{{ vars.input.records[0].description }} | Blocked {{ vars.input.params.ip }}",
+    "{{ vars.input.records[0]['description'] }}\nBlocked {{ vars.input.params.ip }}",
+    '{{ vars.input.records[0]["description"] | default("") }} Blocked',
+])
+def test_trigger_description_kept_when_value_carries_it(db_path, value):
+    text = _trigger_update("fields", "description: " + json.dumps(value))
+    r = compile_yaml(text, db_path)
+    assert r.ok, [e.to_dict() for e in r.errors]
+    assert _description_warnings(r) == [], [e.message for e in r.errors]
+
+
+def test_trigger_update_of_other_fields_not_flagged(db_path):
+    text = _trigger_update("fields", 'status: "{{ vars.input.params.ip }}"')
+    r = compile_yaml(text, db_path)
+    assert r.ok, [e.to_dict() for e in r.errors]
+    assert _description_warnings(r) == []
+
+
+def test_non_trigger_record_description_not_flagged(db_path):
+    # Writing a description on a record the playbook looked up (not the trigger
+    # record) overwrites nothing the analyst is looking at.
+    text = _trigger_update("fields", 'description: "Blocked {{ vars.input.params.ip }}."').replace(
+        "record: \"{{ vars.input.records[0]['@id'] }}\"",
+        "record: \"{{ vars.input.params.target }}\"")
+    assert "vars.input.params.target" in text
+    r = compile_yaml(text, db_path)
+    assert r.ok, [e.to_dict() for e in r.errors]
+    assert _description_warnings(r) == []
 
 
 # ---- code_snippet .code_output → .data.code_output auto-rewrite -----------

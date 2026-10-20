@@ -144,6 +144,22 @@ _SELF_REPAIR_PREFIX = (
 )
 
 
+
+def _card_key(name: str, args: Any) -> tuple[str, str] | None:
+    """(card_type, id) of an emit_card call, or None for anything else. A card
+    without an id keys on its type alone only for capability_gap (handled by
+    the caller); other id-less cards are never treated as duplicates."""
+    if name != "emit_card" or not isinstance(args, dict):
+        return None
+    ct = str(args.get("card_type") or "").strip().lower()
+    payload = args.get("payload")
+    cid = str((payload or {}).get("id") or "").strip() if isinstance(payload, dict) else ""
+    if not ct:
+        return None
+    if not cid and ct != "capability_gap":
+        return None
+    return ct, cid
+
 def _fence_problem(yaml_text: str) -> tuple[str, str] | None:
     """Why a playbook fence must not be saved as it stands: the repair prompt
     to send and the problems it names. None when the fence passes. Compile
@@ -380,6 +396,12 @@ async def run_loop(
     # delivered, further offer attempts this turn are refused (never-offer-twice
     # bar). Set after a successful delivery; read before the next dispatch.
     offer_delivered = False
+    # Any card already on screen this turn, by (card_type, id), plus whether a
+    # capability_gap was delivered: live, one model emitted the SAME
+    # capability_gap card five times in a turn (#170). A gap card is the turn's
+    # answer, so a second one is refused too, whatever its id.
+    delivered_cards: set[tuple[str, str]] = set()
+    gap_delivered = False
 
     trace_id = _uuid.uuid4().hex[:8]   # telemetry correlation, not the chat id
     turn_idx = 0
@@ -389,7 +411,7 @@ async def run_loop(
     dropped_calls: list[DroppedCall] = []
 
     def guarded_dispatch(name: str, args: dict[str, Any]) -> Any:
-        nonlocal offer_delivered
+        nonlocal offer_delivered, gap_delivered
         if isinstance(args, dict) and BAD_ARGS_KEY in args:
             return {
                 "ok": False, "code": "bad_tool_arguments",
@@ -429,6 +451,18 @@ async def run_loop(
                     "turn."
                 ),
             }
+        card = _card_key(name, args)
+        if card is not None and (card in delivered_cards
+                                 or (card[0] == "capability_gap" and gap_delivered)):
+            return {
+                "ok": False,
+                "code": "duplicate_card",
+                "message": (
+                    "This card is already in front of the analyst this turn. "
+                    "Do not emit it again. Continue with the next step or end "
+                    "your turn."
+                ),
+            }
         guard = discipline.evaluate(name, args)
         if guard is not None:
             # Terminal guards (call-once) can never succeed; remembering the
@@ -443,6 +477,10 @@ async def run_loop(
             failed_signatures.add(sig)
         if is_delivered_offer(name, args, result):
             offer_delivered = True
+        if card is not None and isinstance(result, dict) and result.get("ok") is True:
+            delivered_cards.add(card)
+            if card[0] == "capability_gap":
+                gap_delivered = True
         return result
 
     async def wrapup(directive: str, label: str,

@@ -384,6 +384,30 @@ def _db() -> sqlite3.Connection:
     return conn
 
 
+def catalog_missing_tables(conn: sqlite3.Connection,
+                           tables: tuple[str, ...] = ("entries", "entries_fts")
+                           ) -> list[str]:
+    """The vendor API catalog tables `conn` cannot see. All of them when the
+    catalog never attached (it is optional: `_db()` attaches it only when the
+    file exists, and an appliance install ships none). Callers report this as
+    `catalog_unavailable` instead of surfacing SQLite's "no such table"."""
+    try:
+        have = {r[0] for r in conn.execute(
+            "SELECT name FROM catalog.sqlite_master WHERE type='table'")}
+    except sqlite3.Error:
+        return list(tables)
+    return [t for t in tables if t not in have]
+
+
+#: Where to look when the vendor API catalog is not installed: the playbook
+#: side has its own corpora, and an analyst-facing build never needs the
+#: catalog to find a worked step.
+CATALOG_UNAVAILABLE_HINT = (
+    "The vendor API example catalog is not installed here. For playbook "
+    "patterns use find(kind='recipe') or find(kind='step', query=<step type>); "
+    "for a connector's worked calls use find(kind='example', connector=<name>).")
+
+
 def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 

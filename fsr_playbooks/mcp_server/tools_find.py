@@ -92,6 +92,12 @@ def find(kind: str, query: str = "", connector: str = "",
                                          limit=limit)
         else:
             out = search_api_examples(query, limit=limit)
+            # The catalog is optional; an install without it must say where
+            # to look instead, not hand the model a SQLite error string.
+            first = out[0] if isinstance(out, list) and len(out) == 1 else None
+            if isinstance(first, dict) and first.get("code") == "catalog_unavailable":
+                out = {"ok": False, "code": "catalog_unavailable",
+                       "message": first.get("hint", ""), "results": []}
     elif k == "recipe":
         out = _trim_recipe_templates(find_recipe(query, limit=limit))
     elif k == "api":

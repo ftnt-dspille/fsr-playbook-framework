@@ -404,6 +404,75 @@ def _check_message_record(s: Step, pi: int, si: int) -> CompileError | None:
     )
 
 
+# Free-text record fields an update must not overwrite blind. `description`
+# carries an alert's original narrative. Extend this tuple, not the rule, when
+# another long text field earns the same warning.
+_TRIGGER_FREE_TEXT_FIELDS = ("description",)
+_TRIGGER_RECORD_RE = re.compile(r"vars\.input\.records\s*\[\s*0\s*\]")
+
+
+def _reads_trigger_field(value: str, field: str) -> bool:
+    """True when a Jinja value reads `field` off the trigger record, in either
+    dot or bracket form: `vars.input.records[0].description` or
+    `vars.input.records[0]['description']`."""
+    pat = (r"vars\.input\.records\s*\[\s*0\s*\]\s*"
+           r"(?:\.\s*" + re.escape(field) + r"\b"
+           r"|\[\s*(['\"])" + re.escape(field) + r"\1\s*\])")
+    return re.search(pat, value) is not None
+
+
+def _check_trigger_record_overwrite(s: Step, pi: int, si: int) -> list[CompileError]:
+    """Warn when an `update_record` on the trigger record sets a free-text field
+    to a value that does not read that field's current value.
+
+    `update_record` replaces the field it names. A model-authored playbook set
+    an alert's `description` to a constant string and wiped the analyst's
+    original text. A value that reads the field back (`vars.input.records[0]
+    .description`) keeps it, so that is not flagged. Writing the same field on
+    a record the playbook looked up, rather than the trigger, is not flagged
+    either. A warning, not an error: a deliberate constant write is legal, it
+    should just be a choice. The fix the warning points at is a comment.
+    """
+    if s.type != "update_record":
+        return []
+    args = s.arguments if isinstance(s.arguments, dict) else {}
+    record = args.get("record")
+    if not isinstance(record, str) or not _TRIGGER_RECORD_RE.search(record):
+        return []
+    fields = args.get("fields")
+    if not isinstance(fields, dict):
+        fields = args.get("resource")
+    if not isinstance(fields, dict):
+        return []
+    out: list[CompileError] = []
+    for field in _TRIGGER_FREE_TEXT_FIELDS:
+        if field not in fields:
+            continue
+        value = fields[field]
+        text = value if isinstance(value, str) else ""
+        if _reads_trigger_field(text, field):
+            continue
+        name = s.name or s.id or "?"
+        out.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            severity="warning",
+            message=(
+                f"step {name!r} replaces the {field} of the record that started "
+                f"this playbook, so the original {field} is lost. If the step "
+                f"should add to it, include the existing value in the new text "
+                f"(`{{{{ vars.input.records[0].{field} }}}}`). To leave a note on "
+                f"that record instead, post a comment."
+            ),
+            path=f"playbooks[{pi}].steps[{si}].arguments.fields.{field}",
+            suggestion=(
+                "post the note as a comment: a `message:` block with "
+                "`record: \"{{ vars.input.records[0]['@id'] }}\"`, and leave "
+                f"{field} unchanged"
+            ),
+        ))
+    return out
+
+
 # Step types whose REAL output is the `{data, status, message, operation}`
 # envelope but whose MOCK output (mock_result) is the raw payload with NO
 # envelope. A `.data` reference therefore renders EMPTY in a `--mock` run and
@@ -703,6 +772,7 @@ def lint(
                 e = _check_message_record(s, pi, si)
                 if e:
                     errs.append(e)
+                errs.extend(_check_trigger_record_overwrite(s, pi, si))
                 # Resolve the step's config's allow_imports from the catalog.
                 # Per-step: a pinned config name reads that config; no pin reads
                 # the default.  An inline allow_imports on the step always wins.
