@@ -2213,6 +2213,8 @@ class BuildProgressGuard:
         self._authored = False
         self._run_intent = False
         self._investigated = False
+        # An op was ATTEMPTED (any result) -- see `outstanding`.
+        self._ran_op = False
         self._forced = False
         self._build_research = False
         # Second stage -- see `unverified_draft`.
@@ -2242,6 +2244,13 @@ class BuildProgressGuard:
         # the turn is looking at data, not stalled on a playbook.
         if counts_as_investigation(name) and _answered(result):
             self._investigated = True
+        # An op attempt is investigation whatever came back: an errored,
+        # deferred or not-yet-run op still means the turn is on the op path.
+        if name == "run_op" or (
+                name == "find" and isinstance(args, dict)
+                and args.get("kind") == "action"
+                and args.get("action_type") == "enrichment"):
+            self._ran_op = True
         if name in _BUILD_RESEARCH_TOOLS or (
                 name == "find" and isinstance(args, dict)
                 and args.get("kind") in _BUILD_RESEARCH_FIND_KINDS):
@@ -2348,7 +2357,7 @@ class BuildProgressGuard:
         # into authoring: get_op_schema is build research, but an op that ran
         # means the turn is investigating. A build turn that executed nothing
         # keeps the guard (see _BUILD_RESEARCH_TOOLS).
-        if self._investigated:
+        if self._investigated or self._ran_op:
             return False
         # Nor is a triage turn. Live, every turn advertises verify_playbook, so
         # without this a triage turn that pulled the record and searched the

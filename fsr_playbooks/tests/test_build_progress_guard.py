@@ -261,3 +261,28 @@ def test_reputation_lookup_gets_one_verdict_round_not_a_playbook():
         v.note_result(name, args, result)
     assert g.outstanding(LIVE_SLICE) is False
     assert v.outstanding(LIVE_SLICE) is True
+
+
+def test_schema_then_failed_run_op_is_not_a_stalled_build():
+    """#190: an enrichment turn read an op schema, then its run_op ERRORED.
+    The op was still attempted, so the turn is investigating, not stalled on
+    authoring. An answered-only check let it be forced into a playbook."""
+    g = BuildProgressGuard()
+    g.note_result("get_op_schema", {"connector": "virustotal", "operation": "get_ip"},
+                  {"ok": True, "params": []})
+    g.note_result("run_op", {"connector": "virustotal", "operation": "get_ip",
+                             "params": {"ip": "1.1.1.1"}},
+                  {"ok": False, "error": "connector timeout"})
+    assert g.outstanding(LIVE_SLICE) is False
+
+
+def test_schema_then_deferred_run_op_is_not_a_stalled_build():
+    """#190: a schema read followed by a run_op that a guard DEFERRED (not yet
+    run). The model is on the op path; forcing an authoring round here is
+    the wrong nudge."""
+    g = BuildProgressGuard()
+    g.note_result("get_op_schema", {"connector": "virustotal", "operation": "get_ip"},
+                  {"ok": True, "params": []})
+    g.note_result("run_op", {"connector": "virustotal", "operation": "get_ip"},
+                  {"kind": "guard_defer", "ok": False})
+    assert g.outstanding(LIVE_SLICE) is False
