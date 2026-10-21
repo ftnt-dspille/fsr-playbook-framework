@@ -42,10 +42,15 @@ playbooks:
     tag: optional
     is_active: true                    # default true; set false for a disabled draft
     owners: [TeamA, TeamB]            # restrict who can run it (optional)
-    parameters: [hostname, severity]  # input params; read as vars.input.params.<name>
-    steps:
-      - name: Start
-        type: start
+    parameters:                       # names (+ optional types) for the
+      hostname: string                # compiler's type checks ONLY -- runtime
+    steps:                            # binding needs the start step's
+      - name: Start                   # inputVariables: (see "Manual-trigger
+        type: start                   # inputs" below)
+        module: assets                # makes it an Execute-menu action trigger
+        requires_record: false        # run once with inputs, no record needed
+        inputVariables:
+          - {name: hostname}
         next: Do Lookup
       - name: Do Lookup
         type: connector
@@ -185,11 +190,48 @@ Always set `record:` explicitly, or use `set:`/`vars:` instead of
 | Expression | What it gives you |
 |---|---|
 | `{{ vars.input.records[0] }}` | the trigger record |
-| `{{ vars.input.params.<name> }}` | input param declared in `parameters:` |
+| `{{ vars.input.params.<name> }}` | input param bound from the start step's `inputVariables:` (see "Manual-trigger inputs" below); `parameters:` alone does NOT bind it |
 | `{{ vars.steps.<step_name>.<field> }}` | output of a previous step (name with spaces → underscores) |
 | `{{ vars.<name> }}` | a variable set via `set_variable` or `set:` |
 | `{{ vars.env.<key> }}` | env-level variables (organization, user, …) |
 | `{{ vars.item }}` | current element in a `for_each` loop |
+
+### Manual-trigger inputs
+
+Two separate declarations are involved, and only one of them binds at
+runtime (live-verified on 8.0.x, 2026-10):
+
+1. **`parameters:`** (playbook level) — a list of names or a `{name: type}`
+   mapping. This feeds the compiler's type checking of
+   `vars.input.params.<name>` references. It does **not** bind anything at
+   runtime.
+2. **`inputVariables:`** (on the start step) — the declaration the platform
+   uses. With it, the compiler emits the trigger's input form *and* the
+   start step's `step_variables.input.params` mapping
+   (`{{vars.request.data["<name>"]}}` per name), which is what makes
+   `vars.input.params.<name>` resolve.
+
+The start step must also carry **`module:`**: `type: start` with a `module:`
+compiles to `cybersponse.action` (the Execute-menu trigger); without one it
+compiles to `cybersponse.abstract_trigger` (designer-only Run button), where
+`inputVariables:` is accepted but the params mapping stays **empty** and
+every `vars.input.params.<name>` reference is undefined at runtime.
+`requires_record: false` runs the playbook once with inputs instead of
+per-record.
+
+How values arrive (all live-verified):
+
+| How the run is started | `vars.input.params.<name>` | `vars.inputs.<name>` |
+|---|---|---|
+| UI Execute dialog | works — the dialog puts the values in `vars.request.data`, and the emitted mapping copies them | n/a |
+| API, values as top-level trigger body keys (`pyfsr` `trigger(..., env={...})`) | works — the platform seeds `vars.input.params` directly | absent |
+| API, `pyfsr` `inputs={...}` | **null** — the key exists (from the declaration) but the value never arrives | works |
+
+Failure signature to recognize: a connector step reading an input param
+fails with `Invalid params provided :: Parameters <X> have either blank
+value or not provided`. That means the compiled start step's
+`arguments.step_variables.input.params` is `[]` — fix the YAML (add
+`module:` + `inputVariables:` to the start step), not the connector.
 
 ### Reading a previous step's output
 
@@ -250,6 +292,20 @@ converted to underscores (case preserved):
 ```
 
 ## Routing
+
+Execution follows `next:` pointers (and decision branch targets) only.
+**File order is presentation** -- the compiler and the runtime never infer a
+flow from where a step sits in the file. Two consequences worth internalizing:
+
+- **A step nothing points to is dead code.** When you add a step, the step
+  *before* it in the flow must get `next: <new step>` -- inserting the YAML
+  block between two steps wires nothing by itself. Unreachable steps are
+  flagged at compile time, and a reference from inside one fails with
+  `step 'X' is unreachable -- no step's next/branches point to it ...`.
+- **See the flow before you push**: `fsrpb graph file.yaml` renders the
+  whole collection as an ASCII graph -- trigger, chains, decision branches,
+  and a ⚠ marker on every step nothing routes to. Cheap insurance against
+  the dead-step mistake.
 
 **Linear flow** -- one step → next:
 
@@ -352,6 +408,8 @@ Any step can run once per element of a list:
   operation: query_ip            # required
   config: "my-vt-config"         # config name or UUID; omit for default
   params:
+    # reads a manual-trigger input -- the start step must declare
+    # inputVariables: (see "Manual-trigger inputs"), or this is blank at runtime
     ip: "{{ vars.input.params.hostname }}"
 ```
 

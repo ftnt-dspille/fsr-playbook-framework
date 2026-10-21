@@ -31,7 +31,7 @@ playbooks. For per-filter docs run `mcp find_jinja_filter <name>` or see
 | `vars.input.records[0]` | 435 | the first/single trigger record |
 | `vars.result` | 354 | the previous step's result (legacy/implicit) |
 | `vars.input.records[0]['@id']` | 307 | the trigger record's IRI |
-| `vars.input.params.<name>` | many | input params declared in `parameters:` |
+| `vars.input.params.<name>` | many | input params — bound from the start step's `inputVariables:` (playbook-level `parameters:` only types them; see AUTHORING.md "Manual-trigger inputs") |
 | `vars.item` | 125 | the current `{% for %}` loop item |
 | `vars.steps.<Name_us>` | many | a previous step's full result (see AUTHORING.md for naming rule) |
 
