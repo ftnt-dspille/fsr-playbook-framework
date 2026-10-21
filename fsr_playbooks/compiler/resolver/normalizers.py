@@ -477,6 +477,21 @@ class NormalizerMixin:
         # plus the record list. With no input variables, params stays the empty
         # array the live corpus uses.
         input_vars = a.get("inputVariables") or []
+        _iv_names = [iv["name"] for iv in input_vars
+                     if isinstance(iv, dict) and isinstance(iv.get("name"), str)]
+        _dupes = sorted({n for n in _iv_names if _iv_names.count(n) > 1})
+        if _dupes:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                severity="warning",
+                message=(
+                    f"inputVariables declares {_dupes} more than once -- "
+                    "the duplicates fold into one params mapping, but they "
+                    "are almost always an editing artifact; keep one entry "
+                    "per name"
+                ),
+                path=f"{path}.arguments.inputVariables",
+            ))
         params_shape: Any = {
             # Percent-formatting on purpose: this is a Jinja template literal,
             # so an f-string would have to quadruple every brace to emit the

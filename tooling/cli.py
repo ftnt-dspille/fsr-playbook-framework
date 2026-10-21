@@ -3724,6 +3724,102 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 1
 
 
+def cmd_graph(args: argparse.Namespace) -> int:
+    """Render a YAML playbook's step flow as an ASCII graph.
+
+    The view `compile` errors never give you: which step points where,
+    which decision branch goes where, and -- the point -- which steps
+    NOTHING points to. A wrong-wired new step is invisible in `analyze`
+    (it simulates execution, so dead code never appears) and only a
+    buried warning in compile output; here it is a flagged line.
+    """
+    from fsr_playbooks.compiler import compile_yaml
+    from fsr_playbooks.compiler.validator import _reachable_step_ids, _trigger_id
+
+    text = Path(args.input).read_text()
+    result = compile_yaml(text, Path(args.db))
+    if result.ir is None:
+        _print_errors(result.errors)
+        return 1
+    if args.json:
+        docs = []
+        for pb in result.ir.playbooks:
+            by_id = {s.id: s for s in pb.steps}
+            trig = _trigger_id(pb)
+            reach = _reachable_step_ids(pb, trig) if trig else set()
+
+            def outgoing(s):
+                out = []
+                if s.next:
+                    out.append((None, s.next))
+                out.extend((s.branches or {}).items())
+                out.extend((None, t) for t in (s.unlabeled_next or []))
+                return [(lbl, t) for lbl, t in out if t in by_id]
+
+            docs.append({
+                "playbook": pb.name,
+                "trigger": by_id[trig].type if trig in by_id else None,
+                "steps": [{
+                    "name": s.name, "id": s.id, "type": s.type,
+                    "reachable": s.id in reach,
+                    "next": [t for _, t in outgoing(s)],
+                    "branches": {lbl: t for lbl, t in outgoing(s) if lbl},
+                } for s in pb.steps],
+            })
+        print(json.dumps(docs, indent=2))
+        return 0
+
+    for pb in result.ir.playbooks:
+        by_id = {s.id: s for s in pb.steps}
+        trig = _trigger_id(pb)
+        reach = _reachable_step_ids(pb, trig) if trig else set()
+        print(f"\n{pb.name}  [trigger: {by_id[trig].type if trig in by_id else '?'}]")
+
+        seen: set[str] = set()
+
+        def outgoing(s):
+            out = []
+            if s.next:
+                out.append((None, s.next))
+            out.extend((s.branches or {}).items())
+            out.extend((None, t) for t in (s.unlabeled_next or []))
+            return [(lbl, t) for lbl, t in out if t in by_id]
+
+        def walk(sid: str, depth: int, via: str | None) -> None:
+            s = by_id[sid]
+            flag = "" if sid in reach else "   ⚠ UNREACHABLE"
+            via_txt = f"   (via {via})" if via else ""
+            print(f"{'    ' * depth}{s.name}  ({s.type}){via_txt}{flag}")
+            if sid in seen:
+                print(f"{'    ' * (depth + 1)}↩ shown above")
+                return
+            seen.add(sid)
+            outs = outgoing(s)
+            for i, (lbl, tgt) in enumerate(outs):
+                last = i == len(outs) - 1
+                if lbl:
+                    print(f"{'    ' * (depth + 1)}{'└─' if last else '├─'} [{lbl}]")
+                    walk(tgt, depth + 2, s.name)
+                else:
+                    walk(tgt, depth + 1, None
+                         if len(outs) == 1 else
+                         ("└─" if last else "├─"))
+
+        if trig:
+            walk(trig, 0, None)
+        orphans = [s for s in pb.steps if s.id not in reach]
+        if orphans:
+            print(f"  ⚠ {len(orphans)} unreachable step(s) -- nothing routes to them:")
+            for s in orphans:
+                outs = outgoing(s)
+                tgt_txt = ", ".join(
+                    (f"[{lbl}] " if lbl else "") + (by_id[t].name if t in by_id else t)
+                    for lbl, t in outs) or "(no outgoing edges either)"
+                print(f"      {s.name} ({s.type}) → {tgt_txt}")
+    print("", file=sys.stderr)
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     from fsr_playbooks.compiler import compile_yaml
     text = Path(args.input).read_text()
@@ -5203,6 +5299,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("input")
     sp.add_argument("--json", action="store_true", help="emit errors as JSON on stdout")
     sp.set_defaults(func=cmd_validate)
+
+    sp = sub.add_parser(
+        "graph",
+        help="render a YAML playbook's step flow as an ASCII graph "
+             "(flags unreachable steps)",
+    )
+    sp.add_argument("input")
+    sp.add_argument("--json", action="store_true", help="emit the graphs as JSON")
+    sp.set_defaults(func=cmd_graph)
 
     sp = sub.add_parser(
         "verify",

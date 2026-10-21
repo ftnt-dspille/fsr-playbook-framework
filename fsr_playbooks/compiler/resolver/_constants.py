@@ -6,6 +6,19 @@ def _looks_like_uuid(s: str) -> bool:
     return isinstance(s, str) and len(s) == 36 and s.count("-") == 4
 
 
+# Friendly step types that are triggers. Shared by the parser (missing-trigger
+# synthesis) and the validator (trigger-rooted reachability) so the two never
+# disagree: a type added here is a trigger everywhere. `api_endpoint` matters
+# most in practice -- API-triggered playbooks whose start type doesn't begin
+# with "start" used to get NO trigger from the validator's ad-hoc
+# `startswith("start")` check, which silently disabled the unreachable-step
+# lint for exactly those playbooks.
+TRIGGER_TYPES = frozenset({
+    "start", "start_on_create", "start_on_update", "start_on_delete",
+    "api_endpoint",
+})
+
+
 # Friendly short types -> canonical FSR step type names. v1 only covers
 # the ones we have full handler signatures for + Start.
 SHORT_TYPE_TO_FSR: dict[str, str] = {

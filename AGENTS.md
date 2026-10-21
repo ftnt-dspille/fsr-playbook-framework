@@ -36,7 +36,8 @@ fsrpb --help       # CLI entry point
 ## The workflow: author → compile → deploy → run
 
 Write YAML IR (`docs/AUTHORING.md` is the step-type reference), check it with
-`fsrpb validate in.yaml`, compile with `fsrpb compile in.yaml -o out.json` or
+`fsrpb validate in.yaml`, **look at it** with `fsrpb graph in.yaml` (ASCII flow;
+flags steps nothing routes to), compile with `fsrpb compile in.yaml -o out.json` or
 `compile_yaml(text, db_path)` (returns structured errors, never raises), then
 push and run through pyfsr (`fsrpb push`, `fsrpb run-playbook --follow`).
 Worked example with Python snippets: [`docs/QUICKSTART.md`](docs/QUICKSTART.md).

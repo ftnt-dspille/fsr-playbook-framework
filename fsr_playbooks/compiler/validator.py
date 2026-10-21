@@ -12,6 +12,7 @@ import re
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Playbook, Step
 from .jinja_checks import check_jinja, to_compile_errors
+from .resolver._constants import TRIGGER_TYPES
 
 # Find every Jinja expression. Non-greedy; tolerates whitespace.
 _JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
@@ -213,10 +214,19 @@ def _compute_predecessors(pb: Playbook) -> dict[str, set[str]]:
     on *any* path reaching S counts as a predecessor; we don't try to
     enforce all-paths dominance (FSR runtime would reject the playbook
     on any path where the reference doesn't bind anyway).
+
+    Run only on RESOLVED IR, same as `unreachable_step_ids`: a fresh
+    parse has not yet promoted decision / manual-input options into
+    `branches`, so on parsed-but-unresolved steps every branch target is
+    missing from the predecessor sets and downstream steps all look
+    unreachable. Instrumenting this function against `parse_yaml` output
+    directly produces all-empty predecessor sets -- that is the parse
+    stage, not a graph problem.
     """
     by_id: dict[str, Step] = {s.id: s for s in pb.steps}
     preds: dict[str, set[str]] = {s.id: set() for s in pb.steps}
-    starts = [s.id for s in pb.steps if s.type and s.type.startswith("start")]
+    starts = [s.id for s in pb.steps
+              if s.type and (s.type in TRIGGER_TYPES or s.type.startswith("start"))]
     if not starts and pb.steps:
         starts = [pb.steps[0].id]
     # Iterate to fixed point (handles cycles and multi-branch joins).
@@ -272,6 +282,11 @@ def _check_jinja_paths(pb: Playbook, pi: int,
     # Reachability: which step ids could have run before each step?
     preds = _compute_predecessors(pb)
     id_by_jinja_key = {k: v.id for k, v in by_jinja_key.items()}
+    # Steps the trigger can reach at all. A referencing step outside this set
+    # is itself dead code -- the actionable problem is its wiring, not the
+    # reference (see the unreachable-referencer branch below).
+    _trigger = _trigger_id(pb)
+    reachable = _reachable_step_ids(pb, _trigger) if _trigger else set()
 
     # `vars.steps.input` is also a valid alias on some FSR versions;
     # treat the literal token 'input' as never-a-step.
@@ -331,6 +346,29 @@ def _check_jinja_paths(pb: Playbook, pi: int,
                     target_id = id_by_jinja_key.get(key)
                     if target_id and target_id != s.id:
                         if target_id not in preds.get(s.id, set()):
+                            if s.id not in reachable:
+                                # The referencing step itself is dead: nothing
+                                # routes to it. That is the actionable problem
+                                # -- say so, instead of describing the
+                                # reference (a wrong-wired NEW step otherwise
+                                # reads as a confusing claim about the step it
+                                # references, and sends the author debugging
+                                # the wrong end of the edge).
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=(
+                                        f"step {s.id!r} ({s.name or s.type}) is "
+                                        f"unreachable -- no step's next/branches "
+                                        f"point to it, so its reference to "
+                                        f"vars.steps.{key} can never bind. "
+                                        f"Point the preceding step's next: (or "
+                                        f"a branch target) at {s.id!r}, or "
+                                        f"remove the step."
+                                    ),
+                                    path=f"{spath}.arguments.{sub}",
+                                    severity="error",
+                                ))
+                                continue
                             # Suggest steps that ARE reachable.
                             reachable_keys = sorted(
                                 k for k, v in id_by_jinja_key.items()
@@ -585,9 +623,10 @@ def _check_reserved_names(pb: Playbook, pi: int,
 def _trigger_id(pb: Playbook) -> str | None:
     if pb.trigger_step_id:
         return pb.trigger_step_id
-    # First step whose type starts with 'start' is the canonical fallback.
+    # Canonical trigger types (shared with the parser's missing-trigger
+    # synthesis) first, then the prefix fallback for exotic spellings.
     for s in pb.steps:
-        if s.type.startswith("start"):
+        if s.type in TRIGGER_TYPES or s.type.startswith("start"):
             return s.id
     return None
 

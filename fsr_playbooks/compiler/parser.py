@@ -14,6 +14,7 @@ import yaml
 from .._yaml_hygiene import sanitize_yaml_text
 from .errors import CompileError, ErrorCode
 from .ir import Annotation, Collection, Playbook, Step
+from .resolver._constants import TRIGGER_TYPES
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -256,9 +257,7 @@ def _autofix_yaml_footguns(text: str, errors: list[CompileError]) -> str:
     return text
 
 
-_TRIGGER_TYPES = frozenset({"start", "start_on_create", "start_on_update",
-                            "start_on_delete", "api_endpoint"})
-
+_TRIGGER_TYPES = TRIGGER_TYPES
 
 def _insert_missing_trigger(steps: list[Step], pb_name: str,
                             errors: list[CompileError]) -> None:
