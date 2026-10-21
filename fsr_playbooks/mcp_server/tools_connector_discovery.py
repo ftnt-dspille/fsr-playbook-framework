@@ -928,7 +928,6 @@ def find_containment_actions(target_type: str = "", probe: bool = True,
     return out
 
 
-@mcp.tool()
 def _mcp_reach() -> list[dict[str, Any]]:
     """The native-MCP servers this turn can call, or [] (fail-open)."""
     try:
@@ -966,6 +965,7 @@ def annotate_mcp_reach(out: dict[str, Any], *, lookup_empty: bool = False) -> di
     return out
 
 
+@mcp.tool()
 def find_enrichment_actions(target_type: str = "", probe: bool = True,
                             limit: int = 25) -> dict[str, Any]:
     """List the read-only ENRICHMENT/intel lookups that are CONFIGURED (and,

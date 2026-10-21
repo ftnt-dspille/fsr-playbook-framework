@@ -19,6 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS
+
 INTENTS = ("triage", "build")
 DEFAULT_INTENT = "build"
 
@@ -84,6 +86,10 @@ ENHANCE_ONLY_TOOLS = frozenset({
 TRIAGE_ONLY_TOOLS: set[str] = {
     "emit_action_card",
     "run_op",
+    # Record reads + hunt tools: investigation, not authoring -- build mode
+    # must not pivot records/SIEM/FAZ/FMG/EDR.
+    *HUNT_TOOLS,
+    *HUNT_RETIRED_TO_UNION,
 }
 
 # The "run an ALREADY-DEPLOYED playbook" verb, exempt from BOTH subtractions.

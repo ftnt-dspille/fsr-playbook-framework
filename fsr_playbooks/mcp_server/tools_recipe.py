@@ -23,16 +23,13 @@ DB_PATH = _shared.DB_PATH
 
 
 # --- failed-run provider hook ---------------------------------------------
-# Finding a recent FAILED run is connector-owned: it queries the live
-# workflow-run tables through the connector's FSR client, and different
-# connectors keep that function in different modules (here it is
-# `fsr_soc_triage.tools_triage.list_playbook_runs`, NOT a
-# `fsr_playbooks.mcp_server.tools_triage` the library can import, and it is not
-# registered in the library REGISTRY by name). So the library's one-shot
-# troubleshooter cannot import it directly -- the connector injects it here at
-# import time, exactly as it does for the run_playbook auto-resolver
-# (`llm.tools.set_run_playbook_auto_resolver`). Absent a connector (bare
-# library), the troubleshooter degrades cleanly to `no_failed_run_provider`.
+# Finding a recent FAILED run needs a live client the host provides: the
+# finder (`tools_triage.list_recent_failed_runs`) reaches the box through
+# `probes._env`, which the SOC assistant connector bridges onto its crudhub
+# client. So the host opts in by injecting it here at import time, exactly as
+# it does for the run_playbook auto-resolver
+# (`llm.tools.set_run_playbook_auto_resolver`). Absent a host, the
+# troubleshooter degrades cleanly to `no_failed_run_provider`.
 _FAILED_RUN_PROVIDER: Any = None
 
 
@@ -93,14 +90,7 @@ def assert_playbook_outcome(assertions: list[dict[str, Any]]) -> dict[str, Any]:
     if client is None:
         return {"ok": False, "code": "no_live_fsr",
                 "message": "FSR instance not configured"}
-    # tools_triage is investigation/triage (connector-owned post REORG_PLAN
-    # Phase 1); imported lazily so the bare library stays importable. Present
-    # whenever this live-FSR assertion tool actually runs (connector runtime).
-    try:
-        from . import tools_triage
-    except ImportError:
-        return {"ok": False, "code": "no_investigation_tools",
-                "message": "assert_playbook_outcome requires investigation tools (tools_triage) not present in the authoring library"}
+    from . import tools_triage  # lazy: tools_triage imports this package at load
     results = [tools_triage._assert_one(client, a if isinstance(a, dict) else {})
                for a in assertions]
     passed = sum(1 for r in results if r.get("ok"))

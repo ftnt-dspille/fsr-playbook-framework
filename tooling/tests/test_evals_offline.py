@@ -196,15 +196,10 @@ def test_a_siem_pivot_completes_offline_instead_of_no_query_id(installed):
     Empty results are fine and expected (the bundles carry no event table).
     `no_query_id` is not: under `--offline` it is always a harness gap.
     """
-    # Resolve the connector the way the harness does -- `importorskip` alone
-    # would skip on every machine that sets FSR_CONNECTOR_REPO but has not put
-    # the checkout on sys.path, and a gate that skips looks exactly like a
-    # gate that passes.
-    from evals.harness import register_triage_tools_if_available
-    substrate = register_triage_tools_if_available()
-    if not substrate.startswith("framework+connector"):
-        pytest.skip(f"no connector triage tools: {substrate}")
-    triage = importlib.import_module("fsr_soc_triage.tools_triage")
+    # The hunt tools are the framework's own: this runs with or without a
+    # connector checkout (it used to skip without one, which looks exactly
+    # like a pass).
+    triage = importlib.import_module("fsr_playbooks.mcp_server.tools_triage")
     out = triage.siem_search(by="ip", value="10.0.0.1", window="24h", limit=5)
     assert isinstance(out, dict), out
     assert out.get("code") != "no_query_id", out

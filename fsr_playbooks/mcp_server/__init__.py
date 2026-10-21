@@ -31,13 +31,16 @@ from . import (
     tools_connector_discovery,
     tools_corpus,
     tools_discovery,
+    tools_edr,
     tools_emit,
     tools_enhancement,
     tools_execution,
     tools_jinja,
+    tools_noc,
     tools_picklists,
     tools_plan,
     tools_recipe,
+    tools_triage,
     tools_verify,
 )
 
@@ -115,6 +118,10 @@ from .tools_discovery import (
     get_step_type,
     list_connector_configurations,
 )
+
+# Record reads + hunt tools (the retired per-axis helpers stay importable for
+# dispatch and call_mcp_tool; see llm.hunt_tools)
+from .tools_edr import edr_host
 from .tools_emit import (
     emit_action_card,
     emit_capability_gap_card,
@@ -148,6 +155,16 @@ from .tools_jinja import (
     get_filter_examples,
     render_jinja,
 )
+from .tools_noc import (
+    faz_event_summary,
+    faz_search_by_serial,
+    faz_search_device_events,
+    fmg_device,
+    fmg_get_device_list,
+    fmg_get_device_status,
+    fmg_get_ha_status,
+    fmg_get_policy_package_status,
+)
 
 # Picklist tools
 from .tools_picklists import (
@@ -170,6 +187,24 @@ from .tools_recipe import (
     generate_recipe,
     set_failed_run_provider,
     why_did_playbook_fail,
+)
+from .tools_triage import (
+    faz_get_alerts,
+    faz_raw_query,
+    faz_search,
+    faz_search_ip,
+    get_record,
+    list_recent_failed_runs,
+    list_tags,
+    search_module_records,
+    siem_events_for_incident,
+    siem_raw_query,
+    siem_search,
+    siem_search_host,
+    siem_search_ip,
+    siem_search_user,
+    test_find_record,
+    verification_status,
 )
 from .tools_verify import verify_playbook
 
@@ -271,4 +306,31 @@ __all__ = [
     "find_api_fixture",
     "find_api_product",
     "propose_http_fallback",
+    # Record reads + hunt tools
+    "get_record",
+    "search_module_records",
+    "list_tags",
+    "list_recent_failed_runs",
+    "verification_status",
+    "test_find_record",
+    "siem_search",
+    "faz_search",
+    "fmg_device",
+    "edr_host",
+    # Retired per-axis hunt helpers (dispatchable, never advertised)
+    "siem_events_for_incident",
+    "siem_raw_query",
+    "siem_search_ip",
+    "siem_search_host",
+    "siem_search_user",
+    "faz_get_alerts",
+    "faz_event_summary",
+    "faz_raw_query",
+    "faz_search_ip",
+    "faz_search_device_events",
+    "faz_search_by_serial",
+    "fmg_get_device_list",
+    "fmg_get_device_status",
+    "fmg_get_ha_status",
+    "fmg_get_policy_package_status",
 ]

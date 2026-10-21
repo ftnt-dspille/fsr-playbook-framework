@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
+
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,33 @@ class ToolResult(TypedDict, total=False):
     card: dict[str, Any]
     # Dispatch-level envelopes (dispatch emits these, not the tool fn).
     pending_approval: bool
+
+
+class ToolErr(BaseModel):
+    """A failed tool envelope: the vocabulary the agent retries against.
+
+    `code` is for the agent's control flow (and for our own grep-the-sessions
+    analysis, which buckets by it); `message` is the human/model-readable
+    reason. Both required -- an error envelope missing one is the defect this
+    model exists to prevent, since the model then has nothing stable to branch
+    on and falls back to re-reading prose.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    ok: Literal[False] = False
+    code: str
+    message: str
+
+
+def tool_err(code: str, message: str, **extra: Any) -> dict[str, Any]:
+    """Build a tool error envelope THROUGH `ToolErr`.
+
+    The win is not the type check, it is that a hand-written literal can
+    silently omit a key and nothing notices. Extra keys are the tool's own
+    context (`op`, `query`, `module`, `suggestions`, ...) and pass through
+    untouched.
+    """
+    return ToolErr(code=code, message=message, **extra).model_dump()
 
 
 def is_valid_tool_output(result: Any) -> bool:

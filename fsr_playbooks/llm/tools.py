@@ -24,6 +24,7 @@ from typing import Any, get_args, get_origin
 import fsr_playbooks.mcp_server as mcp_server
 
 from .._db import default_db_path
+from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS
 
 # Allow-list. Names match attribute names on `mcp_server`.
 SAFE_TOOLS: list[str] = [
@@ -118,6 +119,13 @@ SAFE_TOOLS: list[str] = [
     # this a "why did my run fail?" turn dead-ends the same way S2 did with no
     # read channel. Read-only (renders jinja against a past run's vars); tier 1.
     "why_did_playbook_fail",
+    # Record reads and the per-product hunt tools (tools_triage / tools_noc /
+    # tools_edr), plus the per-axis helpers they replaced (retired: dispatchable,
+    # never advertised). Triage-only, tier 1. Which connector backs a hunt
+    # family, and the record a conversation is on, come from the host through
+    # `_shared` hooks.
+    *HUNT_TOOLS,
+    *HUNT_RETIRED_TO_UNION,
 ]
 
 
@@ -195,6 +203,8 @@ TOOL_TIERS: dict[str, int] = {
     "find_record_actions": 1,
     # Read-only troubleshooting chain (reads run env + renders jinja; no write).
     "why_did_playbook_fail": 1,
+    # Record reads + hunt tools: read-only, auto-confirm.
+    **{name: 1 for name in (*HUNT_TOOLS, *HUNT_RETIRED_TO_UNION)},
 }
 
 # Op-name / category classifiers used as fallback when op_safety has no
@@ -1531,6 +1541,7 @@ RETIRED_TO_UNION: dict[str, str] = {
     # build turn's terminal action is the playbook_offer card, whose accept
     # the CONNECTOR pushes.
     "push_playbook": "emit_card",
+    **HUNT_RETIRED_TO_UNION,
 }
 CONSOLIDATED_AWAY = frozenset(RETIRED_TO_UNION)
 

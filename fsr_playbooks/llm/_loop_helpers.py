@@ -611,7 +611,7 @@ _INVESTIGATION_TOOLS: set[str] = {
     "get_host_context", "get_user_context", "get_ip_context",
     "get_device_info", "get_incident_details", "get_associated_events_new",
     "faz_search", "faz_get_alerts", "faz_raw_query",
-    "fmg_device",
+    "fmg_device", "edr_host",
 }
 # Second line of defence against the same drift: whole read-only hunt FAMILIES
 # count even when an individual name was never registered here. These prefixes

@@ -1217,3 +1217,91 @@ def stale_catalog_hint(connector: str) -> dict[str, Any] | None:
             "one you asked for exists.",
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Host-supplied context for the record and hunt tools
+# ---------------------------------------------------------------------------
+#
+# The record/hunt tools (tools_triage, tools_noc, tools_edr) are mechanism and
+# live here; two answers they need belong to whoever hosts them. The SOC
+# assistant connector registers both at import (fsr_soc_triage.registry).
+# Each default is what an agent with no host context should get, so the tools
+# work standalone (fsrpb MCP, an outside agent) as well as in the connector.
+
+_SOURCE_CONNECTOR_RESOLVER: Any = None
+_HOST_CONNECTOR_NAME: Any = None
+
+# Every connector that can back a hunt family, preferred first. FortiSIEM v2
+# carries every v1 operation under v1's name (6.1.0+), so the helpers run on
+# either; boxes have one or the other.
+SOURCE_CONNECTORS: dict[str, tuple[str, ...]] = {
+    "fortisiem": ("fortinet-fortisiemv2", "fortinet-fortisiem"),
+    "fortianalyzer": ("fortinet-fortianalyzer",),
+    "fortimanager": ("fortinet-fortimanager",),
+    "fortiedr": ("fortinet-fortiedr",),
+}
+
+
+def active_record_iri() -> str | None:
+    """The IRI of the record this turn is mounted on (``SessionState.record_iri``),
+    or ``None``. Used to offer real candidates when a model names a record that
+    does not exist."""
+    try:
+        from fsr_playbooks.llm import session_state
+        return session_state.current().record_iri or None
+    except Exception:  # noqa: BLE001 -- context, never a reason to fail a tool
+        return None
+
+
+def set_source_connector_resolver(fn: Any) -> None:
+    """Register ``fn(key) -> str``: the connector a hunt family should call right
+    now (``key`` is a ``SOURCE_CONNECTORS`` key). The connector supplies one
+    that knows which candidate passed this turn's health check."""
+    global _SOURCE_CONNECTOR_RESOLVER
+    _SOURCE_CONNECTOR_RESOLVER = fn
+
+
+def resolve_source_connector(key: str) -> str:
+    """The connector backing ``key``'s hunt tools. Without a host resolver: the
+    first candidate the box reports installed; when the box can't be asked, the
+    first the reference catalog knows (``run_op`` refuses a connector the
+    catalog lacks); else the preferred one, and ``run_op``'s own preflight
+    reports what is wrong."""
+    if _SOURCE_CONNECTOR_RESOLVER is not None:
+        try:
+            name = _SOURCE_CONNECTOR_RESOLVER(key)
+            if name:
+                return name
+        except Exception:  # noqa: BLE001 -- fall through to the default
+            pass
+    candidates = SOURCE_CONNECTORS.get(key) or (key,)
+    for c in candidates:
+        if box_has_connector(c) is True:
+            return c
+    try:
+        with _db() as conn:
+            for c in candidates:
+                if conn.execute("SELECT 1 FROM connectors WHERE name=? LIMIT 1",
+                                (c,)).fetchone():
+                    return c
+    except sqlite3.Error:
+        pass
+    return candidates[0]
+
+
+def set_host_connector_name(fn: Any) -> None:
+    """Register ``fn() -> str``: the name of the connector hosting these tools.
+    A hunt tool records itself onto the build trace as a ``call_mcp_tool`` step
+    on that connector; with no host there is no such step to record."""
+    global _HOST_CONNECTOR_NAME
+    _HOST_CONNECTOR_NAME = fn
+
+
+def host_connector_name() -> str | None:
+    if _HOST_CONNECTOR_NAME is None:
+        return None
+    try:
+        return _HOST_CONNECTOR_NAME() or None
+    except Exception:  # noqa: BLE001
+        return None

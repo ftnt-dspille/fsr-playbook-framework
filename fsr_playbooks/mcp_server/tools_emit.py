@@ -1731,7 +1731,6 @@ CARD_TYPES: dict[str, str] = {
 
 
 
-@mcp.tool()
 def _clip_summary(text: str) -> tuple[str, int | None]:
     """`text` within VERDICT_SUMMARY_MAX, cut at the last sentence end that
     keeps at least a third of it (else the last word), plus the original
@@ -1748,6 +1747,7 @@ def _clip_summary(text: str) -> tuple[str, int | None]:
     return (room[:sp] if sp > 0 else room).rstrip(" ,;:") + "...", len(text)
 
 
+@mcp.tool()
 def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     """ONE card emitter -- pick `card_type`, pass that card's fields as
     `payload`; the turn halts on the rendered card.

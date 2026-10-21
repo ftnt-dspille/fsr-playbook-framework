@@ -236,14 +236,15 @@ def recover_rows(path: Path | str) -> list[dict[str, Any]]:
 
 
 def register_triage_tools_if_available() -> str:
-    """Pull in the connector's triage tools when its repo is importable.
+    """Pull in the connector's context for the triage tools when its repo is
+    importable.
 
-    `get_record`, `search_module_records` and the SIEM/FAZ hunt tools live in
-    the connector's `fsr_soc_triage.registry`, which mutates the framework's
-    global REGISTRY at import (the "Option-A posture" `intents.py` documents).
-    Without them five investigation fixtures name tools nothing registers and
-    score zero while the agent works competently -- measured 2026-08-13 as
-    3/7 with recall 0.00.
+    `get_record`, `search_module_records` and the SIEM/FAZ/FMG/EDR hunt tools
+    are the framework's own (`mcp_server.tools_triage` / `tools_noc` /
+    `tools_edr`). The connector's `fsr_soc_triage.registry` adds what only it
+    knows -- which connector backs each hunt family this turn, and its own name
+    for the build trace -- plus its persona-gated tools (record writes, ZTPF,
+    playbook runs).
 
     Returns the substrate name, which the matrix records. Two rules follow
     from it and both are load-bearing:
@@ -257,11 +258,12 @@ def register_triage_tools_if_available() -> str:
     relies on it already being importable.
     """
     try:
-        from fsr_playbooks.llm.tools import REGISTRY
+        from fsr_playbooks.mcp_server import _shared
     except Exception:  # noqa: BLE001
         return "unknown (framework registry unreadable)"
 
-    if "get_record" in REGISTRY:
+    # The hunt-family resolver is the one thing only the connector registers.
+    if getattr(_shared, "_SOURCE_CONNECTOR_RESOLVER", None) is not None:
         return "framework+connector (already registered)"
 
     repo = os.environ.get("FSR_CONNECTOR_REPO", "").strip()
@@ -291,8 +293,8 @@ def register_triage_tools_if_available() -> str:
         # servable and others not, with nothing saying which.
         return f"framework-only (register_triage_tools raised: {exc!r})"
 
-    if "get_record" not in REGISTRY:
-        return "framework-only (registration ran but added no record tools)"
+    if getattr(_shared, "_SOURCE_CONNECTOR_RESOLVER", None) is None:
+        return "framework-only (registration ran but wired no connector context)"
     return "framework+connector"
 
 

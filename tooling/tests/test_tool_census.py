@@ -109,36 +109,39 @@ def test_probe_scenarios_count_toward_p1p2_coverage(tmp_path):
 def test_manifest_is_loaded_and_has_the_connector_tools():
     """The committed manifest at data/connector_tool_registry.json is what
     lets the census know about the connector-registered tools without a
-    live turn. Without it, the census is blind to ~38% of the surface (#67).
+    live turn (#67).
 
-    Count is 26 after the hunt-family merge (#69: 8 merged tools + 10 legacy
-    per-axis tools kept in SAFE_TOOLS for backward compat + 7 record/ztpf/
-    playbook tools) plus the FortiEDR `edr_host` lookup."""
+    The record reads and hunt tools are the framework's own now, so the
+    manifest carries only the connector's persona-gated tools -- and nothing
+    the framework already registers (a name in both would be counted twice)."""
+    from fsr_playbooks.llm.hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS
+    from fsr_playbooks.llm.tools import SAFE_TOOLS
+
     assert tc._MANIFEST is not None, "manifest not found at data/connector_tool_registry.json"
-    assert tc._MANIFEST["connector_registered_count"] == 26
-    assert len(tc._MANIFEST["tools"]) == 26
-    assert len(tc._RUNTIME_ONLY) == 26
+    tools = set(tc._MANIFEST["tools"])
+    assert tools == {"create_record", "update_record", "test_template",
+                     "resume_playbook", "list_module_playbooks"}
+    assert tc._MANIFEST["connector_registered_count"] == len(tools)
+    assert not tools & set(SAFE_TOOLS)
+    assert not tools & {*HUNT_TOOLS, *HUNT_RETIRED_TO_UNION}
+    assert set(tc._RUNTIME_ONLY) == tools
 
 
 def test_census_includes_connector_tools_without_runtime():
-    """A census with no --runtime and no --probe must still see all 72 tools
-    (47 framework - emit_patch_proposal + 26 connector-registered from the manifest), not what
-    the framework advertises at import.
+    """A census with no --runtime and no --probe must still see every tool a
+    deployed agent has: the framework's registry (CONSOLIDATED_AWAY names
+    included -- dispatchable, just not advertised) plus the connector's
+    manifest, not only what the framework advertises at import."""
+    from fsr_playbooks.llm.hunt_tools import HUNT_TOOLS
+    from fsr_playbooks.llm.tools import SAFE_TOOLS
 
-    46, not 41, since Phase 1 added the consolidated `find` / `picklist` /
-    `connector_health` / `emit_card` entry points; their constituents stay
-    registered (census counts the registry -- CONSOLIDATED_AWAY names are
-    dispatchable, just no longer advertised). +1 for E6 `compose_playbook`
-    (build a playbook from a typed plan)."""
     rep = tc.census(runtime=None, probe=None)
-    assert rep["meta"]["tools"] == 73  # +edit_playbook -emit_patch_proposal +edr_host +compose_playbook +plan_playbook
-    assert rep["meta"]["connector_registered"] == 26
+    manifest = set(tc._MANIFEST["tools"])
+    assert rep["meta"]["connector_registered"] == len(manifest)
+    assert rep["meta"]["tools"] == len(set(SAFE_TOOLS) | manifest)
     names = {t["tool"] for t in rep["tools"]}
-    # A sample of the P1/P2 tools the connector registers (post-merge)
-    for name in ("search_module_records", "get_record", "siem_search",
-                 "create_record", "faz_get_alerts", "fmg_device",
-                 "resume_playbook", "list_module_playbooks"):
-        assert name in names, f"{name} missing -- manifest not merged"
+    for name in (*HUNT_TOOLS, "faz_get_alerts", *manifest):
+        assert name in names, f"{name} missing from the census"
 
 
 def test_find_step_examples_is_in_the_census():
