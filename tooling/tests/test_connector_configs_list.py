@@ -8,9 +8,8 @@ embedded configuration[] array; it stays offline.
 """
 from __future__ import annotations
 
-import pytest
-
 import connector_configs
+import pytest
 
 
 class _Resp:
@@ -66,7 +65,7 @@ def fake_client(monkeypatch, tmp_path):
 
 def test_connector_with_more_than_one_page_of_configs_is_returned_whole(fake_client):
     # 45 configurations: past the 30-per-page default the API uses.
-    client = fake_client({"data": [_row("fortinet_siem", 45)]})
+    fake_client({"data": [_row("fortinet_siem", 45)]})
 
     configs = connector_configs.list_configurations("fortinet_siem")
 
@@ -83,7 +82,7 @@ def test_last_configuration_past_page_one_is_resolvable(fake_client):
 
 
 def test_request_asks_for_the_connector_by_name_with_a_large_page(fake_client):
-    client = fake_client({"data": [_row("fortinet_siem", 45)]})
+    fake_client({"data": [_row("fortinet_siem", 45)]})
 
     connector_configs.list_configurations("fortinet_siem")
 
