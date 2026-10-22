@@ -120,7 +120,7 @@ def main() -> int:
             print("  push error:", pushed.get("error")); return 1
         inp = dict(kv.split("=", 1) for kv in args.input)
         print(f"→ triggering with input={inp} …")
-        run = te.run_playbook(args.playbook, input=inp, follow=True, timeout_s=120)
+        run = te.run_playbook_dev(args.playbook, input=inp, follow=True, timeout_s=120)
         print("  run:", {k: run.get(k) for k in ("ok", "status", "wf_pk", "task_id", "error_message")})
         pk = str(run.get("wf_pk") or run.get("task_id") or "")
         if not pk:

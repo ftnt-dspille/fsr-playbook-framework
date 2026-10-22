@@ -1,17 +1,13 @@
 {
   "source": "fsr_soc_triage.registry -- register_triage_tools + register_record_tools + register_ztpf_tools + register_playbook_tools",
-  "note": "The tools the connector registers into the framework's SAFE_TOOLS/TOOL_TIERS at runtime. The framework advertises 70 at import (fsr_playbooks.llm.tools.SAFE_TOOLS); a deployed agent sees 73. This manifest lets the census and lint know the truth without a live turn (tracker #67). Regenerate with scripts/export_registry_manifest.py in the connector repo.",
-  "framework_safe_tools_count": 70,
-  "connector_registered_count": 3,
+  "note": "The tools the connector registers into the framework's SAFE_TOOLS/TOOL_TIERS at runtime. The framework advertises 72 at import (fsr_playbooks.llm.tools.SAFE_TOOLS); a deployed agent sees 73. This manifest lets the census and lint know the truth without a live turn (tracker #67). Regenerate with scripts/export_registry_manifest.py in the connector repo.",
+  "framework_safe_tools_count": 72,
+  "connector_registered_count": 1,
   "runtime_total": 73,
   "tools": [
-    "list_module_playbooks",
-    "resume_playbook",
     "test_template"
   ],
   "tiers": {
-    "list_module_playbooks": 1,
-    "resume_playbook": 1,
     "test_template": 1
   },
   "registered_by": {
@@ -19,9 +15,6 @@
     "register_ztpf_tools": [
       "test_template"
     ],
-    "register_playbook_tools": [
-      "resume_playbook",
-      "list_module_playbooks"
-    ]
+    "register_playbook_tools": []
   }
 }

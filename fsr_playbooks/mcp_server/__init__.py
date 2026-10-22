@@ -39,6 +39,7 @@ from . import (
     tools_noc,
     tools_picklists,
     tools_plan,
+    tools_playbook_run,
     tools_recipe,
     tools_records,
     tools_triage,
@@ -144,7 +145,6 @@ from .tools_execution import (
     healthcheck_connector,
     push_playbook,
     run_op,
-    run_playbook,
 )
 
 # Jinja tools
@@ -179,6 +179,7 @@ from .tools_picklists import (
 
 # Verify
 from .tools_plan import plan_playbook
+from .tools_playbook_run import list_module_playbooks, resume_playbook, run_playbook
 
 # Recipe tools
 from .tools_recipe import (
@@ -248,6 +249,8 @@ __all__ = [
     "run_op",
     "push_playbook",
     "run_playbook",
+    "resume_playbook",
+    "list_module_playbooks",
     "dry_run_playbook",
     "connector_health",
     "healthcheck_connector",

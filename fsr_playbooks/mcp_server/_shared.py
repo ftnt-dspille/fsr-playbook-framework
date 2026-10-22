@@ -1342,3 +1342,59 @@ def record_write_gate(module: str) -> dict[str, Any] | None:
     except Exception as exc:  # noqa: BLE001 -- an unreadable policy is a refusal
         return tool_err("write_not_permitted",
                         f"the write policy could not be read ({exc}); refusing")
+
+
+# ---------------------------------------------------------------------------
+# Host-supplied policy for run_playbook / resume_playbook
+# ---------------------------------------------------------------------------
+#
+# The playbook runs (tools_playbook_run) are mechanism. Whether a run may
+# proceed at all is the host's policy (the SOC assistant refuses an unattended
+# run when no persona is bound). Unlike the record writes, the default here is
+# to PERMIT: standalone (fsrpb MCP, a developer's agent) has always been able
+# to run a playbook, and on the LLM path every run is still tier 3, so an
+# analyst approves it on a card unless the host's auto-run resolver says
+# otherwise. The gate is told whether a human approved this call, because an
+# approval is authorization.
+
+_PLAYBOOK_RUN_GATE: Any = None
+_PLAYBOOK_RUN_ANNOTATOR: Any = None
+
+
+def set_playbook_run_gate(fn: Any) -> None:
+    """Register ``fn(playbook, approved, action) -> dict | None``. ``action`` is
+    ``"run"`` or ``"resume"``; ``None`` permits, a ``{ok: False, code, message}``
+    envelope refuses."""
+    global _PLAYBOOK_RUN_GATE
+    _PLAYBOOK_RUN_GATE = fn
+
+
+def playbook_run_gate(playbook: str, approved: bool, *,
+                      action: str = "run") -> dict[str, Any] | None:
+    """The host's verdict on running (or resuming) ``playbook``. No host gate
+    permits; a gate that raises refuses (an unreadable policy is not consent)."""
+    if _PLAYBOOK_RUN_GATE is None:
+        return None
+    try:
+        return _PLAYBOOK_RUN_GATE(playbook, approved, action)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "code": f"{action}_not_permitted",
+                "message": f"the playbook-run policy could not be read ({exc}); refusing"}
+
+
+def set_playbook_run_annotator(fn: Any) -> None:
+    """Register ``fn(playbook) -> dict``: extra fields for a finished run's
+    result (e.g. ``{"unlisted": True}`` for a playbook outside an allowlist)."""
+    global _PLAYBOOK_RUN_ANNOTATOR
+    _PLAYBOOK_RUN_ANNOTATOR = fn
+
+
+def playbook_run_annotations(playbook: str) -> dict[str, Any]:
+    """The host's annotations for a run of ``playbook``; ``{}`` on none or error."""
+    if _PLAYBOOK_RUN_ANNOTATOR is None:
+        return {}
+    try:
+        out = _PLAYBOOK_RUN_ANNOTATOR(playbook)
+    except Exception:  # noqa: BLE001 -- an annotation never fails a run
+        return {}
+    return out if isinstance(out, dict) else {}

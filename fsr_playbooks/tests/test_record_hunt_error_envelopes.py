@@ -1,4 +1,4 @@
-"""Every record/hunt tool ERROR envelope speaks `code` + `message`.
+"""Every record/hunt/playbook-run tool ERROR envelope speaks `code` + `message`.
 
 Moved here with the tools from the SOC assistant connector, whose
 `tests/test_tool_envelope_vocabulary.py` asserts the same over the tools it
@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 
 MCP = Path(__file__).resolve().parent.parent / "mcp_server"
-MODULES = ("tools_triage.py", "tools_noc.py", "tools_edr.py", "_record_lookup.py")
+MODULES = ("tools_triage.py", "tools_noc.py", "tools_edr.py", "_record_lookup.py",
+           "tools_playbook_run.py")
 REQUIRED = {"code", "message"}
 
 

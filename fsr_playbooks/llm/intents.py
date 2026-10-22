@@ -19,7 +19,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS, RECORD_WRITE_TOOLS
+from .hunt_tools import (
+    HUNT_RETIRED_TO_UNION,
+    HUNT_TOOLS,
+    PLAYBOOK_RUN_COMPANIONS,
+    RECORD_WRITE_TOOLS,
+)
 
 INTENTS = ("triage", "build")
 DEFAULT_INTENT = "build"
@@ -92,6 +97,9 @@ TRIAGE_ONLY_TOOLS: set[str] = {
     *HUNT_RETIRED_TO_UNION,
     # Record writes: a triage-side action, never part of authoring.
     *RECORD_WRITE_TOOLS,
+    # Resume / list-runnable: triage-side (RUN_VERB_TOOLS exempts them from
+    # both subtractions, so build keeps them too).
+    *PLAYBOOK_RUN_COMPANIONS,
 }
 
 # The "run an ALREADY-DEPLOYED playbook" verb, exempt from BOTH subtractions.

@@ -24,7 +24,12 @@ from typing import Any, get_args, get_origin
 import fsr_playbooks.mcp_server as mcp_server
 
 from .._db import default_db_path
-from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS, RECORD_WRITE_TOOLS
+from .hunt_tools import (
+    HUNT_RETIRED_TO_UNION,
+    HUNT_TOOLS,
+    PLAYBOOK_RUN_COMPANIONS,
+    RECORD_WRITE_TOOLS,
+)
 
 # Allow-list. Names match attribute names on `mcp_server`.
 SAFE_TOOLS: list[str] = [
@@ -129,6 +134,9 @@ SAFE_TOOLS: list[str] = [
     # Record writes (tools_records). Tier 3, approval-carded, triage-only; the
     # host's write policy decides which modules (none set: every write refused).
     *RECORD_WRITE_TOOLS,
+    # Resume a paused run / list a module's runnable playbooks
+    # (tools_playbook_run, beside run_playbook). Tier 1.
+    *PLAYBOOK_RUN_COMPANIONS,
 ]
 
 
@@ -210,6 +218,9 @@ TOOL_TIERS: dict[str, int] = {
     **{name: 1 for name in (*HUNT_TOOLS, *HUNT_RETIRED_TO_UNION)},
     # Record writes: approval-carded.
     **{name: 3 for name in RECORD_WRITE_TOOLS},
+    # Resuming a run the analyst already authorized feeds their in-chat
+    # choice, so it is not separately carded; listing is a read.
+    **{name: 1 for name in PLAYBOOK_RUN_COMPANIONS},
 }
 
 # Op-name / category classifiers used as fallback when op_safety has no
@@ -413,6 +424,9 @@ set_precard_validator("run_op", _run_op_precard)
 # Record writes: the host's write gate plus the field checks, before the card.
 for _name in RECORD_WRITE_TOOLS:
     set_precard_validator(_name, mcp_server.tools_records.precard_validate)
+# run_playbook: an unknown / deactivated playbook, or an invented record, is
+# refused before the approval card.
+set_precard_validator("run_playbook", mcp_server.tools_playbook_run.precard_validate)
 
 
 def _op_name_is_destructive(op: str) -> bool:
@@ -1367,6 +1381,54 @@ TOOL_SCHEMA_OVERRIDES["update_record"] = {
                    "description": "field -> new value; omitted fields unchanged. "
                                   "Links and picklists are IRI strings "
                                   "(\"/api/3/<module>/<uuid>\")."},
+    },
+}
+
+# Playbook runs: precise wire schemas (the auto-builder would emit bare
+# `object`s for `inputs`).
+TOOL_SCHEMA_OVERRIDES["run_playbook"] = {
+    "type": "object",
+    "required": ["playbook"],
+    "additionalProperties": False,
+    "properties": {
+        "playbook": {"type": "string", "minLength": 1,
+                     "description": "playbook name or uuid to trigger (from "
+                                    "list_module_playbooks or search_playbooks)."},
+        "record": {"type": "string",
+                   "description": "optional selected-record IRI passed to the "
+                                  "trigger, e.g. /api/3/ztpf_devices/<uuid>."},
+        "inputs": {"type": "object", "additionalProperties": True,
+                   "description": "optional manual-input field values."},
+        "follow": {"type": "boolean",
+                   "description": "wait for the run to finish (default true)."},
+        "timeout": {"type": "integer",
+                    "description": "seconds to wait when follow=true (default 180)."},
+    },
+}
+TOOL_SCHEMA_OVERRIDES["resume_playbook"] = {
+    "type": "object",
+    "required": ["run"],
+    "additionalProperties": False,
+    "properties": {
+        "run": {"type": "string", "minLength": 1,
+                "description": "the paused run's pk (the run_pk returned by "
+                               "run_playbook's awaiting_input result), or its "
+                               "@id /wf/api/workflows/<pk>/."},
+        "decision": {"type": "string",
+                     "description": "response option to pick: 'approve' "
+                                    "(default, primary option), 'reject' (first "
+                                    "non-primary), or an exact option label "
+                                    "e.g. 'Ok'/'Cancel'."},
+        "inputs": {"type": "object", "additionalProperties": True,
+                   "description": "values for the paused step's fields, keyed "
+                                  "by field name from the awaiting form "
+                                  "(awaiting.fields[].name). Omit for a "
+                                  "button-only/approval step."},
+        "follow": {"type": "boolean",
+                   "description": "read back the run status after resuming "
+                                  "(default true)."},
+        "timeout": {"type": "integer",
+                    "description": "reserved for follow polling (default 180)."},
     },
 }
 

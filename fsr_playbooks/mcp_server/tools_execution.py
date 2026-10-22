@@ -2266,21 +2266,20 @@ def push_playbook(yaml_text: str,
                       for w in coll.get("workflows", [])],
     }
 
-@mcp.tool()
-def run_playbook(playbook: str,
-                 input: dict[str, Any] | None = None,
-                 collection: str | None = None,
-                 record: str | None = None,
-                 follow: bool = True,
-                 timeout_s: int = 180,
-                 use_mock_output: bool = False) -> dict[str, Any]:
-    """Run / execute / trigger an EXISTING deployed playbook by name, and
-    (optionally) poll until terminal. THIS is the tool for any "run the
-    playbook <name>", "execute the deployed playbook <name>", or "trigger the
-    existing playbook <name>" request -- the platform resolves the named
-    playbook and launches it. Do NOT author YAML or call verify_playbook /
-    validate_yaml for such a request; those are for building a
-    NEW playbook, not running one that already exists.
+def run_playbook_dev(playbook: str,
+                     input: dict[str, Any] | None = None,
+                     collection: str | None = None,
+                     record: str | None = None,
+                     follow: bool = True,
+                     timeout_s: int = 180,
+                     use_mock_output: bool = False) -> dict[str, Any]:
+    """Developer helper: run a deployed playbook through the repo's dev tooling
+    (`tooling/` cli + probes .env client), and (optionally) poll until terminal.
+
+    Not an agent tool. The agent's `run_playbook` is
+    `tools_playbook_run.run_playbook` (pyfsr typed trigger, approval-carded).
+    This keeps the extras dev scripts use: `Collection:Name` / `collection`
+    disambiguation, `use_mock_output`, and the `<module>:<uuid>` record form.
 
     Args:
         playbook: workflow name OR uuid OR `Collection:Name` shorthand
@@ -2513,10 +2512,10 @@ def dry_run_playbook(yaml_text: str, playbook: str,
     push = push_playbook(yaml_text)
     if not push.get("ok"):
         return {"ok": False, "stage": "push", **push}
-    run = run_playbook(playbook, input=input,
-                       collection=push.get("collection_name"),
-                       follow=True, timeout_s=timeout_s,
-                       use_mock_output=use_mock_output)
+    run = run_playbook_dev(playbook, input=input,
+                           collection=push.get("collection_name"),
+                           follow=True, timeout_s=timeout_s,
+                           use_mock_output=use_mock_output)
     coll_uuid = push["collection_uuid"]
     cleaned = False
     if cleanup:

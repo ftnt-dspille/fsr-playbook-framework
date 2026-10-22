@@ -36,3 +36,8 @@ HUNT_RETIRED_TO_UNION: dict[str, str] = {
 # Record writes (mcp_server.tools_records). Tier 3, approval-carded; the host's
 # write policy (`_shared.set_record_write_gate`) decides which modules.
 RECORD_WRITE_TOOLS: tuple[str, ...] = ("create_record", "update_record")
+
+# Playbook runs (mcp_server.tools_playbook_run). `run_playbook` is listed in
+# SAFE_TOOLS on its own (dynamic tier); these are its companions: resuming a
+# paused run and discovering a module's runnable playbooks. Tier 1.
+PLAYBOOK_RUN_COMPANIONS: tuple[str, ...] = ("resume_playbook", "list_module_playbooks")
