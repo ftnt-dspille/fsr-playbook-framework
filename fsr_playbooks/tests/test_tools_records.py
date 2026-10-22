@@ -491,3 +491,29 @@ def test_unreadable_module_fields_fail_open(alert_writer, monkeypatch):
     monkeypatch.setattr(_shared, "live_request_with_reauth",
                         lambda *a, **k: _Resp(500, {}))
     assert tools_records._unknown_fields(_Client(), "alerts", {"anything": 1}) is None
+
+
+# --- identifiers are path segments --------------------------------------------
+# module and uuid are interpolated into /api/3/<module>/<uuid>; a '/', '?' or
+# '..' must be refused before the gate or the transport, whatever the policy.
+
+@pytest.mark.parametrize("module", ["ztpf_templates/../alerts", "alerts?$limit=1",
+                                    "ztpf_templates/x", "a b"])
+def test_a_module_that_is_not_an_identifier_is_refused(_gate, monkeypatch, module):
+    _gate([module])  # even a policy that permits the raw string
+    cap = []
+    _patch_client(monkeypatch, cap)
+    assert tools_records.create_record(module, {"name": "x"})["code"] == "bad_module"
+    assert tools_records.precard_validate({"module": module})["code"] == "bad_module"
+    assert cap == []
+
+
+def test_a_uuid_that_is_not_an_identifier_is_refused(writer, monkeypatch):
+    cap = []
+    _patch_client(monkeypatch, cap)
+    for uuid in ("u/../../alerts/v", "u?x=1"):
+        out = tools_records.update_record("ztpf_templates", uuid, {"name": "x"})
+        assert out["code"] == "bad_uuid"
+        assert tools_records.precard_validate(
+            {"module": "ztpf_templates", "uuid": uuid})["code"] == "bad_uuid"
+    assert cap == []

@@ -32,6 +32,21 @@ from fsr_playbooks.mcp_server._record_lookup import live_request as _request
 from fsr_playbooks.mcp_server._record_lookup import unknown_record
 from fsr_playbooks.mcp_server._shared import mcp
 
+# Module names and record uuids are interpolated into the request path, so
+# anything else ('/', '?', '..') is refused before the gate or the transport.
+_IDENT_RE = re.compile(r"[A-Za-z0-9_]+")
+_UUID_RE = re.compile(r"[A-Za-z0-9-]+")
+
+
+def _bad_ident(module: str, uuid: str | None = None) -> dict | None:
+    """A refusal when ``module`` (or ``uuid``) is not a plain identifier."""
+    if not _IDENT_RE.fullmatch(module):
+        return tool_err("bad_module",
+                        f"{module!r} is not a module name (letters, digits, _)")
+    if uuid is not None and not _UUID_RE.fullmatch(uuid):
+        return tool_err("bad_uuid", f"{uuid!r} is not a record uuid")
+    return None
+
 
 def precard_validate(args: dict) -> dict | None:
     """Pre-card validator for ``create_record`` / ``update_record``: refuse a
@@ -50,12 +65,15 @@ def precard_validate(args: dict) -> dict | None:
     module = (args or {}).get("module")
     if not module or not isinstance(module, str):
         return None  # the tool body's own arg check owns this
+    uuid = (args or {}).get("uuid")
+    bad = _bad_ident(module, uuid.strip() if isinstance(uuid, str) and uuid.strip() else None)
+    if bad is not None:
+        return bad
     gate = _shared.record_write_gate(module)
     if gate is not None:
         return gate
     # An update names a record; an invented uuid used to card, be approved,
     # and only then 404 (HARDEN-4). Same fail-open contract.
-    uuid = (args or {}).get("uuid")
     if isinstance(uuid, str) and uuid.strip():
         missing = unknown_record(_shared._live_client(), module, uuid.strip(),
                                  active_iri=_shared.active_record_iri())
@@ -385,7 +403,7 @@ def create_record(module: str = "", fields: dict | None = None) -> dict[str, Any
     if not isinstance(fields, dict) or not fields:
         return tool_err("missing_fields",
                         "create_record requires a non-empty fields object")
-    gate = _shared.record_write_gate(module)
+    gate = _bad_ident(module) or _shared.record_write_gate(module)
     if gate is not None:
         return gate
     client = _shared._live_client()
@@ -421,7 +439,7 @@ def update_record(module: str = "", uuid: str = "",
     if not isinstance(fields, dict) or not fields:
         return tool_err("missing_fields",
                         "update_record requires a non-empty fields object")
-    gate = _shared.record_write_gate(module)
+    gate = _bad_ident(module, uuid) or _shared.record_write_gate(module)
     if gate is not None:
         return gate
     client = _shared._live_client()
