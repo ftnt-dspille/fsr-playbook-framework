@@ -122,4 +122,5 @@ bypass-selection = true
 "../../fsr_playbooks/helpers" = "fsr_playbooks/helpers"
 "../../fsr_playbooks/harness" = "fsr_playbooks/harness"
 "../../fsr_playbooks/mcp_server" = "fsr_playbooks/mcp_server"
+"../../fsr_playbooks/workflows" = "fsr_playbooks/workflows"
 "../../fsr_playbooks/_data" = "fsr_playbooks/_data"
