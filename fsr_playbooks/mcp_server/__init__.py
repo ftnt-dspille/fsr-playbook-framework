@@ -44,7 +44,6 @@ from . import (
     tools_records,
     tools_triage,
     tools_verify,
-    tools_workflows,
 )
 
 # Import shared infrastructure for external use
@@ -211,15 +210,6 @@ from .tools_triage import (
     verification_status,
 )
 from .tools_verify import verify_playbook
-from .tools_workflows import (
-    build_playbook,
-    debug_run,
-    investigate_alert,
-    orient,
-    provision_module,
-    repair_playbook,
-    verify_effect,
-)
 
 # =========================================================================
 # Entry point
@@ -324,13 +314,6 @@ __all__ = [
     # Record reads + hunt tools
     "get_record",
     "create_record",
-    "build_playbook",
-    "debug_run",
-    "investigate_alert",
-    "orient",
-    "provision_module",
-    "repair_playbook",
-    "verify_effect",
     "update_record",
     "search_module_records",
     "list_tags",

@@ -642,7 +642,7 @@ def why_did_playbook_fail(
                           else (run_match or {}).get("name"))
         rf = None
         if pb_for_failure:
-            from fsr_playbooks.workflows.run_failure import failure_of
+            from fsr_playbooks.run_failure import failure_of
             try:
                 from probes._env import get_client as _get_client
                 rf = failure_of(_get_client().playbooks, playbook=pb_for_failure)

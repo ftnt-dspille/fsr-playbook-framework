@@ -597,9 +597,9 @@ def _run_failure_detail(playbooks: Any, run: Any) -> dict[str, Any] | None:
     The run body returned by the trigger/poll path is shaped from the run LIST,
     whose ``error_message`` is always null; the real message and the failing
     step come from the step-detail fetch, read through the one run-failure
-    implementation (``fsr_playbooks.workflows.run_failure``).
+    implementation (``fsr_playbooks.run_failure``).
     """
-    from fsr_playbooks.workflows.run_failure import failure_of, run_pk_of
+    from fsr_playbooks.run_failure import failure_of, run_pk_of
 
     pk = run_pk_of(run)
     failure = failure_of(playbooks, pk=pk) if pk else None

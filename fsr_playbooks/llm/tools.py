@@ -30,7 +30,6 @@ from .hunt_tools import (
     PLAYBOOK_RUN_COMPANIONS,
     RECORD_WRITE_TOOLS,
 )
-from .workflow_tools import WORKFLOW_TIERS, WORKFLOW_TOOLS
 
 # Allow-list. Names match attribute names on `mcp_server`.
 SAFE_TOOLS: list[str] = [
@@ -138,9 +137,6 @@ SAFE_TOOLS: list[str] = [
     # Resume a paused run / list a module's runnable playbooks
     # (tools_playbook_run, beside run_playbook). Tier 1.
     *PLAYBOOK_RUN_COMPANIONS,
-    # Agent workflows (fsr_playbooks.workflows): one call, one evidence-backed
-    # WorkflowResult. Tiers in llm/workflow_tools.py.
-    *WORKFLOW_TOOLS,
 ]
 
 
@@ -225,7 +221,6 @@ TOOL_TIERS: dict[str, int] = {
     # Resuming a run the analyst already authorized feeds their in-chat
     # choice, so it is not separately carded; listing is a read.
     **{name: 1 for name in PLAYBOOK_RUN_COMPANIONS},
-    **WORKFLOW_TIERS,
 }
 
 # Op-name / category classifiers used as fallback when op_safety has no
@@ -1670,21 +1665,21 @@ def retired_to_union() -> dict[str, str]:
     return {**RETIRED_TO_UNION, **_HOST_RETIRED}
 
 
-# Agent workflows are registered (dispatchable, on the fsrpb MCP server) but
-# not offered to the in-product model until a host opts in: adding tools to
-# every turn changes what the on-box assistant reasons over, so a host turns
-# them on after evaluating them.
-_WORKFLOWS_ADVERTISED = False
+# Tools a host registered but withholds from the in-product model: dispatchable
+# (resumes, the MCP server, the CLI), not offered in the LLM tool list. A host
+# adding tools to every turn changes what the on-box assistant reasons over, so
+# it offers them only after evaluating them (the agentic toolkit's workflows).
+_HOST_WITHHELD: set[str] = set()
 
 
-def advertise_workflows(enabled: bool = True) -> None:
-    """Offer (or stop offering) the workflow tools in the LLM tool list."""
-    global _WORKFLOWS_ADVERTISED
-    _WORKFLOWS_ADVERTISED = bool(enabled)
+def withhold_from_model(names: Any, withheld: bool = True) -> None:
+    """Withhold (or offer again) host-registered tools from the LLM tool list."""
+    for n in names:
+        (_HOST_WITHHELD.add if withheld else _HOST_WITHHELD.discard)(str(n))
 
 
 def _advertised(name: str) -> bool:
-    if name in WORKFLOW_TIERS and not _WORKFLOWS_ADVERTISED:
+    if name in _HOST_WITHHELD:
         return False
     return name not in CONSOLIDATED_AWAY and name not in _HOST_RETIRED
 

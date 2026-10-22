@@ -1398,3 +1398,14 @@ def playbook_run_annotations(playbook: str) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 -- an annotation never fails a run
         return {}
     return out if isinstance(out, dict) else {}
+
+
+def set_live_client(client: Any) -> None:
+    """Use ``client`` (a pyfsr client) as the live FortiSOAR client for every
+    tool in this process. A host that already holds an authenticated client
+    (the agentic toolkit's MCP server and CLI) registers it here instead of the
+    dev ``.env`` lookup; ``None`` clears it."""
+    if client is None:
+        _LIVE_CLIENT_CACHE.pop("client", None)
+    else:
+        _LIVE_CLIENT_CACHE["client"] = client
