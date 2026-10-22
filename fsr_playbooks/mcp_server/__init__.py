@@ -40,6 +40,7 @@ from . import (
     tools_picklists,
     tools_plan,
     tools_recipe,
+    tools_records,
     tools_triage,
     tools_verify,
 )
@@ -188,6 +189,7 @@ from .tools_recipe import (
     set_failed_run_provider,
     why_did_playbook_fail,
 )
+from .tools_records import create_record, update_record
 from .tools_triage import (
     faz_get_alerts,
     faz_raw_query,
@@ -308,6 +310,8 @@ __all__ = [
     "propose_http_fallback",
     # Record reads + hunt tools
     "get_record",
+    "create_record",
+    "update_record",
     "search_module_records",
     "list_tags",
     "list_recent_failed_runs",

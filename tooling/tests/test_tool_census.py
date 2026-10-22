@@ -111,16 +111,16 @@ def test_manifest_is_loaded_and_has_the_connector_tools():
     lets the census know about the connector-registered tools without a
     live turn (#67).
 
-    The record reads and hunt tools are the framework's own now, so the
-    manifest carries only the connector's persona-gated tools -- and nothing
+    The record reads, record writes and hunt tools are the framework's own
+    now, so the manifest carries only the connector's persona-gated tools --
+    and nothing
     the framework already registers (a name in both would be counted twice)."""
     from fsr_playbooks.llm.hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS
     from fsr_playbooks.llm.tools import SAFE_TOOLS
 
     assert tc._MANIFEST is not None, "manifest not found at data/connector_tool_registry.json"
     tools = set(tc._MANIFEST["tools"])
-    assert tools == {"create_record", "update_record", "test_template",
-                     "resume_playbook", "list_module_playbooks"}
+    assert tools == {"test_template", "resume_playbook", "list_module_playbooks"}
     assert tc._MANIFEST["connector_registered_count"] == len(tools)
     assert not tools & set(SAFE_TOOLS)
     assert not tools & {*HUNT_TOOLS, *HUNT_RETIRED_TO_UNION}

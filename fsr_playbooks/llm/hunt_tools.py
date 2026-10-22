@@ -1,4 +1,4 @@
-"""The record-read and hunt tool names, in one place.
+"""The record and hunt tool names, in one place.
 
 `llm.tools` registers them (SAFE_TOOLS / TOOL_TIERS / RETIRED_TO_UNION) and
 `llm.intents` scopes them to triage (TRIAGE_ONLY_TOOLS). Both import from here
@@ -32,3 +32,7 @@ HUNT_RETIRED_TO_UNION: dict[str, str] = {
     "fmg_get_ha_status": "fmg_device",
     "fmg_get_policy_package_status": "fmg_device",
 }
+
+# Record writes (mcp_server.tools_records). Tier 3, approval-carded; the host's
+# write policy (`_shared.set_record_write_gate`) decides which modules.
+RECORD_WRITE_TOOLS: tuple[str, ...] = ("create_record", "update_record")

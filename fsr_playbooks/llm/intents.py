@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS
+from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS, RECORD_WRITE_TOOLS
 
 INTENTS = ("triage", "build")
 DEFAULT_INTENT = "build"
@@ -90,6 +90,8 @@ TRIAGE_ONLY_TOOLS: set[str] = {
     # must not pivot records/SIEM/FAZ/FMG/EDR.
     *HUNT_TOOLS,
     *HUNT_RETIRED_TO_UNION,
+    # Record writes: a triage-side action, never part of authoring.
+    *RECORD_WRITE_TOOLS,
 }
 
 # The "run an ALREADY-DEPLOYED playbook" verb, exempt from BOTH subtractions.

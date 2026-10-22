@@ -1305,3 +1305,40 @@ def host_connector_name() -> str | None:
         return _HOST_CONNECTOR_NAME() or None
     except Exception:  # noqa: BLE001
         return None
+
+
+# ---------------------------------------------------------------------------
+# Host-supplied write policy for create_record / update_record
+# ---------------------------------------------------------------------------
+#
+# The record writes (tools_records) are mechanism; who may write to which
+# module is the host's policy (the SOC assistant connector answers it from the
+# active persona's may_write scope). Unlike the read hooks above, the default
+# is the safe answer for a write: with no host policy, every write is refused.
+
+_RECORD_WRITE_GATE: Any = None
+
+
+def set_record_write_gate(fn: Any) -> None:
+    """Register ``fn(module) -> dict | None``: ``None`` permits a write to
+    ``module``, a ``tool_err`` envelope refuses it (and names the scope the
+    analyst or model can act on). The connector registers its persona gate."""
+    global _RECORD_WRITE_GATE
+    _RECORD_WRITE_GATE = fn
+
+
+def record_write_gate(module: str) -> dict[str, Any] | None:
+    """The host's verdict on a write to ``module``. Fails closed: no host gate,
+    or a gate that raises, refuses."""
+    from fsr_playbooks.llm.tool_result import tool_err
+
+    if _RECORD_WRITE_GATE is None:
+        return tool_err(
+            "write_not_permitted",
+            "record writes need a write policy and none is configured here; "
+            "the host registers one with _shared.set_record_write_gate")
+    try:
+        return _RECORD_WRITE_GATE(module)
+    except Exception as exc:  # noqa: BLE001 -- an unreadable policy is a refusal
+        return tool_err("write_not_permitted",
+                        f"the write policy could not be read ({exc}); refusing")

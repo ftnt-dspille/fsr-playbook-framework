@@ -24,7 +24,7 @@ from typing import Any, get_args, get_origin
 import fsr_playbooks.mcp_server as mcp_server
 
 from .._db import default_db_path
-from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS
+from .hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS, RECORD_WRITE_TOOLS
 
 # Allow-list. Names match attribute names on `mcp_server`.
 SAFE_TOOLS: list[str] = [
@@ -126,6 +126,9 @@ SAFE_TOOLS: list[str] = [
     # `_shared` hooks.
     *HUNT_TOOLS,
     *HUNT_RETIRED_TO_UNION,
+    # Record writes (tools_records). Tier 3, approval-carded, triage-only; the
+    # host's write policy decides which modules (none set: every write refused).
+    *RECORD_WRITE_TOOLS,
 ]
 
 
@@ -205,6 +208,8 @@ TOOL_TIERS: dict[str, int] = {
     "why_did_playbook_fail": 1,
     # Record reads + hunt tools: read-only, auto-confirm.
     **{name: 1 for name in (*HUNT_TOOLS, *HUNT_RETIRED_TO_UNION)},
+    # Record writes: approval-carded.
+    **{name: 3 for name in RECORD_WRITE_TOOLS},
 }
 
 # Op-name / category classifiers used as fallback when op_safety has no
@@ -405,6 +410,9 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
 
 # The one built-in validator. Connector-owned tools register their own.
 set_precard_validator("run_op", _run_op_precard)
+# Record writes: the host's write gate plus the field checks, before the card.
+for _name in RECORD_WRITE_TOOLS:
+    set_precard_validator(_name, mcp_server.tools_records.precard_validate)
 
 
 def _op_name_is_destructive(op: str) -> bool:
@@ -1328,6 +1336,39 @@ def _card_payload_brief() -> str:
 
 TOOL_SCHEMA_OVERRIDES["emit_card"]["properties"]["payload"]["description"] = (
     _card_payload_brief())
+
+# Record writes: `fields` is open-ended per module, so the auto-builder's bare
+# `object` is replaced with one that says how links and picklists are written.
+TOOL_SCHEMA_OVERRIDES["create_record"] = {
+    "type": "object",
+    "required": ["module", "fields"],
+    "additionalProperties": False,
+    "properties": {
+        "module": {"type": "string", "minLength": 1,
+                   "description": "Bare module name to create in (e.g. ztpf_templates)."},
+        "fields": {"type": "object", "minProperties": 1,
+                   "additionalProperties": True,
+                   "description": "field -> value for the new record. A link to "
+                                  "another record (or a picklist) is its IRI "
+                                  "string, e.g. \"/api/3/<module>/<uuid>\"; a "
+                                  "to-many link is a list of IRI strings."},
+    },
+}
+TOOL_SCHEMA_OVERRIDES["update_record"] = {
+    "type": "object",
+    "required": ["module", "uuid", "fields"],
+    "additionalProperties": False,
+    "properties": {
+        "module": {"type": "string", "minLength": 1},
+        "uuid": {"type": "string", "minLength": 1,
+                 "description": "Record UUID (not the sequential id)."},
+        "fields": {"type": "object", "minProperties": 1,
+                   "additionalProperties": True,
+                   "description": "field -> new value; omitted fields unchanged. "
+                                  "Links and picklists are IRI strings "
+                                  "(\"/api/3/<module>/<uuid>\")."},
+    },
+}
 
 
 def _resolved_hints(fn: Callable[..., Any]) -> dict[str, Any]:
