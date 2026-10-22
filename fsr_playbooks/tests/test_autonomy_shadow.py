@@ -7,6 +7,8 @@ approval envelope still waits for a human.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from fsr_playbooks.llm import authorization, autonomy
@@ -287,6 +289,16 @@ def test_one_address_under_two_keys_is_one_target():
     call["args"]["ip"] = EXT
     d = _eval(call=call)
     assert d["targets"] == [EXT] and d["outcome"] == "would_act"
+
+
+def test_an_ip_json_encoded_into_a_string_is_still_the_target():
+    # Live on .159 a model staged a real true-positive block whose ip_addresses
+    # arrived as the string '["203.0.113.9"]' (a JSON-encoded list), not a list.
+    # The address inside must be the target, or a legitimate containment reads
+    # as "not an IP address" and silently declines.
+    call = _block(ip=json.dumps([EXT]))
+    d = _eval(call=call)
+    assert d["targets"] == [EXT] and d["outcome"] == "would_act", d["failed"]
 
 
 # ---- what the cited lookup SAID ---------------------------------------------

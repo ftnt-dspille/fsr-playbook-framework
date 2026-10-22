@@ -20,6 +20,7 @@ record and sets it for the turn with ``set_turn_policy``.
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import time
 from collections.abc import Callable
@@ -236,6 +237,18 @@ def _ip_targets(args: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for k in _IP_ARG_KEYS:
         v = args.get(k)
+        # A model sometimes JSON-encodes a list into a string ('["1.2.3.4"]')
+        # rather than sending a real list. Unwrap it so the single address
+        # inside is one target, not one non-IP token.
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("[") and s.endswith("]"):
+                try:
+                    parsed = json.loads(s)
+                except ValueError:
+                    parsed = None
+                if isinstance(parsed, list):
+                    v = parsed
         vals = v if isinstance(v, list) else str(v or "").replace(";", ",").split(",")
         for x in vals:
             x = str(x).strip()
