@@ -202,6 +202,16 @@ def validate_evidence_ids(evidence_ids: list[str]) -> dict[str, Any] | None:
     evidence = get_turn_evidence()
     if evidence is None:
         return _err("no_turn_evidence", "No turn evidence context found")
+    return check_evidence_ids(evidence, evidence_ids)
+
+
+def check_evidence_ids(evidence: TurnEvidence,
+                       evidence_ids: list[str]) -> dict[str, Any] | None:
+    """`validate_evidence_ids` against an explicit registry rather than the
+    turn's context var. Workflows (`fsr_playbooks.workflows`) hold their own
+    TurnEvidence and validate findings through this same rule."""
+    from ._shared import _err
+
     registry = evidence.valid_ids()
 
     # Collect bad ids for a single refusal with suggestions.
