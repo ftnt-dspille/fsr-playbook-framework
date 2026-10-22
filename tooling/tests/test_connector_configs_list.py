@@ -82,7 +82,7 @@ def test_last_configuration_past_page_one_is_resolvable(fake_client):
 
 
 def test_request_asks_for_the_connector_by_name_with_a_large_page(fake_client):
-    fake_client({"data": [_row("fortinet_siem", 45)]})
+    client = fake_client({"data": [_row("fortinet_siem", 45)]})
 
     connector_configs.list_configurations("fortinet_siem")
 
