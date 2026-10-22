@@ -293,13 +293,26 @@ def _connector_exists(name: str) -> bool:
         return False
 
 
+# Modules read live from the box this process (orient / provision_module), so a
+# module created after the catalog was warmed is not refused as unknown, and its
+# real fields drive the field checks. name -> {field: type}.
+_LIVE_MODULES: dict[str, dict[str, str]] = {}
+
+
+def note_live_module(name: str, fields: dict[str, str] | None = None) -> None:
+    """Record a module (and its fields) that exists on the box right now."""
+    _LIVE_MODULES[name] = dict(fields or {})
+
+
 def _known_modules() -> list[str]:
-    """All module names in the catalog (empty when un-warmed)."""
+    """All module names in the catalog (empty when un-warmed), plus modules
+    read live from the box this process."""
     conn = _db()
     try:
-        return [r[0] for r in conn.execute("SELECT name FROM modules").fetchall()]
+        names = [r[0] for r in conn.execute("SELECT name FROM modules").fetchall()]
     except Exception:  # noqa: BLE001
-        return []
+        names = []
+    return names + [m for m in _LIVE_MODULES if m not in names]
 
 
 def _module_required_fields(module: str) -> list[str]:
@@ -319,7 +332,8 @@ def _module_required_fields(module: str) -> list[str]:
 def _module_field_names(module: str) -> list[str]:
     """All fields a record of `module` can carry (declared + system), for the
     unknown-field check. Empty when un-warmed."""
-    return sorted(module_schema.field_names(_db(), module))
+    names = sorted(module_schema.field_names(_db(), module))
+    return names or sorted(_LIVE_MODULES.get(module) or {})
 
 
 def _op_declared_params(connector: str, op: str) -> list[str]:
