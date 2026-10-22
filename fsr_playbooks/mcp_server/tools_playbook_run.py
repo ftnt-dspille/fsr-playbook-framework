@@ -596,27 +596,17 @@ def _run_failure_detail(playbooks: Any, run: Any) -> dict[str, Any] | None:
 
     The run body returned by the trigger/poll path is shaped from the run LIST,
     whose ``error_message`` is always null; the real message and the failing
-    step name only come back from the step-detail fetch (pyfsr's
-    ``run_failure(pk)``). Entirely best-effort -- a diagnosis is a bonus on top
-    of an already-reported failure, so any error here is swallowed.
+    step come from the step-detail fetch, read through the one run-failure
+    implementation (``fsr_playbooks.workflows.run_failure``).
     """
-    pk = run.get("pk") if isinstance(run, dict) else None
-    if not pk:
-        at = run.get("@id") if isinstance(run, dict) else None
-        pk = ([p for p in str(at).split("/") if p] or [None])[-1] if at else None
-    if not pk:
+    from fsr_playbooks.workflows.run_failure import failure_of, run_pk_of
+
+    pk = run_pk_of(run)
+    failure = failure_of(playbooks, pk=pk) if pk else None
+    if not failure or not (failure["failing_step"] or failure["error_message"]):
         return None
-    try:
-        failure = _jsonable(playbooks.run_failure(str(pk)))
-    except Exception:  # noqa: BLE001
-        return None
-    if not isinstance(failure, dict):
-        return None
-    msg = failure.get("error_message")
-    step = failure.get("failing_step")
-    if not msg and not step:
-        return None
-    return {"failing_step": step, "error_message": msg, "pk": str(pk)}
+    return {"failing_step": failure["failing_step"],
+            "error_message": failure["error_message"], "pk": str(pk)}
 
 
 _APPROVED_DISPATCH: contextvars.ContextVar[bool] = contextvars.ContextVar(

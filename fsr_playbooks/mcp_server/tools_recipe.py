@@ -642,18 +642,19 @@ def why_did_playbook_fail(
                           else (run_match or {}).get("name"))
         rf = None
         if pb_for_failure:
+            from fsr_playbooks.workflows.run_failure import failure_of
             try:
                 from probes._env import get_client as _get_client
-                rf = _get_client().playbooks.why_failed(playbook=pb_for_failure)
+                rf = failure_of(_get_client().playbooks, playbook=pb_for_failure)
             except Exception:  # noqa: BLE001 -- enrichment only; never fail the tool
                 rf = None
         if rf is not None:
-            if rf.failing_step and not result.get("failing_step"):
-                result["failing_step"] = rf.failing_step
-            if rf.error_message and not error_message:
-                error_message = rf.error_message
-            if rf.status and not result.get("run_status"):
-                result["run_status"] = rf.status
+            if rf["failing_step"] and not result.get("failing_step"):
+                result["failing_step"] = rf["failing_step"]
+            if rf["error_message"] and not error_message:
+                error_message = rf["error_message"]
+            if rf["status"] and not result.get("run_status"):
+                result["run_status"] = rf["status"]
     if isinstance(result, dict) and error_message and not result.get("error_message"):
         result["error_message"] = error_message
     if isinstance(result, dict) and run_match:
