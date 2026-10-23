@@ -2937,6 +2937,9 @@ def faz_search_ip(ip: str, direction: str = "any", adom: str = "root",
         _faz_digest_log)
 
 
+_FAZ_READ_ONLY_METHODS: frozenset[str] = frozenset({"get", "exec"})
+
+
 def faz_raw_query(data: dict[str, Any] | str) -> dict[str, Any]:
     """Run a native FortiAnalyzer JSON-RPC request -- the escape hatch.
 
@@ -2960,6 +2963,19 @@ def faz_raw_query(data: dict[str, Any] | str) -> dict[str, Any]:
         except ValueError as e:
             return {"ok": False, "op": "faz_raw_query",
                     "code": "bad_json", "message": f"data is not valid JSON: {e}"}
+    # Read-only escape hatch: the op runs with confirm=True (no approval card),
+    # so a config-changing JSON-RPC method would write to FAZ unapproved. Allow
+    # only the read methods the docstring promises; refuse the rest with a
+    # structured error before any op runs. faz_search(by="raw") routes here too,
+    # so this guards the live axis and the retired faz_raw_query alias alike.
+    method = str(data.get("method", "")).strip().lower() if isinstance(data, dict) else ""
+    if method not in _FAZ_READ_ONLY_METHODS:
+        return {"ok": False, "op": "faz_raw_query", "query": {"data": data},
+                "code": "method_not_read_only",
+                "message": ("faz_raw_query is read-only: method must be one of "
+                            f"{', '.join(sorted(_FAZ_READ_ONLY_METHODS))} "
+                            f"(got {method or 'missing'}). Use an approval-carded "
+                            "action for FortiAnalyzer config changes.")}
     res = run_op("fortinet-fortianalyzer", "json_rpc_freeform",
                  {"data": data}, confirm=True)
     if not isinstance(res, dict) or not res.get("ok"):
