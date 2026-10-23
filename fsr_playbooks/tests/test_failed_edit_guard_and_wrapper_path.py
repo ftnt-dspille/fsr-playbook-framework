@@ -35,7 +35,7 @@ def test_inert_without_an_offer_tool():
 
 
 def test_a_hung_healthcheck_holds_only_the_first_probe(monkeypatch):
-    # Live (.159): one healthcheck never answered and, uncached, held every
+    # Live: one healthcheck never answered and, uncached, held every
     # list_configured_connectors(probe=True) to the full deadline.
     import threading
     import time

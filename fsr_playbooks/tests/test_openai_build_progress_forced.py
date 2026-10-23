@@ -1,7 +1,7 @@
 """End-to-end: a research-only build turn is nudged back into authoring through
 the ACTUAL OpenAIProvider loop -- live matrix row B3, reproduced.
 
-B3 on .159 (connector 0.5.65 / fsr_playbooks 0.6.5): 11 research calls, then
+B3 on a live box (connector 0.5.65 / fsr_playbooks 0.6.5): 11 research calls, then
 prose, then end_turn. No draft, no verify, no offer -- the analyst gets a plan
 instead of a playbook.
 

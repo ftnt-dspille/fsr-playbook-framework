@@ -569,7 +569,7 @@ def populate_op_definitions(client, time_budget_s: float = 60.0,
     The per-connector detail POST returns each operation WITH its parameter
     list, so one fetch captures operations + operation-params together. We warm
     **un-synced connectors first** -- those absent from the bundled catalog
-    (`store_ops_count == 0`, e.g. the sess-uq31go5p virustotal case) have no
+    (`store_ops_count == 0`, e.g. the virustotal case) have no
     offline fallback, so the grounding path would otherwise do a multi-second
     live fetch on every pivot. Remaining budget then warms synced connectors
     too (the bundle can lag the live box), newest-need first.

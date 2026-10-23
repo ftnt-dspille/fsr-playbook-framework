@@ -92,7 +92,7 @@ def _plausible_name_matches(q: str, all_names: list[str],
     "cyops_utilities", and the tool presented those as "did you mean…?". The
     model relayed them to the analyst as real findings -- a wrong answer is far
     more expensive here than no answer, because it sends the whole turn down a
-    false path (LIVE: sessions sess-ykhuxc3g / sess-x0csi5cf).
+    false path (seen live).
 
     So require actual lexical evidence, not just a ratio:
 
@@ -524,7 +524,7 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
         # Multi-match: attach a compact param SIGNATURE per op so the agent sees
         # each op's real param names BEFORE it picks one and calls run_op --
         # pre-empting the "choose an op, then guess its params" flail that wasted
-        # ~8 calls in export sess-vtd15c5v (the agent guessed `ip`/`srcIP`/`host`
+        # ~8 calls in a live export (the agent guessed `ip`/`srcIP`/`host`
         # when the real param was `value (IP Address)`). One batched query,
         # top-level params only (sub-params stay in get_op_schema). Each entry is
         # {name, required, type, label} -- the `label` (the param's human title,

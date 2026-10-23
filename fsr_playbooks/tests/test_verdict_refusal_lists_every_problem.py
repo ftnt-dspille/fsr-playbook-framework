@@ -1,6 +1,6 @@
 """A refused verdict names every problem at once, with the contract.
 
-Live on .159 a verdict took nine emit_card calls: each refusal named one defect
+On a live appliance, a verdict took nine emit_card calls: each refusal named one defect
 and the model fixed exactly that one -- payload shape, disposition, confidence
 type, claim, evidence type, action shape, action label, and finally evidence
 ids that were prose. One refusal listing all of them is one repair.

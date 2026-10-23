@@ -768,7 +768,7 @@ def test_mcp_only_investigation_compiles_to_direct_connector_steps(_trace, monke
 
 
 # --- transient failure must not become permanent -----------------------------
-# All of these come from one live incident (tracker #66). On .159, `fsrpb-41mini`
+# All of these come from one live incident (tracker #66). On a live appliance, `fsrpb-41mini`
 # advertised 66 tools on some calls and 52 on others -- fortisiem's 14 missing.
 # The box log had it exactly: 15 `list_tools('fortisiem') failed` lines matching
 # 12x HTTP 400 + 3x HTTP 429 from the token endpoint. Reproduced off-box: a

@@ -1,5 +1,5 @@
 """SIEM first-class tools must PROPAGATE the underlying run_op failure detail,
-not collapse it to a bare code. Export sess-vtd15c5v: siem_search_ip returned
+not collapse it to a bare code. Export a live session: siem_search_ip returned
 only `code:"bad_params"` with no `issues`/`message`, so the agent couldn't
 self-correct and fell back to raw run_op guessing."""
 from fsr_playbooks.mcp_server.tools_triage import _siem_error

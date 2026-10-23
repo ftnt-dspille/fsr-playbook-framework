@@ -512,7 +512,7 @@ def _auto_remap_params(params: dict[str, Any] | None,
     missing-required param, the unknown was almost certainly meant for that
     required slot -- a semantic alias `difflib` can't catch by spelling
     (`ip`→`value`, `host`→`hostName`, `srcIP`→`source_ip_value`). These are the
-    misses that wasted ~8 run_op calls in export sess-vtd15c5v. Return
+    misses that wasted ~8 run_op calls in a live export. Return
     `{params, from, to}` with the corrected params, or None when it's not the
     unambiguous 1↔1 case.
 

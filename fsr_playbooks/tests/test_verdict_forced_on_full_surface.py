@@ -1,6 +1,6 @@
 """End-to-end: a triage turn on the LIVE tool surface is forced into a verdict.
 
-Live on .159 (0.6.46), "Investigate this alert end to end" ran get_record and
+On a live appliance (0.6.46), "Investigate this alert end to end" ran get_record and
 siem_search x3 and ended in prose: 0 verdict cards across every session. Two
 defects kept VerdictDeliveryGuard dead in production while its unit tests
 passed on hand-built triage slices:

@@ -459,7 +459,7 @@ def test_containment_verb_in_op_name_escalates_tier():
 
 # ─────────────── hunt floor defers containment, never cancels it ───────────────
 #
-# Card #43's root cause, found on .159: the guard said "Do NOT repeat this
+# Card #43's root cause, found on a live appliance: the guard said "Do NOT repeat this
 # call". gpt-4.1-mini obeyed literally -- it ran find_containment_actions,
 # got blocked, investigated well past the floor, and then ended the turn in
 # prose with no card. The analyst was told to wait and never told to come back.
@@ -519,7 +519,7 @@ def test_hunt_floor_unlocks_after_investigation():
 
 
 # --- the hunt floor must credit native MCP evidence (tracker #60) ------------
-# Live on .159, `chat_action_card` failed 2 of 6 runs on the box model, and the
+# On a live appliance, `chat_action_card` failed 2 of 6 runs on the box model, and the
 # separation was perfect: every PASS had >=3 credited evidence calls (4, 5, 4),
 # every FAIL had exactly 2 -- while each FAIL had also run 1-3 `mcp_*`
 # investigation calls that credited nothing. The agent then reported the refusal
@@ -576,7 +576,7 @@ def test_discovery_tools_still_do_not_credit_the_floor():
 
 
 def test_the_live_failing_trace_would_now_clear_the_floor():
-    """The exact turn-1 traces from the .159 measurement: the three that failed
+    """The exact turn-1 traces from the live measurement: the three that failed
     had 2 credited calls and >=1 uncredited MCP evidence call each."""
     from fsr_playbooks.llm import _loop_helpers as H
     from fsr_playbooks.llm import tools as T
@@ -639,7 +639,7 @@ def test_declared_intent_fails_closed_on_junk():
 
 
 def test_analyst_ordered_discovery_clears_the_floor():
-    """The .159 matrix (row TO) proved the exemption was unreachable when it
+    """The live matrix (row TO) proved the exemption was unreachable when it
     covered `emit_action_card` alone: a card names a connector + operation, so
     the agent MUST discover them first, and that call was floor-gated. Two
     `hunt_floor_guard` blocks, terminal=end_turn, no card."""

@@ -27,7 +27,7 @@ def sanitize_yaml_text(yaml_text: Any) -> tuple[str, int]:
 
     Why this exists: every `yaml_text` argument is the model RE-EMITTING a
     playbook it was already given, and a long verbatim copy comes back
-    corrupted. Live on a .159 box, `analyze_playbook` on the real 6-step
+    corrupted. Live on a real appliance, `analyze_playbook` on the real 6-step
     "Hunt Indicators" playbook died with
 
         yaml parse failed: unacceptable character #x0000: special characters

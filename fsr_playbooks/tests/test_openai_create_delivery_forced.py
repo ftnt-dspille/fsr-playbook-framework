@@ -1,7 +1,7 @@
 """End-to-end: the create-delivery guard forces a real playbook offer through
 the ACTUAL OpenAIProvider loop -- the live widget failure, reproduced.
 
-Observed on box .159 (connector 0.5.64, gpt-4.1-mini): a build turn ran
+Observed on a live box (connector 0.5.64, gpt-4.1-mini): a build turn ran
 `get_step_type` / `find_connector` / `find_operation`, drafted YAML, passed
 `verify_playbook`, then closed with "Next, I will author a playbook that
 triggers on a phishing alert ..." and ended. No `emit_playbook_offer`, so the
@@ -215,7 +215,7 @@ def test_offer_already_delivered_ends_the_turn_without_a_narration_round():
 
 
 def test_trace_build_then_prose_is_forced_into_a_trace_offer():
-    # Live (.159 sweep row 5): "Save that as a playbook." ran
+    # Live (sweep row 5): "Save that as a playbook." ran
     # build_playbook_from_trace (clean compile), then described the draft in
     # prose and ended -- no card, nothing to Accept.
     tools = _BUILD_TOOLS + [{"type": "function", "function": {

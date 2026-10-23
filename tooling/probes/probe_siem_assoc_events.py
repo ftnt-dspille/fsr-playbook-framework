@@ -1,7 +1,7 @@
 """Ad-hoc probe: why does get_associated_events_new 400 for incident 17?
 
 Tries several param shapes against the live FortiSIEM connector to pin the
-exact cause behind session sess-2avs5bgw's repeated 400s, and to discover what
+exact cause behind a live session's repeated 400s, and to discover what
 shape DOES work (so the wrapper can coerce to it).
 """
 import json

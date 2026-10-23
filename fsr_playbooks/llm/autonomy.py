@@ -292,7 +292,7 @@ def _read_only(entry: dict[str, Any]) -> bool:
 
 
 # Connector categories (the catalog's `connectors.category`) whose lookups are
-# threat intelligence. Live on .159 a SIEM search that returned NO events for
+# threat intelligence. On a live appliance, a SIEM search that returned NO events for
 # 8.8.8.8 was cited as "a lookup about the target", and the policy blocked
 # Google DNS: traffic logs, record reads and the firewall's own block list say
 # nothing about whether an address is malicious.

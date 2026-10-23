@@ -1,5 +1,5 @@
 """get_record(full=True) must never dump the raw ~100KB hydrated body into
-context (the sess-uq31go5p token-waste finding). full=True now returns a
+context (the token-waste finding). full=True now returns a
 cleaned (null/empty + SLA/boilerplate stripped), hard size-capped body with
 `coerced_full=true` -- not the verbatim record.
 """

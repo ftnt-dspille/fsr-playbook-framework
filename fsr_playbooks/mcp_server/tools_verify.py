@@ -588,7 +588,7 @@ def _per_step_schema_checks(coll, *, live_probe: bool = False) -> list[dict[str,
 # one this box does not have is reported exactly like a typo -- and the model
 # treats it as a defect it can fix, edits nothing that helps, and verifies
 # again. Measured live (#107): an "explain this playbook, step by step" ask on
-# .159 turned into four verify_playbook calls against `phishme-intelligence`
+# A live box turned into four verify_playbook calls against `phishme-intelligence`
 # and `placeholder-connector`, and delivered no explanation at all. The
 # repeated-error guard could not stop it -- each attempt produced a DIFFERENT
 # error, so no two signatures matched.

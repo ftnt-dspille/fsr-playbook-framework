@@ -283,7 +283,7 @@ NO_SPIRAL_MAX_CONSECUTIVE = int(
 INVESTIGATION_RECALL_GATE = float(
     os.environ.get("EVAL_INVESTIGATION_RECALL_GATE", "0.8"))
 # Recall alone greenlights a run that flails for 20 calls and never stages a
-# deliverable (live calibration 2026-05-30: 5/5 at recall 1.0 told us nothing).
+# deliverable (live calibration: 5/5 at recall 1.0 told us nothing).
 # Minimum prose (characters) a refuse-mode turn must produce for its refusal
 # to count as graceful. Deliberately tiny: the target is a SILENT turn, which
 # scored full marks on "delivered nothing" alone until 2026-08-13. Brevity is

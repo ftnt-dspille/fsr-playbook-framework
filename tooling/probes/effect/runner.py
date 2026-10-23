@@ -35,7 +35,7 @@ def _run(pid: str, fn, runs: int) -> list[Result]:
         except Exception as exc:  # noqa: BLE001 -- a drive failure is a result
             msg = f"{type(exc).__name__}: {exc}"
             # An unreachable/unauthenticatable box is not a product signal
-            # (live on .159: the auth service hung mid-session and a probe
+            # (on a live appliance: the auth service hung mid-session and a probe
             # FAILED on 'Authentication failed (400)' -- a verdict about the
             # box, not the write path).
             _env_tokens = ("not configured", "SeedError", "Authentication failed",

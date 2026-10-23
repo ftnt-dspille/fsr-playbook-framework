@@ -742,7 +742,7 @@ def _is_analyst_ordered(name: str, args: Any) -> bool:
     unreachable in practice: a card names a connector + operation, so the agent
     must call `find_containment_actions` first to discover them -- and that call
     is floor-gated too, so an explicit order died at step one and never reached
-    the exempted step two. The live .159 matrix caught this (row TO: two
+    the exempted step two. The live matrix caught this (row TO: two
     `hunt_floor_guard` blocks on discovery, `terminal=end_turn`, no card) after
     the unit tests missed it by calling `emit_action_card` directly.
 
@@ -2009,7 +2009,7 @@ class CreateDeliveryGuard:
                 self._delivered = True
             return
         if name == _TRACE_BUILD_TOOL:
-            # Live (.159 sweep row 5, twice): "save that as a playbook" ran
+            # Live (sweep row 5, twice): "save that as a playbook" ran
             # build_playbook_from_trace, got a clean compile, and ended in
             # prose -- the build is a PREVIEW, nothing the analyst can Accept.
             # It counts as draft-closing for the other guards, so without this
@@ -2088,7 +2088,7 @@ class CreateDeliveryGuard:
 # ─────────────────────── build-progress guard ────────────────────────
 #
 # The failure the delivery guards CANNOT catch: a build turn that researches
-# and then never drafts. Live on .159 (connector 0.5.65, fsr_playbooks 0.6.5,
+# and then never drafts. On a live appliance (connector 0.5.65, fsr_playbooks 0.6.5,
 # gpt-4.1-mini) a "build me a playbook that ..." turn ran
 #
 #     get_step_type x4 -> find_connector x3 -> find_operation x2 -> get_op_schema x2
@@ -2476,7 +2476,7 @@ class VerdictDeliveryGuard:
 
     def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
         """Fold one executed tool result into the verdict state."""
-        # Evidence is a lookup that ANSWERED. Live on .159 a containment turn
+        # Evidence is a lookup that ANSWERED. On a live appliance, a containment turn
         # ("Block the IP ... on FortiGate") called get_record with no iri, got
         # an argument error, and was forced into a verdict round -- which could
         # cite nothing (the citation gate refuses failed calls) and displaced
@@ -2552,7 +2552,7 @@ class ContainmentFollowThrough:
     true_positive, or the close of a false positive when the admin's autonomy
     policy has a rule that closes it.
 
-    Live on .159 the box model ended 5 of 5 confirmed C2 auto-triage turns on
+    On a live appliance, the box model ended 5 of 5 confirmed C2 auto-triage turns on
     the verdict card, so no block was ever proposed and no autonomy policy had
     anything to act on; a false positive under an enforced close rule ended
     the same way, so the alert stayed open. The directive goes into the SAME

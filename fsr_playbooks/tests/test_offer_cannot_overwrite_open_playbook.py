@@ -1,6 +1,6 @@
 """`emit_playbook_offer` must not be able to delete the open playbook's work.
 
-Measured live (session sess-n3d7p4a1 on a lab box): "Explain what this playbook
+Measured live (on a live box): "Explain what this playbook
 does, step by step, in plain language" -- a read-only ask -- ended at a tier-3
 offer whose YAML had replaced two real hunt steps with placeholders, summarised
 as "ready for deployment". The tier gate asks a human to approve an ACTION; it

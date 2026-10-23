@@ -1703,7 +1703,7 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
         # already carries every pivotable field. We honour the request for a
         # fuller body but NEVER return the raw ~100KB blob: strip the dead
         # weight (null/empty, SLA/boilerplate) and hard-cap the size so one
-        # call can't blow the per-turn budget (the sess-uq31go5p waste). The
+        # call can't blow the per-turn budget (the waste). The
         # flags tell the agent it didn't get the verbatim body.
         cleaned = _clean_full_record(data)
         capped, truncated = _cap_json(cleaned)
@@ -1864,7 +1864,7 @@ def _siem_error(op: str, echo: dict[str, Any],
     """Build a SIEM-tool error that PROPAGATES the underlying run_op failure's
     detail (message, issues, suggestions) instead of collapsing it to a bare
     `code`. The opaque collapse is what made siem_search_ip/siem_raw_query
-    unrecoverable in export sess-vtd15c5v: the agent saw only
+    unrecoverable in a live export: the agent saw only
     `code:"bad_params"` with no clue what was wrong, abandoned the first-class
     tool, and fell back to hand-built run_op calls (which then also failed). The
     real cause lives in `underlying` (e.g. a select-option mismatch on the
@@ -2329,7 +2329,7 @@ def _resolve_live_incident(incident_id: str,
     """Find a *live* FortiSIEM incident to query for events.
 
     Demo/seeded FortiSOAR records carry an `incidentId` that may have aged out of
-    the live SIEM (session sess-2avs5bgw passed id 17 -- not on the box; live ids
+    the live SIEM (a live session passed id 17 -- not on the box; live ids
     were 5,6,10,12,13). This resolves the id the events API will actually accept:
 
       1. exact match on the requested id, else
@@ -2469,7 +2469,7 @@ def siem_events_for_incident(incident_id: str, time_from: str = "",
     the originating SIEM" call when an alert came from FortiSIEM.
 
     Self-healing (so a stale/seeded id or a missing window no longer dead-ends --
-    the failure mode in session sess-2avs5bgw):
+    the failure mode in a live session):
       * The op *requires* a time window and a microsecond-Z datetime format. When
         you don't pass one, this resolves the incident's own first/last-seen
         window (≤24h) from `get_incidents` automatically.
@@ -2573,7 +2573,7 @@ def siem_events_for_incident(incident_id: str, time_from: str = "",
                         "incidents from the last 180 days, so its event window "
                         "can't be derived (the events API needs one). Nothing "
                         "was searched."),
-            # Name the exact next call: a stuck turn (sess-jey64wuw) had the
+            # Name the exact next call: a stuck turn (a live session) had the
             # parameters listed and still stopped here.
             "suggestions": [
                 f"Call siem_search(by=\"incident\", value=\"{resolved_id}\", "

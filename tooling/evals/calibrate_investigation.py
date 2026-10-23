@@ -540,7 +540,7 @@ def main() -> int:
 
     # A corrupt reference store makes `find_operation` raise on SOME queries
     # and answer others, so the agent re-searches for operations that exist and
-    # the run reads as flailing. It happened twice in two days: on 2026-08-15 a
+    # the run reads as flailing. It happened twice in two days: a
     # damaged `idx_ops_op` hid 72 real operations and drove this very fixture
     # from a median of 5 tool calls to 22. `doctor` detects it (health().intact)
     # but nothing made calibrate ask, and the numbers looked like agent

@@ -1,7 +1,7 @@
 """Model-supplied `yaml_text` must survive a corrupted verbatim copy.
 
 Regression + parity guard for the NUL-byte class of failure found live on a
-.159 box: `analyze_playbook` on a real 6-step playbook died with
+live box: `analyze_playbook` on a real 6-step playbook died with
 
     yaml parse failed: unacceptable character #x0000: special characters are
     not allowed in "<unicode string>", position 15305
@@ -129,7 +129,7 @@ def grounded():
 GROUND_TRUTH = MINIMAL_PB.format(note="the appliance's own copy")
 
 # Sanitizing cannot save this one: the model also emitted an invalid `\,`
-# escape inside a double-quoted scalar. Taken from the same real .159 payload
+# escape inside a double-quoted scalar. Taken from the same real live payload
 # as CORRUPTED_FRAGMENT -- one model copy, corrupted two different ways, which
 # is why stripping control chars alone is necessary but not sufficient.
 UNSALVAGEABLE = 'playbooks:\n- name: X\n  steps:\n  - mock: "a\\,b"\n'
@@ -282,7 +282,7 @@ class TestNoBareSafeLoadParityGuard:
                 offenders.append(str(path.relative_to(pkg)))
         assert offenders == [], (
             "these modules parse YAML without the control-char strip, so a "
-            "model copy corrupted the way the .159 payload was would fail "
+            "model copy corrupted the way the live payload was would fail "
             "there. Route them through _shared.load_yaml_text (tools) or "
             f"compiler.parser.parse_yaml: {offenders}"
         )

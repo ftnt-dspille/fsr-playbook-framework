@@ -385,13 +385,13 @@ def emit_action_card(
     # Use the SHARED grounding guarantee (offline store + live-definition
     # fallback when the store is un-synced), the same check run_op runs -- so a
     # phantom op can't slip through here just because the connector's ops aren't
-    # catalogued yet (the sess-uq31go5p live-triage failure). Fails open on any
+    # catalogued yet (the live-triage failure). Fails open on any
     # live-lookup hiccup, so a transient network problem never blocks a real op.
     # Pass `args` so the SHARED grounding guarantee validates the argument
     # names too -- against the live connector definition when the store is
     # un-synced -- so a card with guessed/typo'd params can't reach the analyst
     # for a connector whose params aren't catalogued yet (the live half of the
-    # sess-uq31go5p / mail_egress param-flail gap).
+    # a live session / mail_egress param-flail gap).
     from .tools_execution import validate_op_grounded
     op_err = validate_op_grounded(connector, operation, params=args)
     if op_err is not None:
@@ -935,7 +935,7 @@ def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
     client reaches this tool with the full authoring surface, so the tool has to
     hold the line by itself.
 
-    Measured live (session sess-n3d7p4a1, .159): "Explain what this playbook
+    Measured live (a live session): "Explain what this playbook
     does, step by step, in plain language" ended at a tier-3 offer whose YAML
     had replaced the phishme-intelligence and carbonblack hunt steps with
     "Hunt Domains Placeholder" / "Hunt Files Placeholder", summarised as "ready

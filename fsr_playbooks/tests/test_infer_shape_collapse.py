@@ -2,7 +2,7 @@
 
 VirusTotal query_ip echoes ~90 AV engines under last_analysis_results, every
 value the same {method,engine_name,category,result} shape. Echoing all 90 keys
-bloated the run_op tool result (export sess-ei6esw96) with no added signal. The
+bloated the run_op tool result (a live export) with no added signal. The
 shaper now keeps one representative entry + a count sentinel.
 """
 from __future__ import annotations

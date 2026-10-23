@@ -1,7 +1,7 @@
 """B3a: one advertised entry point per capability.
 
 41 tools rode on every turn (~40k chars, identical for triage and build); 17
-of them were called 0-2 times in 287 live sessions on .159. They are retired
+of them were called 0-2 times in 287 live sessions. They are retired
 from the advertised surface -- never from REGISTRY -- each naming the union
 that subsumes it. These pin the relationships a retirement can silently break.
 """

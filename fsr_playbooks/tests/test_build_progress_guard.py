@@ -1,6 +1,6 @@
 """BuildProgressGuard -- the research-but-never-authored detector.
 
-The live failure (box .159, connector 0.5.65 / fsr_playbooks 0.6.5, matrix row
+The live failure (live box, connector 0.5.65 / fsr_playbooks 0.6.5, matrix row
 B3): a "build me a playbook that ..." turn ran 11 research calls --
 `get_step_type` x4, `find_connector` x3, `find_operation` x2, `get_op_schema`
 x2 -- then ended with prose. No validate_yaml, no verify_playbook, no offer,
@@ -123,7 +123,7 @@ def test_inert_on_the_full_default_registry():
 
 
 def test_run_request_is_not_nudged_into_authoring():
-    # Live on .159: "Run the Link Similar Alerts playbook." kept the FULL build
+    # On a live appliance, "Run the Link Similar Alerts playbook." kept the FULL build
     # slice because the run-mode gate failed open, and called find_connector /
     # list_playbook_runs / find_operation. Nudging that turn to "draft the full
     # playbook YAML now" would author something the analyst never asked for.

@@ -1,5 +1,5 @@
 """run_op auto-remap: a single semantic-alias param miss (ip→value) is
-recovered without a round-trip. Export sess-vtd15c5v wasted ~8 calls guessing
+recovered without a round-trip. Export a live session wasted ~8 calls guessing
 `ip`/`srcIP`/`host` when the real param was `value`."""
 from fsr_playbooks.mcp_server._shared import _auto_remap_params
 

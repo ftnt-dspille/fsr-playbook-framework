@@ -132,7 +132,7 @@ def test_text_in_the_record_cannot_satisfy_the_rule():
 
 
 @pytest.mark.parametrize("entry", [
-    # The live .159 case: a SIEM search that found NO events for 8.8.8.8 was
+    # The live case: a SIEM search that found NO events for 8.8.8.8 was
     # cited as the lookup about it, and the policy blocked Google DNS.
     {"name": "siem_search", "ok": True,
      "args": {"by": "ip", "value": EXT, "direction": "any"}},
@@ -292,7 +292,7 @@ def test_one_address_under_two_keys_is_one_target():
 
 
 def test_an_ip_json_encoded_into_a_string_is_still_the_target():
-    # Live on .159 a model staged a real true-positive block whose ip_addresses
+    # On a live appliance, a model staged a real true-positive block whose ip_addresses
     # arrived as the string '["203.0.113.9"]' (a JSON-encoded list), not a list.
     # The address inside must be the target, or a legitimate containment reads
     # as "not an IP address" and silently declines.
@@ -302,7 +302,7 @@ def test_an_ip_json_encoded_into_a_string_is_still_the_target():
 
 
 # ---- what the cited lookup SAID ---------------------------------------------
-# Live on .159 the policy acted on lookups that found nothing about the target.
+# On a live appliance, the policy acted on lookups that found nothing about the target.
 # Citing a threat-intel lookup is not enough: it must rate the target.
 
 def test_a_lookup_that_rated_the_target_clean_is_not_evidence():
