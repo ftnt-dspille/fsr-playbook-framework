@@ -121,6 +121,19 @@ def _load_manifest() -> dict | None:
 _MANIFEST = _load_manifest()
 _RUNTIME_ONLY = frozenset(_MANIFEST["tools"]) if _MANIFEST else frozenset({"resume_playbook"})
 
+# The framework's OWN tool surface, frozen at import -- before any connector
+# `register_*_tools()` call appends its runtime tools to the mutable module
+# global `SAFE_TOOLS`. This module is imported at collection, so the snapshot
+# is the clean framework baseline no matter what order the tests then run in.
+# A test that wants "the framework's own set" (e.g. to assert a connector tool
+# is not double-counted as a framework tool) must read THIS, not the live
+# `SAFE_TOOLS`, which a prior test's turn may have grown.
+try:
+    from fsr_playbooks.llm.tools import SAFE_TOOLS as _ST_AT_IMPORT
+    _FRAMEWORK_BASE_SAFE_TOOLS = frozenset(_ST_AT_IMPORT)
+except Exception:  # noqa: BLE001 -- census must import even if tools cannot
+    _FRAMEWORK_BASE_SAFE_TOOLS = frozenset()
+
 
 def _promise(name: str) -> str:
     for key, promise in _PROMISE_RULES:

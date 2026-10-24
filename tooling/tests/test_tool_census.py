@@ -116,13 +116,17 @@ def test_manifest_is_loaded_and_has_the_connector_tools():
     -- and nothing
     the framework already registers (a name in both would be counted twice)."""
     from fsr_playbooks.llm.hunt_tools import HUNT_RETIRED_TO_UNION, HUNT_TOOLS
-    from fsr_playbooks.llm.tools import SAFE_TOOLS
 
     assert tc._MANIFEST is not None, "manifest not found at data/connector_tool_registry.json"
     tools = set(tc._MANIFEST["tools"])
     assert tools == {"test_template"}
     assert tc._MANIFEST["connector_registered_count"] == len(tools)
-    assert not tools & set(SAFE_TOOLS)
+    # Compare against the framework's import-time baseline, NOT the live
+    # SAFE_TOOLS: a connector `register_*_tools()` triggered by an earlier test
+    # (random order under pytest-randomly) appends the connector's tools to the
+    # mutable global, which would make a connector tool spuriously look like a
+    # framework-own one.
+    assert not tools & tc._FRAMEWORK_BASE_SAFE_TOOLS
     assert not tools & {*HUNT_TOOLS, *HUNT_RETIRED_TO_UNION}
     assert set(tc._RUNTIME_ONLY) == tools
 
