@@ -19,6 +19,7 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -49,7 +50,23 @@ def _resolve_db() -> Path:
     tmpdir = Path(tempfile.mkdtemp(prefix="fsrpb-tooling-"))
     atexit.register(shutil.rmtree, tmpdir, ignore_errors=True)
     tmp = tmpdir / "fsrpb_tooling_fixture.db"
-    shutil.copyfile(FIXTURE_DB, tmp)
+    # WAL-safe copy via SQLite's backup API, NOT shutil.copyfile. The committed
+    # fixture is a WAL database; a raw file copy grabs only the main .db, so if
+    # any -wal pages are uncheckpointed (a crashed or concurrent run) the copy
+    # is inconsistent and opens as "database disk image is malformed" -- which
+    # flaked the release's test gate. backup() reads a transactionally
+    # consistent snapshot into a fresh single-file (non-WAL) copy, and opening
+    # the source read-only means a test run can never write or corrupt the
+    # tracked fixture.
+    src = sqlite3.connect(f"file:{FIXTURE_DB}?mode=ro", uri=True)
+    try:
+        dst = sqlite3.connect(str(tmp))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
     return tmp
 
 
