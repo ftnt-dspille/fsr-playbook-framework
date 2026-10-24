@@ -182,7 +182,7 @@ def build_tasks(corpus_dir: Path, db_path, min_assertions: int = 2) -> list[dict
             "bucket": bucket,
             "source_uuid": ident[0] if ident else "",
             "source_name": pb.name,
-            "spec": derive.derive_spec(pb),
+            "spec": derive.derive_spec(pb, kept),
             "ir_assertions": kept,
             "real_yaml": real_yaml,
             "n_steps": len(pb.steps or []),

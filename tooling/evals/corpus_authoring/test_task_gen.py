@@ -59,6 +59,33 @@ def test_spec_names_the_trigger_not_set_variable(tasks):
         assert "triggers on set_variable" not in t["spec"], t["id"]
 
 
+def test_trigger_detects_start_on_create():
+    """Regression: a playbook with a start_on_create step must resolve its
+    trigger to start_on_create, not the generic 'start' -- otherwise the spec
+    says 'triggers on start' while an assertion demands start_on_create."""
+    from fsr_playbooks.compiler.ir import Playbook, Step
+    pb = Playbook(name="x", trigger="start", steps=[
+        Step(id="t", type="start_on_create"),
+        Step(id="a", type="set_variable"),
+    ])
+    assert derive._trigger_type(pb) == "start_on_create"
+    asserts = derive.derive_assertions(pb)
+    assert "triggers on start_on_create" in derive.derive_spec(pb, asserts)
+
+
+def test_spec_trigger_matches_an_assertion(tasks):
+    """The trigger named in the spec must be backed by a step_type_present
+    assertion -- spec and grading cannot contradict each other."""
+    for t in tasks:
+        first = t["spec"].splitlines()[0]
+        if "triggers on " not in first:
+            continue  # spec may omit the trigger when none is gradable
+        trig = first.split("triggers on ")[-1].rstrip(".")
+        types = {a.get("type") for a in t["ir_assertions"]
+                 if a["kind"] == "step_type_present"}
+        assert trig in types, f"{t['id']}: spec trigger {trig!r} not asserted ({types})"
+
+
 def test_each_task_has_a_substantive_assertion(tasks):
     """A task must require more than 'has a trigger' -- at least one connector
     op, loop, decision, or distinctive step type -- or it grades nothing."""

@@ -17,8 +17,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Step types common enough that "has one" says nothing about intent.
-_UNINTERESTING = {"start", "set_variable"}
+# Step types common enough that "has one" says nothing about intent, plus
+# "unknown" -- a type the decompiler could not classify, which an author cannot
+# be asked to reproduce.
+_UNINTERESTING = {"start", "set_variable", "unknown"}
 
 
 def _op_of(step) -> tuple[str, str]:
@@ -45,17 +47,27 @@ def _loop_expr(step) -> str | None:
     return None
 
 
+# Most specific first: a playbook with a start_on_create step triggers on
+# create, not plain "start", and the spec/assertion must say so.
+_START_FAMILY = ("start_on_create", "start_on_update", "start_on_delete",
+                 "start_on_comment", "start_manual", "start")
+
+
 def _trigger_type(pb) -> str:
     """The resolved trigger step's type (start, start_on_create, ...).
 
-    Use the explicit trigger step when the playbook names one, else the
-    declared short-name trigger. Never the first step's type -- a child
-    playbook's first step is often a set_variable, and calling that "the
-    trigger" both mislabels the spec and makes a trivial assertion."""
+    Use the explicit trigger step when the playbook names one; else the most
+    specific start-family step actually present (so a create-triggered playbook
+    is not mislabeled "start"); else the declared short-name trigger. Never the
+    first step's type -- a child playbook's first step is often a set_variable."""
     if pb.trigger_step_id:
         for s in pb.steps or []:
             if s.id == pb.trigger_step_id:
                 return s.type
+    present = {s.type for s in (pb.steps or [])}
+    for t in _START_FAMILY:
+        if t in present:
+            return t
     return pb.trigger or "start"
 
 
@@ -66,8 +78,9 @@ def derive_assertions(pb) -> list[dict[str, Any]]:
     steps = list(pb.steps or [])
 
     trig = _trigger_type(pb)
-    out.append({"kind": "step_type_present", "type": trig, "min": 1,
-                "note": f"triggers on {trig}"})
+    if trig != "unknown":
+        out.append({"kind": "step_type_present", "type": trig, "min": 1,
+                    "note": f"triggers on {trig}"})
 
     # distinctive step-type presence (not start/set_variable)
     type_counts: dict[str, int] = {}
@@ -129,34 +142,50 @@ def _loop_fragment(expr: str) -> str:
     return last.split(".")[-1]
 
 
-def derive_spec(pb) -> str:
-    """A prose build request restating exactly the required structure."""
-    steps = list(pb.steps or [])
-    trig = _trigger_type(pb)
-    lines = [f"Build a FortiSOAR playbook named \"{pb.name}\" that triggers on {trig}."]
+_DISTINCTIVE_LABEL = {
+    "decision": "a decision branch", "manual_input": "a manual-input step",
+    "approval_manual_input": "an approval gate",
+    "workflow_reference": "a reference to another playbook",
+    "code_snippet": "a code snippet step", "run_script": "a script step",
+    "ingest_bulk_feed": "an ingest-bulk-feed step", "find_record": "a find-record step",
+    "create_record": "a create-record step", "update_record": "an update-record step",
+    "delay": "a delay step",
+}
+
+
+def derive_spec(pb, assertions: list[dict[str, Any]]) -> str:
+    """A prose build request restating EXACTLY the kept assertions, so the spec
+    and the grader never contradict each other (the trigger, ops, loops and
+    distinctive steps the spec names are precisely those that are graded)."""
+    trig = next((a["type"] for a in assertions
+                 if a["kind"] == "step_type_present" and a.get("type") in _START_FAMILY), None)
+    head = f"Build a FortiSOAR playbook named \"{pb.name}\""
+    head += f" that triggers on {trig}." if trig else "."
+    lines = [head]
     if pb.description:
         lines.append(f"Purpose: {pb.description.strip()}")
 
     ops = []
-    for s in steps:
-        if s.type == "connector":
-            conn, op = _op_of(s)
-            if op:
-                ops.append(f"{op}" + (f" (connector {conn})" if conn else ""))
+    for a in assertions:
+        if a["kind"] == "connector_op":
+            op = a.get("operation_contains", "")
+            conn = a.get("connector")
+            ops.append(f"{op}" + (f" (connector {conn})" if conn else ""))
     if ops:
         lines.append("It must call these connector operations: " + "; ".join(dict.fromkeys(ops)) + ".")
 
-    loops = [(_loop_fragment(e)) for s in steps if (e := _loop_expr(s))]
+    loops = [a["contains"] for a in assertions if a["kind"] == "for_each_over"]
     if loops:
         lines.append("It must loop over: " + ", ".join(dict.fromkeys(loops)) + ".")
 
     distinctive = []
-    label = {"decision": "a decision branch", "manual_input": "a manual-input step",
-             "approval_manual_input": "an approval gate", "workflow_reference": "a reference to another playbook",
-             "code_snippet": "a code snippet step", "run_script": "a script step"}
-    for s in steps:
-        if s.type in label and label[s.type] not in distinctive:
-            distinctive.append(label[s.type])
+    for a in assertions:
+        if a["kind"] == "step_type_present":
+            lbl = _DISTINCTIVE_LABEL.get(a.get("type"))
+            if lbl and lbl not in distinctive:
+                distinctive.append(lbl)
+    if any(a["kind"] == "branch_count" for a in assertions) and "a decision branch" not in distinctive:
+        distinctive.append("a decision branch")
     if distinctive:
         lines.append("It must include: " + ", ".join(distinctive) + ".")
 
