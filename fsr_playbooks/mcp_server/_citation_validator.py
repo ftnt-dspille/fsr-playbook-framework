@@ -188,6 +188,28 @@ _EMIT_TOOLS = frozenset({
 })
 
 
+def rated_intel_ids(evidence: TurnEvidence | None = None) -> list[str]:
+    """The tool_use ids of this turn's threat-intelligence lookups that
+    succeeded AND the installed reader rated (``finding`` with a severity) --
+    i.e. a lookup that actually SAID something about its target.
+
+    A verdict that concludes ``true_positive`` must cite one of these: a
+    confident true positive without a cited intel rating is the gap the
+    autonomy policy later rejects as "cites no successful threat-intel
+    lookup", by which point the model can no longer repair it. Mirrors the
+    policy's own notion of a rated lookup (``llm/autonomy.py`` evidence rule),
+    read from the same registry so the two cannot disagree."""
+    evidence = get_turn_evidence() if evidence is None else evidence
+    if evidence is None:
+        return []
+    out: list[str] = []
+    for eid, entry in evidence.valid_ids().items():
+        finding = entry.get("finding")
+        if entry.get("ok") is True and isinstance(finding, dict) and finding.get("severity"):
+            out.append(eid)
+    return out
+
+
 def validate_evidence_ids(evidence_ids: list[str]) -> dict[str, Any] | None:
     """Validate that all evidence ids are valid tool_use ids from this turn.
 

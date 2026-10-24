@@ -1577,17 +1577,36 @@ def emit_verdict(
     # Evidence ids are checked in the same pass: the ninth live attempt was
     # refused for citing prose instead of tool_use ids, AFTER eight structural
     # repairs -- it could have been told the first time.
-    from ._citation_validator import validate_evidence_ids
+    from ._citation_validator import rated_intel_ids, validate_evidence_ids
     cited = [eid for f in findings if isinstance(f, dict)
              and isinstance(f.get("evidence"), list)
              for eid in f["evidence"] if isinstance(eid, str) and eid.strip()]
     id_hints: list[str] = []
+    ids_valid = True
     if cited:
         id_err = validate_evidence_ids(cited)
         if id_err is not None:
+            ids_valid = False
             bad(id_err.get("code") or "invalid_evidence_ids",
                 id_err.get("message") or "unknown evidence ids")
             id_hints = list(id_err.get("suggestions") or [])
+    # A true_positive must cite the threat-intel lookup it rests on. When the
+    # turn ran a rated intel lookup but the verdict cites none of them, the
+    # verdict reads as confident-but-ungrounded and the autonomy policy refuses
+    # the action AFTER the turn ends -- too late for the model to repair. Refuse
+    # here instead, naming the available lookup ids, so the fix is one retry.
+    # Only when the cited ids are otherwise valid (else that is the first fix).
+    if disposition == "true_positive" and ids_valid:
+        intel_ids = rated_intel_ids()
+        if intel_ids and not any(eid in intel_ids for eid in cited):
+            bad("verdict_omits_intel_citation",
+                "a true_positive verdict must cite the threat-intelligence "
+                "lookup it rests on. This turn ran rated lookups ["
+                + ", ".join(intel_ids[:6])
+                + "] but no finding cites one of them -- a traffic log or "
+                "record read shows a connection happened, not that the address "
+                "is malicious. Add the lookup's evidence id to the finding it "
+                "supports.")
     if problems:
         code, message = problems[0]
         if len(problems) > 1:
