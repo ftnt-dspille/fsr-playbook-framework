@@ -142,52 +142,99 @@ def _loop_fragment(expr: str) -> str:
     return last.split(".")[-1]
 
 
-_DISTINCTIVE_LABEL = {
-    "decision": "a decision branch", "manual_input": "a manual-input step",
-    "approval_manual_input": "an approval gate",
-    "workflow_reference": "a reference to another playbook",
-    "code_snippet": "a code snippet step", "run_script": "a script step",
-    "ingest_bulk_feed": "an ingest-bulk-feed step", "find_record": "a find-record step",
-    "create_record": "a create-record step", "update_record": "an update-record step",
-    "delay": "a delay step",
+# Capability language: how a USER describes a need, never the FSR step-type
+# enum the grader checks. Leaking the enum ("add a manual_input step") turns a
+# design task into a lookup, so specs translate requirements to intent and the
+# agent must map intent -> structure itself.
+_CAPABILITY = {
+    "decision": "branch depending on a condition",
+    "manual_input": "pause to collect input from a person",
+    "approval_manual_input": "require a person's approval before continuing",
+    "workflow_reference": "hand off to another, existing playbook",
+    "code_snippet": "run a small piece of custom logic",
+    "run_script": "run a script",
+    "ingest_bulk_feed": "pull in a batch of records from a feed",
+    "find_record": "look up an existing record",
+    "create_record": "create a record",
+    "update_record": "update a record",
+    "delay": "wait before continuing",
 }
 
+# Internal tokens a user-voice spec must NEVER contain (the leakage guard
+# checks these). The step-type enums and the loop-expression/op ids.
+LEAK_TOKENS = sorted(set(list(_CAPABILITY) + list(_START_FAMILY) + [
+    "connector_op", "for_each", "step_type", "set_variable", "yaml_text",
+    "ready_to_push", "workflow_reference", "manual_input", "ir_assertions",
+]))
 
-def derive_spec(pb, assertions: list[dict[str, Any]]) -> str:
-    """A prose build request restating EXACTLY the kept assertions, so the spec
-    and the grader never contradict each other (the trigger, ops, loops and
-    distinctive steps the spec names are precisely those that are graded)."""
+
+def _trigger_phrase(assertions: list[dict[str, Any]]) -> str:
     trig = next((a["type"] for a in assertions
                  if a["kind"] == "step_type_present" and a.get("type") in _START_FAMILY), None)
-    head = f"Build a FortiSOAR playbook named \"{pb.name}\""
-    head += f" that triggers on {trig}." if trig else "."
-    lines = [head]
-    if pb.description:
-        lines.append(f"Purpose: {pb.description.strip()}")
+    return {
+        "start_on_create": "It should run automatically whenever a new record of its type is created.",
+        "start_on_update": "It should run automatically whenever a record is updated.",
+        "start_on_delete": "It should run automatically whenever a record is deleted.",
+        "start": "An analyst will run it on demand.",
+    }.get(trig, "")
 
-    ops = []
-    for a in assertions:
-        if a["kind"] == "connector_op":
-            op = a.get("operation_contains", "")
-            conn = a.get("connector")
-            ops.append(f"{op}" + (f" (connector {conn})" if conn else ""))
-    if ops:
-        lines.append("It must call these connector operations: " + "; ".join(dict.fromkeys(ops)) + ".")
 
-    loops = [a["contains"] for a in assertions if a["kind"] == "for_each_over"]
-    if loops:
-        lines.append("It must loop over: " + ", ".join(dict.fromkeys(loops)) + ".")
-
-    distinctive = []
+def _capabilities(assertions: list[dict[str, Any]]) -> list[str]:
+    """Required capabilities in user language, deduped, no enum/op-id leakage."""
+    caps: list[str] = []
     for a in assertions:
         if a["kind"] == "step_type_present":
-            lbl = _DISTINCTIVE_LABEL.get(a.get("type"))
-            if lbl and lbl not in distinctive:
-                distinctive.append(lbl)
-    if any(a["kind"] == "branch_count" for a in assertions) and "a decision branch" not in distinctive:
-        distinctive.append("a decision branch")
-    if distinctive:
-        lines.append("It must include: " + ", ".join(distinctive) + ".")
+            c = _CAPABILITY.get(a.get("type"))
+            if c and c not in caps:
+                caps.append(c)
+        elif a["kind"] == "for_each_over":
+            c = "repeat the work for each item it is handling"
+            if c not in caps:
+                caps.append(c)
+        elif a["kind"] == "branch_count":
+            c = "branch depending on a condition"
+            if c not in caps:
+                caps.append(c)
+    return caps
 
-    lines.append("Author the YAML and make it pass verify_playbook (ready_to_push).")
+
+def _purpose(pb) -> str:
+    """A usable real-world purpose, or "" when the description is junk (empty,
+    a placeholder like "test", or just the name restated)."""
+    p = (pb.description or "").strip()
+    if len(p) < 10 or p.lower() in {"test", "todo", "tbd", (pb.name or "").lower()}:
+        return ""
+    return p
+
+
+def derive_goal_spec(pb) -> str | None:
+    """Non-expert user: states only the real-world goal, in their own words, no
+    structure at all. None when the playbook has no usable purpose."""
+    purpose = _purpose(pb)
+    if not purpose:
+        return None
+    return (
+        f"I need a FortiSOAR playbook. Here is what it should accomplish:\n"
+        f"{purpose}\n"
+        "Please design and build it -- you decide what steps and integrations it needs."
+    )
+
+
+def derive_operational_spec(pb, assertions: list[dict[str, Any]]) -> str | None:
+    """Analyst user: describes the workflow in operational, plain language --
+    the behaviours it needs, never FSR step-type names. None when there is
+    nothing beyond a trigger to describe."""
+    caps = _capabilities(assertions)
+    if not caps:
+        return None
+    purpose = _purpose(pb)
+    lines = [f'I want to automate a workflow in FortiSOAR ("{pb.name}").']
+    if purpose:
+        lines.append(f"What it is for: {purpose}")
+    trig = _trigger_phrase(assertions)
+    if trig:
+        lines.append(trig)
+    lines.append("Along the way it needs to:")
+    lines.extend(f"  - {c}" for c in caps)
+    lines.append("Build the playbook so it is sound and ready to run.")
     return "\n".join(lines)

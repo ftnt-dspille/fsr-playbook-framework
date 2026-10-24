@@ -59,31 +59,47 @@ def test_spec_names_the_trigger_not_set_variable(tasks):
         assert "triggers on set_variable" not in t["spec"], t["id"]
 
 
-def test_trigger_detects_start_on_create():
-    """Regression: a playbook with a start_on_create step must resolve its
-    trigger to start_on_create, not the generic 'start' -- otherwise the spec
-    says 'triggers on start' while an assertion demands start_on_create."""
+def test_trigger_rendered_in_user_language_not_enum():
+    """A create-trigger must be described in user words, never the enum."""
     from fsr_playbooks.compiler.ir import Playbook, Step
-    pb = Playbook(name="x", trigger="start", steps=[
+    pb = Playbook(name="x", trigger="start", description="do a thing", steps=[
         Step(id="t", type="start_on_create"),
+        Step(id="d", type="decision", branches={"yes": "a", "no": "a"}),
         Step(id="a", type="set_variable"),
     ])
     assert derive._trigger_type(pb) == "start_on_create"
     asserts = derive.derive_assertions(pb)
-    assert "triggers on start_on_create" in derive.derive_spec(pb, asserts)
+    spec = derive.derive_operational_spec(pb, asserts) or ""
+    assert "run automatically whenever a new record" in spec
+    assert "start_on_create" not in spec
 
 
-def test_spec_trigger_matches_an_assertion(tasks):
-    """The trigger named in the spec must be backed by a step_type_present
-    assertion -- spec and grading cannot contradict each other."""
+def test_no_spec_leaks_an_internal_term(tasks):
+    """The load-bearing rule: a user-voice question must not contain any FSR
+    step-type enum, op id, or loop-variable name the grader checks -- or it is
+    a lookup, not a design task. Scan every spec for leak tokens as whole words
+    and for any asserted op id / loop fragment."""
+    import re
     for t in tasks:
-        first = t["spec"].splitlines()[0]
-        if "triggers on " not in first:
-            continue  # spec may omit the trigger when none is gradable
-        trig = first.split("triggers on ")[-1].rstrip(".")
-        types = {a.get("type") for a in t["ir_assertions"]
-                 if a["kind"] == "step_type_present"}
-        assert trig in types, f"{t['id']}: spec trigger {trig!r} not asserted ({types})"
+        low = t["spec"].lower()
+        for tok in derive.LEAK_TOKENS:
+            assert not re.search(rf"\b{re.escape(tok)}\b", low), \
+                f"{t['id']}: spec leaks internal term {tok!r}"
+        # the exact op ids and loop fragments the grader checks must not appear
+        for a in t["ir_assertions"]:
+            if a["kind"] == "connector_op" and a.get("operation_contains"):
+                assert a["operation_contains"].lower() not in low, \
+                    f"{t['id']}: spec leaks op id {a['operation_contains']!r}"
+            if a["kind"] == "for_each_over" and a.get("contains"):
+                assert a["contains"].lower() not in low, \
+                    f"{t['id']}: spec leaks loop field {a['contains']!r}"
+
+
+def test_tasks_come_in_user_voice_styles(tasks):
+    """Every task is a goal or operational (user-voice) question, never the old
+    prescriptive enum-naming style."""
+    styles = {t.get("style") for t in tasks}
+    assert styles and styles <= {"goal", "operational"}, styles
 
 
 def test_each_task_has_a_substantive_assertion(tasks):

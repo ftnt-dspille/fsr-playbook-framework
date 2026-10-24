@@ -177,17 +177,41 @@ def build_tasks(corpus_dir: Path, db_path, min_assertions: int = 2) -> list[dict
         # not (compilability != fidelity), so grading an author against a bar the
         # source cannot meet would be unfair; store it so grading can be fair.
         source_verified = _source_verified(real_yaml, db_path)
-        tasks.append({
-            "id": _task_id(bucket, pb.name, (ident[0] if ident else "")),
+        uuid = ident[0] if ident else ""
+        base = {
             "bucket": bucket,
-            "source_uuid": ident[0] if ident else "",
+            "source_uuid": uuid,
             "source_name": pb.name,
-            "spec": derive.derive_spec(pb, kept),
             "ir_assertions": kept,
             "real_yaml": real_yaml,
             "n_steps": len(pb.steps or []),
             "source_verified": source_verified,
-        })
+        }
+        # A mix of question TYPES in USER language (never the FSR step-type/op
+        # enums the grader checks -- that would be a lookup, not a design task):
+        #   goal        -- non-expert, states only the real-world goal;
+        #   operational -- analyst, describes the behaviours in plain language.
+        # Both grade sound+runnable; structural overlap with the real playbook
+        # is reported but not gated (many valid designs satisfy one ask).
+        variants = []
+        goal = derive.derive_goal_spec(pb)
+        if goal:
+            variants.append(("goal", goal, False))
+        op = derive.derive_operational_spec(pb, kept)
+        if op:
+            variants.append(("operational", op, False))
+        if not variants:
+            stats["no_user_spec"] += 1
+            continue
+        for style, spec, strict_ir in variants:
+            tasks.append({
+                **base,
+                "id": _task_id(bucket, pb.name, uuid) + f"__{style}",
+                "style": style,
+                "strict_ir": strict_ir,
+                "spec": spec,
+            })
+            stats[f"built_{style}"] += 1
         stats["built"] += 1
     tasks.sort(key=lambda t: (t["bucket"], t["id"]))
     return tasks, dict(stats)

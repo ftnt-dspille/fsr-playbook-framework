@@ -52,7 +52,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runs", type=int, default=1, help="runs per task (defect twice = defect)")
     ap.add_argument("--model", default="claude-sonnet-5-5")
     ap.add_argument("--limit", type=int, help="cap total tasks (after stratify)")
+    ap.add_argument("--env-file", help="file of KEY=VALUE box creds (FSR_*); never printed")
     args = ap.parse_args(argv)
+
+    if args.env_file:
+        for line in Path(args.env_file).read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
     if not (os.environ.get("FSR_BASE_URL") and os.environ.get("FSR_API_KEY")):
         ap.error("FSR_BASE_URL and FSR_API_KEY must be set (the toolkit's box)")

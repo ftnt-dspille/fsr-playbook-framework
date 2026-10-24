@@ -69,7 +69,16 @@ def grade_yaml(authored_yaml: str, task: dict[str, Any], db_path: Any = None) ->
     # gaps the source shares). This is the honest "did it match the real thing".
     source_verified = task.get("source_verified", True)
     out["source_verified"] = source_verified
-    out["fair_pass"] = bool(draft and out["ir_passed"] and (verified or not source_verified))
+    out["style"] = task.get("style", "prescriptive")
+    # A prescriptive question names the structure, so fidelity (ir) is part of
+    # the bar. A goal-only question names intent, so many valid designs exist:
+    # grade sound+runnable and report structural overlap WITHOUT gating on it.
+    strict_ir = task.get("strict_ir", True)
+    verified_ok = verified or not source_verified
+    if strict_ir:
+        out["fair_pass"] = bool(draft and out["ir_passed"] and verified_ok)
+    else:
+        out["fair_pass"] = bool(draft and verified_ok)
     return out
 
 

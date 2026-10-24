@@ -52,6 +52,32 @@ def test_empty_yaml_is_a_clean_fail(tasks):
     assert "no YAML" in g["detail"]
 
 
+def test_goal_style_does_not_gate_on_structure(tasks):
+    """A goal-only task grades sound+runnable; structural ir is reported but
+    must NOT sink fair_pass (many valid designs). A broken-structure but
+    compiling+verifying answer should still fair_pass under goal style."""
+    t = dict(tasks[0])
+    t["style"] = "goal"
+    t["strict_ir"] = False
+    t["source_verified"] = False  # don't let verify gate the point
+    # an answer that compiles but misses the real structure
+    r = grade_yaml("name: minimal\nsteps:\n  - id: s\n    type: start\n", t)
+    if r["draft"]:  # if it compiles, goal style forgives the structural miss
+        assert r["fair_pass"] is True
+        assert r["ir_passed"] in (True, False)  # reported either way
+
+
+def test_prescriptive_style_gates_on_structure(tasks):
+    """The same miss under prescriptive style must fail fair_pass."""
+    t = dict(tasks[0])
+    t["style"] = "prescriptive"
+    t["strict_ir"] = True
+    t["source_verified"] = False
+    r = grade_yaml("name: minimal\nsteps:\n  - id: s\n    type: start\n", t)
+    if r["draft"] and not r["ir_passed"]:
+        assert r["fair_pass"] is False
+
+
 def test_aggregate_shapes(tasks):
     rows = [grade_yaml(t["real_yaml"], t) for t in tasks]
     agg = aggregate(rows)
