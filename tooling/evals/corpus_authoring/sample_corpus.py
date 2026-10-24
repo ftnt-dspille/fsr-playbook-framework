@@ -105,6 +105,16 @@ def _bucket(pb) -> str:
 _TRIVIAL_TYPES = {"start", "set_variable"}
 
 
+def _source_verified(real_yaml: str, db_path) -> bool:
+    """Whether the real playbook passes verify_playbook.ready_to_push."""
+    try:
+        from fsr_playbooks.mcp_server.tools_verify import verify_playbook
+        v = verify_playbook(real_yaml, db_path=str(db_path) if db_path else None)
+        return bool(v.get("ready_to_push"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _has_substantive(assertions: list[dict]) -> bool:
     """True if some assertion requires more than a trivial step's presence."""
     for a in assertions:
@@ -163,6 +173,10 @@ def build_tasks(corpus_dir: Path, db_path, min_assertions: int = 2) -> list[dict
             stats["trivial_only"] += 1
             continue
         bucket = _bucket(pb)
+        # Does the REAL playbook pass the product's own pre-submit gate? Many do
+        # not (compilability != fidelity), so grading an author against a bar the
+        # source cannot meet would be unfair; store it so grading can be fair.
+        source_verified = _source_verified(real_yaml, db_path)
         tasks.append({
             "id": _task_id(bucket, pb.name, (ident[0] if ident else "")),
             "bucket": bucket,
@@ -172,6 +186,7 @@ def build_tasks(corpus_dir: Path, db_path, min_assertions: int = 2) -> list[dict
             "ir_assertions": kept,
             "real_yaml": real_yaml,
             "n_steps": len(pb.steps or []),
+            "source_verified": source_verified,
         })
         stats["built"] += 1
     tasks.sort(key=lambda t: (t["bucket"], t["id"]))
