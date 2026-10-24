@@ -2525,6 +2525,61 @@ UNATTENDED_CONTAIN_DIRECTIVE = (
     "say why in one sentence.")
 
 
+def forced_containment(disposition: str | None) -> dict[str, Any] | None:
+    """The containment action to STAGE for a confident true_positive the model
+    declined to stage itself, or None when nothing qualifies.
+
+    Unattended, a confirmed true_positive whose cited evidence rates an EXTERNAL
+    target malicious must not end the turn with nothing staged: the admin's
+    enforced policy then has no card to act on and a real threat is left
+    uncontained (live on .159 the box model ended 5/5 confirmed-C2 turns on the
+    verdict card). This builds the block the matching policy rule defines
+    against THIS turn's cited-malicious target, so the policy always has a card
+    to judge. The policy still refuses a protected / internal / unrated /
+    rate-capped target, so forcing the card never bypasses a check -- it only
+    removes the model's option to silently decline containment of a confirmed
+    threat. Returns an emit_card('action') payload (connector/operation/args/
+    summary), read from the SAME turn registry the policy evaluates."""
+    if disposition != "true_positive":
+        return None
+    from . import session_state
+    policy = session_state.current().autonomy_policy
+    if policy is None or not getattr(policy, "enabled", False):
+        return None
+    from ..mcp_server._citation_validator import get_turn_evidence
+    ev = get_turn_evidence()
+    if ev is None:
+        return None
+    from .autonomy import _RATED_SEVERITIES, _ip_targets, _is_internal, _is_ip
+    rule = next((r for r in policy.rules
+                 if r.action.connector and r.action.op
+                 and r.when.target is not None and r.when.target.kind == "ip"), None)
+    if rule is None:
+        return None
+    rated = getattr(rule.when.evidence, "rated", None) if rule.when.evidence else None
+    ok_sev = _RATED_SEVERITIES.get(rated or "malicious", frozenset({"error"}))
+    for entry in ev.valid_ids().values():
+        if entry.get("ok") is not True:
+            continue
+        finding = entry.get("finding")
+        if not (isinstance(finding, dict) and finding.get("severity") in ok_sev):
+            continue
+        # The target is what the lookup was ABOUT: the reader's own indicator
+        # first, then the call's params/args (a run_op nests the ip under
+        # `params`, so the top-level args alone would miss it).
+        a = entry.get("args") or {}
+        params = a.get("params") if isinstance(a.get("params"), dict) else {}
+        candidates = [finding.get("indicator"), *_ip_targets(params), *_ip_targets(a)]
+        for ip in candidates:
+            ip = str(ip or "").strip()
+            if ip and _is_ip(ip) and not _is_internal(ip):
+                return {"connector": rule.action.connector,
+                        "operation": rule.action.op,
+                        "args": {"ip_addresses": [ip]},
+                        "summary": f"Contain {ip} ({rule.id})"}
+    return None
+
+
 def close_directive(disposition: str, rule: Any) -> str:
     """The ask for a close the admin's ``rule`` would take: which fields the
     write may change and the values it must use, read from the rule itself."""
@@ -2628,6 +2683,13 @@ class ContainmentFollowThrough:
     def mark_fired(self) -> None:
         self._fired = True
         record_guard_fire(type(self).__name__)
+
+    @property
+    def disposition(self) -> str | None:
+        """The last delivered verdict's disposition (for the containment
+        fallback: force the block the policy defines when a true_positive
+        ended with nothing staged)."""
+        return self._disposition
 
 
 # --------------------------------------------------------------------------

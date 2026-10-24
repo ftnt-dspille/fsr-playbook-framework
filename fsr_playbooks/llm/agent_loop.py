@@ -60,6 +60,7 @@ from ._loop_helpers import (
     connector_errors_for_reply,
     drain_with_idle_timeout,
     evidence_id_line,
+    forced_containment,
     is_authoring_slice,
     is_delivered_offer,
     is_offer_attempt,
@@ -576,6 +577,31 @@ async def run_loop(
                               duration_ms=int((time.perf_counter() - t0) * 1000))
         out.append((ToolCall(call_id, "emit_card", args), result))
 
+    async def _force_contain(pin: dict[str, Any]) -> AsyncIterator[Event]:
+        """Force-stage the containment the admin's policy defines (``pin``) when
+        a confident true_positive ended with nothing staged. The card flows
+        through emit_card, so shadow_decision judges it and the connector
+        enforces it like any staged action -- the policy still refuses a
+        protected / internal / unrated / rate-capped target, so this never
+        bypasses a check. It only stops a confirmed threat being left
+        uncontained because the model ended on its verdict."""
+        def _fix(a: dict[str, Any]) -> None:
+            a["card_type"] = "action"
+            a["payload"] = dict(pin)
+        out2: list[Any] = []
+        try:
+            async for ev in force_emit_card("action", _fix, out2):
+                yield ev
+        except Exception:
+            log.exception("forced containment delivery failed")
+            return
+        if out2:
+            c2, r2 = out2[0]
+            w.append_tool_call(c2)
+            w.append_tool_results([ToolOutcome(
+                c2.call_id, cap_model_content(stringify(r2)),
+                is_error_result(r2), c2.name, c2.args)])
+
     for _turn in range(turn_budget):
         turn_idx += 1
         try:
@@ -780,6 +806,17 @@ async def run_loop(
                 contain.mark_fired()
                 yield usage_event(follow[0])
                 turn_idx += 1
+                # A confirmed true_positive must not end unattended with nothing
+                # staged. When the policy defines a block for this turn's cited
+                # malicious external target, force that card now rather than ask
+                # and risk the model ending on prose; the policy still judges it.
+                pin = (forced_containment(contain.disposition)
+                       if follow[0] == "containment_follow_through" else None)
+                if pin is not None:
+                    async for ev in _force_contain(pin):
+                        yield ev
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
                 w.append_user(follow[1])
                 continue
 
@@ -835,6 +872,17 @@ async def run_loop(
                             self_repair_turn=self_repair_turns, tool_calls=[], tags=tags,
                             **w.usage_extra())
                         turn_idx += 1
+                        # Same containment fallback as the non-forced path: a
+                        # confirmed true_positive with a policy-defined block for
+                        # this turn's cited malicious external target gets the
+                        # card forced now, so the policy has one to judge.
+                        pin = (forced_containment(contain.disposition)
+                               if follow[0] == "containment_follow_through" else None)
+                        if pin is not None:
+                            async for ev in _force_contain(pin):
+                                yield ev
+                            yield DoneEvent(stop_reason="end_turn")
+                            return
                         continue
                 yield DoneEvent(stop_reason="end_turn")
                 return
