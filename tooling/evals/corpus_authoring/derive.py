@@ -207,9 +207,21 @@ def _purpose(pb) -> str:
     return p
 
 
-def derive_goal_spec(pb) -> str | None:
-    """Non-expert user: states only the real-world goal, in their own words, no
-    structure at all. None when the playbook has no usable purpose."""
+# --- personas: a wide variety of real users, each asking the SAME underlying
+# playbook in their own voice and at their own level of detail. Every builder
+# takes (pb, assertions) and returns a spec or None; none may contain an FSR
+# step-type enum / op id / loop variable (the leakage guard enforces this).
+
+def derive_terse_spec(pb, assertions: list[dict[str, Any]]) -> str | None:
+    """A hurried user who types a single curt line and expects it handled."""
+    p = _purpose(pb)
+    if not p:
+        return None
+    return p if p.endswith(".") else p + "."
+
+
+def derive_goal_spec(pb, assertions: list[dict[str, Any]] | None = None) -> str | None:
+    """Non-expert user: states only the real-world goal, no structure at all."""
     purpose = _purpose(pb)
     if not purpose:
         return None
@@ -220,10 +232,23 @@ def derive_goal_spec(pb) -> str | None:
     )
 
 
+def derive_verbose_spec(pb, assertions: list[dict[str, Any]] | None = None) -> str | None:
+    """A wordy, non-technical business owner: lots of context, no specifics."""
+    purpose = _purpose(pb)
+    if not purpose:
+        return None
+    return (
+        "Hi! I lead part of our security operations and we keep doing this by hand, "
+        "which really burns our analysts' time and causes mistakes. What I'm hoping "
+        f"you can set up for us is an automation that will: {purpose} "
+        "I'm honestly not a technical person, so I'll leave the how up to you -- just "
+        "please build something that actually works for us."
+    )
+
+
 def derive_operational_spec(pb, assertions: list[dict[str, Any]]) -> str | None:
     """Analyst user: describes the workflow in operational, plain language --
-    the behaviours it needs, never FSR step-type names. None when there is
-    nothing beyond a trigger to describe."""
+    the behaviours it needs, never FSR step-type names."""
     caps = _capabilities(assertions)
     if not caps:
         return None
@@ -238,3 +263,32 @@ def derive_operational_spec(pb, assertions: list[dict[str, Any]]) -> str | None:
     lines.extend(f"  - {c}" for c in caps)
     lines.append("Build the playbook so it is sound and ready to run.")
     return "\n".join(lines)
+
+
+def derive_expert_spec(pb, assertions: list[dict[str, Any]]) -> str | None:
+    """A precise, technical user who still speaks in behaviours, not FSR enums:
+    one tight paragraph describing trigger + flow + production-readiness."""
+    caps = _capabilities(assertions)
+    if not caps:
+        return None
+    purpose = _purpose(pb)
+    trig = _trigger_phrase(assertions).replace("It should ", "").replace(
+        "An analyst will run it on demand.", "It is run on demand.").strip()
+    bits = [f'Build the "{pb.name}" playbook.']
+    if purpose:
+        bits.append(purpose if purpose.endswith(".") else purpose + ".")
+    flow = (trig + " " if trig else "") + "It needs to " + ", then ".join(caps) + "."
+    bits.append(flow[0].upper() + flow[1:])
+    bits.append("It should be statically sound and ready to run in production.")
+    return " ".join(bits)
+
+
+#: name -> (builder, strict_ir). All user-voice styles grade sound+runnable;
+#: structural overlap with the real playbook is tracked, not gated.
+SPEC_BUILDERS = [
+    ("terse", derive_terse_spec, False),
+    ("goal", derive_goal_spec, False),
+    ("verbose", derive_verbose_spec, False),
+    ("operational", derive_operational_spec, False),
+    ("expert", derive_expert_spec, False),
+]

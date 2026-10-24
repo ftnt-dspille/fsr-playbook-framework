@@ -187,19 +187,16 @@ def build_tasks(corpus_dir: Path, db_path, min_assertions: int = 2) -> list[dict
             "n_steps": len(pb.steps or []),
             "source_verified": source_verified,
         }
-        # A mix of question TYPES in USER language (never the FSR step-type/op
-        # enums the grader checks -- that would be a lookup, not a design task):
-        #   goal        -- non-expert, states only the real-world goal;
-        #   operational -- analyst, describes the behaviours in plain language.
-        # Both grade sound+runnable; structural overlap with the real playbook
-        # is reported but not gated (many valid designs satisfy one ask).
+        # A wide variety of USER voices asking the SAME playbook, in their own
+        # words and detail level (terse / non-expert goal / verbose business /
+        # analyst / expert) -- never the FSR step-type/op enums the grader
+        # checks, so it stays a design task, not a lookup. All grade
+        # sound+runnable; structural overlap is tracked, not gated.
         variants = []
-        goal = derive.derive_goal_spec(pb)
-        if goal:
-            variants.append(("goal", goal, False))
-        op = derive.derive_operational_spec(pb, kept)
-        if op:
-            variants.append(("operational", op, False))
+        for style, builder, strict_ir in derive.SPEC_BUILDERS:
+            spec = builder(pb, kept)
+            if spec:
+                variants.append((style, spec, strict_ir))
         if not variants:
             stats["no_user_spec"] += 1
             continue

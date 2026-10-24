@@ -32,14 +32,24 @@ def _load_tasks(tasks_dir: Path) -> list[dict]:
 
 
 def _stratify(tasks: list[dict], per_bucket: int, buckets: set[str] | None) -> list[dict]:
-    by: dict[str, list] = defaultdict(list)
+    """Up to per_bucket tasks per bucket, spread round-robin across the user-voice
+    personas so a sample covers the range of users, not one voice."""
+    by: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
     for t in tasks:
         if buckets and t["bucket"] not in buckets:
             continue
-        by[t["bucket"]].append(t)
+        by[t["bucket"]][t.get("style", "?")].append(t)
     chosen = []
     for b in sorted(by):
-        chosen.extend(sorted(by[b], key=lambda t: t["id"])[:per_bucket])
+        styles = {s: sorted(v, key=lambda t: t["id"]) for s, v in by[b].items()}
+        picked: list[dict] = []
+        i = 0
+        while len(picked) < per_bucket and any(i < len(v) for v in styles.values()):
+            for s in sorted(styles):
+                if i < len(styles[s]) and len(picked) < per_bucket:
+                    picked.append(styles[s][i])
+            i += 1
+        chosen.extend(picked)
     return chosen
 
 

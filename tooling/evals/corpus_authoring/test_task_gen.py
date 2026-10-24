@@ -96,10 +96,11 @@ def test_no_spec_leaks_an_internal_term(tasks):
 
 
 def test_tasks_come_in_user_voice_styles(tasks):
-    """Every task is a goal or operational (user-voice) question, never the old
+    """Every task is one of the registered user-voice personas, never the old
     prescriptive enum-naming style."""
+    known = {name for name, _fn, _strict in derive.SPEC_BUILDERS}
     styles = {t.get("style") for t in tasks}
-    assert styles and styles <= {"goal", "operational"}, styles
+    assert styles and styles <= known, (styles, known)
 
 
 def test_each_task_has_a_substantive_assertion(tasks):
