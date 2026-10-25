@@ -99,9 +99,11 @@ def test_runtime_dependency_passes_static_but_fails_resolve(db):
     """The defining property of the runtime golden: the wrong-output-path variant
     compiles clean and verifies ready (every static gate passes), yet its
     reference does NOT resolve against the producer's real captured shape -- and
-    the correct playbook's reference does. This is the bug class static checks
-    structurally cannot catch."""
+    the correct playbook's reference does. The bug renders empty at runtime; the
+    one thing that lets a STATIC check see it is a grounded shape for the op (see
+    fsr_playbooks grounding), without which it compiles clean."""
     from fsr_playbooks.compiler.pipeline import compile_yaml
+    from fsr_playbooks.mcp_server import tools_verify
     from fsr_playbooks.mcp_server.tools_verify import verify_playbook
     from tooling.evals.corpus_authoring import runtime_dep, step_output
     for stem, cfg in run_golden._RUNTIME_GOLDEN.items():
@@ -115,16 +117,24 @@ def test_runtime_dependency_passes_static_but_fails_resolve(db):
         # inject the wrong path
         d = runtime_dep.inject_wrong_output_path(good, cfg["producer"], shape)
         assert d, f"{stem}: nothing to break"
-        # STATIC: still clean + ready
-        r = compile_yaml(d["yaml"], db)
-        hard = [e for e in (r.errors or []) if getattr(e, "severity", None) != "warning"]
-        assert not hard, f"{stem}: broken variant has hard errors {hard}"
-        assert verify_playbook(d["yaml"], db_path=str(db)).get("ready_to_push"), \
-            f"{stem}: broken variant should still verify ready (static cannot see it)"
-        # RUNTIME: does not resolve
+        # RUNTIME: the injected reference renders empty against the real shape.
         assert not runtime_dep.grade_runtime_dependency(
             d["yaml"], cfg["producer"], shape)["resolves"], \
             f"{stem}: broken variant should render empty at runtime"
+        # it never has a hard COMPILE error (the Jinja path is valid)
+        r = compile_yaml(d["yaml"], db)
+        hard = [e for e in (r.errors or []) if getattr(e, "severity", None) != "warning"]
+        assert not hard, f"{stem}: broken variant has hard compile errors {hard}"
+        # STATIC VISIBILITY depends on grounding. verify_playbook loads the
+        # packaged grounded store; whether it can see this bug is exactly whether
+        # the op is grounded there.
+        grounded = tools_verify._grounded_store().shape_for(
+            cfg["connector"], cfg["operation"])
+        ready = verify_playbook(d["yaml"], db_path=str(db)).get("ready_to_push")
+        if grounded:
+            assert not ready, f"{stem}: grounded op -> verify must CATCH the bad ref"
+        else:
+            assert ready, f"{stem}: ungrounded op -> static cannot see it"
 
 
 def test_restoring_source_grades_as_repaired(tasks, db):
