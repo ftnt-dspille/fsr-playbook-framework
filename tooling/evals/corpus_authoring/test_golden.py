@@ -44,7 +44,7 @@ def tasks(db):
 def test_every_golden_compiles_clean_and_verifies(db):
     from fsr_playbooks.mcp_server.tools_verify import verify_playbook
     files = sorted(run_golden.GOLDEN_DIR.glob("*.yaml"))
-    assert len(files) == 3, files
+    assert len(files) >= 4, files
     for f in files:
         y = f.read_text()
         r = compile_yaml(y, db)
@@ -81,6 +81,50 @@ def test_mapped_defect_injects_and_is_detected(tasks, db):
         assert d["kind"] == want, f"{t['id']}: got {d['kind']}, wanted mapped {want}"
         g = repair_grade.grade_repair(t["real_yaml"], d, repaired_yaml=None, db=db)
         assert g["detected"], f"{t['id']}/{d['kind']}: not detected {g['introduced_codes']}"
+
+
+def test_only_flag_isolates_one_section():
+    """--only <section> must run exactly that section. (Regression: the earlier
+    `only != "repair"` guards let --only runtime also run authoring + repair.)"""
+    for section in ("authoring", "repair", "runtime"):
+        ran = [s for s in ("authoring", "repair", "runtime")
+               if run_golden._should_run(section, s)]
+        assert ran == [section], f"--only {section} ran {ran}"
+    # no flag runs all three
+    assert all(run_golden._should_run(None, s)
+               for s in ("authoring", "repair", "runtime"))
+
+
+def test_runtime_dependency_passes_static_but_fails_resolve(db):
+    """The defining property of the runtime golden: the wrong-output-path variant
+    compiles clean and verifies ready (every static gate passes), yet its
+    reference does NOT resolve against the producer's real captured shape -- and
+    the correct playbook's reference does. This is the bug class static checks
+    structurally cannot catch."""
+    from fsr_playbooks.compiler.pipeline import compile_yaml
+    from fsr_playbooks.mcp_server.tools_verify import verify_playbook
+    from tooling.evals.corpus_authoring import runtime_dep, step_output
+    for stem, cfg in run_golden._RUNTIME_GOLDEN.items():
+        f = run_golden.GOLDEN_DIR / f"{stem}.yaml"
+        good = f.read_text()
+        shape_doc = step_output.load_shape(cfg["connector"], cfg["operation"])
+        assert shape_doc, f"{stem}: no captured shape fixture"
+        shape = shape_doc["shape"]
+        # correct playbook resolves at runtime
+        assert runtime_dep.grade_runtime_dependency(good, cfg["producer"], shape)["resolves"]
+        # inject the wrong path
+        d = runtime_dep.inject_wrong_output_path(good, cfg["producer"], shape)
+        assert d, f"{stem}: nothing to break"
+        # STATIC: still clean + ready
+        r = compile_yaml(d["yaml"], db)
+        hard = [e for e in (r.errors or []) if getattr(e, "severity", None) != "warning"]
+        assert not hard, f"{stem}: broken variant has hard errors {hard}"
+        assert verify_playbook(d["yaml"], db_path=str(db)).get("ready_to_push"), \
+            f"{stem}: broken variant should still verify ready (static cannot see it)"
+        # RUNTIME: does not resolve
+        assert not runtime_dep.grade_runtime_dependency(
+            d["yaml"], cfg["producer"], shape)["resolves"], \
+            f"{stem}: broken variant should render empty at runtime"
 
 
 def test_restoring_source_grades_as_repaired(tasks, db):
