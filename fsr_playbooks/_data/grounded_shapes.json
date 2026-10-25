@@ -1201,6 +1201,352 @@
     },
     "kind": "object"
   },
+  "fortinet-fortiguard-ioc:get_risk_distribution": {
+    "keys": {
+      "data": {
+        "item": {
+          "keys": {
+            "color": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "riskDistribution": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "total": {
+              "kind": "scalar",
+              "type": "integer"
+            }
+          },
+          "kind": "object"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "fortinet-fortiguard-threat-intelligence:get_country_list": {
+    "keys": {
+      "data": {
+        "item": {
+          "kind": "scalar",
+          "type": "string"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "fortinet-fortiguard-threat-intelligence:get_industry_list": {
+    "keys": {
+      "data": {
+        "item": {
+          "kind": "scalar",
+          "type": "string"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "fortinet-fortiguard-threat-intelligence:get_threat_categories": {
+    "keys": {
+      "data": {
+        "item": {
+          "keys": {
+            "ctype": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "description": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "title": {
+              "kind": "scalar",
+              "type": "string"
+            }
+          },
+          "kind": "object"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "fortinet-fortiguard-threat-intelligence:threat_intel_search": {
+    "keys": {
+      "data": {
+        "keys": {
+          "av_cate": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "confidence": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "created": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "ioc_cate": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "ioc_tags": {
+            "item": {
+              "kind": "scalar",
+              "type": "any"
+            },
+            "kind": "list"
+          },
+          "kill_chain_phases": {
+            "item": {
+              "kind": "scalar",
+              "type": "any"
+            },
+            "kind": "list"
+          },
+          "malware_name": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "modified": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "reference_url": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "spam_cates": {
+            "item": {
+              "kind": "scalar",
+              "type": "any"
+            },
+            "kind": "list"
+          },
+          "wf_cate": {
+            "kind": "scalar",
+            "type": "string"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "mitre-attack:get_mitre_data_sample": {
+    "keys": {
+      "data": {
+        "item": {
+          "keys": {
+            "aliases": {
+              "item": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "kind": "list",
+              "optional": true
+            },
+            "created": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "created_by_ref": {
+              "kind": "scalar",
+              "optional": true,
+              "type": "string"
+            },
+            "description": {
+              "kind": "scalar",
+              "optional": true,
+              "type": "string"
+            },
+            "external_references": {
+              "item": {
+                "keys": {
+                  "description": {
+                    "kind": "scalar",
+                    "optional": true,
+                    "type": "string"
+                  },
+                  "external_id": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "source_name": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "url": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "kind": "object"
+              },
+              "kind": "list"
+            },
+            "id": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "modified": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "name": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "object_marking_refs": {
+              "item": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "kind": "list"
+            },
+            "revoked": {
+              "kind": "scalar",
+              "optional": true,
+              "type": "boolean"
+            },
+            "spec_version": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "type": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "x_mitre_aliases": {
+              "item": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "kind": "list",
+              "optional": true
+            },
+            "x_mitre_contributors": {
+              "item": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "kind": "list",
+              "optional": true
+            },
+            "x_mitre_domains": {
+              "item": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "kind": "list"
+            },
+            "x_mitre_modified_by_ref": {
+              "kind": "scalar",
+              "optional": true,
+              "type": "string"
+            },
+            "x_mitre_platforms": {
+              "item": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "kind": "list",
+              "optional": true
+            },
+            "x_mitre_shortname": {
+              "kind": "scalar",
+              "optional": true,
+              "type": "string"
+            },
+            "x_mitre_version": {
+              "kind": "scalar",
+              "type": "string"
+            }
+          },
+          "kind": "object"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "update_record:Replace": {
     "keys": {
       "@context": {

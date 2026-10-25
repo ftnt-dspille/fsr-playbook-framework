@@ -14,18 +14,46 @@ from fsr_playbooks.mcp_server import tools_verify
 from fsr_playbooks.mcp_server.tools_verify import verify_playbook
 from fsr_playbooks._db import default_db_path
 
+# (connector, op, expected data kind) -- grounded from live read-only runs.
 _GROWN = [
-    ("cyops_utilities", "get_email_templates"),
-    ("cyops_utilities", "get_ioc_parsing_regex"),
+    ("cyops_utilities", "get_email_templates", "list"),
+    ("cyops_utilities", "get_ioc_parsing_regex", "list"),
+    ("fortinet-fortiguard-threat-intelligence", "get_country_list", "list"),
+    ("fortinet-fortiguard-threat-intelligence", "get_industry_list", "list"),
+    ("fortinet-fortiguard-threat-intelligence", "get_threat_categories", "list"),
+    ("fortinet-fortiguard-threat-intelligence", "threat_intel_search", "object"),
+    ("fortinet-fortiguard-ioc", "get_risk_distribution", "list"),
+    ("mitre-attack", "get_mitre_data_sample", "list"),
 ]
 
 
-@pytest.mark.parametrize("connector,op", _GROWN)
-def test_op_is_grounded_as_a_list(connector, op):
+@pytest.mark.parametrize("connector,op,kind", _GROWN)
+def test_op_is_grounded_with_expected_kind(connector, op, kind):
     shape = tools_verify._grounded_store().shape_for(connector, op)
     assert shape, f"{connector}:{op} not grounded"
     data = (shape.get("keys") or {}).get("data")
-    assert isinstance(data, dict) and data.get("kind") == "list", data
+    assert isinstance(data, dict) and data.get("kind") == kind, (op, data)
+
+
+def test_grounded_shapes_carry_no_captured_values():
+    """Every grounded entry must be structure only: scalar leaves are a type
+    name, never a captured value. A leaked value would ship box data."""
+    store = tools_verify._grounded_store().as_dict()
+
+    def _check(node):
+        if isinstance(node, dict):
+            if node.get("kind") == "scalar":
+                # only type + structural flags (e.g. optional); never a value.
+                assert set(node) <= {"kind", "type", "optional"}, node
+                assert node.get("type") in {"string", "integer", "float", "boolean",
+                                            "null", "any", "unknown"}, node
+            for v in node.values():
+                _check(v)
+        elif isinstance(node, list):
+            for v in node:
+                _check(v)
+    for entry in store.values():
+        _check(entry)
 
 
 def _pb(op: str, ref: str) -> str:
