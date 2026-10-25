@@ -1230,15 +1230,22 @@ def _validate_branch_jinja(
                             path=f"arguments.{sub}",
                         ))
                     elif (shape and shape.get("kind") == "unknown"
-                          and shape.get("reason") == "attr access on list"
-                          and isinstance(getattr(
-                              jinja_key_lookup.get(key), "for_each", None),
-                              dict)):
-                        # The producer is a `for_each` step → its output is a
-                        # LIST (one envelope per iteration, live-grounded). A
-                        # bare `.attr` on it resolves to "" at runtime, so this
-                        # is a confident bug, not a soft unknown. Tell the
-                        # author to index an iteration or aggregate the list.
+                          and shape.get("reason") == "attr access on list"):
+                        # We descended into a KNOWN list and the author did a
+                        # bare `.attr` on it -- which resolves to "" at runtime.
+                        # This is a confident bug, not a soft unknown: the
+                        # "attr access on list" reason only arises once the list
+                        # shape was actually known, whether from a `for_each`
+                        # step (its per-iteration output is a list) or from a
+                        # connector op whose grounded shape is a list (e.g.
+                        # get_macro_list). Tell the author to index an iteration
+                        # or aggregate the list.
+                        producer = jinja_key_lookup.get(key)
+                        is_loop = isinstance(
+                            getattr(producer, "for_each", None), dict)
+                        why = ("is a for_each loop, so its output is a LIST of "
+                               "per-iteration results"
+                               if is_loop else "produces a LIST")
                         bad_attr = (rest.lstrip(".").split(".", 1)[0]
                                     .split("[", 1)[0] if rest.startswith(".")
                                     else rest)
@@ -1246,12 +1253,10 @@ def _validate_branch_jinja(
                             code="missing_field_on_step_output",
                             message=(
                                 f"vars.steps.{key}{rest} in step {s.id!r}: "
-                                f"{key!r} is a for_each loop, so its output is "
-                                f"a LIST of per-iteration results -- `.{bad_attr}`"
-                                f" on the list resolves to empty at runtime. "
-                                f"Index an iteration "
-                                f"(`vars.steps.{key}[0]{rest}`) or map over the "
-                                f"list with a Jinja filter."),
+                                f"{key!r} {why} -- `.{bad_attr}` on the list "
+                                f"resolves to empty at runtime. Index an "
+                                f"iteration (`vars.steps.{key}[0]{rest}`) or map "
+                                f"over the list with a Jinja filter."),
                             step=s.id, branch=branch_name,
                             path=f"arguments.{sub}",
                         ))

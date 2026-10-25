@@ -1116,6 +1116,30 @@
     },
     "kind": "object"
   },
+  "cyops_utilities:get_macro_list": {
+    "keys": {
+      "data": {
+        "item": {
+          "kind": "scalar",
+          "type": "string"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "update_record:Replace": {
     "keys": {
       "@context": {
