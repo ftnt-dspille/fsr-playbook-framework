@@ -202,7 +202,7 @@ def test_find_keeps_the_tool_call_on_its_compact_row(offline_box, persona):
 
 
 def test_an_empty_allowlist_with_the_tool_offered_gets_it(offline_box, persona):
-    """The live shape (.159's alerts persona): may_write includes alerts, the
+    """The live shape (the live alerts persona): may_write includes alerts, the
     tools allowlist is empty (= the host's default tools, which include the
     record writes). Reading the allowlist answered "no tool" there."""
     persona(may_write=["alerts"], tools_allow=[],

@@ -151,7 +151,7 @@ def _purge(client, name: str = PROBE_COLLECTION_PREFIX) -> None:
             # CRITICAL: ALWAYS filter client-side on the prefix, even on
             # the 200 path. FSR silently ignores unknown query filters
             # and returns ALL workflows - trusting the server-side filter
-            # caused a mass-delete on 2026-05-08 (every workflow on the
+            # caused a mass-delete (every workflow on the
             # appliance was hard-deleted because rt_-prefix filter was
             # ignored). NEVER hard-delete based on an unverified filter.
             wfs = [w for w in wr.json().get("hydra:member", [])

@@ -320,7 +320,7 @@ def step_through_playbook(yaml_text: str = "",
                         #  - gap -> `_render_local` already logged it as an
                         #    `unrendered` diagnostic; do NOT promote it, or a
                         #    pure transport gap reads as the false "failed read"
-                        #    seen live on .159. The offline path treats it the
+                        #    seen on a live appliance. The offline path treats it the
                         #    same non-fatal way.
                         if _template_syntax_broken(value):
                             render_errors.append(f"{path}: {exc}")

@@ -2412,7 +2412,7 @@ def _fetch_trigger_route_uuid(client, wf_uuid: str) -> str | None:
 def cmd_run_playbook(args: argparse.Namespace) -> int:
     """Manually trigger a deployed playbook via /api/triggers/1/.
 
-    Two modes (live-verified 2026-05-03):
+    Two modes (live-verified):
       - default ("designer-run"): POST /api/triggers/1/notrigger/<route_uuid>
         body {input, request:{data:{}}, useMockOutput, globalMock}.
         Returns {task_id}. Used by the playbook designer Run button.

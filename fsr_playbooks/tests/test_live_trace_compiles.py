@@ -1,6 +1,6 @@
 """The live triage trace must compile -- driven through the SHIPPING path.
 
-Captured from `.159` (8.0.0) on 2026-08-02, live-integration `trace_recorded`:
+Captured from a live appliance (8.0.0), live-integration `trace_recorded`:
 the agent enriched an IP, then ran `fortigate-firewall.block_ip_new` twice from
 approved action cards. The recorded call carries both branches of two nested
 selects -- method='Quarantine Based' with the Policy-Based-only

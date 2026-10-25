@@ -5,7 +5,7 @@
 against a bad store are void -- so a store that MUTATES during the run it is
 measuring is not pinned, and two runs of the same fixture are not comparable.
 
-It really did mutate: the store's md5 changed mid-run on 2026-08-15
+It really did mutate: the store's md5 changed mid-run
 (`b411f188…` -> `fdd5af49…`). The writer was the `connector_op_defs` cache in
 `tools_execution`, which opened `DB_PATH` read-write while every other reader
 opens the same file `mode=ro`. In a source checkout `runtime_cache_db_path()`

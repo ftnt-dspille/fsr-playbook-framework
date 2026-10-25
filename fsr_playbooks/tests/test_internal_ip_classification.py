@@ -2,7 +2,7 @@
 
 `ipaddress` counts the RFC 5737 documentation ranges as private. Every seeded
 demo alert uses a TEST-NET address as its external C2 destination, so live on
-.159 the hunt's one external indicator (203.0.113.42) was refused correlation
+a live appliance the hunt's one external indicator (203.0.113.42) was refused correlation
 search as "an internal (private) address", which is why the classifier must
 not count documentation ranges as internal.
 """

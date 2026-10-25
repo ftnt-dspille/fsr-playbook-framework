@@ -536,7 +536,7 @@ def _connectors_that_could_contain(
 
 
 # Connectors whose healthcheck outlived the deadline, by name -> when. Live on
-# .159 one connector's healthcheck never answers; uncached, it held EVERY
+# On a live box one connector's healthcheck never answers; uncached, it held EVERY
 # probe to the full deadline even with the other 84 served from cache. Skipped
 # (fail open, listing status) for a short window; the run_op health cache is
 # untouched, because a hung healthcheck says nothing about the ops.
@@ -559,7 +559,7 @@ def _healthcheck_many(
       • `_live_healthcheck` passes timeout=8 -- but the ON-BOX crudhub session
         SILENTLY IGNORES that kwarg, so an unresponsive vendor healthcheck runs
         unbounded on the box (this is what made find_enrichment_actions take
-        ~2 min in export sess-ei6esw96: ~13 candidate connectors, cold cache).
+        ~2 min in a live export: ~13 candidate connectors, cold cache).
       • So we ALSO bound the whole fan-out by `deadline_s` wall-clock: we wait on
         the pool with a deadline and abandon any straggler probe (its worker
         thread is left to finish/die in the background). A connector we couldn't
@@ -1218,7 +1218,7 @@ def list_configured_connectors(probe: bool = False,
     if not cfg.is_live():
         return {"error": "FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)"}
     client = get_client()
-    # The three listing reads are independent (~2-2.7s each on .159, run one
+    # The three listing reads are independent (~2-2.7s each on a live appliance, run one
     # after another they were ~7s before any probe started), so fetch them
     # together. Each keeps its own fail-open handling below.
     from concurrent.futures import ThreadPoolExecutor
@@ -1299,7 +1299,7 @@ def list_configured_connectors(probe: bool = False,
     if probe:
         targets = [(n, v, name_agent.get(n, "")) for n, v in name_version.items()
                    if only is None or n in only]
-        # A listing is a lookup, not a wait: live on .159 this call took 13s
+        # A listing is a lookup, not a wait: on a live appliance this call took 13s
         # (85 connectors, the disconnected ones re-probed every 5 min, each
         # slow to fail). Anything slower than this keeps its listing status.
         health = _healthcheck_many(client, targets, deadline_s=_LISTING_PROBE_DEADLINE_S)

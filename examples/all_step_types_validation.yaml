@@ -332,7 +332,7 @@ playbooks:
   # PB2 -- post_create trigger variant. ACTIVE + scoped to the orchestrator's
   # audit alert so the orchestrator's own Create step FIRES it -- proving the
   # start_on_create TYPE actually runs, not just compiles. (Playbooks do NOT
-  # need a separate publish to run their triggers -- live-verified 2026-07-02:
+  # need a separate publish to run their triggers -- live-verified:
   # the stock FortiSOAR post-create triggers fire on a direct API alert create
   # with no publish, and so do these.) The `when` filter matches the run marker
   # (description contains `fsrpb_all_step_types_`) so it only fires on our

@@ -1621,7 +1621,7 @@ RETIRED_TO_UNION: dict[str, str] = {
     "emit_manual_input": "emit_card", "emit_capability_gap_card": "emit_card",
     "emit_playbook_offer": "emit_card", "emit_enhancement_offer": "emit_card",
     # B3a (2026-09). Every name below was called 0-2 times in 287 live
-    # sessions on .159 while its schema rode on every turn (41 tools, ~40k
+    # sessions on a live appliance while its schema rode on every turn (41 tools, ~40k
     # chars, identical for triage and build).
     # connector health: one tool answers configured + healthy for all or one.
     "healthcheck_connector": "list_configured_connectors",

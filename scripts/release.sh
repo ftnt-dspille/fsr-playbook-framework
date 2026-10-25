@@ -118,7 +118,7 @@ make tests
 # the release is what triggers the PyPI upload. So CI is gated BEFORE the tag:
 # a red main should stop a release, not be discovered after one.
 #
-# This gate was added on 2026-08-02 after `ci_watch.sh` was pointed at main for
+# This gate was added after `ci_watch.sh` was pointed at main for
 # the first time and found it had been RED for five consecutive runs -- across
 # releases 0.6.6, 0.6.7 and 0.6.8, every one of which published and shipped to a
 # box. `publish.yml` builds and uploads; it does not run the tests. So the whole

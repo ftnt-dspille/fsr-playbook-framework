@@ -1,6 +1,6 @@
 """CreateDeliveryGuard -- the CREATE counterpart to EnhanceDeliveryGuard.
 
-Live-observed failure this pins (box .159, connector 0.5.64): a build turn ran
+Live-observed failure this pins (live box, connector 0.5.64): a build turn ran
 the research tools (`get_step_type`, `find_connector`, `find_operation`),
 drafted YAML, and then ended with "Next, I will author a playbook that ..." --
 no `emit_playbook_offer`, so the analyst got prose and no card to accept. The
@@ -125,7 +125,7 @@ def test_fires_at_most_once():
 
 
 # --- trace builds ------------------------------------------------------------
-# Live (.159 sweep row 5, twice): "save that as a playbook" after a triage ran
+# Live (sweep row 5, twice): "save that as a playbook" after a triage ran
 # build_playbook_from_trace, got a clean compile, and ended in prose. The build
 # is a preview; only an offer card gives the analyst something to Accept.
 

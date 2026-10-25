@@ -1,7 +1,7 @@
 """Unattended triage: a true_positive with nothing staged is asked, in-turn, for
 its containment.
 
-Live on .159 the box model ended 5 of 5 confirmed C2 auto-triage turns on the
+On a live appliance, the box model ended 5 of 5 confirmed C2 auto-triage turns on the
 verdict card (or on the forced one), so no block was ever proposed and the
 autonomy policy had nothing to act on. The ask stays inside the turn because
 the policy judges a staged block against this turn's verdict and evidence.
@@ -240,7 +240,7 @@ def _empty():
 
 
 def test_an_empty_reply_after_the_verdict_is_not_replayed():
-    """The live shape on .159: the model answered its delivered verdict with
+    """The live shape: the model answered its delivered verdict with
     nothing. Replayed as {"role": "assistant", "content": None} with no calls,
     that message makes the follow-through request a 400 and the turn dies."""
     events, disp, sent = _run([_hunt_round(), _verdict_round(), _empty(),
@@ -273,7 +273,7 @@ def test_the_loop_hands_each_run_op_result_to_the_evidence_reader():
 
 
 # --- a false positive under the admin's close rule --------------------------
-# Live on .159 an enforced close rule never closed anything: the box model
+# On a live appliance, an enforced close rule never closed anything: the box model
 # delivered a false_positive verdict at 0.98 and ended the turn, so no close
 # was staged for the policy to judge and the alert stayed open.
 

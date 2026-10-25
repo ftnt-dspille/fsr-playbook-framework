@@ -1,6 +1,6 @@
 """#107 -- an uninstalled connector is a fact about the BOX, not a defect.
 
-Live on .159, "Explain what this playbook does, step by step" produced four
+On a live appliance, "Explain what this playbook does, step by step" produced four
 `verify_playbook` calls against connectors the box does not have
 (`phishme-intelligence`, `placeholder-connector`) and delivered no explanation.
 The agent read `unknown_connector` as something it could fix by editing, and
