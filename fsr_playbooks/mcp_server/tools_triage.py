@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fsr_playbooks.mcp_server import _shared
 from fsr_playbooks.mcp_server._shared import _VERIF_RANK, _db, _rows, mcp
@@ -82,7 +82,7 @@ def _shrink_value(key: str, v: Any) -> Any:
                 [f"...+{len(names) - _REC_MAX_REL} more"]
                 if len(names) > _REC_MAX_REL else [])
         # Hydrated relationship members: thin index of {iri, label, type, ...}.
-        out = []
+        out: list[Any] = []
         for m in members[:_REC_MAX_REL]:
             if isinstance(m, dict) and "@id" in m:
                 ref = {"iri": m["@id"]}
@@ -473,10 +473,14 @@ def _build_query_filters(filters: Any) -> dict[str, Any]:
             if isinstance(value, dict) and value and all(
                     str(k).lstrip("$").lower() in _OP_ALIASES for k in value):
                 for op, v in value.items():
-                    flist.append(_normalize_condition(
-                        {"field": field, "op": str(op).lstrip("$"), "value": v}))
+                    norm = _normalize_condition(
+                        {"field": field, "op": str(op).lstrip("$"), "value": v})
+                    if norm is not None:
+                        flist.append(norm)
                 continue
-            flist.append(_normalize_condition({"field": field, "value": value}))
+            norm = _normalize_condition({"field": field, "value": value})
+            if norm is not None:
+                flist.append(norm)
     else:
         raise ValueError("filters must be a dict or a list of conditions")
     return {"logic": "AND", "filters": flist} if flist else {
@@ -745,11 +749,17 @@ def _sort_rows(members: list[dict], sort_spec: list[dict[str, str]]) -> list[dic
     ``reverse=True`` too, which a rank baked into the key cannot do.
     """
     ordered = list(members)
+
+    def _key_of(field: str) -> Any:
+        return lambda m: _sort_key(m.get(field))
+
+    def _missing_of(field: str) -> Any:
+        return lambda m: m.get(field) is None
+
     for spec in reversed(sort_spec):
         f = spec["field"]
-        ordered.sort(key=lambda m, f=f: _sort_key(m.get(f)),
-                     reverse=(spec["direction"] == "DESC"))
-        ordered.sort(key=lambda m, f=f: m.get(f) is None)
+        ordered.sort(key=_key_of(f), reverse=(spec["direction"] == "DESC"))
+        ordered.sort(key=_missing_of(f))
     return ordered
 
 
@@ -1675,8 +1685,9 @@ def get_record(iri: str = "", module: str = "", uuid: str = "",
                         f"search_module_records(module={mod_seg!r}, q=...)")
             close = _record_lookup.near_uuid(
                 client, mod_seg, seg[-1] if len(seg) > 4 else "", active, candidates)
-            out_nf = {"ok": False, "code": "not_found", "message": msg,
-                      "suggestions": near, "candidates": candidates, "url": url}
+            out_nf: dict[str, Any] = {"ok": False, "code": "not_found",
+                      "message": msg, "suggestions": near,
+                      "candidates": candidates, "url": url}
             if close:
                 out_nf["message"] += _record_lookup.did_you_mean_text(close)
                 out_nf["did_you_mean"] = close
@@ -1950,7 +1961,7 @@ def siem_search(by: Literal["ip", "host", "user", "incident", "raw"], value: str
       time_from, time_to, source_ip: (``by=incident`` only).
       select: (``by=raw`` only) attributes to return.
     """
-    by = by.lower().strip()
+    by = cast(Any, by.lower().strip())
     if by == "incident":
         return siem_events_for_incident(incident_id=value, time_from=time_from,
                                         time_to=time_to, limit=limit,
@@ -2362,7 +2373,7 @@ def _resolve_live_incident(incident_id: str,
         if not fs:
             return "", ""
         f = float(fs) / 1000.0
-        t = float(ls) / 1000.0
+        t = float(cast(float, ls)) / 1000.0
         # pad a little and clamp the interval to the op's 24h ceiling
         f -= 60
         t += 60
@@ -2842,7 +2853,7 @@ def faz_search(by: Literal["ip", "device", "serial", "summary", "alerts", "raw"]
       devid: device selector (default 'All_FortiGate').
       limit: max rows to return (default 25).
     """
-    by = by.lower().strip()
+    by = cast(Any, by.lower().strip())
     if not logtype:
         logtype = "Event" if by == "summary" else "Traffic"
     if by == "alerts":
@@ -3010,7 +3021,7 @@ def _assert_one(client: Any, a: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "code": "bad_filters", "message": str(e), "kind": kind}
 
     if kind == "record_exists":
-        data = _query_module(client, module, body, limit=1)
+        data = _query_module(client, str(module), body, limit=1)
         if "_error" in data:
             return {"ok": False, "code": "query_failed", "kind": kind,
                     "message": f"HTTP {data.get('_http_status')}: {data['_error']}"}
@@ -3031,7 +3042,7 @@ def _assert_one(client: Any, a: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(expected, (int, float)):
             return {"ok": False, "code": "bad_value", "kind": kind,
                     "message": "record_count `value` must be a number"}
-        data = _query_module(client, module, body, limit=1)
+        data = _query_module(client, str(module), body, limit=1)
         if "_error" in data:
             return {"ok": False, "code": "query_failed", "kind": kind,
                     "message": f"HTTP {data.get('_http_status')}: {data['_error']}"}
@@ -3049,7 +3060,7 @@ def _assert_one(client: Any, a: dict[str, Any]) -> dict[str, Any]:
         if not field:
             return {"ok": False, "code": "missing_field", "kind": kind,
                     "message": "field_equals requires `field`"}
-        data = _query_module(client, module, body, limit=2)
+        data = _query_module(client, str(module), body, limit=2)
         if "_error" in data:
             return {"ok": False, "code": "query_failed", "kind": kind,
                     "message": f"HTTP {data.get('_http_status')}: {data['_error']}"}

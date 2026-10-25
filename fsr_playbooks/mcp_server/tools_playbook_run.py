@@ -54,7 +54,7 @@ def _jsonable(obj: Any) -> Any:
                 pass
     try:
         import dataclasses
-        if dataclasses.is_dataclass(obj):
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
             return dataclasses.asdict(obj)
     except Exception:  # noqa: BLE001
         pass
@@ -711,7 +711,10 @@ def _precard_record(args: dict) -> dict | None:
     bad = _bad_record(record)
     if bad is not None:
         return bad
-    module, uuid = _record_parts(record)
+    parts = _record_parts(record)
+    if parts is None:
+        return None
+    module, uuid = parts
     return unknown_record(_shared._live_client(), module, uuid,
                           active_iri=_shared.active_record_iri())
 
@@ -926,7 +929,7 @@ def _run_playbook_impl(playbook: str = "",
                                      action["playbook_uuid"])
                 if parked is not None:
                     return parked
-                result = {"triggered": True}
+                result: Any = {"triggered": True}
             else:
                 # The /action/ route's task_id does NOT correlate via log_list, so
                 # follow by playbook instead -- poll the newest run. A run PAUSED on
@@ -1350,8 +1353,8 @@ def list_module_playbooks(module: str = "",
                     "name": pb.get("name"),
                     "uuid": pb.get("uuid") or (pb.get("@id") or "").rsplit("/", 1)[-1],
                     "description": (pb.get("description") or "")[:200] or None,
-                    "execute_button": args.get("executeButtonText") or "Execute",
-                    "single_record": bool(args.get("singleRecordExecution")),
+                    "execute_button": (args or {}).get("executeButtonText") or "Execute",
+                    "single_record": bool((args or {}).get("singleRecordExecution")),
                     "is_active": bool(is_active) if is_active is not None else None,
                 })
             break  # only the trigger step matters

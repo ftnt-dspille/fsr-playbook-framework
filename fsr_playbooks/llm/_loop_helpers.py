@@ -2567,8 +2567,10 @@ def forced_containment(disposition: str | None) -> dict[str, Any] | None:
         # The target is what the lookup was ABOUT: the reader's own indicator
         # first, then the call's params/args (a run_op nests the ip under
         # `params`, so the top-level args alone would miss it).
-        a = entry.get("args") or {}
-        params = a.get("params") if isinstance(a.get("params"), dict) else {}
+        raw_a = entry.get("args")
+        a = raw_a if isinstance(raw_a, dict) else {}
+        raw_params = a.get("params")
+        params = raw_params if isinstance(raw_params, dict) else {}
         candidates = [finding.get("indicator"), *_ip_targets(params), *_ip_targets(a)]
         for ip in candidates:
             ip = str(ip or "").strip()

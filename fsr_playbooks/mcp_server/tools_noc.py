@@ -463,7 +463,7 @@ def faz_search_device_events(device: str, window: str = "6h",
     echo: dict[str, Any] = {"device": device, "window": window,
                             "logtype": logtype, "adom": adom,
                             "filter": event_filter, "devid": devid}
-    bad = []
+    bad: list[tuple[str, Any, tuple[str, ...]]] = []
     if canon_logtype is None:
         bad.append(("logtype", logtype, _FAZ_LOGTYPE_VALUES))
     if canon_devid is None:
@@ -523,7 +523,7 @@ def faz_search_by_serial(serial: str, window: str = "6h",
     canon_devid = _faz_devid(devid)
     echo: dict[str, Any] = {"serial": serial, "window": window,
                             "logtype": logtype, "adom": adom, "devid": devid}
-    bad = []
+    bad: list[tuple[str, Any, tuple[str, ...]]] = []
     if canon_logtype is None:
         bad.append(("logtype", logtype, _FAZ_LOGTYPE_VALUES))
     if canon_devid is None:

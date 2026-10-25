@@ -82,6 +82,8 @@ def precard_validate(args: dict) -> dict | None:
     try:
         client = _shared._live_client()
         fields = (args or {}).get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
         return (_unknown_fields(client, module, fields)
                 or _structured_into_text(client, module, fields)
                 or _bad_picklist_label(client, module, fields))

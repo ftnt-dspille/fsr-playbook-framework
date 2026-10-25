@@ -142,8 +142,9 @@ def unknown_record(client: Any, module: str, uuid: str,
            + ". Do NOT retry with a guessed uuid: use one of `candidates`, or "
            f"find the record with search_module_records(module={module!r}, "
            "q=...). A record's display id (#123) is not its uuid.")
-    out = {"ok": False, "code": "unknown_record", "module": module,
-           "uuid": uuid, "message": msg, "candidates": candidates}
+    out: dict[str, Any] = {"ok": False, "code": "unknown_record",
+           "module": module, "uuid": uuid, "message": msg,
+           "candidates": candidates}
     if near:
         out["message"] += did_you_mean_text(near)
         out["did_you_mean"] = near
