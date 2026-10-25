@@ -91,6 +91,57 @@ def describe_output(value: Any, root: str) -> dict[str, Any]:
             "suggested_references": suggest_references(shape, root)}
 
 
+def _from_grounded(shape: Any) -> Shape:
+    """Convert a grounded-store Shape ({"kind": ...}) to this module's shape
+    vocabulary, so suggest_references can walk a shape read from the oracle."""
+    if not isinstance(shape, dict):
+        return "unknown"
+    kind = shape.get("kind")
+    if kind == "scalar":
+        t = shape.get("type")
+        return {"string": "str", "integer": "int", "float": "float",
+                "boolean": "bool", "null": "null"}.get(t, "str")
+    if kind == "list":
+        return {"__list_of__": _from_grounded(shape.get("item")), "__len__": 1}
+    if kind == "object":
+        return {k: _from_grounded(v) for k, v in (shape.get("keys") or {}).items()}
+    return "unknown"
+
+
+def grounded_help(connector: str, operation: str, step_name: str | None = None,
+                  store_path: Any = None) -> dict[str, Any]:
+    """Resolvable reference paths into a connector op's output, from the grounded
+    shape oracle -- the answer to 'I wrote vars.steps.X.<path> and it renders
+    empty; what actually resolves?'. Offline: reads the recorded shape, runs
+    nothing. When the op is not grounded, says so (its shape is unknown to static
+    checks) rather than guessing."""
+    from pathlib import Path
+
+    from fsr_playbooks.compiler.grounded_shapes import GroundedShapeStore
+
+    root = f"vars.steps.{(step_name or '<step>').replace(' ', '_')}"
+    if store_path is None:
+        store_path = Path(__file__).resolve().parent / "_data" / "grounded_shapes.json"
+    try:
+        shape = GroundedShapeStore.load(Path(store_path)).shape_for(connector, operation)
+    except Exception:  # noqa: BLE001
+        shape = None
+    if not isinstance(shape, dict):
+        return {"grounded": False, "connector": connector, "operation": operation,
+                "message": (f"{connector}.{operation} is not grounded: its output shape "
+                            "is unknown to static checks. Reference it via "
+                            f"{root}.data and confirm against a real run (debug_run), "
+                            "or ground the op so the shape is known.")}
+    # the op output lives under the envelope's `.data`; root suggestions there.
+    data = (shape.get("keys") or {}).get("data")
+    out_shape = _from_grounded(data if isinstance(data, dict) else shape)
+    base = f"{root}.data" if isinstance(data, dict) else root
+    refs = suggest_references(out_shape, base)
+    return {"grounded": True, "connector": connector, "operation": operation,
+            "is_list": isinstance(out_shape, dict) and "__list_of__" in out_shape,
+            "shape": out_shape, "suggested_references": refs}
+
+
 def probe_output(client: Any, connector: str, operation: str,
                  params: dict | None = None, config: str | None = None,
                  root: str | None = None) -> dict[str, Any]:
