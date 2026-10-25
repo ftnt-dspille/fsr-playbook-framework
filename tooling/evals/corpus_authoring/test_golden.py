@@ -83,6 +83,18 @@ def test_mapped_defect_injects_and_is_detected(tasks, db):
         assert g["detected"], f"{t['id']}/{d['kind']}: not detected {g['introduced_codes']}"
 
 
+def test_only_flag_isolates_one_section():
+    """--only <section> must run exactly that section. (Regression: the earlier
+    `only != "repair"` guards let --only runtime also run authoring + repair.)"""
+    for section in ("authoring", "repair", "runtime"):
+        ran = [s for s in ("authoring", "repair", "runtime")
+               if run_golden._should_run(section, s)]
+        assert ran == [section], f"--only {section} ran {ran}"
+    # no flag runs all three
+    assert all(run_golden._should_run(None, s)
+               for s in ("authoring", "repair", "runtime"))
+
+
 def test_runtime_dependency_passes_static_but_fails_resolve(db):
     """The defining property of the runtime golden: the wrong-output-path variant
     compiles clean and verifies ready (every static gate passes), yet its

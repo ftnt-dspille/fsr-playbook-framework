@@ -60,6 +60,11 @@ _DEFECT_BY_FILE = {
 }
 
 
+def _should_run(only: str | None, section: str) -> bool:
+    """Which sections run for --only. None runs all; otherwise only that one."""
+    return only is None or only == section
+
+
 def _expert_spec(pb, kept):
     for style, builder, strict_ir in derive.SPEC_BUILDERS:
         if style == _STYLE:
@@ -134,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     work = out / "work"
 
     authoring, repairs = [], []
-    if args.only != "repair":
+    if _should_run(args.only, "authoring"):
         print("=== authoring (3 drives) ===")
         for t in tasks:
             run = drive.drive_task(t, work, model=args.model)
@@ -143,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             authoring.append(g)
             print(f"  {t['id']:28} draft={g['draft']!s:5} "
                   f"verified_fair={g.get('verified_fair')!s:5} ir={g['ir_passed']}")
-    if args.only != "authoring":
+    if _should_run(args.only, "repair"):
         print("=== repair (3 drives) ===")
         for t in tasks:
             d = _pick_defect(t)
@@ -159,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"repaired={g['repaired']!s:5} struct={g['structure_preserved']}")
 
     runtime = []
-    if args.only in (None, "runtime"):
+    if _should_run(args.only, "runtime"):
         print("=== runtime step-output dependency (compiles clean, wrong at run time) ===")
         for stem, cfg in _RUNTIME_GOLDEN.items():
             f = GOLDEN_DIR / f"{stem}.yaml"
