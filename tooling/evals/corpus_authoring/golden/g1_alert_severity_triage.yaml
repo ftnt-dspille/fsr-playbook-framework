@@ -1,0 +1,42 @@
+collection: Golden - Alert Severity Triage
+description: Route an alert to the right handling based on its severity.
+visible: true
+playbooks:
+  - name: Alert Severity Triage
+    description: Decide handling by severity and update the alert accordingly.
+    is_active: true
+    steps:
+      - name: Start
+        type: start
+        next: Route By Severity
+      - name: Route By Severity
+        type: decision
+        conditions:
+          - display: High
+            when: "{{ vars.input.records[0].severity == 'High' }}"
+            next: Escalate
+          - display: Medium
+            when: "{{ vars.input.records[0].severity == 'Medium' }}"
+            next: Assign
+          - display: Else
+            default: true
+            next: Close
+      - name: Escalate
+        type: update_record
+        module: alerts
+        record: "{{ vars.input.records[0]['@id'] }}"
+        resource:
+          status: Open
+          severity: High
+      - name: Assign
+        type: update_record
+        module: alerts
+        record: "{{ vars.input.records[0]['@id'] }}"
+        resource:
+          status: Open
+      - name: Close
+        type: update_record
+        module: alerts
+        record: "{{ vars.input.records[0]['@id'] }}"
+        resource:
+          status: Closed

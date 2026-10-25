@@ -177,11 +177,17 @@ def _check_one(pb, a: dict[str, Any]) -> tuple[bool, str]:
                 return str(fe.get("item") or fe).lower()
             return str(fe or "").lower()
 
-        hit = any(needle in _fe(s) for s in steps)
+        # Only steps that actually loop count. An empty `contains` therefore
+        # asserts loop PRESENCE (some step iterates) rather than a specific
+        # field -- fair when the prompt could not name the loop variable. For a
+        # non-empty needle this is identical to scanning all steps, since a
+        # non-looping step contributes "" which never contains a real needle.
+        looping = [s for s in steps if s.for_each]
+        hit = bool(looping) if not needle else any(needle in _fe(s) for s in looping)
         return hit, (label if hit else
                      f"{label}: no step loops over anything containing "
                      f"{needle!r} (for_each values: "
-                     f"{[_fe(s) for s in steps if s.for_each]})")
+                     f"{[_fe(s) for s in looping]})")
 
     if kind == "arg_text_contains":
         needle = str(a.get("contains", "")).lower()
