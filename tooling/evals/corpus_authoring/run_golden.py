@@ -34,10 +34,20 @@ from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler.pipeline import compile_yaml
 
 from tooling.evals.corpus_authoring import (derive, drive, drive_repair, grade,
-                                            mutate, repair_grade)
+                                            mutate, repair_grade, runtime_dep,
+                                            step_output)
 from tooling.evals.ir_assertions import _check_one
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+
+# Runtime goldens are graded against a captured real output SHAPE, not static
+# gates -- they probe the step-output-dependency bug class static checks cannot
+# see. Kept out of the static g1-g3 loops.
+_RUNTIME_GOLDEN = {
+    "g4_macro_digest": {"producer": "Get Macros",
+                        "connector": "cyops_utilities",
+                        "operation": "get_macro_list"},
+}
 
 # The persona whose spec gets driven (detailed enough that structural fidelity
 # is a fair signal) and, per golden playbook, the single defect class to inject
@@ -60,9 +70,11 @@ def _expert_spec(pb, kept):
 
 
 def build_golden_tasks(db) -> list[dict]:
-    """Compile each golden playbook and derive a self-checked authoring task."""
+    """Compile each STATIC golden playbook and derive a self-checked task."""
     tasks: list[dict] = []
     for f in sorted(GOLDEN_DIR.glob("*.yaml")):
+        if f.stem in _RUNTIME_GOLDEN:
+            continue
         real_yaml = f.read_text()
         pb = compile_yaml(real_yaml, db).ir.playbooks[0]
         derived = derive.derive_assertions(pb)
@@ -101,8 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", required=True, help="output dir (local only)")
     ap.add_argument("--model", default="claude-sonnet-5-5")
-    ap.add_argument("--only", choices=("authoring", "repair"),
-                    help="run only one half (default: both)")
+    ap.add_argument("--only", choices=("authoring", "repair", "runtime"),
+                    help="run only one section (default: all)")
     ap.add_argument("--env-file", help="file of KEY=VALUE box creds (FSR_*); never printed")
     args = ap.parse_args(argv)
 
@@ -146,15 +158,51 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {t['id']:28} kind={d['kind']:22} detected={g['detected']!s:5} "
                   f"repaired={g['repaired']!s:5} struct={g['structure_preserved']}")
 
+    runtime = []
+    if args.only in (None, "runtime"):
+        print("=== runtime step-output dependency (compiles clean, wrong at run time) ===")
+        for stem, cfg in _RUNTIME_GOLDEN.items():
+            f = GOLDEN_DIR / f"{stem}.yaml"
+            if not f.exists():
+                continue
+            shape_doc = step_output.load_shape(cfg["connector"], cfg["operation"])
+            if not shape_doc:
+                print(f"  {stem:28} (no captured shape; run capture_shape) SKIP")
+                continue
+            shape = shape_doc["shape"]
+            good_yaml = f.read_text()
+            defect = runtime_dep.inject_wrong_output_path(good_yaml, cfg["producer"], shape)
+            if not defect:
+                print(f"  {stem:28} (no resolving ref to break) SKIP")
+                continue
+            # detection: the broken reference does NOT resolve against the real shape
+            broken = runtime_dep.grade_runtime_dependency(defect["yaml"], cfg["producer"], shape)
+            detected = not broken["resolves"]
+            task = {"id": stem, "real_yaml": good_yaml}
+            run = drive_repair.drive_repair(task, defect, work, model=args.model)
+            fixed = runtime_dep.grade_runtime_dependency(
+                run["repaired_yaml"] or "", cfg["producer"], shape)
+            row = {"id": stem, "kind": "runtime_output_dependency",
+                   "detected": detected,
+                   "repaired": bool(fixed["has_ref"] and fixed["resolves"]),
+                   "kept_dependency": fixed["has_ref"],
+                   "broken_ref": defect["broken_ref"], "fixed_refs": fixed["refs"],
+                   "used_debug": run["used_debug"]}
+            runtime.append(row)
+            print(f"  {stem:28} detected={row['detected']!s:5} repaired={row['repaired']!s:5} "
+                  f"kept_dep={row['kept_dependency']!s:5} used_debug={row['used_debug']}")
+
     def rate(rows, key):
         return f"{sum(1 for r in rows if r.get(key))}/{len(rows)}" if rows else "0/0"
 
     scorecard = {
         "authoring": {k: rate(authoring, k) for k in ("draft", "verified_fair", "ir_passed")},
         "repair": {k: rate(repairs, k) for k in ("detected", "repaired", "structure_preserved")},
+        "runtime": {k: rate(runtime, k) for k in ("detected", "repaired", "kept_dependency")},
     }
     (out / "golden_authoring.json").write_text(json.dumps(authoring, indent=2))
     (out / "golden_repair.json").write_text(json.dumps(repairs, indent=2))
+    (out / "golden_runtime.json").write_text(json.dumps(runtime, indent=2))
     (out / "golden_scorecard.json").write_text(json.dumps(scorecard, indent=2))
     print("\n=== INTELLIGENCE SCORECARD ===")
     print(json.dumps(scorecard, indent=2))
