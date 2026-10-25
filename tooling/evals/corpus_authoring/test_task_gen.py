@@ -103,6 +103,41 @@ def test_tasks_come_in_user_voice_styles(tasks):
     assert styles and styles <= known, (styles, known)
 
 
+def test_loop_assertion_is_field_agnostic():
+    """A looping playbook yields a for_each_over with EMPTY contains (loop
+    presence), never the exact looped field a user-voice prompt can't name."""
+    from fsr_playbooks.compiler.ir import Playbook, Step
+    pb = Playbook(name="x", trigger="start", description="loop over stuff", steps=[
+        Step(id="t", type="start"),
+        Step(id="l", type="set_variable",
+             for_each={"item": "{{ vars.steps.fetch.data.emails_data }}"}),
+    ])
+    loops = [a for a in derive.derive_assertions(pb) if a["kind"] == "for_each_over"]
+    assert loops, "a looping playbook must yield a for_each_over assertion"
+    assert all(a.get("contains") == "" for a in loops), loops
+    # and it must grade TRUE for a playbook that loops over a DIFFERENT field
+    other = Playbook(name="y", trigger="start", description="d", steps=[
+        Step(id="t", type="start"),
+        Step(id="l", type="set_variable", for_each={"item": "{{ vars.other_field }}"}),
+    ])
+    for a in loops:
+        assert _check_one(other, a)[0], f"field-agnostic loop should match: {a}"
+
+
+def test_internal_utility_ops_are_not_asserted():
+    """Decompiler plumbing ops (make_cyops_request, no_op) are not user-meaningful
+    intent and must not become connector_op assertions."""
+    from fsr_playbooks.compiler.ir import Playbook, Step
+    pb = Playbook(name="x", trigger="start", description="d", steps=[
+        Step(id="t", type="start"),
+        Step(id="c", type="connector",
+             arguments={"connector": "Utilities", "operation": "make_cyops_request"}),
+    ])
+    ops = [a for a in derive.derive_assertions(pb) if a["kind"] == "connector_op"]
+    assert all("make_cyops_request" not in (a.get("operation_contains") or "")
+               for a in ops), ops
+
+
 def test_each_task_has_a_substantive_assertion(tasks):
     """A task must require more than 'has a trigger' -- at least one connector
     op, loop, decision, or distinctive step type -- or it grades nothing."""

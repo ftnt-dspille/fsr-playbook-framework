@@ -22,6 +22,13 @@ from typing import Any
 # be asked to reproduce.
 _UNINTERESTING = {"start", "set_variable", "unknown"}
 
+# Decompiler/utility internal operations that are implementation plumbing, not
+# user-meaningful intent. The corpus playbook emits them (e.g. a generic HTTP
+# call lands as Utilities make_cyops_request; a null step as no_op), but a
+# user-voice prompt would never name them and a correct author expresses the
+# same intent with a native step. Asserting them penalizes a valid design.
+_INTERNAL_OPS = {"make_cyops_request", "no_op"}
+
 
 def _op_of(step) -> tuple[str, str]:
     """(connector, operation) for a resolved connector step, best-effort."""
@@ -99,7 +106,7 @@ def derive_assertions(pb) -> list[dict[str, Any]]:
         if s.type != "connector":
             continue
         conn, op = _op_of(s)
-        if op and (conn, op) not in seen_ops:
+        if op and op.lower() not in _INTERNAL_OPS and (conn, op) not in seen_ops:
             seen_ops.add((conn, op))
             a: dict[str, Any] = {"kind": "connector_op",
                                  "operation_contains": op,
@@ -108,14 +115,14 @@ def derive_assertions(pb) -> list[dict[str, Any]]:
                 a["connector"] = conn
             out.append(a)
 
-    # loops: assert iteration over the same expression text
-    for s in steps:
-        expr = _loop_expr(s)
-        if expr:
-            # grade on a stable fragment of the expression (the field being looped)
-            frag = _loop_fragment(expr)
-            out.append({"kind": "for_each_over", "contains": frag,
-                        "note": f"loops over {frag}"})
+    # loops: assert iteration PRESENCE, not the exact looped field. A user-voice
+    # prompt cannot name the corpus's loop variable, so demanding that exact
+    # field (`emails_data`, `ingestedData`, ...) is an over-strict artifact; the
+    # fair structural signal is "some step iterates over a collection". Empty
+    # `contains` means loop-presence in ir_assertions.
+    if any(_loop_expr(s) for s in steps):
+        out.append({"kind": "for_each_over", "contains": "",
+                    "note": "iterates over a collection (loops)"})
 
     # decisions: at least as many arms as the real one
     for s in steps:

@@ -18,6 +18,42 @@ from fsr_playbooks._db import default_db_path
 
 from tooling.evals.ir_assertions import check_ir_assertions
 
+# A hard verify failure whose only cause is that THIS install lacks the corpus
+# playbook's connector or custom module. The product's own remediation calls
+# these "a fact about the box, not a defect in the playbook" -- so grading an
+# authored playbook as unsound for them punishes the author for the test box.
+_ENVIRONMENT_CODES = {"unknown_connector", "unknown_module"}
+
+
+def _hard_fixes(fixes: Any) -> list[dict]:
+    if not isinstance(fixes, list):
+        return []
+    return [f for f in fixes if isinstance(f, dict) and f.get("severity") == "error"]
+
+
+def _environment_blocked(fixes: Any) -> bool:
+    """True when verify failed ONLY because the box lacks a connector/module the
+    corpus playbook names -- an environment fact, not an authoring defect."""
+    hard = _hard_fixes(fixes)
+    if not hard:
+        return False
+    return all(f.get("environment") is True or f.get("code") in _ENVIRONMENT_CODES
+               for f in hard)
+
+
+def _authored_has_loop(authored_yaml: str, db: Any) -> bool:
+    """Field-agnostic 'this playbook iterates': does any step carry a for_each?
+    A user-voice prompt can't name the exact loop variable, so exact-field
+    for_each_over is unfair as a structural signal; loop PRESENCE is fair."""
+    try:
+        from fsr_playbooks.compiler.pipeline import compile_yaml
+        ir = getattr(compile_yaml(authored_yaml, db), "ir", None)
+        if not ir or not ir.playbooks:
+            return False
+        return any(getattr(s, "for_each", None) for s in (ir.playbooks[0].steps or []))
+    except Exception:  # noqa: BLE001
+        return False
+
 
 def grade_yaml(authored_yaml: str, task: dict[str, Any], db_path: Any = None) -> dict[str, Any]:
     db = db_path or default_db_path()
@@ -56,11 +92,23 @@ def grade_yaml(authored_yaml: str, task: dict[str, Any], db_path: Any = None) ->
     out["verified"] = verified
     out["required_fixes"] = verify_fixes[:5] if isinstance(verify_fixes, list) else verify_fixes
 
+    # environment-blocked: the only hard verify failures are "this box lacks that
+    # connector/module". Sound modulo the test environment.
+    env_blocked = (not verified) and _environment_blocked(verify_fixes)
+    out["env_blocked"] = env_blocked
+    verified_fair = verified or env_blocked
+    out["verified_fair"] = verified_fair
+
     # ir: behavioral assertions
     ires = check_ir_assertions(authored_yaml, task.get("ir_assertions"), db)
     out["ir_passed"] = bool(ires.get("passed"))
     out["ir_checked"] = ires.get("checked")
     out["ir_failures"] = ires.get("failures")
+
+    # field-agnostic structural signals a user-voice prompt CAN be held to even
+    # when it cannot name the exact loop variable / op id the corpus used.
+    wants_loop = any(a.get("kind") == "for_each_over" for a in (task.get("ir_assertions") or []))
+    out["loop_present"] = _authored_has_loop(authored_yaml, db) if wants_loop else None
 
     # strict: compiles, statically sound, AND matches the required structure.
     out["passed"] = bool(draft and verified and out["ir_passed"])
@@ -74,7 +122,9 @@ def grade_yaml(authored_yaml: str, task: dict[str, Any], db_path: Any = None) ->
     # the bar. A goal-only question names intent, so many valid designs exist:
     # grade sound+runnable and report structural overlap WITHOUT gating on it.
     strict_ir = task.get("strict_ir", True)
-    verified_ok = verified or not source_verified
+    # Sound enough: it verifies, OR the only blocker is this box's missing
+    # connector/module, OR the real source itself can't verify either.
+    verified_ok = verified_fair or not source_verified
     if strict_ir:
         out["fair_pass"] = bool(draft and out["ir_passed"] and verified_ok)
     else:
@@ -92,7 +142,8 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     for r in results:
         buckets.setdefault(r.get("bucket", "?"), []).append(r)
 
-    gates = ("draft", "verified", "ir_passed", "passed", "fair_pass", "source_verified")
+    gates = ("draft", "verified", "verified_fair", "env_blocked",
+             "ir_passed", "passed", "fair_pass", "source_verified")
     report: dict[str, Any] = {
         "n": len(results),
         "overall": {g: rate(results, g) for g in gates},

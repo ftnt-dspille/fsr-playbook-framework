@@ -78,6 +78,88 @@ def test_prescriptive_style_gates_on_structure(tasks):
         assert r["fair_pass"] is False
 
 
+# A minimal, box-independent playbook that compiles but names a connector no
+# install has, so verify fails for one reason only: unknown_connector.
+_ENV_FAIL_YAML = """\
+collection: Env Blocked Demo
+description: compiles but names a connector no install has
+visible: true
+playbooks:
+- name: Env Blocked Demo
+  description: compiles but names a connector no install has
+  trigger_step_id: start
+  steps:
+  - type: start
+    name: start
+    button_label: Go
+    next: Act
+  - type: connector
+    name: Act
+    connector: zzz_not_installed
+    operation: do_a_thing
+    arguments: {}
+"""
+
+
+def test_environment_classifier_unit():
+    """Pure classifier: a hard fix flagged environment, or an unknown
+    connector/module code, is environment-blocked; a plain error is not."""
+    from tooling.evals.corpus_authoring.grade import _environment_blocked
+    assert _environment_blocked([{"severity": "error", "code": "unknown_connector"}])
+    assert _environment_blocked([{"severity": "error", "code": "x", "environment": True}])
+    assert not _environment_blocked([{"severity": "error", "code": "bad_value"}])
+    assert not _environment_blocked([])  # nothing hard -> not env-blocked
+    # a real error mixed with an environment one is NOT purely environment
+    assert not _environment_blocked([
+        {"severity": "error", "code": "unknown_connector"},
+        {"severity": "error", "code": "unreachable_step"}])
+
+
+def test_environment_only_verify_failure_does_not_sink_fair_pass(tasks):
+    """A playbook that compiles but fails verify ONLY because this box lacks the
+    connector it names is sound-modulo-env; the product's own remediation calls
+    that 'not a defect in the playbook'. env_blocked/verified_fair/fair_pass
+    must all hold under strict, source-verified grading.
+
+    Red without the fix: the old grader set verified_ok = verified (False here),
+    so fair_pass was False whenever source_verified and the box lacked a
+    corpus connector -- the artifact that dominated the first real run."""
+    t = dict(tasks[0])
+    t["source_verified"] = True
+    t["strict_ir"] = False  # isolate the verify dimension
+    r = grade_yaml(_ENV_FAIL_YAML, t)
+    assert r["draft"], r["compile_errors"]
+    assert r["verified"] is False, "demo YAML should fail verify on the missing connector"
+    assert r["env_blocked"] is True, r["required_fixes"]
+    assert r["verified_fair"] is True
+    assert r["fair_pass"] is True
+
+
+def test_real_soundness_failure_still_sinks_verified_fair(tasks):
+    """A non-environment verify failure (garbage) must NOT be excused: it has no
+    hard environment fix, so env_blocked is False and verified_fair is False."""
+    g = grade_yaml("name: nope\nnot_a_playbook: true\n", tasks[0])
+    assert g["env_blocked"] is False
+    assert g["verified_fair"] is False
+
+
+def test_loop_present_is_field_agnostic(tasks):
+    """loop_present reports whether ANY step iterates, regardless of the exact
+    loop variable a user-voice prompt could never name. For a task that wants a
+    loop, the real YAML (which loops) must read loop_present True."""
+    t = next((x for x in tasks
+              if any(a.get("kind") == "for_each_over" for a in x["ir_assertions"])), None)
+    if t is None:
+        pytest.skip("no loop task in synthetic corpus")
+    r = grade_yaml(t["real_yaml"], t)
+    assert r["loop_present"] is True
+    # a non-looping task reports None, not False
+    t2 = next((x for x in tasks
+               if not any(a.get("kind") == "for_each_over" for a in x["ir_assertions"])), None)
+    if t2 is not None:
+        assert grade_yaml(t2["real_yaml"], t2)["loop_present"] is None
+
+
 def test_aggregate_shapes(tasks):
     rows = [grade_yaml(t["real_yaml"], t) for t in tasks]
     agg = aggregate(rows)
