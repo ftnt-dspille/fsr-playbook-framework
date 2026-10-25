@@ -1,0 +1,25 @@
+collection: Golden - Enrich And Record
+description: Run a utility operation, then record the result as an alert.
+visible: true
+playbooks:
+  - name: Enrich And Record
+    description: Call a utility op and create an alert carrying the result.
+    is_active: true
+    steps:
+      - name: Start
+        type: start
+        next: Get Macros
+      - name: Get Macros
+        type: connector
+        connector: cyops_utilities
+        operation: get_macro_list
+        config: ""
+        params: {}
+        next: Record Finding
+      - name: Record Finding
+        type: create_record
+        module: alerts
+        resource:
+          name: Enrichment finding
+          severity: Medium
+          description: "{{ vars.steps.Get_Macros.data }}"

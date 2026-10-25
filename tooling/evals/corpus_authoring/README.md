@@ -1,8 +1,31 @@
-# Corpus-driven authoring eval
+# Playbook agent eval
 
 Measures whether an agent driving the `fsr-agentic-toolkit` MCP tools can author
-playbooks that match the structure of **real** FortiSOAR playbooks, across the
-whole corpus (not a handful of curated fixtures).
+and repair FortiSOAR playbooks. Two scales:
+
+- **The standard intelligence eval (`run_golden.py`) -- start here.** Six
+  `claude -p` drives (3 authoring + 3 repair) over three committed, synthetic
+  golden playbooks (`golden/*.yaml`). Fixed, portable (no local corpus, no
+  connector-install noise), cheap enough to run routinely, and the same tasks
+  every run. It is the standard scorecard for playbook-building intelligence.
+
+      FSRPB_DEV=1 .venv/bin/python -m tooling.evals.corpus_authoring.run_golden \
+          --out <local out> --env-file <box>
+
+  Each golden probes one intelligence-relevant structure: `g1` multi-branch
+  decision, `g2` loop/for_each, `g3` connector + record write. The repair half
+  injects one deterministic defect per playbook (unknown-next / orphan step /
+  missing required field) and grades detected / repaired / structure_preserved.
+
+- **The full-corpus sweep (below) -- occasional, large.** Drives the authoring
+  (`run_eval.py`) and repair (`run_repair.py`) loops across the real
+  191-playbook corpus. Hundreds of subscription drives; run deliberately, not
+  routinely.
+
+## Full-corpus sweep
+
+Measures authoring/repair against the structure of **real** FortiSOAR playbooks,
+across the whole corpus (not a handful of curated fixtures).
 
 The gap this fills: the 49-task matrix grades curated authoring fixtures; the
 real 191-playbook corpus is only used by the static fidelity/compilability
