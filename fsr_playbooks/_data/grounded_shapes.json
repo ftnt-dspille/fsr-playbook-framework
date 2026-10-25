@@ -1116,6 +1116,67 @@
     },
     "kind": "object"
   },
+  "cyops_utilities:get_email_templates": {
+    "keys": {
+      "data": {
+        "item": {
+          "kind": "scalar",
+          "type": "string"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "cyops_utilities:get_ioc_parsing_regex": {
+    "keys": {
+      "data": {
+        "item": {
+          "keys": {
+            "defang_regx": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "indicator_type": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "pattern_regx": {
+              "kind": "scalar",
+              "type": "string"
+            }
+          },
+          "kind": "object"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "cyops_utilities:get_macro_list": {
     "keys": {
       "data": {
