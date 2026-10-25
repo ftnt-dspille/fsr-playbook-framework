@@ -35,7 +35,7 @@ from fsr_playbooks.compiler.pipeline import compile_yaml
 
 from tooling.evals.corpus_authoring import (derive, drive, drive_repair, grade,
                                             mutate, repair_grade, runtime_dep,
-                                            step_output)
+                                            step_output, tool_selection)
 from tooling.evals.ir_assertions import _check_one
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
@@ -187,15 +187,18 @@ def main(argv: list[str] | None = None) -> int:
             run = drive_repair.drive_repair(task, defect, work, model=args.model)
             fixed = runtime_dep.grade_runtime_dependency(
                 run["repaired_yaml"] or "", cfg["producer"], shape)
+            sel = tool_selection.grade_tool_selection(
+                run.get("tools"), "runtime_output_dependency")
             row = {"id": stem, "kind": "runtime_output_dependency",
                    "detected": detected,
                    "repaired": bool(fixed["has_ref"] and fixed["resolves"]),
                    "kept_dependency": fixed["has_ref"],
                    "broken_ref": defect["broken_ref"], "fixed_refs": fixed["refs"],
-                   "used_debug": run["used_debug"]}
+                   "used_debug": run["used_debug"], "tool_selection": sel}
             runtime.append(row)
             print(f"  {stem:28} detected={row['detected']!s:5} repaired={row['repaired']!s:5} "
-                  f"kept_dep={row['kept_dependency']!s:5} used_debug={row['used_debug']}")
+                  f"kept_dep={row['kept_dependency']!s:5} used_debug={row['used_debug']} "
+                  f"selected_right={sel['selected_right']!s:5} brute_forced={sel['brute_forced']}")
 
     def rate(rows, key):
         return f"{sum(1 for r in rows if r.get(key))}/{len(rows)}" if rows else "0/0"
@@ -204,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
         "authoring": {k: rate(authoring, k) for k in ("draft", "verified_fair", "ir_passed")},
         "repair": {k: rate(repairs, k) for k in ("detected", "repaired", "structure_preserved")},
         "runtime": {k: rate(runtime, k) for k in ("detected", "repaired", "kept_dependency")},
+        "tool_selection": tool_selection.aggregate(
+            [r["tool_selection"] for r in runtime if "tool_selection" in r]),
     }
     (out / "golden_authoring.json").write_text(json.dumps(authoring, indent=2))
     (out / "golden_repair.json").write_text(json.dumps(repairs, indent=2))
