@@ -76,14 +76,22 @@ def inject_wrong_output_path(yaml_text: str, producer: str,
     coll = yaml.safe_load(yaml_text)
     refs = refs_to_step(coll, producer)
     token = f"vars.steps.{_norm(producer)}"
+    is_list = isinstance(shape, dict) and "__list_of__" in shape
     for path, expr in refs:
         if not step_output.reference_resolves(expr, {_norm(producer): shape}):
             continue  # only break one that currently works
-        # turn `{{ vars.steps.P.data | join(...) }}` into `{{ vars.steps.P.data.macros }}`
-        broken_expr = re.sub(token + r"\.[A-Za-z0-9_]+",
-                             token + ".data.macros", expr, count=1)
+        if is_list and re.search(r"\[\s*\d+\s*\]", expr):
+            # the classic list-as-scalar gotcha: drop the index, so a list is
+            # read as if it were a single record -> the attr renders empty.
+            broken_expr = re.sub(r"\[\s*\d+\s*\]", "", expr, count=1)
+        else:
+            # append a plausible-but-absent child onto the producer's path
+            # (e.g. `.data` -> `.data.value`) -> renders empty at run time.
+            broken_expr = re.sub(
+                token + r"((?:\.[A-Za-z0-9_]+|\[\d+\])*)",
+                lambda m: token + m.group(1) + ".value", expr, count=1)
         if broken_expr == expr:
-            broken_expr = "{{ " + token + ".data.macros }}"
+            broken_expr = "{{ " + token + ".value }}"
         c = copy.deepcopy(coll)
         _set_at(c, path, broken_expr)
         return {"yaml": yaml.safe_dump(c, sort_keys=False, allow_unicode=True),

@@ -87,14 +87,23 @@ def _render(expr: str, ctx: dict) -> str:
         return ""
 
 
+_JINJA_BLOCK = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
+
+
 def reference_resolves(expr: str, step_shapes: dict[str, Any]) -> bool:
-    """True if `expr` renders to a non-empty value against samples built from the
-    given step output shapes (keyed by step name). A reference that renders ''
-    is runtime-broken even though it compiled."""
+    """True if every Jinja expression embedded in `expr` renders to a non-empty
+    value against samples built from the given step output shapes. Each embedded
+    `{{ ... }}` is rendered in ISOLATION so surrounding literal text (e.g. a
+    'First open alert: ' prefix) can't mask an expression that renders empty --
+    an empty render is runtime-broken even though it compiled."""
     ctx = {"vars": {"steps": {name: sample_of(shape)
                               for name, shape in step_shapes.items()}}}
-    out = _render(expr, ctx)
-    return bool(out and out.strip() and out.strip() != "None")
+    blocks = _JINJA_BLOCK.findall(expr) or [expr]
+    for block in blocks:
+        out = _render(block, ctx)
+        if not (out and out.strip() and out.strip() != "None"):
+            return False
+    return True
 
 
 def load_shape(connector: str, operation: str) -> dict[str, Any] | None:
