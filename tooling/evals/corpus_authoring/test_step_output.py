@@ -40,6 +40,15 @@ def test_resolver_true_for_list_ref_false_for_phantom_attr():
         "{{ vars.steps.Get_Macros.data[0].name }}", shapes)
 
 
+def test_literal_prefix_does_not_mask_empty_expression():
+    """Regression: a reference like 'First: {{ expr }}' must grade on the expr,
+    not the literal prefix. Previously the non-empty prefix made any such
+    reference 'resolve' even when the Jinja rendered empty."""
+    shapes = {"Find": {"__list_of__": {"name": "str"}, "__len__": 3}}
+    assert not step_output.reference_resolves("First: {{ vars.steps.Find.name }}", shapes)
+    assert step_output.reference_resolves("First: {{ vars.steps.Find[0].name }}", shapes)
+
+
 def test_refs_to_step_normalizes_spaces():
     coll = {"playbooks": [{"steps": [
         {"name": "Record", "resource": {"d": "{{ vars.steps.Get_Macros.data }}"}}]}]}
