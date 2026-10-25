@@ -106,13 +106,13 @@ def test_a_disabled_policy_decides_nothing():
     ("internal ip", {"call": _block(INT), "registry": _registry(INT)}, "internal"),
     ("protected ip", {"call": _block("198.51.100.1"), "registry": _registry("198.51.100.1")},
      "protected"),
-    ("uncited verdict", {"verdicts": [_verdict(evidence=())]}, "cites no"),
-    ("cited lookup failed", {"registry": _registry(ok=False)}, "cites no"),
-    ("cited lookup about another ip", {"registry": _registry("203.0.113.77")},
+    ("no lookup ran this turn", {"registry": {}}, "threat-intel"),
+    ("the only lookup failed", {"registry": _registry(ok=False)}, "threat-intel"),
+    ("lookup about another ip", {"registry": _registry("203.0.113.77")},
      f"about {EXT}"),
-    ("cited a write, not a lookup", {"registry": _registry(op="block_ip_new",
-                                                         connector="fortigate-firewall")},
-     "cites no"),
+    ("only a write ran, not a lookup", {"registry": _registry(op="block_ip_new",
+                                                            connector="fortigate-firewall")},
+     "threat-intel"),
     ("hourly cap reached", {"counter": lambda r, t: (10, 0)}, "this hour"),
     ("target already acted on today", {"counter": lambda r, t: (0, 1)}, "today"),
     ("no counter: limits fail closed", {"counter": None}, "cannot be checked"),
@@ -124,11 +124,32 @@ def test_each_check_failing_means_would_not_act(case, kwargs, needle):
 
 
 def test_text_in_the_record_cannot_satisfy_the_rule():
-    """A prompt-injected 'confirmed malicious' with no cited lookup is a claim,
-    not evidence."""
+    """A prompt-injected 'confirmed malicious' with no lookup in the registry is
+    a claim, not evidence -- nothing acts."""
     v = _verdict(evidence=("record-text",))
     d = _eval(verdicts=[v], registry={})
     assert d["outcome"] == "would_not_act"
+
+
+def test_a_rated_lookup_about_the_target_acts_even_if_the_verdict_omits_the_id():
+    """A5 fix: the safety property is that a threat-intel source rated THIS
+    target malicious THIS turn, not that the model copied the lookup's id into
+    its verdict. A confident true_positive that staged the block but cited no
+    lookup still acts WHEN the turn actually ran a rated-malicious lookup about
+    the target (the box model drops the citation under load). The run was real,
+    so the evidence is real."""
+    v = _verdict(evidence=())            # the model cited nothing
+    d = _eval(verdicts=[v], registry=_registry())   # but a rated VT lookup ran
+    assert d["outcome"] == "would_act", d["failed"]
+
+
+def test_a_rated_lookup_about_a_DIFFERENT_ip_does_not_authorize_the_block():
+    """The lookup must be about the action's OWN target. A rated-malicious
+    lookup about some other address does not license blocking EXT."""
+    v = _verdict(evidence=())
+    d = _eval(verdicts=[v], registry=_registry("203.0.113.77"))
+    assert d["outcome"] == "would_not_act"
+    assert any(f"about {EXT}" in f for f in d["failed"]), d["failed"]
 
 
 @pytest.mark.parametrize("entry", [

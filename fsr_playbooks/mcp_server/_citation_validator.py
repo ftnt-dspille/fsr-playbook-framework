@@ -193,12 +193,13 @@ def rated_intel_ids(evidence: TurnEvidence | None = None) -> list[str]:
     succeeded AND the installed reader rated (``finding`` with a severity) --
     i.e. a lookup that actually SAID something about its target.
 
-    A verdict that concludes ``true_positive`` must cite one of these: a
-    confident true positive without a cited intel rating is the gap the
-    autonomy policy later rejects as "cites no successful threat-intel
-    lookup", by which point the model can no longer repair it. Mirrors the
-    policy's own notion of a rated lookup (``llm/autonomy.py`` evidence rule),
-    read from the same registry so the two cannot disagree."""
+    A verdict that concludes ``true_positive`` is nudged to cite one of these
+    in-turn, so the human-facing card shows its evidence and the model forms
+    the habit. (The autonomy policy itself credits a rated lookup ABOUT the
+    action's target from this same registry whether or not the verdict threaded
+    its id in -- ``llm/autonomy.py`` evidence rule -- so a dropped citation no
+    longer silently loses a confirmed block; the two read the same registry and
+    cannot disagree.)"""
     evidence = get_turn_evidence() if evidence is None else evidence
     if evidence is None:
         return []

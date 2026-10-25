@@ -433,25 +433,36 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
                    for eid in cited):
             failed.append("the verdict cites no successful lookup")
     elif w.evidence is not None and verdict is not None:
+        # The safety property is that a threat-intelligence source rated THIS
+        # action's OWN target malicious THIS turn. The candidate lookups are
+        # every successful intel lookup the turn actually RAN (the registry),
+        # not only those the verdict threaded into findings[].evidence: an
+        # attacker cannot make VirusTotal rate their address malicious, so a
+        # real rated lookup about the target is the evidence, and whether the
+        # model copied that lookup's id into its verdict is bookkeeping it drops
+        # under load (A5 live: a confident true_positive staged a block but
+        # cited no lookup, though VirusTotal rated the target malicious at the
+        # same time). Prompt-injected "confirmed malicious" record text still
+        # cannot satisfy this -- with no lookup in the registry nothing acts.
+        # `cited` is kept for the decision record only (what the model cited).
+        import json
         cited = [str(e) for f in verdict.get("findings") or [] if isinstance(f, dict)
                  for e in (f.get("evidence") or []) if isinstance(e, str)]
-        lookups = [(eid, registry.get(eid) or {}) for eid in cited]
-        lookups = [(eid, e) for eid, e in lookups
-                   if e.get("ok") is True and _intel_lookup(e)]
+        lookups = [(eid, e) for eid, e in registry.items()
+                   if isinstance(e, dict) and e.get("ok") is True and _intel_lookup(e)]
         if not lookups:
-            failed.append("the verdict cites no successful threat-intel lookup")
+            failed.append("no successful threat-intel lookup ran this turn")
         else:
-            import json
             ok_sev = _RATED_SEVERITIES[w.evidence.rated]
             for t in targets:
                 about = [e for _, e in lookups
                          if t in json.dumps(e.get("args") or {}, default=str)]
                 if not about:
-                    failed.append(f"no cited threat-intel lookup was about {t}")
+                    failed.append(f"no threat-intel lookup was about {t}")
                 elif not any((e.get("finding") or {}).get("severity") in ok_sev
                              for e in about):
                     said = "; ".join(_said(e) for e in about)
-                    failed.append(f"no cited threat-intel lookup rated {t} "
+                    failed.append(f"no threat-intel lookup rated {t} "
                                   f"{w.evidence.rated} ({said})")
     elif w.evidence is not None:
         failed.append("no verdict to cite evidence")
