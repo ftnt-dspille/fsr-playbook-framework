@@ -45,8 +45,10 @@ from fsr_playbooks.compiler.grounded_shapes import (  # noqa: E402
     shape_from_value,
 )
 
-# a sanitized scalar leaf carries only these -- never a captured value.
-_SCALAR_META = {"kind", "type", "optional"}
+# a sanitized scalar leaf carries only these structural flags -- never a
+# captured value. `optional` (key absent in some observations) and `nullable`
+# (null in some, typed in others) are both set by merge_shape as metadata.
+_SCALAR_META = {"kind", "type", "optional", "nullable"}
 
 # a dict KEY that matches one of these is box data wearing a schema field's
 # clothes (an op that returns a map keyed by an IP / email / uuid|long-hex),

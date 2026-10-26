@@ -50,6 +50,9 @@ def test_assert_value_free_passes_structure_and_catches_a_value():
         "data": {"kind": "object", "keys": {
             "asn": {"kind": "scalar", "type": "string"}}}}}
     go.assert_value_free(good)  # no raise
+    # merge_shape flags are structural metadata, not values -- must pass
+    go.assert_value_free({"kind": "scalar", "type": "string", "optional": True})
+    go.assert_value_free({"kind": "scalar", "type": "string", "nullable": True})
     bad = {"kind": "object", "keys": {
         "asn": {"kind": "scalar", "type": "string", "example": "15169"}}}
     with pytest.raises(AssertionError):
