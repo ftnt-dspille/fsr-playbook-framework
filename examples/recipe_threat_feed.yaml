@@ -56,11 +56,13 @@ playbooks:
         next: Map to ingestedData
         comment: |
           TODO replace BOTH the connector and operation. This template
-          uses `cyops_utilities.get_picklist` as a structurally-valid
+          uses `cyops_utilities.get_macro_list` as a structurally-valid
           placeholder so the recipe compiles and round-trips out of the
-          box; it does NOT fetch a feed. Recipe rule: target connector
-          must already be installed on the configured FSR -- verify with
-          `fsrpb health <connector>` before running.
+          box; it does NOT fetch a feed. The placeholder returns the
+          fetched list directly at `.data` (see the Map step), so swap in
+          a real feed op with the same envelope. Recipe rule: target
+          connector must already be installed on the configured FSR --
+          verify with `fsrpb health <connector>` before running.
         connector: cyops_utilities
         operation: get_macro_list
         config: ""
@@ -80,7 +82,9 @@ playbooks:
         # activates when --mock is passed.
         mock_result: |
           {
-            "indicators": [
+            "status": "Success",
+            "message": "",
+            "data": [
               {
                 "id": "TODO-mock-1",
                 "value": "1.2.3.4",
@@ -101,7 +105,7 @@ playbooks:
           the current source-feed record at IngestBulkFeed time, NOT
           here. This step just unboxes the array into `ingestedData`.
         vars:
-          ingestedData: "{{ vars.steps.Fetch_indicators.data.indicators }}"
+          ingestedData: "{{ vars.steps.Fetch_indicators.data }}"
 
       - name: Any data
         type: decision
