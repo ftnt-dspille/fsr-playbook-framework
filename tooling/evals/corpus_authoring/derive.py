@@ -130,7 +130,7 @@ def derive_assertions(pb) -> list[dict[str, Any]]:
             arms = len(s.branches or {}) or len(s.unlabeled_next or [])
             if arms >= 2:
                 out.append({"kind": "branch_count", "type": "decision",
-                            "min": 2, "note": f"a decision with >= 2 arms"})
+                            "min": 2, "note": "a decision with >= 2 arms"})
             break
 
     return out

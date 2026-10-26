@@ -18,7 +18,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from fsr_playbooks._db import default_db_path
-
 from tooling.evals.corpus_authoring import drive, grade
 
 

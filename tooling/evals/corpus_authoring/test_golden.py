@@ -18,7 +18,6 @@ import pytest
 
 from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler.pipeline import compile_yaml
-
 from tooling.evals.corpus_authoring import repair_grade, run_golden
 
 # vocabulary a user-voice spec must never contain (step-type enums, op ids,

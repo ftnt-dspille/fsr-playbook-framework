@@ -15,8 +15,6 @@ from pathlib import Path
 import pytest
 
 from fsr_playbooks._db import default_db_path
-from fsr_playbooks.compiler.pipeline import compile_yaml
-
 from tooling.evals.corpus_authoring import derive
 from tooling.evals.corpus_authoring.sample_corpus import build_tasks
 from tooling.evals.ir_assertions import _check_one, check_ir_assertions

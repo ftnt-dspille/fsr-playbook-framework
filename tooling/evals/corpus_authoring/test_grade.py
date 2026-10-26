@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from fsr_playbooks._db import default_db_path
-
 from tooling.evals.corpus_authoring.grade import aggregate, grade_yaml
 from tooling.evals.corpus_authoring.sample_corpus import build_tasks
 

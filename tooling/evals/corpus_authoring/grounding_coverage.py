@@ -69,7 +69,7 @@ class Coverage:
     def hit_rate(self) -> float:
         return self.grounded / self.total if self.total else 0.0
 
-    def merge(self, other: "Coverage") -> None:
+    def merge(self, other: Coverage) -> None:
         self.grounded += other.grounded
         self.ungrounded += other.ungrounded
         self.ungrounded_ops.update(other.ungrounded_ops)
@@ -131,7 +131,7 @@ def format_report(cov: Coverage, top: int = 15) -> str:
         f"  hit-rate                        : {cov.hit_rate:.1%}",
         f"  distinct ungrounded ops         : {len(cov.ungrounded_ops)}",
         "",
-        f"  top ungrounded ops by reference count (grow these first):",
+        "  top ungrounded ops by reference count (grow these first):",
     ]
     for op, n in cov.ungrounded_ops.most_common(top):
         lines.append(f"    {n:4d}  {op}")

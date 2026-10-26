@@ -18,7 +18,6 @@ import re
 from typing import Any
 
 from fsr_playbooks._db import default_db_path
-
 from tooling.evals.corpus_authoring import derive
 from tooling.evals.ir_assertions import check_ir_assertions
 

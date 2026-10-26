@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
+from fsr_playbooks._db import default_db_path
 from fsr_playbooks.mcp_server import tools_verify
 from fsr_playbooks.mcp_server.tools_verify import verify_playbook
-from fsr_playbooks._db import default_db_path
 
 # (connector, op, expected data kind) -- grounded from live read-only runs.
 _GROWN = [

@@ -32,10 +32,17 @@ from pathlib import Path
 
 from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler.pipeline import compile_yaml
-
-from tooling.evals.corpus_authoring import (derive, drive, drive_repair, grade,
-                                            mutate, repair_grade, runtime_dep,
-                                            step_output, tool_selection)
+from tooling.evals.corpus_authoring import (
+    derive,
+    drive,
+    drive_repair,
+    grade,
+    mutate,
+    repair_grade,
+    runtime_dep,
+    step_output,
+    tool_selection,
+)
 from tooling.evals.ir_assertions import _check_one
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"

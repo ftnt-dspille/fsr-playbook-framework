@@ -12,7 +12,6 @@ import pytest
 
 from fsr_playbooks._db import default_db_path
 from fsr_playbooks.compiler.pipeline import compile_yaml
-
 from tooling.evals.corpus_authoring import mutate, outcome, repair_grade
 from tooling.evals.corpus_authoring.sample_corpus import build_tasks
 
