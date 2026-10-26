@@ -877,6 +877,14 @@ def _resolve_path(env_key: str, attr_chain: str,
                 return _shape_unknown("attr access on list"), ""
             elif cur.get("kind") == "unknown":
                 return cur, ""
+            elif cur.get("kind") == "scalar" and cur.get("type") == "any":
+                # A scalar of UNKNOWN type (`any`) carries no field info, so
+                # `.field` on it is unknowable, not wrong -- degrade to soft.
+                # This is the item shape of a list whose elements we could not
+                # type (e.g. make_cyops_request's hydra:member, whose records
+                # vary by queried module), so `member[0].<field>` must not fire
+                # a firm missing_field. A scalar of a KNOWN type still errors.
+                return _shape_unknown("attr access on untyped scalar"), ""
             else:
                 return None, "missing_field_on_step_output"
         else:  # index
@@ -884,6 +892,9 @@ def _resolve_path(env_key: str, attr_chain: str,
                 cur = cur.get("item") or _shape_scalar("any")
             elif cur.get("kind") == "unknown":
                 return cur, ""
+            elif cur.get("kind") == "scalar" and cur.get("type") == "any":
+                # Indexing an untyped scalar is likewise unknowable, not wrong.
+                return _shape_unknown("index on untyped scalar"), ""
             else:
                 return None, "non_list_indexed"
     return cur, ""
