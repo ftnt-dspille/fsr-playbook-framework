@@ -1342,6 +1342,153 @@
     },
     "kind": "object"
   },
+  "fortinet-fortiedr:get_event_list": {
+    "keys": {
+      "data": {
+        "item": {
+          "keys": {
+            "action": {
+              "kind": "scalar",
+              "nullable": true,
+              "type": "string"
+            },
+            "archived": {
+              "kind": "scalar",
+              "type": "boolean"
+            },
+            "certified": {
+              "kind": "scalar",
+              "type": "boolean"
+            },
+            "classification": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "collectors": {
+              "item": {
+                "kind": "scalar",
+                "type": "any"
+              },
+              "kind": "list"
+            },
+            "comment": {
+              "kind": "scalar",
+              "nullable": true,
+              "type": "string"
+            },
+            "destinations": {
+              "item": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "kind": "list"
+            },
+            "eventId": {
+              "kind": "scalar",
+              "type": "integer"
+            },
+            "firstSeen": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "handlingState": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "lastSeen": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "loggedUsers": {
+              "kind": "scalar",
+              "nullable": true,
+              "type": "any"
+            },
+            "muteEndTime": {
+              "kind": "scalar",
+              "type": "null"
+            },
+            "muted": {
+              "kind": "scalar",
+              "type": "boolean"
+            },
+            "organization": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "process": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "processOwner": {
+              "kind": "scalar",
+              "nullable": true,
+              "type": "string"
+            },
+            "processPath": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "processType": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "rules": {
+              "item": {
+                "kind": "scalar",
+                "nullable": true,
+                "type": "string"
+              },
+              "kind": "list"
+            },
+            "seen": {
+              "kind": "scalar",
+              "type": "boolean"
+            },
+            "severity": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "threatDetails": {
+              "keys": {
+                "threatFamily": {
+                  "kind": "scalar",
+                  "nullable": true,
+                  "type": "string"
+                },
+                "threatName": {
+                  "kind": "scalar",
+                  "nullable": true,
+                  "type": "string"
+                },
+                "threatType": {
+                  "kind": "scalar",
+                  "nullable": true,
+                  "type": "string"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "kind": "object"
+        },
+        "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "fortinet-fortiguard-ioc:get_risk_distribution": {
     "keys": {
       "data": {
