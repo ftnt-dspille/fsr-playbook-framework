@@ -1116,6 +1116,32 @@
     },
     "kind": "object"
   },
+  "cyops_utilities:format_richtext": {
+    "keys": {
+      "data": {
+        "keys": {
+          "formatted_string": {
+            "kind": "scalar",
+            "type": "string"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "cyops_utilities:get_email_templates": {
     "keys": {
       "data": {
@@ -1185,6 +1211,27 @@
           "type": "string"
         },
         "kind": "list"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "cyops_utilities:json_to_html": {
+    "keys": {
+      "data": {
+        "kind": "scalar",
+        "type": "string"
       },
       "message": {
         "kind": "scalar",
@@ -5354,6 +5401,308 @@
           "type": {
             "kind": "scalar",
             "type": "string"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "whois-rdap:whois_ip": {
+    "keys": {
+      "data": {
+        "keys": {
+          "asn": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "asn_cidr": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "asn_country_code": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "asn_date": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "asn_description": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "asn_registry": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "entities": {
+            "item": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "kind": "list"
+          },
+          "network": {
+            "keys": {
+              "cidr": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "country": {
+                "kind": "scalar",
+                "type": "null"
+              },
+              "end_address": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "events": {
+                "item": {
+                  "keys": {
+                    "action": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "actor": {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    "timestamp": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "kind": "list"
+              },
+              "handle": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "ip_version": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "links": {
+                "item": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "kind": "list"
+              },
+              "name": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "notices": {
+                "item": {
+                  "keys": {
+                    "description": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "links": {
+                      "kind": "scalar",
+                      "type": "any"
+                    },
+                    "title": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "kind": "list"
+              },
+              "parent_handle": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "raw": {
+                "kind": "scalar",
+                "type": "null"
+              },
+              "remarks": {
+                "kind": "scalar",
+                "type": "null"
+              },
+              "start_address": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "status": {
+                "item": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "kind": "list"
+              },
+              "type": {
+                "kind": "scalar",
+                "type": "string"
+              }
+            },
+            "kind": "object"
+          },
+          "nir": {
+            "kind": "scalar",
+            "type": "null"
+          },
+          "objects": {
+            "item": {
+              "keys": {
+                "contact": {
+                  "keys": {
+                    "address": {
+                      "item": {
+                        "keys": {
+                          "type": {
+                            "kind": "scalar",
+                            "type": "null"
+                          },
+                          "value": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "kind": "object"
+                      },
+                      "kind": "list"
+                    },
+                    "email": {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    "kind": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "name": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "phone": {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    "role": {
+                      "kind": "scalar",
+                      "type": "null"
+                    },
+                    "title": {
+                      "kind": "scalar",
+                      "type": "null"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "entities": {
+                  "item": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "list"
+                },
+                "events": {
+                  "item": {
+                    "keys": {
+                      "action": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "actor": {
+                        "kind": "scalar",
+                        "type": "null"
+                      },
+                      "timestamp": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "kind": "list"
+                },
+                "events_actor": {
+                  "kind": "scalar",
+                  "type": "null"
+                },
+                "handle": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "links": {
+                  "item": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "list"
+                },
+                "notices": {
+                  "kind": "scalar",
+                  "type": "null"
+                },
+                "raw": {
+                  "kind": "scalar",
+                  "type": "null"
+                },
+                "remarks": {
+                  "item": {
+                    "keys": {
+                      "description": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "links": {
+                        "kind": "scalar",
+                        "type": "null"
+                      },
+                      "title": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "kind": "list"
+                },
+                "roles": {
+                  "item": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "kind": "list"
+                },
+                "status": {
+                  "kind": "scalar",
+                  "type": "null"
+                }
+              },
+              "kind": "object"
+            },
+            "kind": "list"
+          },
+          "query": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "raw": {
+            "kind": "scalar",
+            "type": "null"
           }
         },
         "kind": "object"
