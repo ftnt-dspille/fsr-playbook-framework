@@ -1248,6 +1248,64 @@
     },
     "kind": "object"
   },
+  "cyops_utilities:make_cyops_request": {
+    "keys": {
+      "data": {
+        "keys": {
+          "@context": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "@id": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "@type": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "hydra:member": {
+            "item": {
+              "kind": "scalar",
+              "type": "any"
+            },
+            "kind": "list"
+          },
+          "hydra:totalItems": {
+            "kind": "scalar",
+            "type": "integer"
+          },
+          "hydra:view": {
+            "keys": {
+              "@id": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "@type": {
+                "kind": "scalar",
+                "type": "string"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "file-content-extraction:extract_indicators_from_file": {
     "keys": {
       "data": {

@@ -43,8 +43,10 @@ def test_grounded_shapes_carry_no_captured_values():
     def _check(node):
         if isinstance(node, dict):
             if node.get("kind") == "scalar":
-                # only type + structural flags (e.g. optional); never a value.
-                assert set(node) <= {"kind", "type", "optional"}, node
+                # only type + structural flags (optional: key absent in some
+                # observations; nullable: null in some, typed in others); never
+                # a captured value.
+                assert set(node) <= {"kind", "type", "optional", "nullable"}, node
                 assert node.get("type") in {"string", "integer", "float", "boolean",
                                             "null", "any", "unknown"}, node
             for v in node.values():
