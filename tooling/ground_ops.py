@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -38,10 +39,27 @@ STORE_PATH = REPO / "fsr_playbooks" / "_data" / "grounded_shapes.json"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tooling"))
 
-from fsr_playbooks.compiler.grounded_shapes import GroundedShapeStore  # noqa: E402
+from fsr_playbooks.compiler.grounded_shapes import (  # noqa: E402
+    GroundedShapeStore,
+    merge_shape,
+    shape_from_value,
+)
 
 # a sanitized scalar leaf carries only these -- never a captured value.
 _SCALAR_META = {"kind", "type", "optional"}
+
+# a dict KEY that matches one of these is box data wearing a schema field's
+# clothes (an op that returns a map keyed by an IP / email / uuid|long-hex),
+# so a committed shape built from it would leak that value as a key name.
+_DATA_KEY = re.compile(
+    r"^(?:\d{1,3}(?:\.\d{1,3}){3}"            # IPv4
+    r"|[^@\s]+@[^@\s]+\.[^@\s]+"              # email
+    r"|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"  # uuid
+    r"|[0-9a-fA-F]{16,})$")                   # long hex token
+
+
+def _key_looks_like_data(key: str) -> bool:
+    return bool(_DATA_KEY.match(str(key).strip()))
 
 
 def envelope_of(result: Any) -> dict[str, Any]:
@@ -71,6 +89,8 @@ def assert_value_free(shape: Any, path: str = "") -> None:
                           f"{path}[]")
     elif kind == "object":
         for k, v in (shape.get("keys") or {}).items():
+            if _key_looks_like_data(k):
+                raise AssertionError(f"{path}.{k}: key looks like box data")
             assert_value_free(v, f"{path}.{k}")
     # 'unknown' and other kinds carry only a reason, no value -- fine.
 
@@ -105,15 +125,25 @@ def ground_ops(specs: list[tuple[str, str, dict]], *, store_path: Path = STORE_P
             report.append({"op": key, "result": "skip",
                            "detail": env.get("message") or status})
             continue
-        shape = store.observe(connector, operation, env)
+        # Verify the shape BEFORE touching the store: observe() mutates in
+        # place, so checking its return value would already have folded an
+        # unsafe shape in. Compute the exact shape observe() would store
+        # (measure + merge with any prior) and gate on it.
+        measured = shape_from_value(env)
+        prior = store.shape_for(connector, operation)
+        candidate = measured if prior is None else merge_shape(prior, measured)
         try:
-            assert_value_free(shape)
+            assert_value_free(candidate)
         except AssertionError as exc:
             report.append({"op": key, "result": "unsafe", "detail": str(exc)})
             continue
+        store.observe(connector, operation, env)  # safe: checked above
         report.append({"op": key, "result": "grounded"})
-    # only save if at least one op grounded cleanly
-    if any(r["result"] == "grounded" for r in report):
+    # save only when every attempted op is accounted for and none was unsafe,
+    # and at least one grounded -- an unsafe op never enters the store above,
+    # but refusing to save on any 'unsafe' is the belt to that suspenders.
+    if (any(r["result"] == "grounded" for r in report)
+            and not any(r["result"] == "unsafe" for r in report)):
         store.save(store_path)
     return report, store
 

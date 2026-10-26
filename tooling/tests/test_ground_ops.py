@@ -90,6 +90,42 @@ def test_failed_op_is_skipped_not_grounded(tmp_path):
                            "extract_indicators_from_file") is None
 
 
+def test_data_like_keys_are_flagged():
+    # a scalar is clean; a dict keyed by an IP / email / uuid is box data.
+    go.assert_value_free({"kind": "object", "keys": {
+        "asn_cidr": {"kind": "scalar", "type": "string"}}})
+    for bad_key in ("8.8.8.8", "user@example.com",
+                    "fc252a08-423a-41c8-8c7e-f4c95161d88e", "deadbeefdeadbeef"):
+        with pytest.raises(AssertionError):
+            go.assert_value_free({"kind": "object", "keys": {
+                bad_key: {"kind": "scalar", "type": "string"}}})
+
+
+def test_unsafe_op_never_reaches_disk_even_beside_a_clean_one(tmp_path):
+    # Fail-open regression: observe() mutates in place, so an op whose shape
+    # leaks data must be gated BEFORE the store is touched, and a clean op in
+    # the same batch must not drag the unsafe store to disk.
+    store_path = tmp_path / "s.json"
+    store_path.write_text("{}")
+    client = _FakeClient({
+        # leaks a box IP as a dict key
+        "leaky:op": _TypedResult({"192.168.1.5": {"seen": 3}}),
+        # clean, grounds fine on its own
+        "whois-rdap:whois_ip": _TypedResult({"asn": "15169"}),
+    })
+    report, store = go.ground_ops(
+        [("leaky", "op", {}), ("whois-rdap", "whois_ip", {"ip": "8.8.8.8"})],
+        store_path=store_path, client=client)
+    results = {r["op"]: r["result"] for r in report}
+    assert results["leaky:op"] == "unsafe"
+    # the leaked key must be nowhere in the in-memory store OR on disk
+    assert store.shape_for("leaky", "op") is None
+    disk = store_path.read_text()
+    assert "192.168.1.5" not in disk
+    # belt-and-suspenders: an unsafe op in the batch blocks the save entirely
+    assert disk.strip() == "{}"
+
+
 def test_parse_spec():
     assert go._parse_spec("whois-rdap:whois_ip:{\"ip\":\"8.8.8.8\"}") == \
         ("whois-rdap", "whois_ip", {"ip": "8.8.8.8"})
