@@ -1248,6 +1248,42 @@
     },
     "kind": "object"
   },
+  "file-content-extraction:extract_indicators_from_file": {
+    "keys": {
+      "data": {
+        "keys": {
+          "domains": {
+            "item": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "kind": "list"
+          },
+          "urls": {
+            "item": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "kind": "list"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "fortinet-fortiguard-ioc:get_risk_distribution": {
     "keys": {
       "data": {
@@ -2569,6 +2605,2871 @@
       "vulnerabilitySeverity": {
         "kind": "scalar",
         "type": "null"
+      }
+    },
+    "kind": "object"
+  },
+  "virustotal:query_domain": {
+    "keys": {
+      "data": {
+        "keys": {
+          "attributes": {
+            "keys": {
+              "categories": {
+                "keys": {},
+                "kind": "object"
+              },
+              "creation_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "expiration_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "first_seen_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "jarm": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "last_analysis_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_analysis_results": {
+                "keys": {
+                  "0xSI_f33d": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ADMINUSLabs": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AILabs (MONITORAPP)": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Abusix": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Acronis": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AlienVault": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AlphaSOC": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Antiy-AVL": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ArcSight Threat Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AutoShun": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Axur": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Bfore.Ai PreCrime": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "BitDefender": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Bkav": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Blueliv": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CINS Army": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CMC Threat Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CRDF": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CSIS Security Group": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CTX AI": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Certego": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ChainPatrol": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Chong Lua Dao": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Criminal IP": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CyRadar": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Cyan": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Cyble": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "DNS8": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Dr.Web": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ESET": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ESTsecurity": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "EmergingThreats": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Emsisoft": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Ermes": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Forcepoint ThreatSeeker": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Fortinet": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Fortra": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "G-Data": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "GCP Abuse Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Google Safe Browsing": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "GreenSnow": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "GreyNoise": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Gridinsoft": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Guardpot": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Heimdal Security": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Hunt.io Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "IPsum": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Juniper Networks": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Kaspersky": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "LevelBlue": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Lionic": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Lumu": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "MalwarePatrol": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "MalwareURL": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Malwared": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Mimecast": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Netcraft": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "OpenPhish": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Orcapot": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "PREBYTES": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "PhishFort": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Phishing Database": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Phishtank": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "PrecisionSec": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Quick Heal": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Quttera": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "SCUMWARE.org": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "SOCRadar": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "SafeToOpen": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Sansec eComscan": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Scantitan": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Seclookup": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "SecureBrain": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Snort IP sample list": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Sophos": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "StopForumSpam": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Sucuri SiteCheck": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Synthient": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ThreatHive": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "URLQuery": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "URLhaus": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "VIPRE": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "VX Vault": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Viettel Threat Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ViriBack": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Webroot": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Xcitium Verdict Cloud": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Yandex Safebrowsing": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ZeroCERT": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ZeroFox": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "alphaMountain.ai": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "desenmascara.me": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  }
+                },
+                "kind": "object"
+              },
+              "last_analysis_stats": {
+                "keys": {
+                  "harmless": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "malicious": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "suspicious": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "timeout": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "undetected": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  }
+                },
+                "kind": "object"
+              },
+              "last_dns_records": {
+                "item": {
+                  "keys": {
+                    "expire": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "integer"
+                    },
+                    "flag": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "integer"
+                    },
+                    "minimum": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "integer"
+                    },
+                    "priority": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "integer"
+                    },
+                    "refresh": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "integer"
+                    },
+                    "retry": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "integer"
+                    },
+                    "rname": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "string"
+                    },
+                    "serial": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "integer"
+                    },
+                    "tag": {
+                      "kind": "scalar",
+                      "optional": true,
+                      "type": "string"
+                    },
+                    "ttl": {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    "type": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "value": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "kind": "list"
+              },
+              "last_dns_records_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_https_certificate": {
+                "keys": {
+                  "cert_signature": {
+                    "keys": {
+                      "signature": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "signature_algorithm": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "extensions": {
+                    "keys": {
+                      "1.3.6.1.4.1.11129.2.4.2": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "CA": {
+                        "kind": "scalar",
+                        "type": "boolean"
+                      },
+                      "authority_key_identifier": {
+                        "keys": {
+                          "keyid": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "kind": "object"
+                      },
+                      "ca_information_access": {
+                        "keys": {
+                          "CA Issuers": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "kind": "object"
+                      },
+                      "certificate_policies": {
+                        "item": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "list"
+                      },
+                      "crl_distribution_points": {
+                        "item": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "list"
+                      },
+                      "extended_key_usage": {
+                        "item": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "list"
+                      },
+                      "key_usage": {
+                        "item": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "list"
+                      },
+                      "subject_alternative_name": {
+                        "item": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "kind": "list"
+                      },
+                      "subject_key_identifier": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "issuer": {
+                    "keys": {
+                      "C": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "CN": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "O": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "public_key": {
+                    "keys": {
+                      "algorithm": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "ec": {
+                        "keys": {
+                          "oid": {
+                            "kind": "scalar",
+                            "type": "string"
+                          },
+                          "pub": {
+                            "kind": "scalar",
+                            "type": "string"
+                          }
+                        },
+                        "kind": "object"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "serial_number": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "size": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "subject": {
+                    "keys": {
+                      "CN": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "thumbprint": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "thumbprint_sha256": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "validity": {
+                    "keys": {
+                      "not_after": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "not_before": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "version": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "kind": "object"
+              },
+              "last_https_certificate_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_modification_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_update_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "popularity_ranks": {
+                "keys": {
+                  "Alexa": {
+                    "keys": {
+                      "rank": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      },
+                      "timestamp": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Cisco Umbrella": {
+                    "keys": {
+                      "rank": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      },
+                      "timestamp": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Cloudflare Radar": {
+                    "keys": {
+                      "rank": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      },
+                      "timestamp": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Majestic": {
+                    "keys": {
+                      "rank": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      },
+                      "timestamp": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Quantcast": {
+                    "keys": {
+                      "rank": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      },
+                      "timestamp": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Statvoo": {
+                    "keys": {
+                      "rank": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      },
+                      "timestamp": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      }
+                    },
+                    "kind": "object"
+                  }
+                },
+                "kind": "object"
+              },
+              "rdap": {
+                "keys": {
+                  "entities": {
+                    "item": {
+                      "keys": {
+                        "as_event_actor": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "autnums": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "entities": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "events": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "handle": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "lang": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "links": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "networks": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "object_class_name": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "port43": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "public_ids": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "rdap_conformance": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "remarks": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "roles": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "string"
+                          },
+                          "kind": "list"
+                        },
+                        "status": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "url": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "vcard_array": {
+                          "item": {
+                            "keys": {
+                              "name": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "parameters": {
+                                "keys": {
+                                  "cc": {
+                                    "item": {
+                                      "kind": "scalar",
+                                      "type": "string"
+                                    },
+                                    "kind": "list",
+                                    "optional": true
+                                  },
+                                  "type": {
+                                    "item": {
+                                      "kind": "scalar",
+                                      "type": "string"
+                                    },
+                                    "kind": "list",
+                                    "optional": true
+                                  }
+                                },
+                                "kind": "object"
+                              },
+                              "type": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "values": {
+                                "item": {
+                                  "kind": "scalar",
+                                  "type": "string"
+                                },
+                                "kind": "list"
+                              }
+                            },
+                            "kind": "object"
+                          },
+                          "kind": "list"
+                        }
+                      },
+                      "kind": "object"
+                    },
+                    "kind": "list"
+                  },
+                  "events": {
+                    "item": {
+                      "keys": {
+                        "event_action": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "event_actor": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "event_date": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "links": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        }
+                      },
+                      "kind": "object"
+                    },
+                    "kind": "list"
+                  },
+                  "handle": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "lang": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "ldh_name": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "links": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "any"
+                    },
+                    "kind": "list"
+                  },
+                  "nameservers": {
+                    "item": {
+                      "keys": {
+                        "entities": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "events": {
+                          "item": {
+                            "keys": {
+                              "event_action": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "event_actor": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "event_date": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "links": {
+                                "item": {
+                                  "kind": "scalar",
+                                  "type": "any"
+                                },
+                                "kind": "list"
+                              }
+                            },
+                            "kind": "object"
+                          },
+                          "kind": "list"
+                        },
+                        "handle": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "lang": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "ldh_name": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "links": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "notices": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "object_class_name": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "port43": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "remarks": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "any"
+                          },
+                          "kind": "list"
+                        },
+                        "status": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "string"
+                          },
+                          "kind": "list"
+                        },
+                        "unicode_name": {
+                          "kind": "scalar",
+                          "type": "string"
+                        }
+                      },
+                      "kind": "object"
+                    },
+                    "kind": "list"
+                  },
+                  "nask0_state": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "notices": {
+                    "item": {
+                      "keys": {
+                        "description": {
+                          "item": {
+                            "kind": "scalar",
+                            "type": "string"
+                          },
+                          "kind": "list"
+                        },
+                        "links": {
+                          "item": {
+                            "keys": {
+                              "href": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "href_lang": {
+                                "item": {
+                                  "kind": "scalar",
+                                  "type": "any"
+                                },
+                                "kind": "list"
+                              },
+                              "media": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "rel": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "title": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "type": {
+                                "kind": "scalar",
+                                "type": "string"
+                              },
+                              "value": {
+                                "kind": "scalar",
+                                "type": "string"
+                              }
+                            },
+                            "kind": "object"
+                          },
+                          "kind": "list"
+                        },
+                        "title": {
+                          "kind": "scalar",
+                          "type": "string"
+                        },
+                        "type": {
+                          "kind": "scalar",
+                          "type": "string"
+                        }
+                      },
+                      "kind": "object"
+                    },
+                    "kind": "list"
+                  },
+                  "object_class_name": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "port43": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "public_ids": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "any"
+                    },
+                    "kind": "list"
+                  },
+                  "punycode": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "rdap_conformance": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "kind": "list"
+                  },
+                  "remarks": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "any"
+                    },
+                    "kind": "list"
+                  },
+                  "secure_dns": {
+                    "keys": {
+                      "delegation_signed": {
+                        "kind": "scalar",
+                        "type": "boolean"
+                      },
+                      "ds_data": {
+                        "item": {
+                          "kind": "scalar",
+                          "type": "any"
+                        },
+                        "kind": "list"
+                      },
+                      "key_data": {
+                        "item": {
+                          "kind": "scalar",
+                          "type": "any"
+                        },
+                        "kind": "list"
+                      },
+                      "max_sig_life": {
+                        "kind": "scalar",
+                        "type": "integer"
+                      },
+                      "zone_signed": {
+                        "kind": "scalar",
+                        "type": "boolean"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "status": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "kind": "list"
+                  },
+                  "switch_name": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "type": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "unicode_name": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "variants": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "any"
+                    },
+                    "kind": "list"
+                  }
+                },
+                "kind": "object"
+              },
+              "registrar": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "reputation": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "tags": {
+                "item": {
+                  "kind": "scalar",
+                  "type": "any"
+                },
+                "kind": "list"
+              },
+              "tld": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "total_votes": {
+                "keys": {
+                  "harmless": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "malicious": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  }
+                },
+                "kind": "object"
+              },
+              "whois": {
+                "keys": {
+                  "data": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "raw": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "any"
+                    },
+                    "kind": "list"
+                  }
+                },
+                "kind": "object"
+              },
+              "whois_date": {
+                "kind": "scalar",
+                "type": "integer"
+              }
+            },
+            "kind": "object"
+          },
+          "id": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "links": {
+            "keys": {
+              "self": {
+                "kind": "scalar",
+                "type": "string"
+              }
+            },
+            "kind": "object"
+          },
+          "type": {
+            "kind": "scalar",
+            "type": "string"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
       }
     },
     "kind": "object"
@@ -5381,6 +8282,2335 @@
               "whois_date": {
                 "kind": "scalar",
                 "type": "integer"
+              }
+            },
+            "kind": "object"
+          },
+          "id": {
+            "kind": "scalar",
+            "type": "string"
+          },
+          "links": {
+            "keys": {
+              "self": {
+                "kind": "scalar",
+                "type": "string"
+              }
+            },
+            "kind": "object"
+          },
+          "type": {
+            "kind": "scalar",
+            "type": "string"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
+  "virustotal:query_url": {
+    "keys": {
+      "data": {
+        "keys": {
+          "attributes": {
+            "keys": {
+              "categories": {
+                "keys": {
+                  "BitDefender": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "Forcepoint ThreatSeeker": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "Sophos": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "kind": "object"
+              },
+              "console_messages": {
+                "item": {
+                  "kind": "scalar",
+                  "type": "any"
+                },
+                "kind": "list"
+              },
+              "first_submission_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "html_meta": {
+                "keys": {
+                  "referrer": {
+                    "item": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "kind": "list"
+                  }
+                },
+                "kind": "object"
+              },
+              "javascript_variables": {
+                "item": {
+                  "keys": {
+                    "name": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "type": {
+                      "kind": "scalar",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "value": {
+                      "kind": "scalar",
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "kind": "list"
+              },
+              "last_analysis_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_analysis_results": {
+                "keys": {
+                  "0xSI_f33d": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ADMINUSLabs": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AILabs (MONITORAPP)": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Abusix": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Acronis": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AlienVault": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AlphaSOC": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Antiy-AVL": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ArcSight Threat Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "AutoShun": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Bfore.Ai PreCrime": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "BitDefender": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Bkav": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "BlockList": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Blueliv": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CINS Army": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CRDF": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CSIS Security Group": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CTX AI": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Certego": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ChainPatrol": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Chong Lua Dao": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Criminal IP": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "CyRadar": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Cyan": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Cyble": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "DNS8": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Dr.Web": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ESET": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ESTsecurity": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "EmergingThreats": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Emsisoft": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Ermes": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Forcepoint ThreatSeeker": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Fortinet": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Fortra": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "G-Data": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "GCP Abuse Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Google Safe Browsing": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "GreenSnow": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "GreyNoise": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Gridinsoft": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Guardpot": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Heimdal Security": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Hunt.io Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "IPsum": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Juniper Networks": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "K7AntiVirus": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Kaspersky": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "LevelBlue": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Lionic": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Lumu": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "MalwarePatrol": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "MalwareURL": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Malwared": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Mimecast": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Netcraft": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "OpenPhish": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Orcapot": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "PREBYTES": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "PhishFort": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Phishing Database": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Phishtank": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "PrecisionSec": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Quick Heal": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Quttera": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Rising": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "SCUMWARE.org": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "SOCRadar": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "SafeToOpen": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Sangfor": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Sansec eComscan": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Scantitan": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Seclookup": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Snort IP sample list": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Sophos": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "StopForumSpam": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Sucuri SiteCheck": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Synthient": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ThreatHive": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "URLQuery": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "URLhaus": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "VIPRE": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "VX Vault": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Viettel Threat Intelligence": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ViriBack": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Webroot": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Xcitium Verdict Cloud": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "Yandex Safebrowsing": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ZeroCERT": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "ZeroFox": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "alphaMountain.ai": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "desenmascara.me": {
+                    "keys": {
+                      "category": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "engine_name": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "method": {
+                        "kind": "scalar",
+                        "type": "string"
+                      },
+                      "result": {
+                        "kind": "scalar",
+                        "type": "string"
+                      }
+                    },
+                    "kind": "object"
+                  }
+                },
+                "kind": "object"
+              },
+              "last_analysis_stats": {
+                "keys": {
+                  "harmless": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "malicious": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "suspicious": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "timeout": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "undetected": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  }
+                },
+                "kind": "object"
+              },
+              "last_final_url": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "last_http_response_code": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_http_response_content_length": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_http_response_content_sha256": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "last_http_response_cookies": {
+                "keys": {
+                  "AEC": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "NID": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "SEARCH_SAMESITE": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "__Secure-STRP": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "kind": "object"
+              },
+              "last_http_response_cookies_extended": {
+                "item": {
+                  "keys": {
+                    "domain": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "expires": {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    "http_only": {
+                      "kind": "scalar",
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "priority": {
+                      "kind": "scalar",
+                      "type": "string"
+                    },
+                    "secure": {
+                      "kind": "scalar",
+                      "type": "boolean"
+                    },
+                    "session": {
+                      "kind": "scalar",
+                      "type": "boolean"
+                    },
+                    "size": {
+                      "kind": "scalar",
+                      "type": "integer"
+                    },
+                    "value": {
+                      "kind": "scalar",
+                      "type": "string"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "kind": "list"
+              },
+              "last_http_response_headers": {
+                "keys": {
+                  "accept-ch": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "alt-svc": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "cache-control": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "content-encoding": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "content-length": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "content-security-policy-report-only": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "content-type": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "cross-origin-opener-policy": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "date": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "expires": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "link": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "p3p": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "permissions-policy": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "report-to": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "server": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "strict-transport-security": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "x-frame-options": {
+                    "kind": "scalar",
+                    "type": "string"
+                  },
+                  "x-xss-protection": {
+                    "kind": "scalar",
+                    "type": "string"
+                  }
+                },
+                "kind": "object"
+              },
+              "last_modification_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "last_submission_date": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "outgoing_links": {
+                "item": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "kind": "list"
+              },
+              "proxy_country": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "reputation": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "tags": {
+                "item": {
+                  "kind": "scalar",
+                  "type": "string"
+                },
+                "kind": "list"
+              },
+              "threat_names": {
+                "item": {
+                  "kind": "scalar",
+                  "type": "any"
+                },
+                "kind": "list"
+              },
+              "times_submitted": {
+                "kind": "scalar",
+                "type": "integer"
+              },
+              "title": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "tld": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "total_votes": {
+                "keys": {
+                  "harmless": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  },
+                  "malicious": {
+                    "kind": "scalar",
+                    "type": "integer"
+                  }
+                },
+                "kind": "object"
+              },
+              "url": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "user_agent": {
+                "kind": "scalar",
+                "type": "string"
+              },
+              "web_category": {
+                "kind": "scalar",
+                "type": "string"
               }
             },
             "kind": "object"
