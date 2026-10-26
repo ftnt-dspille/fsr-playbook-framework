@@ -1248,6 +1248,42 @@
     },
     "kind": "object"
   },
+  "file-content-extraction:extract_indicators_from_file": {
+    "keys": {
+      "data": {
+        "keys": {
+          "domains": {
+            "item": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "kind": "list"
+          },
+          "urls": {
+            "item": {
+              "kind": "scalar",
+              "type": "string"
+            },
+            "kind": "list"
+          }
+        },
+        "kind": "object"
+      },
+      "message": {
+        "kind": "scalar",
+        "type": "string"
+      },
+      "operation": {
+        "kind": "scalar",
+        "type": "null"
+      },
+      "status": {
+        "kind": "scalar",
+        "type": "string"
+      }
+    },
+    "kind": "object"
+  },
   "fortinet-fortiguard-ioc:get_risk_distribution": {
     "keys": {
       "data": {
