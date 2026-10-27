@@ -939,7 +939,10 @@ TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
     # per-card wire contracts during the migration).
     "emit_card": {
         "type": "object",
-        "required": ["card_type", "payload"],
+        # Only card_type is required. payload is the canonical home for the
+        # card's fields, but the implementation also folds fields passed at the
+        # top level into it, so a top-level-only call must clear the arg-gate.
+        "required": ["card_type"],
         "additionalProperties": False,
         "properties": {
             "card_type": {

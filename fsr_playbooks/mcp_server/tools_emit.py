@@ -1782,7 +1782,8 @@ def _clip_summary(text: str) -> tuple[str, int | None]:
 
 
 @mcp.tool()
-def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+def emit_card(card_type: str, payload: dict[str, Any] | None = None,
+              **fields: Any) -> dict[str, Any]:
     """ONE card emitter -- pick `card_type`, pass that card's fields as
     `payload`; the turn halts on the rendered card.
 
@@ -1806,9 +1807,20 @@ def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         return _err("unknown_card_type",
                     f"card_type {card_type!r} not recognized",
                     suggestions=[f"valid card_types: {sorted(CARD_TYPES)}"])
+    # The canonical shape is emit_card(card_type, payload={...}). The model
+    # often passes the card's fields as TOP-LEVEL arguments instead (live, a
+    # verdict card never rendered because the arg-gate rejected its fields as
+    # "not an argument of emit_card", so the model kept resending an empty
+    # payload until the repeated-call guard fired). Accept either shape: stray
+    # top-level fields fold into payload, with an explicit payload winning any
+    # collision.
+    if payload is None:
+        payload = {}
     if not isinstance(payload, dict):
         return _err("bad_payload", "payload must be an object holding the "
                                    "card's fields")
+    if fields:
+        payload = {**fields, **payload}
     import inspect  # noqa: PLC0415
 
     import fsr_playbooks.mcp_server as _pkg  # noqa: PLC0415 - registration cycle
