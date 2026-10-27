@@ -88,6 +88,36 @@ def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
 _THINKING_TYPES = ("thinking", "redacted_thinking")
 
 
+def _thinking_only_in_last_assistant(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep thinking blocks ONLY on the most recent assistant turn; strip them
+    from every earlier assistant turn.
+
+    Preserved-thinking models (Haiku 5.5, Sonnet 5.5, Opus 5.x, Fable 5.x) bind a
+    thinking block to the turn that produced it and reject a request that resends
+    an EARLIER turn's thinking block -- with summarized display the resent text no
+    longer matches what the signature signed, so the API reads it as a
+    modification: `400 ... thinking or redacted_thinking blocks in the latest
+    assistant message cannot be modified`. It only wants the reasoning that chose
+    the still-pending tool calls, which lives on the last assistant turn; the
+    earlier turns' thinking has already served its purpose. (Keeping ALL of them,
+    which this loop did, is exactly what tripped the guard on the 2nd+ tool round.)
+    """
+    last_asst = max((i for i, m in enumerate(msgs) if m.get("role") == "assistant"),
+                    default=-1)
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(msgs):
+        c = m.get("content")
+        if i != last_asst and m.get("role") == "assistant" and isinstance(c, list):
+            kept = [b for b in c
+                    if not (isinstance(b, dict) and b.get("type") in _THINKING_TYPES)]
+            # An assistant tool-loop turn always carries a tool_use/text block, so
+            # stripping thinking never empties it; guard anyway.
+            if kept:
+                m = {**m, "content": kept}
+        out.append(m)
+    return out
+
+
 def _without_thinking(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """`msgs` with thinking blocks removed, for the side requests (the forced
     call, the wrap-up) that pin `tool_choice` or send no tools: those are not
@@ -629,7 +659,8 @@ class _AnthropicTurn:
         return {"prefix_fingerprint": self._prefix_fp}
 
     def _messages(self) -> list[dict[str, Any]]:
-        return _with_history_breakpoint(_to_anthropic_messages(self.history))
+        return _with_history_breakpoint(_thinking_only_in_last_assistant(
+            _to_anthropic_messages(self.history)))
 
     # The wire dicts built above are the SDK's own TypedDict shapes; these
     # casts state that for the type checker at the one place they are sent.
