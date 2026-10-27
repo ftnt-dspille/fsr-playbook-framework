@@ -6,15 +6,20 @@ fsr_playbooks.llm.provider.
 """
 from __future__ import annotations
 
+import asyncio
 import json
-import os
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from backend import history as history_db
 from backend import settings as _settings
+from backend._history_sink import BackendHistorySink
+from backend.system_prompt import build_system_prompt
+from fsr_playbooks.llm import approvals as _approval_store
 from fsr_playbooks.llm.factory import get_provider
 from fsr_playbooks.llm.provider import (
     ApprovalRequestEvent,
@@ -27,15 +32,8 @@ from fsr_playbooks.llm.provider import (
     ToolUseEvent,
     UsageEvent,
 )
-from fsr_playbooks.llm import approvals as _approval_store
-from fsr_playbooks.llm.run_turn import run_agent_turn, resume_agent_turn
-from backend.system_prompt import build_system_prompt
-from backend import history as history_db
-from backend._history_sink import BackendHistorySink
+from fsr_playbooks.llm.run_turn import resume_agent_turn, run_agent_turn
 from fsr_playbooks.llm.usage_log import est_tokens, log_turn
-
-import asyncio
-
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -358,19 +356,17 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                 )
                 await queue.put((_DONE, result))
                 return result
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 # run_agent_turn already catches stream errors; this
                 # is for setup/teardown failures only.
                 await queue.put((_DONE, None))
                 raise
 
         producer = asyncio.create_task(_produce())
-        result = None
         try:
             while True:
                 item = await queue.get()
                 if isinstance(item, tuple) and len(item) == 2 and item[0] is _DONE:
-                    result = item[1]
                     break
                 yield _serialize(item)
 

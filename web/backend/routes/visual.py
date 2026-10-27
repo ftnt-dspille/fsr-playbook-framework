@@ -15,11 +15,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from fsr_playbooks.compiler.visual_model import to_visual, from_visual
 from fsr_playbooks.compiler.samples import (
     append_samples,
     extract_samples_block,
 )
+from fsr_playbooks.compiler.visual_model import from_visual, to_visual
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES_DIR = REPO_ROOT / "examples"
@@ -124,7 +124,7 @@ async def draft_step(payload: DraftStepIn) -> dict[str, Any]:
 
     See ``backend/step_drafter.py`` for the prompt-building logic.
     """
-    from backend.step_drafter import draft_step_args, STEP_INTROS
+    from backend.step_drafter import STEP_INTROS, draft_step_args
 
     if payload.step_type not in STEP_INTROS:
         raise HTTPException(400,

@@ -16,19 +16,18 @@ FakeProvider's `resume()` method with the right shape.
 from __future__ import annotations
 
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
+from backend.app import app
 from fastapi.testclient import TestClient
 
-from backend.app import app
 from fsr_playbooks.llm import approvals as _approvals
 from fsr_playbooks.llm import factory
 from fsr_playbooks.llm.fake_provider import FakeProvider
 from fsr_playbooks.llm.provider import (
     DoneEvent,
     Event,
-    Message,
     TextEvent,
     ToolResultEvent,
     UsageEvent,

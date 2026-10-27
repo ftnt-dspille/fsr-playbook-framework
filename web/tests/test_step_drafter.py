@@ -8,16 +8,15 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
-from fsr_playbooks.llm.factory import register, reset_registry
-from fsr_playbooks.llm.fake_provider import FakeProvider
-from fsr_playbooks.llm.provider import TextEvent
 from backend.step_drafter import (
     build_system_prompt,
     draft_step_args,
     extract_json,
 )
 
+from fsr_playbooks.llm.factory import register, reset_registry
+from fsr_playbooks.llm.fake_provider import FakeProvider
+from fsr_playbooks.llm.provider import TextEvent
 
 # ---------------------------------------------------------------------------
 # Pure helpers

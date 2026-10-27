@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 _MANUAL_INPUT: dict[str, Any] = {
     "summary": (
         "Pause the playbook for a human response. Friendly form: prompt "

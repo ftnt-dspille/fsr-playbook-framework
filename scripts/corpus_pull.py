@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import traceback
 from collections import Counter
 from pathlib import Path
 
@@ -107,6 +106,8 @@ for k, n in classes.most_common():
 # Group by the SHAPE of the message (identifiers stripped) so the triage list
 # is "how many distinct compiler gaps" rather than "how many playbooks".
 import re
+
+
 def shape(msg: str) -> str:
     m = msg.split(" ;; ")[0]
     m = re.sub(r"'[^']*'", "'X'", m)

@@ -13,15 +13,15 @@ import re
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
-from typing import Any, AsyncIterator
-
 from asyncio import create_subprocess_exec as _spawn
 from asyncio.subprocess import PIPE, STDOUT
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOLING_DIR = REPO_ROOT / "tooling"

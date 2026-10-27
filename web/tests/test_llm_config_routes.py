@@ -7,10 +7,9 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-from backend import secrets_store, settings as _settings
+from backend import settings as _settings
 from backend.app import app
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture

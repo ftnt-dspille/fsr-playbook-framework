@@ -5,7 +5,6 @@ import json
 import sqlite3
 
 import pytest
-
 from backend.step_examples import (
     cluster_examples,
     summarise_decision,
@@ -17,7 +16,6 @@ from backend.step_examples import (
     summarise_trigger,
     summarise_workflow_ref,
 )
-
 
 # ---------------------------------------------------------------------------
 # Pure-summariser tests (no DB)

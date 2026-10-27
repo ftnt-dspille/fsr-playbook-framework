@@ -71,8 +71,9 @@ app = FastAPI(title="FSR Playbook Studio", version="0.0.1")
 # Install the backend-settings-backed ConfigProvider so fsr_playbooks.llm
 # can resolve provider configs without importing the web backend.
 from fsr_playbooks.llm import factory as _llm_factory  # noqa: E402
-from . import settings as _settings  # noqa: E402
 from fsr_playbooks.protocols import ProviderConfig as _CoreProviderConfig  # noqa: E402
+
+from . import settings as _settings  # noqa: E402
 
 
 class _BackendConfigProvider:
@@ -99,6 +100,7 @@ def _install_approval_persistence() -> None:
     secrets store so persisted tokens still verify after a restart; without a
     stable key the binding check fails closed and the analyst re-issues."""
     import secrets as _secrets
+
     from fsr_playbooks.llm import approvals as _approvals
 
     if not os.environ.get("FSR_APPROVAL_HMAC_KEY"):
@@ -128,16 +130,16 @@ def _install_approval_persistence() -> None:
         pass
 
 
-from .routes.yaml_routes import router as yaml_router  # noqa: E402
 from .routes.chat import router as chat_router  # noqa: E402
-from .routes.playbook import router as playbook_router  # noqa: E402
-from .routes.ref import router as ref_router  # noqa: E402
 from .routes.examples import router as examples_router  # noqa: E402
-from .routes.llm_config import router as llm_config_router  # noqa: E402
 from .routes.history import router as history_router  # noqa: E402
+from .routes.llm_config import router as llm_config_router  # noqa: E402
 from .routes.mcp import router as mcp_router  # noqa: E402
-from .routes.visual import router as visual_router  # noqa: E402
+from .routes.playbook import router as playbook_router  # noqa: E402
 from .routes.playbooks import router as playbooks_router  # noqa: E402
+from .routes.ref import router as ref_router  # noqa: E402
+from .routes.visual import router as visual_router  # noqa: E402
+from .routes.yaml_routes import router as yaml_router  # noqa: E402
 
 app.include_router(yaml_router)
 app.include_router(chat_router)
@@ -216,7 +218,9 @@ def _probe_fsr() -> dict:
 
 @app.get("/api/health")
 def health() -> dict:
-    from . import settings as _settings  # local import: avoids touching keyring at import time
+    from . import (
+        settings as _settings,  # local import: avoids touching keyring at import time
+    )
     active = _settings.get_active_provider_name()
     cfg = _settings.load_provider(active)
     return {

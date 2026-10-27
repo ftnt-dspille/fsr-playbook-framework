@@ -8,15 +8,11 @@ hand against a live FSR.
 from __future__ import annotations
 
 import json
-import subprocess
 from types import SimpleNamespace
-
-import pytest
-from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.routes import playbook as playbook_route
-
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 

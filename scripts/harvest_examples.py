@@ -11,14 +11,11 @@ Usage:
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any
 
 import yaml
-
 
 # Find repo root
 REPO_ROOT = Path(__file__).parent.parent
@@ -282,7 +279,7 @@ def _process_playbook_file(
 
     # Check for credentials/IPs
     if _has_credentials_or_ips(yaml_text):
-        return False, f"has_credentials_or_real_infrastructure", None
+        return False, "has_credentials_or_real_infrastructure", None
 
     # Compute content hash
     content_hash = _content_hash(yaml_text)
@@ -567,7 +564,7 @@ def main() -> int:
         if (i % 25) == 0 or (i == len(files)):
             print(f"  {i}/{len(files)}: {file_path.name} {status}")
 
-    print(f"\nHarvest summary:")
+    print("\nHarvest summary:")
     print(f"  Total files processed: {len(files)}")
     print(f"  Harvested: {len(rows)}")
     print(f"  Deduplicated (hash): {skipped.get('hash_dup', 0)}")
@@ -576,7 +573,7 @@ def main() -> int:
     print(f"  Parse errors: {skipped.get('yaml_parse_error', 0)}")
 
     if refused:
-        print(f"\n  Files with credentials/real infrastructure (REFUSED):")
+        print("\n  Files with credentials/real infrastructure (REFUSED):")
         for f in refused:
             print(f"    {f}")
 
@@ -585,7 +582,7 @@ def main() -> int:
         return 0
 
     # Validate all DBs have required tables before proceeding
-    print(f"\nValidating DB structure...")
+    print("\nValidating DB structure...")
     for db_path in dbs:
         if not db_path.exists():
             print(f"  Warning: {db_path} does not exist, will skip it")
@@ -610,13 +607,13 @@ def main() -> int:
     print(f"\nEstimated DB size increase: {estimated_added_mb:.1f} MB")
 
     if estimated_added_mb > 1.5:
-        print(f"Warning: estimated size > 1.5 MB, may exceed target")
+        print("Warning: estimated size > 1.5 MB, may exceed target")
 
     # Insert into DBs
     for db_path in dbs:
         print(f"\nInserting into {db_path}...")
         if not db_path.exists():
-            print(f"  Warning: DB does not exist, skipping")
+            print("  Warning: DB does not exist, skipping")
             continue
 
         inserted, skipped_count = _insert_recipes(db_path, rows)

@@ -8,7 +8,6 @@ when the caller passes a relative work dir (red without the work.resolve() fix).
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest

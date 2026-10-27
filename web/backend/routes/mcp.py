@@ -12,7 +12,6 @@ VISUAL_EDITOR_PLAN.md.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import os
 from typing import Any
