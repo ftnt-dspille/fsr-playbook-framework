@@ -1318,8 +1318,23 @@ def emit_manual_input(
     paused playbook gate. `workflow_run_iri` ties the response back to
     the FortiSOAR workflow runtime; the widget submits via the
     connector's `respond_manual_input` operation, not `chat_resume`."""
-    for label, val in (("id", id), ("workflow_run_iri", workflow_run_iri),
-                       ("question", question)):
+    # A fill-in form is only valid while a playbook run is paused at a gate:
+    # workflow_run_iri ties the analyst's answer back to that run. In a plain
+    # triage/chat turn there is no paused run, yet this tool is advertised, so
+    # the model reaches for it to ask the analyst a question. Returning the raw
+    # "workflow_run_iri must be a non-empty string" both dead-ends the model and
+    # leaks an internal param name into analyst-facing text (live, the assistant
+    # printed exactly that). Answer with a self-correcting, analyst-safe redirect
+    # to the two paths that do work in a chat turn.
+    if not isinstance(workflow_run_iri, str) or not workflow_run_iri.strip():
+        return _err(
+            "no_paused_playbook",
+            "A fill-in form can only be shown while a playbook is paused "
+            "waiting for input, and none is paused here. Ask the analyst the "
+            "question directly in your reply, or offer the options with a "
+            "choice card.",
+        )
+    for label, val in (("id", id), ("question", question)):
         if not isinstance(val, str) or not val.strip():
             return _err("missing_field", f"{label} must be a non-empty string")
     if not isinstance(fields, list) or not fields:
