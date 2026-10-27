@@ -27,7 +27,6 @@ import sqlite3
 from collections import defaultdict
 from typing import Any
 
-
 # Friendly step type → list of corpus ``step_type_name`` values that
 # represent it. Some friendlies merge multiple corpus types
 # (start_on_create rolls up post_create rows; create_record collapses

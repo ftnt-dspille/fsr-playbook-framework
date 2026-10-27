@@ -7,20 +7,17 @@ default provider selection picks it up. No API key required.
 from __future__ import annotations
 
 import json
-import os
-from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
-
 from backend import app as app_module
 from backend import history as history_db
+from fastapi.testclient import TestClient
+
 from fsr_playbooks.llm import factory
 from fsr_playbooks.llm.fake_provider import FakeProvider
 from fsr_playbooks.llm.provider import (
     DoneEvent,
     Event,
-    Message,
     TextEvent,
     ToolCallUsage,
     ToolResultEvent,
@@ -190,7 +187,6 @@ def test_yaml_sha_changes_when_content_changes(client):
     # Both turns landed on the same session id ("testsess") because the
     # FakeProvider hardcodes it. Check both rows; their yaml_sha differs.
     sess = history_db.get_chat_session("testsess")
-    shas = {t.get("yaml_sha") for t in sess["turns"]}
     # Two posts, but turn=1 is the same primary key -- REPLACE leaves
     # only the latest. Verify that the latest sha is from the second
     # request (post-edit).

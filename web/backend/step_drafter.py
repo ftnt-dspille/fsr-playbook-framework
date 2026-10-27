@@ -32,7 +32,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from backend.step_examples import cluster_examples, STEP_TYPE_TO_CORPUS
+from backend.step_examples import STEP_TYPE_TO_CORPUS, cluster_examples
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = REPO_ROOT / "data" / "fsr_reference.db"
@@ -289,7 +289,9 @@ def validate_proposed_args(step_type: str,
     if str(repo_python) not in sys.path:
         sys.path.insert(0, str(repo_python))
     try:
-        from fsr_playbooks.compiler import compile_yaml as _compile  # type: ignore[import-not-found]
+        from fsr_playbooks.compiler import (
+            compile_yaml as _compile,  # type: ignore[import-not-found]
+        )
     except ImportError as exc:
         return [{
             "severity": "unknown",
@@ -359,7 +361,10 @@ async def draft_step_args(
     """
     from fsr_playbooks.llm.factory import get_provider
     from fsr_playbooks.llm.provider import (
-        Message, TextEvent, ErrorEvent, DoneEvent,
+        DoneEvent,
+        ErrorEvent,
+        Message,
+        TextEvent,
     )
 
     system = build_system_prompt(step_type, module, intent, current_args)

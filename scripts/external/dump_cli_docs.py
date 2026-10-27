@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO / "tooling"))
@@ -51,7 +51,9 @@ def _action_table(actions: Iterable[argparse.Action]) -> list[str]:
             meta.append(f"default: `{a.default}`")
         if a.required and a.option_strings:
             meta.append("required")
-        line = f"| {name} | {(a.help or '').replace('|', '\\|')} | {' · '.join(meta) or '--'} |"
+        help_txt = (a.help or "").replace("|", "\\|")
+        meta_txt = " · ".join(meta) or "--"
+        line = f"| {name} | {help_txt} | {meta_txt} |"
         rows.append(line)
     if not rows:
         return []

@@ -7,7 +7,6 @@ line inside the step, not on the step header (`- name: ...`).
 """
 from backend.routes.yaml_routes import _path_to_line
 
-
 YAML_WITH_STEPS = """\
 collection: "test"
 description: ""

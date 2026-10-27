@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROOT.parent
 for _p in (REPO_ROOT, ROOT):
@@ -38,7 +37,8 @@ def _isolate_secrets_and_settings(tmp_path, monkeypatch):
     care about LLM config can still hit /api/chat without a config_error
     short-circuit. Tests that DO care about config can override the
     backend via `secrets_backend` param or write their own settings."""
-    from backend import secrets_store, settings as _settings
+    from backend import secrets_store
+    from backend import settings as _settings
     fake = _MemorySecrets({"anthropic_api_key": "sk-ant-test-fixture"})
     secrets_store.reset_for_tests(fake)
     monkeypatch.setattr(_settings, "DATA_DIR", tmp_path)

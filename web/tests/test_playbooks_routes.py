@@ -7,10 +7,9 @@ auto-snapshot vs named-save distinction.
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from backend.app import app
 from backend.routes import playbooks as pb_routes
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)

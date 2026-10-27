@@ -26,7 +26,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pushes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

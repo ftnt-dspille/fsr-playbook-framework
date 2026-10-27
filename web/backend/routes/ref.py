@@ -145,12 +145,12 @@ def synthesize_http_step(entry_id: int, step_name: str = "Call API") -> dict[str
         raise HTTPException(404, step["error"])
     args = step.get("args") or {}
     yaml_lines = [
-        f"- id: call_api",
-        f"  type: connector",
+        "- id: call_api",
+        "  type: connector",
         f"  name: {step.get('name', step_name)!r}",
         f"  connector: {step.get('connector', 'http')}",
         f"  operation: {step.get('operation', 'http_request')}",
-        f"  args:",
+        "  args:",
         f"    method: {args.get('method', 'GET')}",
         f"    rest_api: {args.get('rest_api', '')!r}",
         f"    auth_type: {args.get('auth_type', 'No Auth')!r}",
@@ -303,7 +303,7 @@ def step_examples(step_type: str, limit: int = 10) -> dict[str, Any]:
     Powers the Examples tab on every step type. See
     ``web/backend/step_examples.py`` for clustering + summariser.
     """
-    from ..step_examples import cluster_examples, STEP_TYPE_TO_CORPUS
+    from ..step_examples import STEP_TYPE_TO_CORPUS, cluster_examples
     if step_type not in STEP_TYPE_TO_CORPUS:
         raise HTTPException(404,
             f"step type {step_type!r} has no corpus mapping; "

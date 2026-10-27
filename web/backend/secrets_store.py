@@ -20,7 +20,6 @@ from typing import Protocol
 import keyring
 from keyring.errors import KeyringError, NoKeyringError, PasswordDeleteError
 
-
 SERVICE = "fsr-studio"
 
 

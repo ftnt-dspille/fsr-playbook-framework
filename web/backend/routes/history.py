@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 
 from .. import history as history_db
 
-
 router = APIRouter(prefix="/api/history", tags=["history"])
 
 

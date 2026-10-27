@@ -4,7 +4,6 @@ chat↔push correlation marker, YAML diff.
 from __future__ import annotations
 
 import pytest
-
 from backend import history
 
 
@@ -306,8 +305,8 @@ def test_delete_session_cascades_to_turns_messages_and_feedback():
 def test_get_session_derives_final_yaml_from_compile_tool_call():
     """No push happened, but the agent ran compile_yaml -- the route
     should surface that yaml_text as final_yaml."""
-    from fastapi.testclient import TestClient
     from backend.app import app
+    from fastapi.testclient import TestClient
     client = TestClient(app)
 
     history.record_chat_turn({
@@ -341,8 +340,8 @@ def test_get_session_derives_final_yaml_from_compile_tool_call():
 
 
 def test_get_session_derives_final_yaml_from_fenced_block():
-    from fastapi.testclient import TestClient
     from backend.app import app
+    from fastapi.testclient import TestClient
     client = TestClient(app)
 
     history.record_chat_turn({

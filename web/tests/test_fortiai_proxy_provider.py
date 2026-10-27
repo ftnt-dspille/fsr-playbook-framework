@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from fsr_playbooks.llm.fortiai_proxy_provider import (
     FortiAIProxyProvider,
@@ -29,7 +26,6 @@ from fsr_playbooks.llm.provider import (
     ToolUseEvent,
     UsageEvent,
 )
-
 
 # ---- Helpers ----------------------------------------------------
 
@@ -293,7 +289,7 @@ def test_malformed_tool_args_become_empty_dict():
     p = _provider_with_responses(call1, call2)
     with patch("fsr_playbooks.llm.fortiai_proxy_provider.dispatch",
                return_value={}) as mock_dispatch:
-        events = asyncio.run(_drain(p, system="", messages=[], tools=[], tags={}))
+        asyncio.run(_drain(p, system="", messages=[], tools=[], tags={}))
     # Dispatch received empty dict for malformed args
     mock_dispatch.assert_called_with("find_connector", {})
 

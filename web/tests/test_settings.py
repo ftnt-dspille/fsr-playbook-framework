@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
-from backend import secrets_store, settings as _settings
+from backend import secrets_store
+from backend import settings as _settings
 
 
 def test_load_provider_returns_blank_when_nothing_saved():

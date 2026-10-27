@@ -13,7 +13,6 @@ from pydantic import BaseModel
 
 from backend import settings as _settings
 
-
 router = APIRouter(prefix="/api/llm", tags=["llm-config"])
 
 

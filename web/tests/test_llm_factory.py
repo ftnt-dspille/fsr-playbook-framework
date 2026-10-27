@@ -8,16 +8,13 @@ round-trip, and be selectable by name.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
 
 import pytest
 
 from fsr_playbooks.llm import factory
 from fsr_playbooks.llm.fake_provider import FakeProvider
 from fsr_playbooks.llm.provider import (
-    DoneEvent,
     Event,
-    LLMProvider,
     Message,
     TextEvent,
     UsageEvent,
