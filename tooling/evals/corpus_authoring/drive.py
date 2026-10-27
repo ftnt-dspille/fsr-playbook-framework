@@ -82,10 +82,16 @@ def _events(stdout: str) -> list[dict]:
 
 
 def _extract_yaml(events: list[dict]) -> tuple[str, list[str]]:
-    """Authored YAML + the ordered list of toolkit tool names called."""
+    """Authored YAML + the ordered list of toolkit tool names called.
+
+    The YAML is the LAST one to appear in document order, whether it came in a
+    tool's ``yaml_text`` or a ```yaml fence in the agent's prose. A repair flow
+    often ends by emitting the corrected YAML in the final message AFTER the
+    last repair_playbook call carried the still-broken draft -- taking the last
+    tool input there would score the agent's actual fix as no-fix.
+    """
     last_yaml = ""
     tool_names: list[str] = []
-    final_text = ""
     for ev in events:
         for b in (ev.get("message") or {}).get("content") or []:
             if not isinstance(b, dict):
@@ -98,14 +104,14 @@ def _extract_yaml(events: list[dict]) -> tuple[str, list[str]]:
                     if isinstance(y, str) and y.strip():
                         last_yaml = y
             elif b.get("type") == "text":
-                final_text = b.get("text") or final_text
+                fences = _YAML_FENCE.findall(b.get("text") or "")
+                if fences and fences[-1].strip():
+                    last_yaml = fences[-1]
         if ev.get("type") == "result" and ev.get("result"):
-            final_text = str(ev["result"])
-    # Prefer the last YAML a tool actually received; else a fence in the answer.
-    if last_yaml:
-        return last_yaml, tool_names
-    fences = _YAML_FENCE.findall(final_text or "")
-    return (fences[-1] if fences else ""), tool_names
+            fences = _YAML_FENCE.findall(str(ev["result"]))
+            if fences and fences[-1].strip():
+                last_yaml = fences[-1]
+    return last_yaml, tool_names
 
 
 def drive_task(task: dict, work: Path, model: str = "claude-sonnet-5-5",
