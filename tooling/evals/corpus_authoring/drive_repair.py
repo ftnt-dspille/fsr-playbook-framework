@@ -32,6 +32,9 @@ REPAIR_PREAMBLE = (
 def drive_repair(task: dict, defect: dict, work: Path,
                  model: str = "claude-sonnet-5-5", timeout: int = 1800) -> dict:
     """Run one repair; return {id, kind, repaired_yaml, tools, rc, stderr_tail}."""
+    # Absolute: see drive.drive_task -- a relative work path makes --mcp-config
+    # resolve against cwd=work and disappear, so claude loads no tools.
+    work = Path(work).resolve()
     work.mkdir(parents=True, exist_ok=True)
     cfg = drive._mcp_config(work)
     prompt = REPAIR_PREAMBLE + defect["yaml"] + "\n```\n"

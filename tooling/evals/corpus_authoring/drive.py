@@ -111,6 +111,10 @@ def _extract_yaml(events: list[dict]) -> tuple[str, list[str]]:
 def drive_task(task: dict, work: Path, model: str = "claude-sonnet-5-5",
                timeout: int = 1800) -> dict:
     """Run one task; return {id, authored_yaml, tools, rc, stderr_tail}."""
+    # Absolute: claude -p runs with cwd=work, so a relative --mcp-config path
+    # would resolve against work and vanish -- claude then loads no tools and
+    # the scorecard silently reads 0 (a false negative, not a real result).
+    work = Path(work).resolve()
     work.mkdir(parents=True, exist_ok=True)
     cfg = _mcp_config(work)
     cmd = ["claude", "-p", PREAMBLE + task["spec"], "--model", model,
