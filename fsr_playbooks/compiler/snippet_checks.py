@@ -168,8 +168,10 @@ def check_snippet(
                      f"(line {e.lineno})"),
             suggestion=(
                 "fix the syntax; a top-level `return` is the usual culprit -- "
-                "the sandbox runs the body at module scope, so use a bare "
-                "expression/assignment or wrap it in a function you then call"
+                "the sandbox runs the body at module scope, so drop `return` and "
+                "`print(<value>)` instead -- a snippet's output is what it prints "
+                "(measured on 8.0: `return`, a result variable and a bare expression "
+                "all leave code_output null)"
                 if e.msg and "return" in e.msg.lower()
                 else "fix the syntax error before pushing"),
             lineno=e.lineno or 1,
