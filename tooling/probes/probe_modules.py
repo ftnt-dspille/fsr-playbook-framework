@@ -8,6 +8,10 @@ Live source:
       → picklists with their items inlined, used to resolve picklist @id refs
         on attribute defaults.
 
+The live read and the writes live in `fsr_playbooks.warmup` (shipped), so
+`fsrpb warmup` and this probe share one ingest. This module keeps the
+probe-only parts: the opt-in conditional refetch and the local fallback.
+
 Trust ladder:
   module existence:    tested_pass via live_api_get
   field declaration:   seen via live_api_get (declared on the box, not exercised)
@@ -22,229 +26,42 @@ import json
 import sqlite3
 import warnings
 from pathlib import Path
-from typing import Any
+
+from fsr_playbooks import warmup
+
+# TAGS_URL and _tag_rows are re-exported: the tooling tests import them from here.
+from fsr_playbooks.warmup import (  # noqa: F401
+    METADATA_URL,
+    PICKLISTS_URL,
+    TAGS_URL,
+    _tag_rows,
+)
 
 from . import _env
 from .common import (
     SCHEMA_JSON_PATH,
     conditional_refetch,
     probe_session,
-    record_verification,
     wipe_probe_tables,
 )
 
 PROBE_NAME = "probe_modules"
 
-METADATA_URL = (
-    "/api/3/staging_model_metadatas"
-    "?$limit=2147483647&$orderby=type&$relationships=true"
-)
-PICKLISTS_URL = (
-    "/api/3/picklist_names"
-    "?$export=false&$limit=2147483647&$orderby=name&$relationships=true"
-)
-# No `$orderby`: on 8.0 the collection is plain strings with no `name` column,
-# and ordering by it is a server-side QueryException (HTTP 400).
-TAGS_URL = "/api/3/tags?$limit=2147483647"
-TEAMS_URL = "/api/3/teams?$limit=2147483647&$orderby=name"
-
-
-def _tag_rows(members: list) -> list[tuple[str, str]]:
-    """(name, iri) rows from a `/api/3/tags` collection.
-
-    8.0 serves each tag as a bare string; older boxes as an object. Skipping
-    the strings wiped the table and left tag validation silently off. A bare
-    tag's IRI is the slug form the compiler already emits for an unknown tag.
-    """
-    rows: list[tuple[str, str]] = []
-    for m in members:
-        if isinstance(m, str):
-            if m:
-                rows.append((m, f"/api/3/tags/{m}"))
-        elif isinstance(m, dict):
-            name = m.get("itemValue") or m.get("name")
-            iri = m.get("@id")
-            if name and iri:
-                rows.append((str(name), str(iri)))
-    return rows
-
-
-def _scalarize(v: Any) -> Any:
-    if v is None or isinstance(v, (str, int, float, bytes)):
-        return v
-    return json.dumps(v)
-
-
-def _bool(v: Any) -> int:
-    return 1 if v else 0
-
-
-def _is_required(validation: Any) -> bool:
-    return isinstance(validation, dict) and validation.get("required") is True
-
-
-def _picklist_list_name(attr: dict) -> str | None:
-    """Return the listName the attribute binds to (e.g. 'AlertStatus'),
-    or None if it isn't picklist-backed."""
-    ds = attr.get("dataSource") or {}
-    if not isinstance(ds, dict):
-        return None
-    query = ds.get("query") or {}
-    for f in query.get("filters", []) or []:
-        if isinstance(f, dict) and f.get("field") == "listName__name":
-            v = f.get("value")
-            if isinstance(v, str):
-                return v
-    return None
-
-
-def _picklist_options_for(attr: dict, picklist_lists: dict[str, list[str]]) -> list[str] | None:
-    """Extract picklist option strings if the attribute references one."""
-    list_name = _picklist_list_name(attr)
-    if list_name is None:
-        return None
-    return picklist_lists.get(list_name)
-
-
-def _unique_columns(m: dict) -> list[str]:
-    """The module's natural-key column(s), from its uniqueConstraint.
-
-    Shape on the wire is a list of single-entry dicts::
-
-        [{"c_v_es_unique": {"columns": ["cVEID"]}}]
-
-    Most modules define one constraint; the columns of all of them are
-    collected so a composite key is not silently halved.
-    """
-    out: list[str] = []
-    for entry in (m.get("uniqueConstraint") or []):
-        if not isinstance(entry, dict):
-            continue
-        for spec in entry.values():
-            if isinstance(spec, dict):
-                for col in (spec.get("columns") or []):
-                    if isinstance(col, str) and col not in out:
-                        out.append(col)
-    return out
-
-
-def _insert_module(conn: sqlite3.Connection, m: dict) -> str | None:
-    name = m.get("type") or m.get("module")
-    if not name:
-        return None
-    unique = _unique_columns(m)
-    conn.execute(
-        """INSERT OR REPLACE INTO modules
-             (name, label, plural, description, unique_constraint)
-           VALUES (?, ?, ?, ?, ?)""",
-        (
-            name,
-            _scalarize(m.get("displayName") or m.get("module") or name),
-            _scalarize(m.get("module")),
-            _scalarize(m.get("descriptions")),
-            json.dumps(unique) if unique else None,
-        ),
-    )
-    return name
-
-
-def _insert_field(
-    conn: sqlite3.Connection,
-    *,
-    module: str,
-    attr: dict,
-    picklist_items: dict[str, str],
-    picklist_lists: dict[str, list[str]],
-) -> None:
-    name = attr.get("name")
-    if not name:
-        return
-    options = _picklist_options_for(attr, picklist_lists)
-    list_name = _picklist_list_name(attr)
-    conn.execute(
-        """INSERT OR REPLACE INTO module_fields
-           (module_name, field_name, title, type, required,
-            picklist_options, tooltip, picklist_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            module,
-            name,
-            _scalarize(attr.get("title") or attr.get("displayName") or name),
-            # Date fields are `type: integer` (epoch) with `formType: datetime`;
-            # keep the datetime -- a query filter on one needs `type: datetime`.
-            "datetime" if attr.get("formType") == "datetime"
-            else _scalarize(attr.get("type") or attr.get("formType")),
-            _bool(_is_required(attr.get("validation"))),
-            json.dumps(options) if options else None,
-            _scalarize(attr.get("tooltip")),
-            list_name,
-        ),
-    )
-
 
 # ----------------------- live -----------------------
-
-def _parse_picklists(body: Any) -> tuple[dict[str, str], dict[str, list[str]],
-                                          list[tuple[str, str, str]], int]:
-    """Parse a picklist_names JSON body into (item_id_to_value,
-    list_name_to_options, items_rows, totalItems). Fetch-agnostic so the
-    conditional-refetch path can reuse it without a double-GET.
-    """
-    members = body.get("hydra:member", []) if isinstance(body, dict) else []
-    item_id_to_value: dict[str, str] = {}
-    list_name_to_options: dict[str, list[str]] = {}
-    items_rows: list[tuple[str, str, str]] = []
-    for pl_name in members:
-        name = pl_name.get("name")
-        items = pl_name.get("picklists") or []
-        opts = []
-        for it in items:
-            iid = it.get("@id")
-            iv = it.get("itemValue")
-            if iid and iv is not None:
-                item_id_to_value[iid] = iv
-            if iv is not None:
-                opts.append(iv)
-            if name and isinstance(iv, str) and isinstance(iid, str):
-                items_rows.append((name, iv, iid))
-        if name:
-            list_name_to_options[name] = opts
-    return item_id_to_value, list_name_to_options, items_rows, len(members)
-
-
-def _load_picklists(client) -> tuple[dict[str, str], dict[str, list[str]],
-                                      list[tuple[str, str, str]], int, str | None]:
-    """Returns (item_id_to_value, list_name_to_options, items_rows, totalItems, etag).
-
-    `items_rows` is a list of (list_name, item_value, item_iri) tuples,
-    ready for bulk-insertion into the `picklists` table. `etag` is the
-    ETag response header (if present), for use in Tier-2 freshness checks.
-    """
-    resp = client.session.get(
-        client.base_url + PICKLISTS_URL,
-        verify=client.verify_ssl,
-    )
-    resp.raise_for_status()
-    return (*_parse_picklists(resp.json()), resp.headers.get("ETag"))
-
 
 def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
     client = _env.get_client()
     if client is None:
         return 0, 0, ["env not configured"]
-    errors: list[str] = []
 
     # Tier-2 conditional refetch (opt-in via FSR_CONDITIONAL_REFETCH), keyed on
-    # the picklists collection. Coarse-grained: a fresh/unchanged picklists
-    # response skips the whole re-derive (all collections current); a refreshed
-    # 200 wipes + re-derives everything (tags/teams/metadata are re-fetched on
-    # the refreshed path -- the rare case). Per-collection ETags (tags /
-    # model_metadatas) are still recorded on the refreshed path; conditional_refetch
-    # owns the picklists ETag + data_warmed_at, so the legacy recording below is
-    # skipped for picklists on this path. The non-conditional path leaves the wipe
-    # to main() (current behavior).
+    # the picklists collection. A fresh/unchanged picklists response skips the
+    # whole re-derive; a refreshed 200 wipes and re-derives everything. The
+    # picklists ETag and warm time are recorded by conditional_refetch itself,
+    # so warm_modules is handed the body and skips its own picklists GET.
     conditional = _env.is_conditional_enabled()
-    picklists_etag: str | None = None
+    picklists_body = None
     if conditional:
         outcome, payload = conditional_refetch(
             client, url=PICKLISTS_URL, conn=conn, collection="picklists",
@@ -255,206 +72,23 @@ def _live(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
             return 0, 0, []
         if outcome == "error":
             return 0, 0, [str(payload)]
-        # refreshed: wipe + clear module verifications before re-deriving.
         wipe_probe_tables(conn, PROBE_NAME)
-        conn.execute(
-            "DELETE FROM verifications WHERE kind IN ('module','module_field') "
-            "AND method IN ('live_api_get','schema_json')"
-        )
-        picklist_items, picklist_lists, items_rows, n_pl = _parse_picklists(payload)
-        # picklists_etag stays None -- conditional_refetch recorded it.
-    else:
-        try:
-            picklist_items, picklist_lists, items_rows, n_pl, picklists_etag = _load_picklists(client)
-        except Exception as e:  # noqa: BLE001
-            return 0, 0, [f"picklists: {e!r}"]
-    # Persist (list_name, item_value, item_iri) so the resolver can map
-    # friendly picklist tokens in record-write payloads to IRIs without
-    # an online lookup.
-    conn.execute("DELETE FROM picklists")
-    conn.executemany(
-        "INSERT OR REPLACE INTO picklists (list_name, item_value, item_iri) "
-        "VALUES (?, ?, ?)",
-        items_rows,
-    )
-    record_verification(
-        conn, kind="api_endpoint",
-        key="GET /api/3/picklist_names",
-        method="live_api_get", status="tested_pass",
-        notes=f"picklists={n_pl}, items={len(items_rows)}",
-    )
+        picklists_body = payload
 
-    # Tags catalog -- drives compile-time validation of
-    # set_variable.message.tags so the agent can't ship a playbook that
-    # silently creates a typo tag at runtime.
-    tags_etag = None
     try:
-        tags_resp = client.session.get(
-            client.base_url + TAGS_URL,
-            verify=client.verify_ssl,
+        n_mod, n_fld, errors, etags = warmup.warm_modules(
+            conn, client, picklists_body=picklists_body,
         )
-        tags_resp.raise_for_status()
-        rt = tags_resp.json()
-        tags_etag = tags_resp.headers.get("ETag")
-        tag_rows = _tag_rows(rt.get("hydra:member") or [])
-        conn.execute("DELETE FROM tags")
-        conn.executemany(
-            "INSERT OR REPLACE INTO tags (name, iri) VALUES (?, ?)",
-            tag_rows,
-        )
-        record_verification(
-            conn, kind="api_endpoint",
-            key="GET /api/3/tags",
-            method="live_api_get", status="tested_pass",
-            notes=f"tags={len(tag_rows)}",
-        )
-    except Exception as e:  # noqa: BLE001
-        errors.append(f"tags: {e!r}")
-
-    # Owner teams -- populate the `teams` table so the resolver can map
-    # playbook `owners:` friendly names to /api/3/teams/<uuid> IRIs.
-    try:
-        teams_resp = client.session.get(
-            client.base_url + TEAMS_URL,
-            verify=client.verify_ssl,
-        )
-        teams_resp.raise_for_status()
-        tr = teams_resp.json()
-        team_rows: list[tuple[str, str]] = []
-        for m in tr.get("hydra:member") or []:
-            if not isinstance(m, dict):
-                continue
-            name = m.get("name")
-            iri = m.get("@id")
-            if name and iri:
-                team_rows.append((str(name), str(iri)))
-        conn.execute("DELETE FROM teams")
-        conn.executemany(
-            "INSERT OR REPLACE INTO teams (name, iri) VALUES (?, ?)",
-            team_rows,
-        )
-        record_verification(
-            conn, kind="api_endpoint",
-            key="GET /api/3/teams",
-            method="live_api_get", status="tested_pass",
-            notes=f"teams={len(team_rows)}",
-        )
-    except Exception as e:  # noqa: BLE001
-        errors.append(f"teams: {e!r}")
-
-    metadata_etag = None
-    try:
-        metadata_resp = client.session.get(
-            client.base_url + METADATA_URL,
-            verify=client.verify_ssl,
-        )
-        metadata_resp.raise_for_status()
-        r = metadata_resp.json()
-        metadata_etag = metadata_resp.headers.get("ETag")
-    except Exception as e:  # noqa: BLE001
-        return 0, 0, [f"metadata: {e!r}"]
-    record_verification(
-        conn, kind="api_endpoint",
-        key="GET /api/3/staging_model_metadatas",
-        method="live_api_get", status="tested_pass",
-        notes="$relationships=true required for inline attributes",
-    )
-
-    members = r.get("hydra:member", [])
-    n_modules = 0
-    n_fields = 0
-    for m in members:
-        if not isinstance(m, dict) or not m.get("type"):
-            continue
-        module = _insert_module(conn, m)
-        if not module:
-            continue
-        n_modules += 1
-        record_verification(
-            conn, kind="module", key=module,
-            method="live_api_get", status="tested_pass",
-        )
-        for attr in m.get("attributes") or []:
-            if not isinstance(attr, dict):
-                continue
-            _insert_field(
-                conn, module=module, attr=attr,
-                picklist_items=picklist_items,
-                picklist_lists=picklist_lists,
-            )
-            n_fields += 1
-            if attr.get("name"):
-                record_verification(
-                    conn, kind="module_field",
-                    key=f"{module}:{attr['name']}",
-                    method="live_api_get", status="seen",
-                )
-
-    _stamp_provenance(conn, client)
-
-    # Record ETags for Tier-2 freshness checks (conditional re-pull on TTL expiry).
-    # Best-effort: these are supplementary to the core warmup.
-    from fsr_playbooks import _catalog_meta
-    if picklists_etag:
-        _catalog_meta.record_etag(conn, "picklists", picklists_etag)
-    if tags_etag:
-        _catalog_meta.record_etag(conn, "tags", tags_etag)
-    if metadata_etag:
-        _catalog_meta.record_etag(conn, "model_metadatas", metadata_etag)
-    # Also record data_warmed_at timestamp for TTL tracking.
-    _catalog_meta.record_data_warmed_at(conn)
-    conn.commit()  # _stamp_provenance already committed, but re-record these for atomicity
-
-    return n_modules, n_fields, errors
-
-
-def _stamp_provenance(conn: sqlite3.Connection, client) -> None:
-    """Record which instance (+ version / publish watermark) this catalog was
-    warmed from, into ``_catalog_meta`` -- drives the compile-time multi-instance
-    guard and the Tier-0/Tier-1 freshness check. Best-effort: the two extra
-    GETs are cheap and failure here must not fail the warmup."""
-    from fsr_playbooks import _catalog_meta
+    except warmup.WarmupFatal as e:
+        return 0, 0, [str(e)]
 
     cfg = _env.get_config()
-    fsr_version = None
-    last_publish = None
-    try:  # public, no-auth, ~25 B -- Tier-0 upgrade gate
-        v = client.get("/api/version")
-        if isinstance(v, dict):
-            fsr_version = v.get("version")
-    except Exception:  # noqa: BLE001
-        pass
-    try:  # appliance-wide publish watermark -- Tier-1 gate
-        p = client.get("/api/publish/error")
-        if isinstance(p, dict):
-            last_publish = p.get("last_publish_time")
-    except Exception:  # noqa: BLE001
-        pass
-    licence_serial = None
-    try:  # durable identity: license serial survives URL/port changes
-        licence_serial = _env.live_license_serial(client)
-    except Exception:  # noqa: BLE001
-        pass
-    _catalog_meta.stamp_instance(
-        conn,
-        instance_label=cfg.instance_label,
-        base_url=cfg.base_url,
-        fsr_version=fsr_version,
-        last_publish_time=last_publish,
-        instance_serial=licence_serial,
+    warmup.stamp_provenance(
+        conn, client, instance_label=cfg.instance_label, base_url=cfg.base_url,
     )
-    # Baseline the cheap row counts so a later `check-fresh` can detect
-    # add/delete drift (incl. picklist value adds that publish nothing).
-    for coll in ("model_metadatas", "attribute_metadatas",
-                 "picklists", "picklist_names", "tags"):
-        try:
-            r = client.get(f"/api/3/{coll}?$limit=0")
-            total = r.get("hydra:totalItems") if isinstance(r, dict) else None
-            if isinstance(total, int):
-                _catalog_meta.record_count(conn, coll, total)
-        except Exception:  # noqa: BLE001
-            pass
+    warmup.record_warm_markers(conn, etags)
     conn.commit()
+    return n_mod, n_fld, errors
 
 
 # ----------------------- local fallback -----------------------
@@ -466,34 +100,10 @@ def _local(conn: sqlite3.Connection) -> tuple[int, int, list[str]]:
         d = json.loads(SCHEMA_JSON_PATH.read_text())
     except Exception as e:  # noqa: BLE001
         return 0, 0, [f"{SCHEMA_JSON_PATH}: {e!r}"]
-    members = d.get("hydra:member") or []
-    n_modules = 0
-    n_fields = 0
-    for m in members:
-        if not isinstance(m, dict) or not m.get("type"):
-            continue
-        module = _insert_module(conn, m)
-        if not module:
-            continue
-        n_modules += 1
-        record_verification(
-            conn, kind="module", key=module,
-            method="schema_json", status="seen",
-        )
-        for attr in m.get("attributes") or []:
-            if not isinstance(attr, dict):
-                continue
-            _insert_field(
-                conn, module=module, attr=attr,
-                picklist_items={}, picklist_lists={},
-            )
-            n_fields += 1
-            if attr.get("name"):
-                record_verification(
-                    conn, kind="module_field",
-                    key=f"{module}:{attr['name']}",
-                    method="schema_json", status="seen",
-                )
+    n_modules, n_fields = warmup.write_modules(
+        conn, d.get("hydra:member") or [], {},
+        method="schema_json", module_status="seen",
+    )
     return n_modules, n_fields, []
 
 
@@ -509,56 +119,12 @@ def main() -> int:
     with probe_session(PROBE_NAME, sources) as conn:
         # Idempotent migration for already-built DBs that predate the
         # picklists table / module_fields.picklist_name column.
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS picklists ("
-            "  list_name TEXT NOT NULL,"
-            "  item_value TEXT NOT NULL,"
-            "  item_iri TEXT NOT NULL,"
-            "  PRIMARY KEY (list_name, item_value))"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_picklists_list ON picklists(list_name)"
-        )
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS tags ("
-            "  name TEXT PRIMARY KEY,"
-            "  iri  TEXT NOT NULL)"
-        )
-        # Owner teams -- drives compile-time resolution of playbook `owners:`
-        # team names to /api/3/teams/<uuid> IRIs (so a private playbook can
-        # be authored by team name, not raw UUID).
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS teams ("
-            "  name TEXT PRIMARY KEY,"
-            "  iri  TEXT NOT NULL)"
-        )
-        cols = {r[1] for r in conn.execute(
-            "PRAGMA table_info(module_fields)").fetchall()}
-        if "picklist_name" not in cols:
-            conn.execute(
-                "ALTER TABLE module_fields ADD COLUMN picklist_name TEXT"
-            )
-        # The module's NATURAL KEY -- the column(s) an upsert matches on. A
-        # create_record routed at /api/3/upsert/<m> whose payload omits these
-        # has nothing to match against, so it inserts a new record on every
-        # run instead of updating. Carried into the catalog so the compiler can
-        # say so offline; older catalogs simply lack the column and the check
-        # stays quiet rather than guessing.
-        mcols = {r[1] for r in conn.execute(
-            "PRAGMA table_info(modules)").fetchall()}
-        if "unique_constraint" not in mcols:
-            conn.execute(
-                "ALTER TABLE modules ADD COLUMN unique_constraint TEXT"
-            )
+        warmup.apply_migrations(conn)
         # Default (always-re-pull) path wipes before _live rewrites. When
         # FSR_CONDITIONAL_REFETCH is on, _live owns the wipe (only on a refreshed
         # 200) so a fresh/unchanged outcome leaves existing rows intact.
         if not _env.is_conditional_enabled():
             wipe_probe_tables(conn, PROBE_NAME)
-            conn.execute(
-                "DELETE FROM verifications WHERE kind IN ('module','module_field') "
-                "AND method IN ('live_api_get','schema_json')"
-            )
 
         n_mod = n_fld = 0
         live_errs: list[str] = []

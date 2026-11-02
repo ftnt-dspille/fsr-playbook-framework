@@ -94,6 +94,10 @@ _DEFAULT_CONSTRAINTS = {
         # `set()` fails with "Uses of ['set'] is restricted". Use a list
         # or dict for dedup instead: `seen = {}` / `seen[k] = True`.
         "set",
+        # Measured on 8.0.1 by live runs: `all(...)` and `map(...)` fail the step
+        # with "Uses of ['all'] is restricted" (and 'map'). A local named `seq`
+        # ran fine, so it is not banned.
+        "all", "map",
     }),
     "imports_allowed_by_default": False,
 }
@@ -118,6 +122,10 @@ def _banned_suggestion(name: str) -> str:
         return ("use attribute access in try/except AttributeError instead")
     if name == "enumerate":
         return "use a manual index counter instead"
+    if name == "all":
+        return "loop with a flag instead: ok = True; for x in xs: ok = ok and bool(x)"
+    if name == "map":
+        return "use a list comprehension instead: [str(x) for x in xs]"
     return f"remove the use of {name!r}; the sandbox has no filesystem/process access"
 
 
@@ -238,6 +246,23 @@ def check_snippet(
                                     "connector config, or drop the import"),
                         lineno=ln,
                     ))
+
+    # --- B3: no output. ---
+    # A snippet's output is what it prints. Measured on 8.0.1: a body that never
+    # prints (a bare computation, or assigning `output = ...`) finishes "Success"
+    # with code_output null, so the next step silently gets nothing.
+    prints = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "print"
+                 for n in ast.walk(tree))
+    raises = any(isinstance(n, ast.Raise) for n in ast.walk(tree))
+    if not prints and not raises:
+        _add(SnippetFinding(
+            severity="warning",
+            name="no-print",
+            message=("code-snippet never prints, so its code_output is null: the step "
+                     "succeeds and the next step gets nothing"),
+            suggestion="print() the value the next step needs; print(dict) keeps the type",
+            lineno=1,
+        ))
 
     findings.sort(key=lambda f: (f.lineno, f.name))
     return findings

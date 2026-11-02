@@ -20,6 +20,10 @@ SCHEMA_PATH = STORE_DIR / "schema.sql"
 
 import os
 
+# Shipped in fsr_playbooks.warmup so `fsrpb warmup` writes verifications the
+# same way the probes do. Re-exported here for the probes that import it.
+from fsr_playbooks.warmup import record_verification  # noqa: F401
+
 # External DB we ATTACH read-only for enrichment (cross-vendor API examples
 # + extracted FortiSOAR connector method bodies). Env override
 # `FSRPB_API_CATALOG` lets a deploy point at a different file without
@@ -177,35 +181,6 @@ def wipe_probe_tables(conn: sqlite3.Connection, probe_name: str) -> None:
         conn.execute(f"DELETE FROM {table}")
     # FTS rows tagged with kind owned by this probe get cleared by the probe
     # itself when it rewrites them -- keep that explicit, not magical here.
-
-
-def record_verification(
-    conn: sqlite3.Connection,
-    kind: str,
-    key: str,
-    method: str,
-    status: str = "seen",
-    notes: str | None = None,
-) -> None:
-    """Record a verification fact.
-
-    Reminder: anything sourced from a local file (rpm info.json, schema.json,
-    fsr-schema.ts, widget constants) is `status='seen'` -- it does NOT count as
-    trusted. Only live_* / playbook_e2e methods with status='tested_pass' make
-    an entity trusted in `v_verification_state`.
-    """
-    conn.execute(
-        "INSERT OR REPLACE INTO verifications (kind, key, method, status, ts, notes) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            kind,
-            key,
-            method,
-            status,
-            datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            notes,
-        ),
-    )
 
 
 def conditional_refetch(

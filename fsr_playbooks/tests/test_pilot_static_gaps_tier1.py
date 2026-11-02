@@ -68,7 +68,22 @@ def test_b2_plain_import_unknown_config_is_warning():
 
 def test_b2_plain_import_allowed_when_config_enables_it():
     # The whole point: imports ARE legal if the connector config enables them.
-    assert check_snippet("import json", allow_imports=True) == []
+    assert check_snippet("import json\nprint(json.dumps({}))", allow_imports=True) == []
+
+
+def test_b2_all_and_map_are_banned():
+    # Live on 8.0.1: "Uses of ['all'] is restricted" (and 'map'); `seq` ran fine.
+    names = {f.name for f in check_snippet("print(all([1]))\nm = map(str, [1])")}
+    assert {"all", "map"} <= names
+    assert check_snippet("seq = [1, 2]\nprint(len(seq))") == []
+
+
+def test_b3_a_snippet_that_never_prints_warns():
+    # Live on 8.0.1: no print -> "Success" with code_output null.
+    for code in ("x = 1 + 1", "output = 2"):
+        [f] = check_snippet(code)
+        assert (f.severity, f.name) == ("warning", "no-print")
+    assert check_snippet("raise ValueError('x')") == []
 
 
 def test_b2_plain_import_error_when_config_disables_it():

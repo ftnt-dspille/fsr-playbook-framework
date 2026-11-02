@@ -131,6 +131,40 @@ def _check_step_id_uuid(s: Step, pi: int, si: int) -> CompileError | None:
     )
 
 
+_DOUBLED_IRI_RE = re.compile(r"/api/3/[A-Za-z0-9_]+/\{\{[^}]*@id[^}]*\}\}")
+
+
+def _check_doubled_iri(s: Step, pi: int, si: int) -> list[CompileError]:
+    """``/api/3/<module>/{{ ...['@id'] }}``: the expression is already a full IRI.
+
+    Measured on 8.0.1: an update_record whose record is
+    ``/api/3/alerts/{{ <an IRI> }}`` renders ``/api/3/alerts//api/3/alerts/<uuid>``
+    and fails with "No route found"; ``{{ <the IRI> }}`` alone succeeds.
+    """
+    errs: list[CompileError] = []
+
+    def walk(v, path):
+        if isinstance(v, str) and _DOUBLED_IRI_RE.search(v):
+            errs.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"{path} puts /api/3/<module>/ in front of an @id, which is already a "
+                         f"full IRI -- it renders /api/3/<module>//api/3/... and the call fails "
+                         f"with 'No route found'"),
+                path=path,
+                suggestion="drop the /api/3/<module>/ prefix and use the @id as is",
+                severity="error",
+            ))
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                walk(x, f"{path}.{k}")
+        elif isinstance(v, list):
+            for i, x in enumerate(v):
+                walk(x, f"{path}[{i}]")
+
+    walk(s.arguments if isinstance(s.arguments, dict) else {}, f"playbooks[{pi}].steps[{si}].arguments")
+    return errs
+
+
 def _check_step_name(s: Step, pi: int, si: int) -> CompileError | None:
     """Auto-fix step names that the FSR designer would refuse to save.
 
@@ -773,6 +807,7 @@ def lint(
                 if e:
                     errs.append(e)
                 errs.extend(_check_trigger_record_overwrite(s, pi, si))
+                errs.extend(_check_doubled_iri(s, pi, si))
                 # Resolve the step's config's allow_imports from the catalog.
                 # Per-step: a pinned config name reads that config; no pin reads
                 # the default.  An inline allow_imports on the step always wins.

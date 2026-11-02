@@ -13,6 +13,7 @@ Codes are grouped:
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Iterable
 
 from .runner import (
@@ -377,6 +378,27 @@ def check_raises_connector_error(ctx: ConnectorCtx) -> Iterable[Issue]:
                                 file=str(ctx.operations_py), line=node.lineno)
 
 
+def check_config_fields_used(ctx: ConnectorCtx) -> Iterable[Issue]:
+    """Warn on configuration fields no code reads, and HTTP code with no server field.
+
+    An edited scaffold tends to orphan or drop the server field; the connector
+    still validates and then calls a hard-coded host.
+    """
+    fields = [f.get("name") for f in ((ctx.info.get("configuration") or {}).get("fields") or [])
+              if isinstance(f, dict) and f.get("name")]
+    code = "\n".join(p.read_text(errors="ignore") for p in ctx.root.glob("*.py"))
+    for name in fields:
+        if f"'{name}'" not in code and f'"{name}"' not in code:
+            yield Issue("CFG001", Severity.WARN,
+                        f"configuration field {name!r} is never read by the code; "
+                        f"use it (config.get({name!r})) or remove it", file=str(ctx.info_path))
+    if re.search(r"\b(requests|httpx|urllib)\b", code) and not any(
+            re.search(r"url|server|host|endpoint", n, re.IGNORECASE) for n in fields):
+        yield Issue("CFG002", Severity.WARN,
+                    "the code makes HTTP calls but no configuration field holds the server/URL, so the "
+                    "host is hard-coded; keep a server field and read it", file=str(ctx.info_path))
+
+
 # --------------------------- ALL_CHECKS ------------------------------------
 
 ALL_CHECKS = (
@@ -392,4 +414,5 @@ ALL_CHECKS = (
     check_connector_class,
     check_check_health_function,
     check_raises_connector_error,
+    check_config_fields_used,
 )

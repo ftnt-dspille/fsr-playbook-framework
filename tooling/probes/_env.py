@@ -158,10 +158,6 @@ def live_license_serial(client=None) -> str | None:
         client = get_client()
         if client is None:
             return None
-    try:
-        payload = client.get("/api/auth/license", params={"param": "license_details"})
-        from fsr_playbooks._catalog_meta import license_serial_from_details
+    from fsr_playbooks.warmup import live_license_serial as _serial
 
-        return license_serial_from_details(payload)
-    except Exception:  # noqa: BLE001 -- identity is advisory, never fatal
-        return None
+    return _serial(client)

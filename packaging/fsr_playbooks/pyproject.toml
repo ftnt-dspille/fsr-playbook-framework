@@ -116,6 +116,7 @@ bypass-selection = true
 "../../fsr_playbooks/output_shape.py" = "fsr_playbooks/output_shape.py"
 "../../fsr_playbooks/picklists.py" = "fsr_playbooks/picklists.py"
 "../../fsr_playbooks/reference_db.py" = "fsr_playbooks/reference_db.py"
+"../../fsr_playbooks/warmup.py" = "fsr_playbooks/warmup.py"
 "../../fsr_playbooks/protocols.py" = "fsr_playbooks/protocols.py"
 # subpackages (each ships its .py + bundled runtime assets)
 "../../fsr_playbooks/compiler" = "fsr_playbooks/compiler"

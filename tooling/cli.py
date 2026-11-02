@@ -2188,6 +2188,32 @@ def _health_probe_config(client, name: str, version: str, config: str | None = N
     return (r.json() or {}).get("status", "?")
 
 
+def cmd_warmup(args: argparse.Namespace) -> int:
+    """Warm a reference-catalog copy from the configured live box.
+
+    The work is `fsr_playbooks.warmup.warm_catalog`; this only builds the client
+    from .env, like the other live commands, and prints its report.
+    """
+    from probes import _env  # type: ignore
+
+    from fsr_playbooks.warmup import WarmupError, warm_catalog
+
+    cfg = _env.get_config()
+    if not cfg.is_live():
+        print("FSR_BASE_URL / auth not configured (.env)", file=sys.stderr)
+        return 2
+    try:
+        report = warm_catalog(
+            _env.get_client(), args.warm_db,
+            instance_label=args.label or cfg.instance_label or None,
+        )
+    except WarmupError as e:
+        print(f"warmup refused: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["committed"] and not report["errors"] else 1
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     """List configured-and-active connectors, with optional live healthcheck.
 
@@ -5211,6 +5237,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--version", default=None, help="override connector version (default: store)")
     sp.add_argument("--config", default=None, help="connector config name")
     sp.set_defaults(func=cmd_run_op)
+
+    sp = sub.add_parser(
+        "warmup",
+        help="warm a reference-catalog copy from the live box (writes only --db)")
+    # dest is not "db": the top-level --db has a default that a subparser would overwrite.
+    sp.add_argument("--db", dest="warm_db", required=True,
+                    help="reference DB to warm; created from the packaged catalog when absent. "
+                         "The packaged file and the dev corpus are refused.")
+    sp.add_argument("--label", default=None,
+                    help="instance label stamped into _catalog_meta (default: FSR_INSTANCE_LABEL)")
+    sp.set_defaults(func=cmd_warmup)
 
     sp = sub.add_parser("run-playbook", help="manually trigger a deployed playbook")
     sp.add_argument("playbook", help="workflow name, UUID, or 'Collection:Name'")

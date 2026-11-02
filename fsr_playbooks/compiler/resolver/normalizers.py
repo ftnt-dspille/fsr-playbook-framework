@@ -133,6 +133,26 @@ def _rewrite_query_filter_ops(
         ))
 
 
+
+# Trigger keys seen across the playbook corpus (abstract_trigger and
+# cybersponse.action rows of playbook_steps) plus the documented friendly keys.
+# An unknown key on a trigger was folded into its arguments and dropped.
+_TRIGGER_OPTION_KEYS = {"step_variables", "__triggerLimit", "triggerOnReplicate", "triggerOnSource"}
+# One corpus abstract_trigger is a data-ingestion trigger; its wire keys are valid.
+_INGESTION_TRIGGER_KEYS = {
+    "@id", "@type", "agentId", "batch_preference", "connector_action", "connector_action_inputs",
+    "connector_icon", "connector_label", "connector_mapping", "connector_name", "connector_version",
+    "createUser_id", "default", "description", "event_id", "exit_if_running", "installed_by",
+    "modifyUser_id", "poll", "sample_data", "schedule", "start_time", "tag", "trigger_condition",
+    "type", "uuid",
+}
+_RECORD_ACTION_FRIENDLY = {"module", "modules", "button_label", "title", "requires_record", "run_mode",
+                           "inputVariables", "mock_result"}
+_RECORD_ACTION_CANONICAL = _TRIGGER_OPTION_KEYS | {
+    "inputVariables", "resources", "route", "singleRecordExecution", "noRecordExecution",
+    "executeButtonText", "displayConditions", "_promptexpanded", "showToasterMessage",
+}
+
 class NormalizerMixin:
     """Methods for normalizing step arguments and dispatching by step type."""
 
@@ -383,7 +403,7 @@ class NormalizerMixin:
         elif step.type == "set_variable":
             self._normalize_set_variable_args(step, path, errors)
         elif step.type == "start":
-            self._normalize_start_args(step)
+            self._normalize_start_args(step, path, errors)
         # decision: no further ref-checking in v1 -- args are free-form jinja.
 
         # message: posts a collaboration comment after the step runs.
@@ -423,6 +443,10 @@ class NormalizerMixin:
         """
         import uuid as _uuidmod
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        if self._check_unknown_keys(
+            a, "start (record action)", _RECORD_ACTION_FRIENDLY, _RECORD_ACTION_CANONICAL, path, errors,
+        ):
+            return
         # Scalar-flag type validation via the typed-args layer
         # (`typed_args.steps.expand_record_action`, model `RecordActionArgs`).
         # Validation-only -- it never mutates `a`; the canonical transform below
@@ -540,8 +564,20 @@ class NormalizerMixin:
         fieldbasedtrigger.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        if "condition" in a:
+            # Accepted as a universal step key but never read by a record
+            # trigger: live, a start_on_create with `condition:` compiled
+            # clean and the playbook ran on every alert.
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_PARAM,
+                message=f"{step.type}: `condition` is not read by a record trigger; "
+                        f"the playbook would run on every record",
+                path=f"{path}.arguments.condition",
+                suggestion="filter with `when: {logic: AND, filters: [{field, op, value}]}`",
+            ))
+            return
         _FRIENDLY = {"module", "modules", "when", "trigger_filter",
-                     "mock_result", "condition"}
+                     "mock_result"}
         _CANONICAL = {
             "resource", "resources", "step_variables", "triggerOnSource",
             "triggerOnReplicate", "__triggerLimit", "fieldbasedtrigger",
@@ -2091,7 +2127,7 @@ class NormalizerMixin:
         if new is not None:
             step.arguments = new
 
-    def _normalize_start_args(self, step: Step) -> None:
+    def _normalize_start_args(self, step: Step, path: str = "", errors: list[CompileError] | None = None) -> None:
         """abstract_trigger needs `arguments.step_variables.input.params`
         populated even when the playbook takes no input -- without it FSR's
         runtime fails with `pop expected at most 1 argument, got 2` when it
@@ -2099,6 +2135,12 @@ class NormalizerMixin:
         Mirrors the canonical default observed in every live playbook.
         """
         a = step.arguments if isinstance(step.arguments, dict) else {}
+        if errors is not None and self._check_unknown_keys(
+            # A decompiled record action can arrive as a bare start carrying its wire keys.
+            a, "start", _RECORD_ACTION_FRIENDLY, _RECORD_ACTION_CANONICAL | _INGESTION_TRIGGER_KEYS,
+            path, errors,
+        ):
+            return
         a.setdefault("step_variables", {"input": {"params": []}})
         step.arguments = a
 
