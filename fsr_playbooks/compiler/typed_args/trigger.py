@@ -366,6 +366,23 @@ def _leaf_to_filter(
     if not _check_arity(op, leaf.value, opath, errors):
         return None
 
+    # A trigger filter on a picklist's `.itemValue` (or `.@id`) sub-key compiles
+    # and publishes but does not match reliably: live-tested on 8.0.1, a
+    # start_on_create on `severity.itemValue eq Critical` failed to fire in most
+    # runs (it fired once, unexplained), while `severity eq <picklist IRI>` fired
+    # every time. Refuse it and point at the form that works.
+    base_field, _, sub = (leaf.field or "").partition(".")
+    if sub in ("itemValue", "@id", "display"):
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(f"trigger filter on `{leaf.field}` does not fire reliably: the "
+                     f"trigger engine matches picklist fields by IRI. Use `field: {base_field}` "
+                     f"with the picklist IRI as the value (resolve_picklist gives it, "
+                     f"e.g. /api/3/picklists/<uuid>)."),
+            path=f"{leaf_path}.field",
+        ))
+        return None
+
     # Advanced (live-grounded) wire shapes: when the author/decompiler sets an
     # explicit non-primitive `type`, emit that shape with the supplied
     # passthrough keys instead of forcing the scalar `primitive` form.
