@@ -81,6 +81,17 @@ def cmd_compile(args: argparse.Namespace) -> int:
     if not result.ok:
         _print_errors(result.errors)
         return 1
+    # Warnings used to vanish here: CompileResult.ok only means "no
+    # *errors*" -- the findings list still carries severity=warning
+    # diagnostics the author never got to see. Print them on success so
+    # compile output is the complete health picture (two live-caught
+    # playbook defects shipped to a staged box while their compiler
+    # findings sat unread in this silent list).
+    warns = [e for e in result.errors
+             if getattr(e, "severity", "") == "warning"]
+    if warns:
+        print(f"compiled with {len(warns)} warning(s):", file=sys.stderr)
+        _print_errors(warns)
     out = Path(args.output)
     out.write_text(json.dumps(result.fsr_json, indent=2))
     print(f"wrote {out}", file=sys.stderr)

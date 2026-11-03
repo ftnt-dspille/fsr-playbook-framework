@@ -24,10 +24,20 @@ Rules implemented:
    runs live even under ``useMockOutput=true`` - missing
    ``mock_result`` surfaces resolveRange/picklist errors against TODO
    placeholders during a mock run.
+4. **Non-boolean decision condition** - FSR's decision engine checks each
+   route condition's rendered value with isinstance(bool); a bare
+   ``{{ vars.steps.X.data.foo }}`` renders whatever sits in that slot
+   (often a string) and the step fails at runtime. Warns when the
+   expression's AST provably cannot render a bool; undecidable shapes
+   stay silent (live-verified on 8.0.x: four routes rendered strings and
+   crashed their child playbooks until wrapped in explicit boolean forms).
 
 Severity policy:
 - (1) and (2) are blocking errors (FSR-level breakage).
 - (3) is a warning - it doesn't break a real run, only mock plumbing.
+- (4) is a warning - statically undecidable: the referenced slot may hold
+  a runtime bool (a ``set_variable`` can export one fine), so only the
+  live render decides, and there a non-bool fails the step.
 """
 from __future__ import annotations
 
@@ -37,6 +47,7 @@ from pathlib import Path
 
 from .errors import CompileError, ErrorCode
 from .ir import Collection, Step
+from .jinja_checks import non_boolean_condition
 from .snippet_checks import check_snippet
 
 # YAML 1.1 boolean tokens (case-insensitive). Quoting any of these
@@ -408,6 +419,10 @@ def _check_message_record(s: Step, pi: int, si: int) -> CompileError | None:
 
     - ``--mock`` runs (which use ``notrigger`` mode -- no trigger record)
     - Manual / API-triggered runs without a record
+    - a child invoked via ``workflow_reference``: the parent's payload
+      rides ``params``, so there is no trigger record to default to
+      (live-verified on 8.0.x, where a child's audit step failed with
+      exactly this error until it pinned ``record: "{{ vars.record_id }}"``)
 
     Authors who intend the comment to attach to the trigger record can make
     this explicit with ``record: "{{ vars.input.records[0]['@id'] }}"``.
@@ -430,12 +445,64 @@ def _check_message_record(s: Step, pi: int, si: int) -> CompileError | None:
             f"explicit `record:` / `records:`. FSR defaults to the trigger "
             f"record (vars.input.records[0]), which is correct for "
             f"record-triggered playbooks but fails with 'No record found' "
-            f"in --mock runs and manual/API-triggered runs without a record."
+            f"in --mock runs, in manual/API-triggered runs without a "
+            f"record, and in workflow_reference children (no trigger "
+            f"record to default to; the parent passes the record via "
+            f"params instead)."
         ),
         path=f"playbooks[{pi}].steps[{si}].arguments.message",
         suggestion='add record: "{{ vars.input.records[0][\'@id\'] }}" to be '
                    'explicit, or use vars: instead of message: for mock-friendly output',
     )
+
+
+def _check_decision_conditions(s: Step, pi: int, si: int) -> list[CompileError]:
+    """Warn when a decision route's rendered value is provably not a bool.
+
+    FSR's decision engine requires an isinstance(bool) render per route
+    condition (live-verified on 8.0.x). Decision steps only -- a
+    connector-step ``when:`` is a truthiness guard with different
+    semantics, and a non-bool connector guard is legal.
+
+    Authored YAML writes ``when:`` per route; the wire (and thus the IR, via
+    the parser's sugar hoisting) writes ``condition:``. Both keys are read so
+    the lint sees pre- and post-compile shapes.
+    """
+    if (s.type or "").lower() != "decision":
+        return []
+    args = s.arguments if isinstance(s.arguments, dict) else {}
+    conds = args.get("conditions")
+    if not isinstance(conds, list):
+        return []
+    errs: list[CompileError] = []
+    name = s.name or s.id or "?"
+    for ci, cond in enumerate(conds):
+        if not isinstance(cond, dict):
+            continue
+        expr = cond.get("condition") or cond.get("when")
+        if not isinstance(expr, str):
+            continue                  # default route -- no predicate
+        why = non_boolean_condition(expr)
+        if why is None:
+            continue
+        route = cond.get("option") or cond.get("display") or ci
+        errs.append(CompileError(
+            code=ErrorCode.NON_BOOLEAN_CONDITION,
+            severity="warning",
+            message=(
+                f"decision step {name!r} route {route!r} renders {why}, "
+                f"not a strict bool -- FSR's decision engine requires "
+                f"isinstance(bool) and the step fails at runtime on a "
+                f"non-bool render"),
+            path=(f"playbooks[{pi}].steps[{si}]."
+                  f"arguments.conditions[{ci}].condition"),
+            suggestion=(
+                "make the render boolean: compare explicitly "
+                "(`... == 'true'`), guard presence "
+                "(`... | default('', true) | string | length > 0`) or route "
+                "through `| bool`"),
+        ))
+    return errs
 
 
 # Free-text record fields an update must not overwrite blind. `description`
@@ -808,6 +875,8 @@ def lint(
                     errs.append(e)
                 errs.extend(_check_trigger_record_overwrite(s, pi, si))
                 errs.extend(_check_doubled_iri(s, pi, si))
+                # Decision route conditions must render strict bools.
+                errs.extend(_check_decision_conditions(s, pi, si))
                 # Resolve the step's config's allow_imports from the catalog.
                 # Per-step: a pinned config name reads that config; no pin reads
                 # the default.  An inline allow_imports on the step always wins.

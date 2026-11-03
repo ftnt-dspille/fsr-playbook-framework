@@ -30,10 +30,24 @@ class ErrorCode(str, Enum):
     # AUTHORED playbook with an orphan is a dropped link, not a parked step.
     UNREACHABLE_STEP = "unreachable_step"
     # Jinja diagnostics -- emitted by the compile-path jinja check (the real
-    # jinja2 parser, via jinja_checks.check_jinja). Syntax errors block; an
-    # unknown filter/test name is a warning (the catalog is a curated subset).
+    # jinja2 parser, via jinja_checks.check_jinja). Syntax errors block. An
+    # unknown *filter* name stays a warning (the widget catalog is a curated
+    # subset, so a truly-custom-but-real filter shouldn't hard-block). An
+    # unknown *test* name is an ERROR when the packaged reference DB carries
+    # the backend-introspected jinja_tests registry -- absence there is
+    # appliance-authoritative and the template fails at render time
+    # (live-verified on 8.0.x: `is not empty`, where stock Jinja2 has no
+    # `empty` test either, until a live child run crashed on it).
     JINJA_SYNTAX_ERROR = "jinja_syntax_error"
     UNKNOWN_JINJA_FILTER = "unknown_jinja_filter"
+    # A decision-step route condition whose top-level Jinja expression
+    # provably cannot render a strict bool (bare reference / unguarded
+    # filter chain). FSR's decision engine checks the rendered value with
+    # isinstance(bool), so a string render fails the step at runtime.
+    # Emitted as a *warning*: the referenced slot may hold a runtime bool
+    # (a set_variable can export one), so hard-blocking would false-positive
+    # on legitimately-authored playbooks.
+    NON_BOOLEAN_CONDITION = "non_boolean_condition"
     # A `vars.steps.X.foo` reference the static typed walk resolves to a
     # non-existent step / unreachable producer / missing output key. Emitted as a
     # *warning* by the compile-time reference lint (typed_walker) so a wrong

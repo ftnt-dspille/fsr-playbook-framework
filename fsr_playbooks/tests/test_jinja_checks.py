@@ -7,6 +7,7 @@ FortiSOAR runtime parser, so these findings are zero-false-positive for syntax.
 from fsr_playbooks.compiler.jinja_checks import (
     _KNOWN_FILTERS,
     _KNOWN_TESTS,
+    _LIVE_TESTS,
     check_jinja,
 )
 
@@ -128,6 +129,51 @@ def test_ansible_tests_validate_clean():
 def test_unknown_filter_message_is_advisory():
     issues = check_jinja({"x": "{{ vars.a | zzz_not_a_filter_qq }}"},
                          step_id="s", path="p")
+    (w,) = issues
+    assert w["code"] == "unknown_jinja_filter"
+    assert w["severity"] == "warning"
+    assert "may still be valid" in w["message"]
+
+
+# --- unknown test: authoritative error (backend-introspected registry) -----
+
+def test_registry_is_loaded_and_authoritative():
+    # The appliance's jinja_tests harvest (39 names, backend_introspect off
+    # the live workflow engine) rides in the packaged DB. `defined` is in
+    # it; `empty` -- the live-caught render-time crash on 8.0.x -- is not.
+    assert _LIVE_TESTS
+    assert "defined" in _LIVE_TESTS
+    assert "empty" not in _LIVE_TESTS
+
+
+def test_unknown_test_is_error_when_registry_loaded():
+    # `is not empty` parses fine, stock Jinja2 defines no `empty` test, and
+    # the appliance registers none either: the template dies at render time
+    # on the box. At warning severity this finding sailed through a green
+    # build (live-caught mid-run on 8.0.x); with the registry loaded it must
+    # be an error that blocks the build.
+    issues = check_jinja(
+        {"v": "{{ vars.card is not empty }}"}, step_id="s", path="p")
+    (e,) = issues
+    assert e["code"] == "unknown_jinja_filter"
+    assert e["severity"] == "error"
+    assert "backend-introspected" in e["message"]
+
+
+def test_registry_test_passes_escalation_free():
+    # `boolean` ships in the backend-introspected registry (and in stock
+    # Jinja2) -- known appliance tests must never trip the escalation.
+    assert check_jinja(
+        {"v": "{% if vars.ok is boolean %}y{% endif %}"},
+        step_id="s", path="p") == []
+
+
+def test_unknown_filter_keeps_advisory_severity():
+    # The escalation is tests-only: filters stay advisory (the widget
+    # catalog is curated, and the box grows filters independently of any
+    # local harvest).
+    issues = check_jinja(
+        {"v": "{{ vars.a | zzz_not_a_filter_qq }}"}, step_id="s", path="p")
     (w,) = issues
     assert w["code"] == "unknown_jinja_filter"
     assert w["severity"] == "warning"

@@ -191,8 +191,11 @@ in FSR (engine quirks around evaluating undefined keys).
 
 ## 8. Decision-step condition (most common shape)
 
-A `decision` step's `condition:` is just a Jinja expression that has to
-return truthy/falsy. The corpus pattern:
+A `decision` step's `condition:` is a Jinja expression, and the appliance
+requires its render to be a **strict Python bool** (an `isinstance(bool)`
+check -- live-verified on 8.0.x: four routes whose bare reads rendered
+strings failed the step mid-run at the decision). "Truthy/falsy" is NOT
+enough; the corpus pattern is a comparison:
 
 ```yaml
 - id: route
@@ -206,6 +209,22 @@ return truthy/falsy. The corpus pattern:
 ```
 
 The default branch should always have `default: true` and no condition.
+
+Boolean-rendering shapes the compiler proves statically (and warns
+`non_boolean_condition` otherwise): comparisons (`x | length > 0`,
+`x == 'yes'`), `is <test>` checks, `not x`, `and`/`or` whose both sides
+render bools, and a chain ending in `| bool`. A bare reference
+(`{{ vars.steps.X.data.foo }}`) or an unguarded filter chain
+(`{{ x | string }}`) renders its value verbatim and the step fails at
+runtime when that value is not a bool. A connector-step `when:`, by
+contrast, IS a truthiness guard -- strict booleans are not required there.
+
+There is also **no `empty` test on the appliance** (stock Jinja2 defines
+none either; the backend-introspected registry -- 39 tests, shipped in the
+reference DB -- carries none). `x is not empty` parses fine offline and
+dies at render time on the box; the working emptiness guard is
+`{{ x | default('', true) | string | length > 0 }}` (compile now
+hard-errors an unknown `is <test>` against that registry).
 
 ---
 
