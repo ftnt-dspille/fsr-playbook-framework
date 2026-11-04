@@ -268,6 +268,15 @@ def _agent_configured_rows(client) -> list[dict[str, Any]]:
 
 
 def _configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
+    """`_all_configured_rows`, cut to the configurations the calling analyst's
+    teams can see (see `caller_scope`). Every config-name consumer -- run_op's
+    resolver, the offer gate, the configured-connector listing -- reads this,
+    so the agent never sees, offers or runs on another team's configuration."""
+    from .caller_scope import filter_rows
+    return filter_rows(client, _all_configured_rows(client, force))
+
+
+def _all_configured_rows(client, force: bool = False) -> list[dict[str, Any]]:
     """Active, configured connectors on the live instance (by name+version).
 
     Cached in-process for a short TTL: preflight calls this on every `run_op`,
@@ -924,6 +933,13 @@ def _preflight_connector(client, connector: str,
     try:
         rows = _configured_rows(client)
     except Exception:  # noqa: BLE001
+        from .caller_scope import current_caller
+        if current_caller():
+            # An analyst's call we cannot scope to their teams: refuse rather
+            # than run on a configuration they may not be allowed to use.
+            return _err("config_not_available",
+                        f"could not check which '{connector}' configurations "
+                        "you can use; try again.", connector=connector)
         return None  # can't preflight → don't block; execute will report real errors
     cands = [x for x in rows if x.get("name") == connector]
     if not cands:
@@ -965,6 +981,22 @@ def _preflight_connector(client, connector: str,
     version = cands[0].get("version") or ""
     agent_id = cands[0].get("_agent_id") or ""
     config_id = _resolve_config_id(rows, connector, config_name)
+    if config_name and not config_id:
+        # A named config this analyst cannot see (another team's, or none by
+        # that name). Running with "" would fall back to the connector's
+        # default -- possibly another team's -- so refuse.
+        visible = sorted({c.get("name") for r in rows if r.get("name") == connector
+                          for c in (r.get("configuration") or [])
+                          if isinstance(c, dict) and c.get("name")})
+        return _err(
+            "config_not_available",
+            f"'{connector}' has no configuration named {config_name!r} that "
+            "you can use.",
+            suggestions=([f"configurations you can use: {', '.join(visible)}"]
+                         if visible else [])
+            + ["ask the analyst which configuration to use"],
+            connector=connector,
+        )
 
     # Healthcheck the connector BEFORE running an op. This is cheap -- the
     # healthcheck endpoint returns in ~0.5s (it's the connector's *ops* that

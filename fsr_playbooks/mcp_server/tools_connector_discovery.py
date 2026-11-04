@@ -1226,7 +1226,10 @@ def list_configured_connectors(probe: bool = False,
     from .tools_execution import _agent_configured_rows, _configured_rows
     with ThreadPoolExecutor(max_workers=3) as _pool:
         _f_list = _pool.submit(client.connectors.list_configured)
-        _f_active = _pool.submit(_configured_rows, client)
+        # In the caller's context: the configs it may see are scoped by the
+        # analyst bound in a contextvar, which a pool thread does not inherit.
+        import contextvars as _cv
+        _f_active = _pool.submit(_cv.copy_context().run, _configured_rows, client)
         _f_agent = _pool.submit(_agent_configured_rows, client)
     try:
         # Use pyfsr wrapper for configured connectors list

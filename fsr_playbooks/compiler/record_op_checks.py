@@ -245,6 +245,29 @@ def check_op_params(
     return issues
 
 
+def one_config_match(cfg: str, names: list[str]) -> list[str]:
+    """The ONE configured name `cfg` was evidently meant to be, or [].
+
+    Configs are often per-person ('student04 FortiAIGate', 'student10 ...'),
+    so a fuzzy "closest" name can be someone else's -- similarity scores tie
+    across them. Only an unambiguous match is suggested: same text ignoring
+    case/spacing/punctuation, else same letters transposed (a box config
+    misspelled 'sutdent09'). Anything else: no guess, ask the analyst."""
+    import re
+
+    def norm(x: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", x.lower())
+    n = norm(cfg)
+    for key in (norm, lambda x: "".join(sorted(norm(x)))):
+        target = n if key is norm else "".join(sorted(n))
+        hits = [c for c in names if key(c) == target]
+        if len(hits) == 1:
+            return hits
+        if hits:
+            return []
+    return []
+
+
 def check_connector_config(
     *,
     connector: str | None,
@@ -287,13 +310,18 @@ def check_connector_config(
         if _is_dynamic(val) or "/api/" in val:
             return []  # IRI / templated → trust
         if names and val not in names:
-            near = difflib.get_close_matches(val, sorted(names), n=3, cutoff=0.5)
+            # Per-person configs tie on similarity; suggest only the one
+            # unambiguous match, never a neighbour's config.
+            near = one_config_match(val, names)
             msg = (f"connector {connector!r} has no configuration named "
                    f"{val!r}")
             sug = None
             if near:
-                msg += f" -- did you mean {', '.join(repr(n) for n in near)}?"
+                msg += f" -- the box's name for it is {near[0]!r}"
                 sug = f"use config {near[0]!r}"
+            else:
+                msg += (" and none of its configs is clearly the one meant;"
+                        " ask the analyst which configuration to use")
             return [{
                 "code": "unknown_connector_config",
                 "message": msg,

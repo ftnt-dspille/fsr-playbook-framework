@@ -896,7 +896,6 @@ def _unknown_config_pins(yaml_text: str) -> list[dict[str, Any]]:
     would fail on its first run. Templated values and IRIs are trusted; a
     connector the box lists with no config names, or a box that cannot be
     asked, is skipped (fail open, like the unconfigured-connector gate)."""
-    import difflib
     try:
         doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
         pbs = (doc or {}).get("playbooks") or []
@@ -926,8 +925,8 @@ def _unknown_config_pins(yaml_text: str) -> list[dict[str, Any]]:
         names = box.get(conn) or []
         if not names or cfg in names:
             continue
-        near = [n for n in names if n.lower() == cfg.lower()] or \
-            difflib.get_close_matches(cfg, names, n=3, cutoff=0.5)
+        from ..compiler.record_op_checks import one_config_match
+        near = one_config_match(cfg, names)
         bad.append({"step": step, "connector": conn, "config": cfg,
                     "configured": names, "near": near})
     return bad
@@ -936,8 +935,11 @@ def _unknown_config_pins(yaml_text: str) -> list[dict[str, Any]]:
 def _unknown_config_error(bad: list[dict[str, Any]]) -> dict[str, Any]:
     parts = []
     for b in bad:
-        hint = (f" -- did you mean {b['near'][0]!r}?" if b["near"]
-                else f" (this box has: {', '.join(repr(n) for n in b['configured'])})")
+        hint = (f" -- the box's name for it is {b['near'][0]!r}" if b["near"]
+                else f" and none of its configs is clearly the one meant "
+                     f"(it has: {', '.join(repr(n) for n in b['configured'])}). "
+                     "Do not pick one: ask the analyst which configuration "
+                     "to use")
         parts.append(f"step {b['step']!r} uses config {b['config']!r} on "
                      f"{b['connector']!r}, which this box does not have{hint}")
     return _err(

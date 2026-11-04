@@ -40,7 +40,9 @@ playbooks:
 def box(monkeypatch):
     monkeypatch.setattr(tcd, "list_configured_connectors",
                         lambda **kw: {"configured": [{"name": "fortigate-firewall"}]})
-    names = {"fortigate-firewall": ["Student19 FortiAIGate", "Lab Gate"]}
+    names = {"fortigate-firewall": ["Student19 FortiAIGate", "Lab Gate",
+                                    "student04 FortiAIGate", "student10 FortiAIGate",
+                                    "sutdent09 FortiAIGate"]}
     monkeypatch.setattr(tools_emit, "_box_config_names", lambda: names)
     return names
 
@@ -63,7 +65,9 @@ def test_unknown_config_name_is_refused(box, cfg):
     assert bad["step"] == "Revoke Key"
     assert bad["config"] == cfg.strip()
     if cfg != "nope":
-        assert bad["near"][0] == "Student19 FortiAIGate"
+        assert bad["near"] == ["Student19 FortiAIGate"]
+    else:
+        assert bad["near"] == []
 
 
 @pytest.mark.parametrize("cfg", ["'Student19 FortiAIGate'", "'Lab Gate'",
@@ -81,3 +85,19 @@ def test_new_playbook_card_lists_steps_in_flow_order(box):
     res = _offer("'Lab Gate'")
     assert [o["label"] for o in res["card"]["ops_summary"]] == \
         ["Start", "Read Key Id", "Revoke Key"]
+
+
+@pytest.mark.parametrize("cfg,near", [
+    # The box's own config is misspelled; the model wrote it correctly.
+    ("student09 FortiAIGate", ["sutdent09 FortiAIGate"]),
+    # No config for this student: never suggest a different student's.
+    ("student05 FortiAIGate", []),
+    ("student04 fortiaigate", ["student04 FortiAIGate"]),
+])
+def test_suggests_only_an_unambiguous_match(box, cfg, near):
+    res = _offer(repr(cfg))
+    assert res["code"] == "offer_uses_unknown_config"
+    assert res["unknown_configs"][0]["near"] == near
+    if not near:
+        assert "ask the analyst" in res["message"]
+        assert res["suggestions"] == []
