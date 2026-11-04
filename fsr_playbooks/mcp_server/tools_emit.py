@@ -862,6 +862,94 @@ def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str]]:
     return missing, have
 
 
+def _box_config_names() -> dict[str, list[str]] | None:
+    """{connector: [config names]} for the active configs on THIS box -- the
+    same rows run_op resolves a `config:` name against. None when the box
+    cannot be asked (the caller fails open)."""
+    try:
+        from probes._env import get_client
+        from .tools_execution import _configured_rows
+        rows = _configured_rows(get_client())
+    except Exception:  # noqa: BLE001
+        return None
+    if not rows:
+        return None
+    out: dict[str, list[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        names = out.setdefault(str(row["name"]), [])
+        for key in ("configs", "configurations", "config", "configuration"):
+            for c in row.get(key) or []:
+                n = c if isinstance(c, str) else (
+                    c.get("name") if isinstance(c, dict) else None)
+                if isinstance(n, str) and n and n not in names:
+                    names.append(n)
+    return out
+
+
+def _unknown_config_pins(yaml_text: str) -> list[dict[str, Any]]:
+    """Connector steps whose `config:` names a configuration THIS box does not
+    have. Live: a classroom box's config was named one way and the model
+    wrote it another ('student19 FortiAIGate'); verify only checks names
+    under live_probe, the offer gate did not check them at all, and the step
+    would fail on its first run. Templated values and IRIs are trusted; a
+    connector the box lists with no config names, or a box that cannot be
+    asked, is skipped (fail open, like the unconfigured-connector gate)."""
+    import difflib
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+    except Exception:  # noqa: BLE001
+        return []
+    pins: list[tuple[str, str, str]] = []
+    for pb in pbs if isinstance(pbs, list) else []:
+        for st in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
+            if not isinstance(st, dict):
+                continue
+            args = st.get("arguments") if isinstance(st.get("arguments"), dict) else {}
+            conn = st.get("connector") or args.get("connector")
+            cfg = st.get("config", args.get("config"))
+            if not (isinstance(conn, str) and isinstance(cfg, str)):
+                continue
+            cfg = cfg.strip()
+            if not cfg or "{{" in cfg or "/api/" in cfg:
+                continue
+            pins.append((str(st.get("name") or ""), conn.strip(), cfg))
+    if not pins:
+        return []
+    box = _box_config_names()
+    if not box:
+        return []
+    bad: list[dict[str, Any]] = []
+    for step, conn, cfg in pins:
+        names = box.get(conn) or []
+        if not names or cfg in names:
+            continue
+        near = [n for n in names if n.lower() == cfg.lower()] or \
+            difflib.get_close_matches(cfg, names, n=3, cutoff=0.5)
+        bad.append({"step": step, "connector": conn, "config": cfg,
+                    "configured": names, "near": near})
+    return bad
+
+
+def _unknown_config_error(bad: list[dict[str, Any]]) -> dict[str, Any]:
+    parts = []
+    for b in bad:
+        hint = (f" -- did you mean {b['near'][0]!r}?" if b["near"]
+                else f" (this box has: {', '.join(repr(n) for n in b['configured'])})")
+        parts.append(f"step {b['step']!r} uses config {b['config']!r} on "
+                     f"{b['connector']!r}, which this box does not have{hint}")
+    return _err(
+        "offer_uses_unknown_config",
+        "; ".join(parts) + ". Config names must match exactly (case and "
+        "spacing). Fix the config name, verify again, then offer.",
+        suggestions=[f"set config: {b['near'][0]!r} on step {b['step']!r}"
+                     for b in bad if b["near"]],
+        unknown_configs=bad,
+    )
+
+
 def fenced_connector_errors(yaml_text: str) -> str | None:
     """The connector check the offer gate applies, for a playbook that reaches
     the analyst in the reply TEXT as a ```yaml fence. The widget saves the last
@@ -1030,6 +1118,17 @@ def _yaml_ops_summary(yaml_text: str) -> list[dict[str, Any]]:
             out.append(entry)
     except Exception:  # noqa: BLE001 -- display summary only, never block
         return []
+    # Flow order, not declaration order: the model may write the trigger last,
+    # and the card should read top-down like the designer.
+    try:
+        from ..compiler import parse_yaml
+        from .tools_enhancement import _flow_order
+        coll, _errs = parse_yaml(yaml_text)
+        if coll is not None and coll.playbooks:
+            rank = {n: i for i, n in enumerate(_flow_order(coll.playbooks[0]))}
+            out.sort(key=lambda e: rank.get(e["label"], 1 << 30))
+    except Exception:  # noqa: BLE001 -- keep declaration order
+        pass
     return out
 
 
@@ -1152,6 +1251,10 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
             unconfigured=missing,
         )
 
+    bad_configs = _unknown_config_pins(yaml_text)
+    if bad_configs:
+        return _unknown_config_error(bad_configs)
+
     ops_summary = _yaml_ops_summary(yaml_text)
 
     card: dict[str, Any] = {
@@ -1254,6 +1357,9 @@ def emit_enhancement_offer(
         )
 
     yaml_text = entry["yaml"]
+    bad_configs = _unknown_config_pins(yaml_text)
+    if bad_configs:
+        return _unknown_config_error(bad_configs)
 
     # An edit to the conversation's unsaved draft has nothing to apply to: it
     # is delivered as the draft's next Create card, through the same gate every
