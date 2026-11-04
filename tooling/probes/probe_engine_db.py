@@ -57,7 +57,7 @@ def _ssh_cmd(cfg: _env.Config, remote: str) -> list[str]:
     """Build an ssh argv that runs `remote` on the FSR box.
 
     Uses key auth when `FSR_SSH_KEY_PATH` is set; otherwise relies on
-    `sshpass`-style password injection. We don't shell out to expect --
+    ssh's own auth (agent / ssh config). We don't shell out to expect --
     callers should set up key auth via probes._env (one-time `ssh-copy-id`)
     so this stays fast.
     """
