@@ -1961,8 +1961,12 @@ def _default_live_probe(c: _Call) -> Any:
     """verify_playbook grounds op output shapes from a real execution of the
     op_safety=='safe' steps only (run_op refuses anything else without
     confirm=True, which the probe never sets). On by default so the model
-    needn't know; an explicit live_probe still wins."""
-    if c.name == "verify_playbook" and "live_probe" not in c.args:
+    needn't know; an explicit live_probe still wins. verify_enhancement too:
+    the connector-config name check is gated on live_probe, so an edit that
+    pinned a config name the box doesn't have (case or spacing off) went
+    through the edit path unchecked and only failed at run time."""
+    if (c.name in ("verify_playbook", "verify_enhancement")
+            and "live_probe" not in c.args):
         c.args["live_probe"] = True
     return None
 

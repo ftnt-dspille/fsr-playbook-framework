@@ -62,3 +62,16 @@ def test_verify_defaults_to_the_live_probe_unless_told():
     c = _call("verify_playbook", {"yaml_text": "x", "live_probe": False})
     T._default_live_probe(c)
     assert c.args["live_probe"] is False
+
+
+def test_verify_enhancement_also_defaults_to_the_live_probe():
+    # The connector-config name check rides on live_probe. The edit path
+    # left it off, so an offer pinned a config name the box did not have
+    # (off by case/spacing) and nothing flagged it before Apply.
+    c = _call("verify_enhancement", {"before_yaml": "x", "after_yaml": "y"})
+    T._default_live_probe(c)
+    assert c.args["live_probe"] is True
+    c = _call("verify_enhancement", {"before_yaml": "x", "after_yaml": "y",
+                                     "live_probe": False})
+    T._default_live_probe(c)
+    assert c.args["live_probe"] is False

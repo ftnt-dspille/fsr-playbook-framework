@@ -82,6 +82,27 @@ def _step_projection(s) -> dict[str, Any]:
     }
 
 
+def _flow_order(pb) -> list[str]:
+    """Step names in the order an analyst reads the playbook: the trigger
+    first, then breadth-first along next / branches, then anything the walk
+    never reached in declaration order. The diff is built from name *sets*,
+    so without this the offer card listed "Start" last (live, a classroom of
+    analysts read edits bottom-up)."""
+    from ..compiler.validator import _step_outgoing, _trigger_id
+    steps = list(pb.steps or [])
+    by_id = {s.id: s for s in steps}
+    seen: list[str] = []
+    queue = [_trigger_id(pb)] if steps else []
+    while queue:
+        sid = queue.pop(0)
+        if sid is None or sid in seen or sid not in by_id:
+            continue
+        seen.append(sid)
+        queue.extend(_step_outgoing(by_id[sid]))
+    seen += [s.id for s in steps if s.id not in seen]
+    return [(by_id[i].name or i) for i in seen]
+
+
 def _annotation_projection(a) -> dict[str, Any]:
     """Annotation comparison projection. Excludes `uuid` (emitter-filled)
     and `auto_for_step` (derived from step.comment round-trip)."""
@@ -225,8 +246,7 @@ def _diff_collections(before, after, user_message: str | None,
             "step": None,
             "kind": "playbook_removed",
             "type": None,
-            "before": {"steps": [(s.name or s.id)
-                                 for s in before_pbs[name].steps]},
+            "before": {"steps": _flow_order(before_pbs[name])},
             "after": None,
             "changed_fields": [],
         })
@@ -247,7 +267,7 @@ def _diff_collections(before, after, user_message: str | None,
             "kind": "playbook_added",
             "type": None,
             "before": None,
-            "after": {"steps": [(s.name or s.id) for s in after_pbs[name].steps]},
+            "after": {"steps": _flow_order(after_pbs[name])},
             "changed_fields": [],
         })
 
@@ -505,6 +525,34 @@ def _diff_collections(before, after, user_message: str | None,
                     "severity": "warning",
                     "message": f"annotation {aid!r} body/title changed",
                 })
+
+    # Flow order, not set order: the card reads top-down like the designer.
+    # A removed step ranks by where it sat before; everything else by where
+    # it sits after. Playbook-level rows keep their place at the front.
+    rank: dict[tuple[str, str], int] = {}
+    for pb_name, pb in before_pbs.items():
+        for i, n in enumerate(_flow_order(pb)):
+            rank[(pb_name, n)] = i
+    for pb_name, pb in after_pbs.items():
+        for i, n in enumerate(_flow_order(pb)):
+            rank[(pb_name, n)] = i
+    pb_rank = {n: i for i, n in enumerate(after_pbs)}
+    for n in before_pbs:
+        pb_rank.setdefault(n, len(pb_rank))
+
+    def _change_key(c: dict[str, Any]) -> tuple:
+        if c.get("step") is None:
+            return (-1, 0, 0)
+        name = c["step"]
+        if c.get("kind") == "renamed":
+            name = (c.get("after") or {}).get("name", name)
+        return (pb_rank.get(c["playbook"], 0), 1,
+                rank.get((c["playbook"], name), 1 << 30))
+
+    changes.sort(key=_change_key)
+    any_rank = {n: r for (_pb, n), r in rank.items()}
+    for names in (steps_added, steps_removed, steps_modified):
+        names.sort(key=lambda n: any_rank.get(n, 1 << 30))
 
     diff_summary = {
         "steps_added": steps_added,
