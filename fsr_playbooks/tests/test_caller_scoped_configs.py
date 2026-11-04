@@ -130,8 +130,9 @@ def test_run_op_refuses_another_teams_config_by_name(monkeypatch):
 
 
 def test_offer_gate_uses_the_scoped_names(monkeypatch):
-    from fsr_playbooks.mcp_server import tools_emit
     import probes._env as env
+
+    from fsr_playbooks.mcp_server import tools_emit
     monkeypatch.setattr(env, "get_client", lambda: _Client())
     tok = cs.set_caller("u04")
     try:

@@ -868,6 +868,7 @@ def _box_config_names() -> dict[str, list[str]] | None:
     cannot be asked (the caller fails open)."""
     try:
         from probes._env import get_client
+
         from .tools_execution import _configured_rows
         rows = _configured_rows(get_client())
     except Exception:  # noqa: BLE001
