@@ -943,6 +943,26 @@ def _preflight_connector(client, connector: str,
         return None  # can't preflight → don't block; execute will report real errors
     cands = [x for x in rows if x.get("name") == connector]
     if not cands:
+        from .caller_scope import current_caller
+        if current_caller():
+            try:
+                exists = any(x.get("name") == connector
+                             for x in _all_configured_rows(client))
+            except Exception:  # noqa: BLE001
+                exists = False
+            if exists:
+                # Configured on the box, but every configuration belongs to
+                # teams this analyst is not in. Not a missing config: saying
+                # "add one" would send them to create a duplicate.
+                return _err(
+                    "config_not_available",
+                    f"'{connector}' is configured on this FortiSOAR box, but "
+                    "none of its configurations are shared with your teams, "
+                    "so you can't use it.",
+                    suggestions=["ask an administrator to add one of your "
+                                 f"teams to a '{connector}' configuration"],
+                    connector=connector,
+                )
         return _err(
             "connector_not_configured",
             f"'{connector}' has no active configuration on this FortiSOAR "

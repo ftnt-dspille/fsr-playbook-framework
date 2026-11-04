@@ -139,3 +139,22 @@ def test_offer_gate_uses_the_scoped_names(monkeypatch):
     finally:
         cs.reset_caller(tok)
     assert names["fortinet-fortiaigate"] == ["student04 FortiAIGate"]
+
+
+def test_a_connector_with_only_other_teams_configs_says_so():
+    tok = cs.set_caller("u04")
+    try:
+        err = te._preflight_connector(_Client(), "only-team10")
+    finally:
+        cs.reset_caller(tok)
+    assert err["code"] == "config_not_available"
+    assert "none of its configurations are shared with your teams" in err["message"]
+
+
+def test_a_connector_not_on_the_box_is_still_not_configured():
+    tok = cs.set_caller("u04")
+    try:
+        err = te._preflight_connector(_Client(), "no-such-connector")
+    finally:
+        cs.reset_caller(tok)
+    assert err["code"] == "connector_not_configured"

@@ -1312,7 +1312,27 @@ def list_configured_connectors(probe: bool = False,
     # `ok: True` so the connector's result classifier doesn't read a
     # successful payload that happens to omit `ok` as a failure (it was
     # mislabeling this tool `(error)` despite returning valid data).
+    # Connectors configured on the box whose configurations all belong to
+    # teams this analyst is not in. Named so the agent says "not shared with
+    # you" instead of "not configured -- add one" (live: it told an analyst to
+    # create a config that already existed for other teams).
+    not_shared: list[str] = []
+    try:
+        from .caller_scope import current_caller
+        if current_caller():
+            from .tools_execution import _all_configured_rows
+            shown = {i["name"] for i in out}
+            not_shared = sorted({r.get("name") for r in _all_configured_rows(client)
+                                 if r.get("name") and r.get("name") not in shown})
+    except Exception:  # noqa: BLE001
+        not_shared = []
+    extra = ({"not_shared_with_you": not_shared, "not_shared_note": (
+        "configured on this box, but no configuration is shared with this "
+        "analyst's teams: they cannot use these. Do not tell them to add a "
+        "configuration; say an administrator must share one with their team.")}
+        if not_shared else {})
     return annotate_mcp_reach({
+        **extra,
         "ok": True, "configured": out, "probed": probe, "count": len(out),
         # This lists only connectors with a SAVED configuration. Config-less
         # connectors (utilities such as cyops_utilities) run without one and do
