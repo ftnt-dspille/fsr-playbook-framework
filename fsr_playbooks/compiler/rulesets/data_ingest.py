@@ -34,7 +34,8 @@ from ._shared import (
 
 def rule_picklist_mapping_for_severity_status(doc: dict) -> Iterable[Issue]:
     """Alert/incident Create Record commonly maps vendor severity/status to FSR
-    picklist IRIs via resolveRange. Warn if neither severity nor status is set
+    picklist IRIs via resolveRange, a literal picklist IRI, or the runtime
+    ``| picklist("Name")`` filter. Warn if neither severity nor status is set
     on the resource (likely incomplete mapping).
     """
     import json
@@ -57,7 +58,7 @@ def rule_picklist_mapping_for_severity_status(doc: dict) -> Iterable[Issue]:
                     message="Create Record resource sets neither severity nor status/state -- alert mapping likely incomplete",
                     path=f"data[{ci}].workflows[{wi}].steps[{si}]({step.get('name')!r})",
                 )
-            elif "resolveRange" not in blob and "/api/3/picklists/" not in blob:
+            elif "resolveRange" not in blob and "/api/3/picklists/" not in blob and "| picklist(" not in blob:
                 yield Issue(
                     rule_id="data_ingest.severity_status_no_picklist_resolution",
                     severity="warn",
