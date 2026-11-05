@@ -304,9 +304,17 @@ def _open_ref_db() -> sqlite3.Connection | None:
             try:
                 conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
                 conn.row_factory = sqlite3.Row
+                # A file without operation_params (e.g. an empty data/ DB left by
+                # a test run in CI) is not a reference store: try the next one
+                # rather than raise mid-rule.
+                if not conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation_params'"
+                ).fetchone():
+                    conn.close()
+                    continue
                 return conn
             except sqlite3.Error:
-                return None
+                continue
     return None
 
 
