@@ -1328,8 +1328,10 @@ def list_configured_connectors(probe: bool = False,
         not_shared = []
     extra = ({"not_shared_with_you": not_shared, "not_shared_note": (
         "configured on this box, but no configuration is shared with this "
-        "analyst's teams: they cannot use these. Do not tell them to add a "
-        "configuration; say an administrator must share one with their team.")}
+        "analyst's teams. You can still author playbook steps on them; those "
+        "steps (and run_op) will not run until an administrator shares a "
+        "configuration with their team. Do not tell them to add a new "
+        "configuration.")}
         if not_shared else {})
     return annotate_mcp_reach({
         **extra,

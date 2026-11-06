@@ -958,7 +958,8 @@ def _preflight_connector(client, connector: str,
                     "config_not_available",
                     f"'{connector}' is configured on this FortiSOAR box, but "
                     "none of its configurations are shared with your teams, "
-                    "so you can't use it.",
+                    "so it can't run for you. A playbook step on it can still "
+                    "be written; it runs once a configuration is shared.",
                     suggestions=["ask an administrator to add one of your "
                                  f"teams to a '{connector}' configuration"],
                     connector=connector,
@@ -966,7 +967,8 @@ def _preflight_connector(client, connector: str,
         return _err(
             "connector_not_configured",
             f"'{connector}' has no active configuration on this FortiSOAR "
-            "instance, so its operations can't run.",
+            "instance, so its operations can't run. A playbook step on it "
+            "can still be written; it runs once the connector is configured.",
             suggestions=[
                 f"Add and activate a configuration for '{connector}' under "
                 "Settings → Connectors, then retry.",
