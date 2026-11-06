@@ -99,6 +99,34 @@ def _resolve_for_each(raw: dict[str, Any],
     return out
 
 
+_COMMON_STEP_KEYS = frozenset({"kind", "name", "for_each"})
+_STEP_KEYS: dict[str, frozenset[str]] = {
+    "connector": frozenset({"connector", "operation", "inputs", "params",
+                            "config"}),
+    "record": frozenset({"action", "module", "operation", "fields", "query"}),
+    "decision": frozenset({"conditions", "default"}),
+    "manual_input": frozenset({"message", "options", "fields"}),
+    "set_variable": frozenset({"values", "vars"}),
+}
+
+
+def _merged_alias(step: dict[str, Any], canonical: str, alias: str,
+                  where: str, errors: list[str]) -> dict[str, Any]:
+    """Read `canonical` or its YAML-shaped `alias`; both at once is ambiguous."""
+    a, b = step.get(canonical), step.get(alias)
+    if a is not None and b is not None:
+        errors.append(f"{where}: pass `{alias}` or `{canonical}`, not both")
+        return {}
+    val = a if a is not None else b
+    if val is None:
+        return {}
+    if not isinstance(val, dict):
+        errors.append(f"{where}: `{alias if b is not None else canonical}` "
+                      "must be an object mapping names to values")
+        return {}
+    return dict(val)
+
+
 def _plan_to_trace(steps: list[dict[str, Any]], module: str):
     from fsr_playbooks.agent.skill_trace import SkillCall, SkillTrace
 
@@ -126,6 +154,15 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
                     f"step {i} ({name!r}): unknown kind {kind!r}; use one of "
                     f"{sorted(list(_KIND_TO_SKILL) + ['record'])}")
                 continue
+        accepted = _STEP_KEYS.get(kind, frozenset())
+        unknown = sorted(k for k in step
+                         if k not in accepted and k not in _COMMON_STEP_KEYS)
+        if unknown:
+            errors.append(
+                f"step {i} ({name!r}): unknown key(s) {unknown} for a {kind!r} "
+                f"step; accepted keys: "
+                f"{sorted(accepted | _COMMON_STEP_KEYS)}")
+            continue
         ref_prefix = _DEFAULT_REF_PREFIX.get(kind, "")
         ref_prefix_by_step[name] = ref_prefix
 
@@ -141,7 +178,10 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
                 errors.append(f"step {i} ({name!r}): a record step needs a "
                               "`module`")
         elif kind == "connector":
-            inputs = dict(step.get("inputs") or {})
+            inputs = _merged_alias(step, "inputs", "params",
+                                   f"step {i} ({name!r})", errors)
+            if step.get("config") is not None:
+                inputs["config"] = step["config"]
             inputs["connector"] = step.get("connector") or ""
             inputs["operation"] = step.get("operation") or ""
             if not inputs["connector"] or not inputs["operation"]:
@@ -155,8 +195,10 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
             resolved = {k: step[k] for k in ("message", "options", "fields")
                         if step.get(k) is not None}
         else:  # set_variable
-            resolved = _resolve_inputs(dict(step.get("values") or {}),
-                                       ref_prefix_by_step)
+            resolved = _resolve_inputs(
+                _merged_alias(step, "values", "vars",
+                              f"step {i} ({name!r})", errors),
+                ref_prefix_by_step)
 
         for_each = None
         raw_fe = step.get("for_each")
@@ -187,7 +229,8 @@ def compose_playbook(steps: list[dict[str, Any]],
     and verifies the YAML. Do NOT hand-author YAML when you can use this.
 
     `steps` is the ordered plan, each a small object with a `kind` and a `name`:
-      - `connector`: `{kind, name, connector, operation, inputs?}` -- `inputs`
+      - `connector`: `{kind, name, connector, operation, inputs?, config?}` -- `inputs`
+        (alias `params`)
         maps each parameter to a literal, or to `{from_step, output}` to read an
         earlier step's output (this writes the correct `vars.steps...` path for
         you; never type jinja yourself).
@@ -198,7 +241,8 @@ def compose_playbook(steps: list[dict[str, Any]],
         over earlier outputs.
       - `manual_input`: `{kind, name, message?, options?, fields?}` -- a human
         confirmation or extra input a following decision consumes.
-      - `set_variable`: `{kind, name, values}` -- stage/normalize values.
+      - `set_variable`: `{kind, name, values}` (alias `vars`) -- stage/normalize values.
+      Unknown step keys are rejected with the accepted list, never dropped.
       - loop any `connector` / `record` / `set_variable` step by adding
         `for_each: {item, parallel?}`, where `item` is the list to iterate
         (a `{from_step, output}` ref, or a jinja string); the element is bound as

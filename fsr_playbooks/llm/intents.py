@@ -16,6 +16,8 @@ and are vendored wholesale into the connector by ``scripts/build.sh``.
 """
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -274,7 +276,36 @@ def register_intent_prompt(intent: str, loader: Any) -> None:
     _PROMPT_LOADERS[resolve_intent(intent)] = loader
 
 
-def load_intent_prompt(intent: str) -> str:
+_COND_RE = re.compile(
+    r"<!--if ([A-Za-z0-9_,\s]+?)-->(.*?)(?:<!--else-->(.*?))?<!--endif-->",
+    re.DOTALL)
+
+
+def render_prompt_for_slice(text: str,
+                            tool_names: Iterable[str] | None = None) -> str:
+    """Resolve `<!--if tool[,tool]-->A<!--else-->B<!--endif-->` blocks against
+    the tool slice the model is actually given: A when EVERY named tool is in
+    `tool_names`, else B (or nothing). Blocks do not nest. `None` means the
+    full surface (every condition holds). This is what keeps a prompt from
+    telling the model to call a tool its slice removed."""
+    have = None if tool_names is None else set(tool_names)
+
+    def _sub(m: re.Match[str]) -> str:
+        need = [n.strip() for n in m.group(1).split(",") if n.strip()]
+        ok = have is None or all(n in have for n in need)
+        return (m.group(2) if ok else (m.group(3) or ""))
+
+    return _COND_RE.sub(_sub, text)
+
+
+def load_intent_prompt(intent: str,
+                       tool_names: Iterable[str] | None = None) -> str:
+    """The intent's system prompt rendered for `tool_names` (the slice the
+    model will see; None = full surface). See `render_prompt_for_slice`."""
+    return render_prompt_for_slice(_load_intent_prompt_raw(intent), tool_names)
+
+
+def _load_intent_prompt_raw(intent: str) -> str:
     """Load the intent's system prompt from the vendored markdown, cached.
     Falls back to an inline string if the file is missing/empty."""
     intent = resolve_intent(intent)
@@ -411,7 +442,7 @@ def tools_for_intent(intent: str) -> list[dict[str, Any]]:
 __all__ = [
     "INTENTS", "DEFAULT_INTENT", "BUILD_ONLY_TOOLS", "TRIAGE_ONLY_TOOLS",
     "ENHANCE_ONLY_TOOLS", "RUN_VERB_TOOLS",
-    "resolve_intent", "load_intent_prompt", "tools_for_intent",
+    "resolve_intent", "load_intent_prompt", "render_prompt_for_slice", "tools_for_intent",
     "classify_message", "gate_directive",
     "TRIVIAL", "CONTINUE", "DIRECTIVE",
     "CREATE_STRATEGIES", "DEFAULT_CREATE_STRATEGY", "FREEFORM_AUTHORING_TOOLS",

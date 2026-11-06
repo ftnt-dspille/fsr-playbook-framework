@@ -21,6 +21,25 @@ DB_PATH = _shared.DB_PATH
 # ---------------------------------------------------------------------------
 
 
+def _near_filter_names(name: str, known: list[str], n: int = 3) -> list[str]:
+    """Near-miss filter names from the real filter list: first names equal once
+    case and underscores are ignored (`fromjson` -> `from_json`), then close
+    spellings."""
+    import difflib
+
+    def squash(s: str) -> str:
+        return s.lower().replace("_", "")
+
+    want = squash(name)
+    exact = [k for k in known if squash(k) == want]
+    close = difflib.get_close_matches(name, known, n=n, cutoff=0.7)
+    out: list[str] = []
+    for k in exact + close:
+        if k not in out:
+            out.append(k)
+    return out[:n]
+
+
 @mcp.tool()
 def find_jinja_filter(q: str, limit: int = 15,
                       verbose: bool = False) -> list[dict[str, Any]]:
@@ -328,7 +347,14 @@ def get_filter_examples(name: str, limit: int = 8) -> dict[str, Any]:
             (name,),
         )
         if not meta:
-            return {"error": f"unknown filter {name!r}"}
+            known = [r["name"] for r in _rows(
+                conn, "SELECT name FROM jinja_macros")]
+            near = _near_filter_names(name, known)
+            out: dict[str, Any] = {"error": f"unknown filter {name!r}"}
+            if near:
+                out["suggestions"] = near
+                out["error"] += f"; did you mean {near[0]!r}?"
+            return out
         examples = _rows(
             conn,
             """SELECT expression, from_playbook, from_step, step_type, occurrences
