@@ -172,3 +172,36 @@ def test_record_kind_without_action_is_an_honest_plan_error():
     assert r["ok"] is False
     assert r["code"] == "bad_plan"
     assert any("action" in e for e in r["errors"])
+
+
+def _one(step):
+    return compose_playbook(steps=[step], name="P", module="alerts")
+
+
+def test_set_variable_vars_alias_is_wired_not_dropped():
+    r = _one({"kind": "set_variable", "name": "Stage",
+              "vars": {"marker": "hello-marker"}})
+    assert r["ok"] is True
+    assert "hello-marker" in r["yaml"]
+
+
+def test_connector_params_alias_and_config_are_read():
+    r = _one({"kind": "connector", "name": "Q", "connector": "virustotal",
+              "operation": "query_ip", "config": "my-config-marker",
+              "params": {"ip": "1.2.3.4"}})
+    assert r["ok"] is True
+    assert "1.2.3.4" in r["yaml"]
+    assert "my-config-marker" in r["yaml"]
+
+
+def test_unknown_step_key_fails_loudly_with_accepted_keys():
+    r = _one({"kind": "set_variable", "name": "S", "variables": {"a": "b"}})
+    assert r["ok"] is False and r["code"] == "bad_plan"
+    msg = " ".join(r["errors"])
+    assert "variables" in msg and "vars" in msg and "values" in msg
+
+
+def test_both_alias_and_canonical_is_rejected():
+    r = _one({"kind": "set_variable", "name": "S", "vars": {"a": "b"},
+              "values": {"c": "d"}})
+    assert r["ok"] is False

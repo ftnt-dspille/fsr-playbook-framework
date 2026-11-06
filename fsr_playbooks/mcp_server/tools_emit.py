@@ -168,9 +168,13 @@ def emit_choice_card(
         return _err("missing_id", "id must be a non-empty string")
     if not isinstance(prompt, str) or not prompt.strip():
         return _err("missing_prompt", "prompt must be a non-empty string")
-    if not isinstance(options, list) or len(options) < 2:
+    min_options = 1 if allow_text else 2
+    if not isinstance(options, list) or len(options) < min_options:
         return _err("too_few_options",
-                    "options must be a list of at least 2 entries")
+                    f"options must be a list of at least {min_options} "
+                    "entries" + ("" if allow_text else
+                                 " (or set allow_text=True to ask an open "
+                                 "question with a single suggestion)"))
     seen_values: set[str] = set()
     for i, opt in enumerate(options):
         if not isinstance(opt, dict):

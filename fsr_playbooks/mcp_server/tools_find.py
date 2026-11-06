@@ -96,8 +96,14 @@ def find(kind: str, query: str = "", connector: str = "",
             # to look instead, not hand the model a SQLite error string.
             first = out[0] if isinstance(out, list) and len(out) == 1 else None
             if isinstance(first, dict) and first.get("code") == "catalog_unavailable":
+                msg = first.get("hint", "")
+                if not connector:
+                    msg = ("kind='example' without `connector` searches the "
+                           "vendor API catalog, which is not installed here. "
+                           "Pass `connector=<name>` to get that connector's "
+                           "worked operation calls. " + msg)
                 out = {"ok": False, "code": "catalog_unavailable",
-                       "message": first.get("hint", ""), "results": []}
+                       "message": msg, "results": []}
     elif k == "recipe":
         out = _trim_recipe_templates(find_recipe(query, limit=limit))
     elif k == "api":
