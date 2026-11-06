@@ -732,7 +732,19 @@ class _AnthropicTurn:
             elif b.type == "tool_use":
                 blocks.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
                 calls.append(ToolCall(b.id, b.name, dict(b.input)))
-        text = "".join(b["text"] for b in blocks if b["type"] == "text")
+            else:
+                # Any other block (server_tool_use + tool_search_tool_result
+                # from deferred-tool search, citations-bearing server results)
+                # is kept verbatim and IN PLACE. Dropping it shifted the
+                # thinking block after it, and the API refuses a latest
+                # assistant turn whose thinking moved: `400 messages.N.content.2:
+                # thinking ... blocks in the latest assistant message cannot be
+                # modified` (Sonnet 5 family only; Haiku never searches).
+                dump = getattr(b, "model_dump", None)
+                raw = dump(mode="json", exclude_none=True) if callable(dump) else None
+                if isinstance(raw, dict) and raw.get("type"):
+                    blocks.append(raw)
+        text ="".join(b["text"] for b in blocks if b["type"] == "text")
         # Only a `tool_use` stop executes its calls; any other stop
         # (`max_tokens` above all) drops them -- a tool_use with no tool_result
         # makes the next request a 400.
