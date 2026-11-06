@@ -16,6 +16,14 @@
 #   * fast tests must pass before tagging
 set -euo pipefail
 
+# A PyPI release is permanent and public: the user's to run. Under Claude Code
+# (CLAUDECODE=1) it runs only with CONFIRM_DEPLOY=1, which the connector's
+# `make deploy FW=...` passes through when the user asked for a release.
+if [ -n "${CLAUDECODE:-}" ] && [ "${CONFIRM_DEPLOY:-}" != 1 ]; then
+  echo "refused: release.sh publishes to PyPI; the user runs it (connector: make deploy FW=...). A human can set CONFIRM_DEPLOY=1." >&2
+  exit 2
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
