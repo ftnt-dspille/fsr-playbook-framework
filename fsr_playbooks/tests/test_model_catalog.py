@@ -151,3 +151,12 @@ def test_the_offline_tier_models_are_screened():
         v = mc.check(m, "frank")
         assert v.level == "tested", m
         assert v.endpoint_warning, "gateway is not reachable from a box"
+
+
+def test_haiku_5_5_is_tested_and_allowed() -> None:
+    """The connector's default model: screened 5/5 x3, so `doctor` must not
+    call it unscreened and the dropdown must offer it."""
+    v = check("claude-haiku-5-5", "anthropic")
+    assert v.ok is True
+    assert v.level == "tested"
+    assert "claude-haiku-5-5" in allowed_models("anthropic")

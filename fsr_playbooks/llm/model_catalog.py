@@ -123,6 +123,16 @@ CATALOG: tuple[ModelEntry, ...] = (
         "Pre-4.6: uses `budget_tokens`, not adaptive thinking.",
     ),
     ModelEntry(
+        "claude-haiku-5-5", "anthropic", "tested", True,
+        "attribute lane 20261106T185920Z -- 5/5, 3 repeats, verdict consistent",
+        "Screened on the gate slice over the attribute substrate, 15/15 "
+        "fixture runs with every gate green, including select_build_offer "
+        "(4/4 x3), the fixture its predecessor claude-haiku-4-5 failed 0/3. "
+        "Reached through Anthropic's OpenAI-compatible endpoint, as the "
+        "attribute lane's provider speaks that wire. Fast: 5-10s a fixture, "
+        "~35s for the build hand-off.",
+    ),
+    ModelEntry(
         "claude-haiku-4-5-20251001", "anthropic", "discouraged", True,
         "gate slice on the attribute substrate, 20260824T013356Z -- 4/5, "
         "3 repeats, verdict failing",
