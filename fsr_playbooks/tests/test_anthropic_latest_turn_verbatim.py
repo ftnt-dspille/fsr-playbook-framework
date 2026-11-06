@@ -109,3 +109,56 @@ def test_server_blocks_survive_into_an_earlier_turn_without_thinking():
     assert [b["type"] for b in asst[0]["content"]] == [
         "text", "server_tool_use", "tool_search_tool_result", "tool_use"]
     assert _strip_cache(asst[-1]["content"]) == second
+
+
+# -- a thinking round that stops before its tool call finishes -------------
+
+_TRUNCATED_ROUND = [
+    {"type": "thinking", "thinking": "Read the record next.", "signature": "sig-9"},
+    {"type": "text", "text": "Reading it."},
+    {"type": "tool_use", "id": "toolu_9", "name": "get_record", "input": {"id": 9}},
+]
+
+
+def _assert_every_tool_use_answered(messages: list[dict[str, Any]]) -> None:
+    """Anthropic's pairing rule: each tool_use is answered by a tool_result in
+    the very next (user) message, and tool_results lead that message."""
+    for i, m in enumerate(messages):
+        c = m.get("content")
+        if m.get("role") != "assistant" or not isinstance(c, list):
+            continue
+        ids = [b["id"] for b in c if b.get("type") == "tool_use"]
+        if not ids:
+            continue
+        assert i + 1 < len(messages), f"messages[{i}] tool_use has no follower"
+        nc = messages[i + 1]["content"]
+        assert messages[i + 1]["role"] == "user" and isinstance(nc, list)
+        lead = [b for b in nc[:len(ids)] if b.get("type") == "tool_result"]
+        assert {b["tool_use_id"] for b in lead} == set(ids), (
+            f"messages[{i}] tool_use ids {ids} not answered first in messages[{i + 1}]")
+
+
+def _turn_after_truncated_round(follow: str) -> list[dict[str, Any]]:
+    from fsr_playbooks.llm.anthropic_provider import _AnthropicTurn
+    p = AnthropicProvider(model="claude-sonnet-5", base_url="http://x",
+                          api_key="x", client=MagicMock())
+    w = _AnthropicTurn(p, "s", [Message(role="user", content="what happened?")],
+                       _TOOLS, turn_budget=5)
+    rnd = w._parse(_final(_TRUNCATED_ROUND, "max_tokens"))
+    assert rnd.tool_calls == [], "a max_tokens call must never execute"
+    assert [d.name for d in rnd.dropped_calls] == ["get_record"]
+    w.append_assistant(rnd)
+    w.append_user(follow)
+    return w._messages()
+
+
+def test_truncated_thinking_round_replays_verbatim_and_answers_its_call():
+    msgs = _turn_after_truncated_round("Your reply was cut off; answer now.")
+    assert_preserved_thinking_contract(msgs)
+    _assert_every_tool_use_answered(msgs)
+    latest = [m for m in msgs if m["role"] == "assistant"][-1]
+    assert _strip_cache(latest["content"]) == _TRUNCATED_ROUND
+    res = msgs[-1]["content"][0]
+    assert res["tool_use_id"] == "toolu_9" and res["is_error"] is True
+    # The follow-up text still reaches the model, after the result.
+    assert msgs[-1]["content"][-1]["text"] == "Your reply was cut off; answer now."

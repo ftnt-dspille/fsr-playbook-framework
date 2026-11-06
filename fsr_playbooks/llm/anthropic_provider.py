@@ -118,6 +118,54 @@ def _thinking_only_in_last_assistant(msgs: list[dict[str, Any]]) -> list[dict[st
     return out
 
 
+_UNEXECUTED_RESULT = ("Not run: the reply stopped before this call completed, "
+                      "so it was never executed.")
+
+
+def _answer_open_tool_uses(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every tool_use an answering tool_result in the next user message.
+
+    A thinking-bearing round that stopped for anything but `tool_use` keeps its
+    (unexecuted) calls verbatim, since the API refuses a latest assistant turn
+    whose thinking context changed. Anthropic also refuses a tool_use with no
+    tool_result right after it, so each open call is answered here with an
+    is_error result, placed first in the following user message (or in a new
+    one when the assistant turn has no follower but is not the last message)."""
+    out: list[dict[str, Any]] = []
+    n = len(msgs)
+    i = 0
+    while i < n:
+        m = msgs[i]
+        out.append(m)
+        c = m.get("content")
+        if m.get("role") == "assistant" and isinstance(c, list):
+            ids = [b.get("id") for b in c
+                   if isinstance(b, dict) and b.get("type") == "tool_use"]
+            if ids:
+                nxt = msgs[i + 1] if i + 1 < n else None
+                nc = nxt.get("content") if nxt else None
+                have = ({b.get("tool_use_id") for b in nc
+                         if isinstance(b, dict) and b.get("type") == "tool_result"}
+                        if isinstance(nc, list) else set())
+                missing = [x for x in ids if x not in have]
+                if missing and nxt is not None:
+                    fill = [{"type": "tool_result", "tool_use_id": x,
+                             "content": _UNEXECUTED_RESULT, "is_error": True}
+                            for x in missing]
+                    if nxt.get("role") == "user":
+                        rest = (list(nc) if isinstance(nc, list)
+                                else ([{"type": "text", "text": nc}] if nc else []))
+                        res = [b for b in rest if isinstance(b, dict)
+                               and b.get("type") == "tool_result"]
+                        other = [b for b in rest if b not in res]
+                        out.append({**nxt, "content": res + fill + other})
+                        i += 2
+                        continue
+                    out.append({"role": "user", "content": fill})
+        i += 1
+    return out
+
+
 def _without_thinking(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """`msgs` with thinking blocks removed, for the side requests (the forced
     call, the wrap-up) that pin `tool_choice` or send no tools: those are not
@@ -660,7 +708,7 @@ class _AnthropicTurn:
 
     def _messages(self) -> list[dict[str, Any]]:
         return _with_history_breakpoint(_thinking_only_in_last_assistant(
-            _to_anthropic_messages(self.history)))
+            _answer_open_tool_uses(_to_anthropic_messages(self.history))))
 
     # The wire dicts built above are the SDK's own TypedDict shapes; these
     # casts state that for the type checker at the one place they are sent.
@@ -672,7 +720,8 @@ class _AnthropicTurn:
 
     def _plain_messages_param(self) -> list[MessageParam]:
         return cast("list[MessageParam]", _with_history_breakpoint(
-            _without_thinking(_to_anthropic_messages(self.history))))
+            _without_thinking(_answer_open_tool_uses(
+                _to_anthropic_messages(self.history)))))
 
     def _tools_param(self) -> list[ToolUnionParam]:
         return cast("list[ToolUnionParam]", self.request_tools)
@@ -753,7 +802,15 @@ class _AnthropicTurn:
             for c in calls:
                 raw = json.dumps(c.args, default=str)
                 dropped.append(DroppedCall(name=c.name, arg_chars=len(raw), tail=raw[-200:]))
-            blocks = [b for b in blocks if b["type"] != "tool_use"]
+            if any(b["type"] in _THINKING_TYPES for b in blocks):
+                # A thinking-bearing turn is replayed VERBATIM: removing its
+                # tool_use moves or re-contexts the signed thinking, a 400 when
+                # it is the latest assistant turn. Its calls stay in history
+                # unexecuted; `_answer_open_tool_uses` answers each with an
+                # is_error tool_result on the wire, which keeps the request valid.
+                pass
+            else:
+                blocks = [b for b in blocks if b["type"] != "tool_use"]
             if not any(b["type"] not in _THINKING_TYPES for b in blocks):
                 blocks.append({"type": "text", "text": unexecuted_tool_calls_note(
                     final.stop_reason, [c.name for c in calls])})
