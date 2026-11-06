@@ -82,6 +82,19 @@ def _connector_config_required(config_schema_json: Any) -> bool:
     return False
 
 
+def _blob_is_schema(blob: Any) -> bool:
+    """Is this catalog column a config SCHEMA ({fields: [...]}) rather than
+    empty or a list (a box-warmed row's saved configurations)?"""
+    if isinstance(blob, dict):
+        return True
+    if not isinstance(blob, str) or not blob:
+        return False
+    try:
+        return isinstance(json.loads(blob), dict)
+    except (TypeError, ValueError):
+        return False
+
+
 def _plausible_name_matches(q: str, all_names: list[str],
                             n: int = 3) -> list[str]:
     """Catalog names close enough to ``q`` to be worth showing as a TYPO guess.
@@ -179,8 +192,8 @@ def find_connector(q: str, limit: int = 15,
         # as "connector unavailable" and bailed to a skeleton (S3 run-3). The
         # `config_required` flag + guidance stops that: a config-less op runs with
         # `config: ''`, no configuration needed.
-        cols = ("name, label, category, description, config_schema_json" if verbose
-                else "name, label, category, config_schema_json")
+        cols = ("name, label, category, description, config_schema_json, version"
+                if verbose else "name, label, category, config_schema_json, version")
         rows = _rows(
             conn,
             f"""SELECT {cols}
@@ -237,9 +250,20 @@ def find_connector(q: str, limit: int = 15,
                         rows.append(r)
         # Derive config_required from the (internal) schema blob, then drop the
         # blob so it never bloats the tool result.
+        # A box-warmed row may not hold a schema at all (empty, or the saved
+        # configurations an older warm stored there): ask the box for the
+        # schema then, the same rule the offer's setup notice uses. Treating
+        # those rows as config-less told the model to author `config: ''` for
+        # connectors that need a configuration.
+        from .tools_emit import _config_required_from
         config_less: list[str] = []
         for r in rows:
-            required = _connector_config_required(r.pop("config_schema_json", None))
+            blob = r.pop("config_schema_json", None)
+            version = r.pop("version", None) or ""
+            if _blob_is_schema(blob):
+                required = _connector_config_required(blob)
+            else:
+                required = _config_required_from(r["name"], blob, version)
             r["config_required"] = required
             if not required:
                 config_less.append(r["name"])

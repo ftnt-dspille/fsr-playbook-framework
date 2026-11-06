@@ -861,7 +861,6 @@ def _needs_configuration(connector: str) -> bool:
     rows the schema is read from the box's detail endpoint instead. Without
     this, every connector on a live box read as config-free and the offer's
     `runs_after_setup` notice never fired."""
-    import json
     try:
         row = _db().execute(
             "SELECT config_schema_json, version FROM connectors WHERE name=?",
@@ -870,7 +869,14 @@ def _needs_configuration(connector: str) -> bool:
         return False
     if row is None:
         return False
-    raw, version = row[0], (row[1] or "")
+    return _config_required_from(connector, row[0], row[1] or "")
+
+
+def _config_required_from(connector: str, raw: Any, version: str) -> bool:
+    """`_needs_configuration` for a catalog row already in hand (raw schema
+    column + version). A dict is the schema; anything else (empty, or the
+    saved-config list an older box warm stored) is asked of the box."""
+    import json
     schema: Any = None
     if raw:
         try:
