@@ -3,8 +3,9 @@
 The widget saves the LAST ```yaml fence of the turn's text over the open record
 and has no other signal. The loop repairs a failing last fence up to
 MAX_SELF_REPAIR_TURNS times. When the cap runs out the failing fence used to
-stay in the delivered text, so a playbook that does not compile, or calls a
-connector this box does not have, could still be saved.
+stay in the delivered text, so a playbook that does not compile could still be
+saved. (A connector this box has not configured is not a failure: that
+playbook is delivered with a setup warning.)
 
 The fix neutralises a failing fence in the delivered text: the fence becomes a
 plain-language note naming what failed, and a passing fence is untouched. The
@@ -99,21 +100,21 @@ def test_a_fence_that_does_not_compile_is_not_delivered_after_the_cap():
     assert "Here is the playbook." in text, "the prose before the fence was lost"
 
 
-def test_a_fence_calling_an_unconfigured_connector_is_not_delivered_after_the_cap():
-    """Red before the fix: the connector check refuses, the cap runs out, and
-    the bad fence is still the reply."""
+def test_a_fence_calling_an_unconfigured_connector_is_delivered():
+    """An unconfigured connector no longer fails the fence: the playbook is
+    delivered as written (the reply carries the setup warning), with no
+    repair round."""
     with _with_listing(_LISTING_NO_FALCON), \
          patch("fsr_playbooks.llm.agent_loop.compile_errors", return_value=None), \
          patch("fsr_playbooks.mcp_server.tools_emit._needs_configuration",
                return_value=True):
         requests, _, events = _run_openai_like(
             OpenAIProvider,
-            [_reply_round(_FALCON_REPLY)] * 3 + [_close_round()], _BUILD_TOOLS)
-    assert len(requests) == 3
+            [_reply_round(_FALCON_REPLY), _close_round()], _BUILD_TOOLS)
+    assert len(requests) == 1
     text = _delivered(events)
-    assert "```yaml" not in text, f"a failing fence was delivered: {text!r}"
-    assert "crowd-strike-falcon" in text and "not configured" in text, (
-        f"the reply does not name the connector that failed: {text!r}")
+    assert "```yaml" in text and "crowd-strike-falcon" in text, (
+        f"the playbook was not delivered: {text!r}")
 
 
 def test_a_repaired_reply_delivers_only_the_good_fence():

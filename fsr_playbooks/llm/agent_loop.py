@@ -135,9 +135,10 @@ UNVERIFIED_DRAFT_FAILED_DIRECTIVE = (
 )
 
 _CONNECTOR_REPAIR_PREFIX = (
-    "The playbook in your reply calls a connector this box has not configured, "
-    "so it would fail the first time it runs. Rebuild it on a configured "
-    "connector, or leave it out of the reply and say so.\n\nProblems:\n"
+    "The playbook in your reply has a connector problem. Fix it and emit a "
+    "corrected fenced ```yaml block. A connector that is only unconfigured is "
+    "not a problem: keep that step and say it will not run until it is set "
+    "up.\n\nProblems:\n"
 )
 _SELF_REPAIR_PREFIX = (
     "The YAML you just produced doesn't compile. Fix the errors and emit a "

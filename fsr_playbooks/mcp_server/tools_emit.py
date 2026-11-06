@@ -838,28 +838,67 @@ def _needs_configuration(connector: str) -> bool:
     return bool(isinstance(schema, dict) and schema.get("fields"))
 
 
-def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str]]:
-    """(connectors the YAML calls that THIS box has not configured, the ones it
-    has). ([], []) when the box cannot be asked -- the gate fails open, the
-    same way run_op's preflight does, so a listing outage never blocks a save.
+def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str], list[str]]:
+    """(connectors the YAML calls that THIS box has not configured for this
+    analyst, the ones it has, the subset of the missing ones that ARE
+    configured on the box but not shared with the analyst's teams).
+    ([], [], []) when the box cannot be asked.
 
     Called through the module so an offline inventory patched onto
     `tools_connector_discovery` answers here too."""
     used = _yaml_connectors(yaml_text)
     if not used:
-        return [], []
+        return [], [], []
     from . import tools_connector_discovery as _tcd
     try:
         listing = _tcd.list_configured_connectors()
     except Exception:  # noqa: BLE001
-        return [], []
+        return [], [], []
     rows = listing.get("configured") if isinstance(listing, dict) else None
     if not rows:
-        return [], []
+        return [], [], []
     names = {r.get("name") for r in rows if isinstance(r, dict) and r.get("name")}
     have = sorted(n for n in names if isinstance(n, str))
     missing = [c for c in used if c not in have and _needs_configuration(c)]
-    return missing, have
+    hidden = set(listing.get("not_shared_with_you") or [])
+    return missing, have, [c for c in missing if c in hidden]
+
+
+def _runs_after_setup(yaml_text: str) -> list[dict[str, Any]]:
+    """Steps that are written on a real connector operation but cannot run
+    until that connector is configured on this box, or shared with the
+    analyst's team. Authoring is allowed (the analyst asked for the step, and
+    a refusal leaves them with nothing); the card says plainly that these
+    steps will not run yet, and how to fix it. Fails open: [] when the box
+    cannot be asked."""
+    missing, _have, not_shared = _unconfigured_connectors(yaml_text)
+    out: list[dict[str, Any]] = []
+    for c in missing:
+        if c in not_shared:
+            out.append({
+                "connector": c, "reason": "not_shared",
+                "message": (f"Steps that use {c} will not run until an "
+                            "administrator shares one of its configurations "
+                            "with your team."),
+                "setup_steps": [
+                    f"Ask an administrator to open Content Hub, {c}, "
+                    "Configurations.",
+                    "Add your team to an existing configuration and save.",
+                    "Run the playbook again."],
+            })
+        else:
+            out.append({
+                "connector": c, "reason": "not_configured",
+                "message": (f"Steps that use {c} will not run until the "
+                            "connector is installed and configured on this "
+                            "FortiSOAR box."),
+                "setup_steps": [
+                    f"Open Content Hub and install the {c} connector.",
+                    "Add a configuration with the product's address and "
+                    "credentials, share it with your team, and save.",
+                    "Run the connector health check, then run the playbook."],
+            })
+    return out
 
 
 def _box_config_names() -> dict[str, list[str]] | None:
@@ -896,7 +935,7 @@ def _unknown_config_pins(yaml_text: str) -> list[dict[str, Any]]:
     under live_probe, the offer gate did not check them at all, and the step
     would fail on its first run. Templated values and IRIs are trusted; a
     connector the box lists with no config names, or a box that cannot be
-    asked, is skipped (fail open, like the unconfigured-connector gate)."""
+    asked, is skipped (fail open)."""
     try:
         doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
         pbs = (doc or {}).get("playbooks") or []
@@ -954,43 +993,13 @@ def _unknown_config_error(bad: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def fenced_connector_errors(yaml_text: str) -> str | None:
-    """The connector check the offer gate applies, for a playbook that reaches
-    the analyst in the reply TEXT as a ```yaml fence. The widget saves the last
-    fence over the open record, so the fence is a delivery and needs the same
-    check an offer card gets.
-
-    Returns the message to send the model back with, or None when every
-    connector the playbook calls is configured, or it calls none.
-
-    Unlike the offer gate this FAILS CLOSED: a connector list it cannot read
-    cannot clear a connector, so it refuses and says the connectors could not
-    be verified. It asks nothing of the listing for a playbook that calls no
-    connector.
-    """
-    used = _yaml_connectors(yaml_text)
-    if not used:
-        return None
-    from . import tools_connector_discovery as _tcd
-    try:
-        listing = _tcd.list_configured_connectors()
-        rows = listing.get("configured") if isinstance(listing, dict) else None
-    except Exception:  # noqa: BLE001 -- undecidable is refused, not passed
-        rows = None
-    if not rows:
-        return (
-            "- could not verify connectors on this box, so the connector(s) "
-            f"{', '.join(repr(c) for c in used)} cannot be cleared. Retry once "
-            "the connector list can be read, or leave the playbook out of the "
-            "reply and say so.")
-    names = {r.get("name") for r in rows if isinstance(r, dict) and r.get("name")}
-    missing = [c for c in used if c not in names and _needs_configuration(c)]
-    if not missing:
-        return None
-    return "\n".join(
-        f"- connector '{c}' is not configured on this FortiSOAR box, so a step "
-        "that calls it fails the first time the playbook runs. Rebuild the "
-        "playbook on a configured connector, or leave it out of the reply and "
-        "say so." for c in missing)
+    """The connector check for a playbook delivered in the reply TEXT as a
+    ```yaml fence. A step on a connector this box has not configured (or not
+    shared with the analyst's team) is NOT a reason to send the model back:
+    the analyst asked for the step, and the build prompt has the model say
+    that it will not run until the connector is set up. Kept as the hook the
+    loop calls; returns None (deliver) for every connector state today."""
+    return None
 
 
 def _step_names(yaml_text: str) -> list[str]:
@@ -1235,25 +1244,6 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
                          "question -- no playbook_offer until it does something"],
         )
 
-    # The analyst saves this onto THIS box. A step on a connector it has not
-    # configured fails the first time the playbook runs -- live, "isolate with
-    # CrowdStrike Falcon" was offered for a box with no Falcon, after the
-    # model had itself said Falcon was unavailable.
-    missing, have = _unconfigured_connectors(yaml_text)
-    if missing:
-        return _err(
-            "offer_uses_unconfigured_connector",
-            f"this playbook calls {', '.join(repr(m) for m in missing)}, which "
-            "this FortiSOAR box has not configured, so those steps would fail "
-            "the first time it runs. Rebuild it on a configured connector "
-            "that does the same job, or, if none does, tell the analyst what "
-            "is missing instead of offering it.",
-            suggestions=[f"configured here: {', '.join(have)}",
-                         "find(kind='action', ...) to pick the op on one of "
-                         "those connectors"],
-            unconfigured=missing,
-        )
-
     bad_configs = _unknown_config_pins(yaml_text)
     if bad_configs:
         return _unknown_config_error(bad_configs)
@@ -1282,7 +1272,22 @@ def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
         card["warnings"] = verdict["warnings"]
     if title_suggestion and title_suggestion.strip():
         card["title_suggestion"] = title_suggestion.strip()
-    return {"ok": True, "card": card}
+    return _with_setup_warning(card, yaml_text)
+
+
+def _with_setup_warning(card: dict[str, Any], yaml_text: str) -> dict[str, Any]:
+    """Attach `runs_after_setup` to an offer card (create or edit alike) and
+    tell the model to say it in the reply. A step on an unconfigured or
+    not-shared connector is delivered, never refused: the analyst gets the
+    playbook plus a plain warning that those steps will not run yet."""
+    pending = _runs_after_setup(yaml_text)
+    if not pending:
+        return {"ok": True, "card": card}
+    card["runs_after_setup"] = pending
+    return {"ok": True, "card": card, "note": (
+        "Delivered. Tell the analyst in one or two plain sentences that "
+        + "; ".join(p["message"] for p in pending)
+        + " The card lists the setup steps.")}
 
 
 @mcp.tool()
@@ -1366,8 +1371,8 @@ def emit_enhancement_offer(
 
     # An edit to the conversation's unsaved draft has nothing to apply to: it
     # is delivered as the draft's next Create card, through the same gate every
-    # Create card passes (verify on these exact bytes, no unconfigured
-    # connectors, ...). The open-playbook guard is skipped because the draft IS
+    # Create card passes (verify on these exact bytes, the same setup
+    # warning, ...). The open-playbook guard is skipped because the draft IS
     # the grounded document -- that is what makes this an edit.
     if get_grounded_source() == "draft":
         return _offer_from_yaml(id, summary, yaml_text, title_suggestion=None,
@@ -1413,7 +1418,7 @@ def emit_enhancement_offer(
     warnings = entry.get("warnings") or []
     if warnings:
         card["warnings"] = warnings
-    return {"ok": True, "card": card}
+    return _with_setup_warning(card, yaml_text)
 
 
 @mcp.tool()

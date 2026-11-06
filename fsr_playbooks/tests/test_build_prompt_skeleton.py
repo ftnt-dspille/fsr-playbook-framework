@@ -314,7 +314,7 @@ def test_terminal_action_rule_is_scoped_to_change_requests():
 
 def _absent_product_section() -> str:
     start = _FLAT.index("**a product this box does not have.**")
-    end = _FLAT.index("**configured is the bar for authoring")
+    end = _FLAT.index("**health never blocks authoring.**")
     return _FLAT[start:end]
 
 
@@ -329,17 +329,34 @@ def test_prompt_never_asks_for_a_placeholder_step():
 
 def test_absent_product_rule_forbids_a_stand_in_for_the_missing_step():
     section = _absent_product_section()
-    assert "no `connector` step on it" in section
-    assert "no stand-in in its place" in section
+    assert "no stand-in step" in section
     assert "`set_variable`" in section
 
 
-def test_absent_product_rule_says_what_to_do_instead():
+# The rule once refused: "write no step for the absent product", "deliver no
+# playbook", "hold the line". Analysts asked for a playbook and got none
+# ("it always fights us"). It now builds the step on the real operation,
+# delivers the offer, and warns that the step will not run until setup.
+
+def test_absent_product_rule_builds_and_warns_instead_of_refusing():
     section = _absent_product_section()
-    assert "deliver a playbook of only the steps this box can run" in section
-    assert "emit_card(card_type='capability_gap'" in section
-    assert "deliver no playbook" in section
-    assert "configured connector does the same job" in section
+    assert "still build what the analyst asked for" in section
+    assert "real connector operation" in section and "get_op_schema" in section
+    assert "deliver the offer" in section
+    assert "runs_after_setup" in section
+    assert "will not run until" in section
+    assert "not shared" in section or "shares a" in section
+
+
+def test_prompt_no_longer_refuses_an_unconfigured_connector():
+    for refusal in ("hold the line", "write no step for the absent product",
+                    "deliver no playbook", "only a configured connector can carry",
+                    "does not change this"):
+        assert refusal not in _FLAT, refusal
+
+
+def test_running_an_unconfigured_connector_still_refuses():
+    assert "never run or test an operation on a connector without a configuration" in _FLAT
 
 
 def test_every_card_type_the_prompt_or_the_loop_names_is_a_real_card():
