@@ -33,9 +33,27 @@ _INPUT_ORDER = ["str", "int", "float", "bool", "list", "dict", "NoneType"]
 _DIGEST_FILTERS = {"password_hash", "hash", "hash_salt", "checksum"}
 
 
+def _has_filter_rows(db: Path) -> bool:
+    if not db.exists():
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        return conn.execute("SELECT COUNT(*) FROM jinja_macros").fetchone()[0] > 0
+    except sqlite3.OperationalError:
+        return False  # bare/schema-only DB (e.g. a fresh data/ DB in CI)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _db_path() -> Path:
+    # Prefer the freshly-probed full DB, but only if it actually carries the
+    # jinja tables; otherwise the shipped slim catalog, which always does.
     full = REPO_ROOT / "data" / "fsr_reference.db"
-    return full if full.exists() else REPO_ROOT / "fsr_playbooks" / "_data" / "fsr_reference.db"
+    slim = REPO_ROOT / "fsr_playbooks" / "_data" / "fsr_reference.db"
+    return full if _has_filter_rows(full) else slim
 
 
 def _sig(name: str, signature: str | None) -> str:
