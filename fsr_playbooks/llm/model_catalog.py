@@ -272,4 +272,8 @@ def allowed_models(provider: str) -> list[str]:
     got = [e for e in CATALOG
            if e.provider == (provider or "").strip().lower()
            and e.tier in ("tested", "supported")]
-    return [e.model for e in sorted(got, key=lambda e: (order[e.tier], e.model))]
+    # Stable sort on tier alone: within a tier the CATALOG order is the ranking
+    # (the volume default first). An alphabetical tie-break once ranked a newly
+    # screened Haiku above Sonnet and the deploy's "best model" fallback config
+    # silently became Haiku.
+    return [e.model for e in sorted(got, key=lambda e: order[e.tier])]

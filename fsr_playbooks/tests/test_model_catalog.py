@@ -160,3 +160,11 @@ def test_haiku_5_5_is_tested_and_allowed() -> None:
     assert v.ok is True
     assert v.level == "tested"
     assert "claude-haiku-5-5" in allowed_models("anthropic")
+
+
+def test_allowed_models_keeps_catalog_order_within_a_tier():
+    # Two tested Anthropic models: the catalog lists the volume default first,
+    # and that is the "best model" deploy provisions as the fallback config.
+    from fsr_playbooks.llm.model_catalog import allowed_models
+    got = allowed_models("anthropic")
+    assert got.index("claude-sonnet-5") < got.index("claude-haiku-5-5"), got
