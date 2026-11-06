@@ -14,7 +14,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: backend frontend dev e2e tests tests-random playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate enhance-live release ci-watch corpus-gate corpus-gen corpus-triage matrix tool-gate agreement mypy mypy-gate doctor db-restore wire-audit wire-census test-effect-probes
+.PHONY: jinja-export jinja-probe jinja-docs jinja-verify backend frontend dev e2e tests tests-random playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate enhance-live release ci-watch corpus-gate corpus-gen corpus-triage matrix tool-gate agreement mypy mypy-gate doctor db-restore wire-audit wire-census test-effect-probes
 
 PY        := uv run python
 FRONTEND_DIR := web/frontend
@@ -363,6 +363,22 @@ db-restore: ## restore data/fsr_reference.db from FROM=<backup> (default .db.bak
 	  || { echo "restore FAILED integrity check"; exit 1; }; \
 	echo "✓ restored $$dst from $$src"; \
 	$(VENV_PY) -m fsr_playbooks.doctor
+
+jinja-export: ## LIVE (SSH): dump every Jinja filter/global/test + signature from a box: make jinja-export INSTANCE=<alias>
+	@[ -n "$(INSTANCE)" ] || { echo "usage: make jinja-export INSTANCE=<pyfsr instance alias>"; exit 2; }
+	PYTHONPATH=. $(VENV_PY) -W ignore -m tooling.jinja_export --instance $(INSTANCE)
+	PYTHONPATH=. $(VENV_PY) -W ignore -m tooling.probes.probe_jinja_backend
+
+jinja-probe: ## LIVE: render every filter case on a box and store the evidence: make jinja-probe INSTANCE=<alias> [ONLY=a,b]
+	@[ -n "$(INSTANCE)" ] || { echo "usage: make jinja-probe INSTANCE=<pyfsr instance alias>"; exit 2; }
+	PYTHONPATH=. $(VENV_PY) -W ignore -m tooling.probes.probe_jinja_filter_io --instance $(INSTANCE) $(if $(ONLY),--only $(ONLY))
+
+jinja-docs: ## regenerate docs/JINJA_FILTERS.md from the reference DB (offline)
+	PYTHONPATH=. $(VENV_PY) -m tooling.store.export_jinja_reference
+
+jinja-verify: ## LIVE: replay every filter case on a box; fails if a filter breaks or changes type: make jinja-verify INSTANCE=<alias>
+	@[ -n "$(INSTANCE)" ] || { echo "usage: make jinja-verify INSTANCE=<pyfsr instance alias>"; exit 2; }
+	FSRPB_JINJA_INSTANCE=$(INSTANCE) PYTHONPATH=. $(VENV_PY) -m pytest tooling/tests/test_jinja_filters_live.py -q -m live -p no:randomly
 
 verify: ## green-check for the fsr_playbooks + connector axis (offline)
 	@echo "→ [0/5] environment doctor"

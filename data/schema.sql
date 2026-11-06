@@ -344,6 +344,25 @@ CREATE TABLE IF NOT EXISTS jinja_tests (
     description       TEXT
 );
 
+-- Live evidence for every Jinja filter: one row per probe case, rendered on a
+-- real FortiSOAR through /api/wf/api/jinja-editor/. Written by
+-- tooling/probes/probe_jinja_filter_io.py; replayed by `make jinja-verify`;
+-- rendered into docs/JINJA_FILTERS.md by tooling/store/export_jinja_reference.py.
+CREATE TABLE IF NOT EXISTS jinja_filter_probes (
+    filter_name     TEXT NOT NULL,
+    case_id         TEXT NOT NULL,            -- 'input:list', 'args:curated:1', ...
+    template        TEXT NOT NULL,            -- exactly what was rendered
+    input_json      TEXT,                     -- JSON of `value` in the render context
+    input_type      TEXT,                     -- str|int|float|bool|list|dict|NoneType
+    ok              INTEGER NOT NULL,         -- 1 = rendered, 0 = raised
+    output_type     TEXT,                     -- Python type name from type_debug
+    output_preview  TEXT,                     -- first 200 chars of the rendered value
+    error           TEXT,                     -- first 300 chars of the error when ok=0
+    fsr_build       TEXT,                     -- e.g. cyops-workflow-8.0.0-6034
+    probed_at       TEXT NOT NULL,
+    PRIMARY KEY (filter_name, case_id)
+);
+
 CREATE TABLE IF NOT EXISTS jinja_context_vars (
     scope       TEXT NOT NULL,                -- 'vars', 'vars.steps', 'vars.input', ...
     var_name    TEXT NOT NULL,

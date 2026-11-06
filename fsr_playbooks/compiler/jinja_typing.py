@@ -139,7 +139,7 @@ _HAND_CURATED: dict[str, tuple[str | None, str | None]] = {
     "htmltotext":     ("string", "string"),
     "html2texthash":  ("string", "string"),
     "json2html":      ("object", "string"),
-    "markdown2html":  ("string", "string"),
+    "markdown2html":     ("string", "object"),  # returns {'html': ...} dict, not a string (jinja_filter_probes)
     "logParse":       ("string", "object"),
     "urlencode":      (None, "string"),
     "urlsplit":       ("string", "object"),
@@ -178,7 +178,7 @@ _HAND_CURATED: dict[str, tuple[str | None, str | None]] = {
     "to_yaml":        (None, "string"),
     "to_nice_yaml":   (None, "string"),
     "to_nice_json":   (None, "string"),
-    "to_datetime":    ("string", "string"),   # FSR keeps these as ISO strings
+    "to_datetime":       ("string", None),  # returns a datetime object, not a string (jinja_filter_probes)
 
     # ── Numeric / boolean ──────────────────────────────────────────────
     "bool":           (None, "boolean"),
@@ -201,13 +201,19 @@ _HAND_CURATED: dict[str, tuple[str | None, str | None]] = {
     "iriToLink":          ("string", "string"),
     "loadRelationships":  ("string", "object"),
     "find_indicators":    (None, "list"),
-    "extract_artifacts":  ("string", "list"),
+    "extract_artifacts": ("string", "object"),  # returns an artifacts dict, not a list (jinja_filter_probes)
     "extract_cef":        ("string", "object"),
     "count_occurrence":   (None, "object"),
     "counter":            (None, "object"),
-    "getRelativeDate":    (None, "string"),   # returns ISO timestamp
-    "resolveRange":       ("string", "object"),
-    "picklist":           ("string", "string"),
+    "getRelativeDate":    (None, None),        # returns a datetime object (jinja_filter_probes)
+    # resolveRange returns the mapped value (whatever the map holds) or None on a
+    # miss -- proven live (jinja_filter_probes): output is str/NoneType here, never
+    # a dict "object". Polymorphic in, polymorphic out.
+    "resolveRange":       (None, None),
+    # picklist(name) returns the whole picklist-item object (dict); picklist(name,
+    # key) returns just that field (e.g. the @id string); a miss returns None.
+    # Proven live (jinja_filter_probes) -- not a plain "string".
+    "picklist":           (None, None),
 }
 
 

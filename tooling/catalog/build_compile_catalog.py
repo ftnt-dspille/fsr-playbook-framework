@@ -55,6 +55,10 @@ STABLE_TABLES = (
     "jinja_macros",
     "jinja_globals",
     "jinja_tests",
+    # Live I/O evidence per filter (globally stable for a FortiSOAR build, no
+    # per-install ids): ships so the generated filter reference and its
+    # freshness test work from the slim DB too.
+    "jinja_filter_probes",
     "jinja_context_vars",
     "recipes",
     "connector_op_defs",

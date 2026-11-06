@@ -1,0 +1,124 @@
+# Hand-picked probe cases for Jinja filters, run by probe_jinja_filter_io.py.
+#
+# Every filter whose extra parameters are all optional is ALSO probed
+# automatically across the input matrix (str, int, float, bool, list, dict,
+# None) with no arguments. Add cases here for:
+#   * filters with REQUIRED arguments (the matrix cannot call them), and
+#   * behaviour worth pinning (a miss, an edge, a second calling form).
+#
+# Shape:  <filter>: [ {input: <any JSON value>, args: "<text inside the parens>", note: "..."} ]
+# `args` is pasted verbatim into `value | <filter>(<args>)`. Use a context
+# variable only when the filter genuinely needs one: `ctx` is passed alongside
+# `value` and holds whatever the case's `ctx:` key sets.
+
+replace:
+  - {input: "Hello World", args: "'World', 'SOAR'"}
+  - {input: "aaaa", args: "'a', 'b', 2", note: "count limits replacements"}
+default:
+  - {input: null, args: "'fallback'", note: "None is NOT undefined: default() keeps None unless boolean=true"}
+  - {input: null, args: "'fallback', true"}
+  - {input: "", args: "'fallback', true"}
+resolveRange:
+  - {input: "high", args: "{'high': 'H', 'low': 'L'}"}
+  - {input: "bogus", args: "{'high': 'H'}", note: "a key that is not in the map returns None"}
+  - {input: 7, args: "{'0-3': 'Low', '4-6': 'Medium', '7-10': 'High'}", note: "numeric ranges"}
+picklist:
+  - {input: "Severity", args: "'High'", note: "returns the whole picklist item object"}
+  - {input: "Severity", args: "'High', '@id'", note: "a key returns just that field (the IRI)"}
+  - {input: "Severity", args: "'NoSuchItem'", note: "an unknown item"}
+json_query:
+  - {input: {"a": [{"b": 1}, {"b": 2}]}, args: "'a[].b'"}
+regex_replace:
+  - {input: "abc123", args: "'[0-9]+', ''"}
+regex_search:
+  - {input: "id=42", args: "'[0-9]+'"}
+  - {input: "none here", args: "'[0-9]+'", note: "no match"}
+regex_findall:
+  - {input: "a1b22c333", args: "'[0-9]+'"}
+split:
+  - {input: "a,b,c", args: "','"}
+join:
+  - {input: ["a", "b"], args: "', '"}
+map:
+  - {input: [{"n": 1}, {"n": 2}], args: "attribute='n'", note: "a generator until listed"}
+selectattr:
+  - {input: [{"ok": true}, {"ok": false}], args: "'ok'"}
+rejectattr:
+  - {input: [{"ok": true}, {"ok": false}], args: "'ok'"}
+select:
+  - {input: [0, 1, 2], args: "'odd'"}
+reject:
+  - {input: [0, 1, 2], args: "'odd'"}
+attr:
+  - {input: {"a": 1}, args: "'a'"}
+groupby:
+  - {input: [{"t": "x"}, {"t": "y"}, {"t": "x"}], args: "'t'"}
+sum:
+  - {input: [{"n": 1}, {"n": 2}], args: "attribute='n'"}
+batch:
+  - {input: [1, 2, 3, 4, 5], args: "2"}
+slice:
+  - {input: [1, 2, 3, 4, 5], args: "2"}
+combine:
+  - {input: {"a": 1}, args: "{'b': 2}"}
+dict2items:
+  - {input: {"a": 1}, args: ""}
+items2dict:
+  - {input: [{"key": "a", "value": 1}], args: ""}
+format:
+  - {input: "%s-%s", args: "'a', 'b'"}
+truncate:
+  - {input: "a long sentence here", args: "8"}
+indent:
+  - {input: "a\nb", args: "2"}
+wordwrap:
+  - {input: "one two three four", args: "8"}
+center:
+  - {input: "x", args: "5"}
+dictsort:
+  - {input: {"b": 2, "a": 1}, args: ""}
+strftime:
+  - {input: "%Y-%m-%d", args: "0", note: "Ansible: format string piped, epoch as argument"}
+to_datetime:
+  - {input: "2026-01-02 03:04:05", args: ""}
+currentDateMinus:
+  - {input: null, args: "1", note: "argument is days"}
+ternary:
+  - {input: true, args: "'yes', 'no'"}
+  - {input: false, args: "'yes', 'no'"}
+extract:
+  - {input: 0, args: "['a', 'b']"}
+union:
+  - {input: [1, 2], args: "[2, 3]"}
+intersect:
+  - {input: [1, 2], args: "[2, 3]"}
+difference:
+  - {input: [1, 2], args: "[2, 3]"}
+symmetric_difference:
+  - {input: [1, 2], args: "[2, 3]"}
+zip:
+  - {input: [1, 2], args: "['a', 'b']"}
+product:
+  - {input: [1, 2], args: "['a']"}
+combinations:
+  - {input: [1, 2, 3], args: "2"}
+permutations:
+  - {input: [1, 2], args: ""}
+subelements:
+  - {input: [{"n": "x", "l": [1, 2]}], args: "'l'"}
+ipaddr:
+  - {input: "192.0.2.10", args: "'address'"}
+ipmath:
+  - {input: "192.0.2.10", args: "1"}
+ipsubnet:
+  - {input: "192.0.2.0/24", args: "26"}
+hash:
+  - {input: "abc", args: "'md5'"}
+password_hash:
+  - {input: "secret", args: "'sha512', 'saltsalt'"}
+comment:
+  - {input: "text", args: ""}
+mandatory:
+  - {input: "set", args: ""}
+type_debug:
+  - {input: [1], args: ""}
