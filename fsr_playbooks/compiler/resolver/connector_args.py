@@ -375,6 +375,13 @@ class ConnectorArgsMixin:
             # falsy → step is bypassed. Whitelisted here so the resolver
             # doesn't auto-lift it into params or flag it as unknown.
             "condition",
+            # Connector-step wire field: whether the connector configuration is
+            # chosen dynamically at runtime (the UI's "select config at runtime"
+            # toggle). FSR writes it on the wire step beside `config`; reserved
+            # so a hand-authored value passes through verbatim instead of being
+            # misread as a connector op param. Seen at step level in real
+            # exported playbook JSON.
+            "dynamicallySelected",
         }
         if valid_params:
             existing_params = a.get("params") if isinstance(a.get("params"), dict) else None
