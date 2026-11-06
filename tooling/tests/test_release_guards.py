@@ -6,6 +6,7 @@ repos and check the refusal actually fires.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -58,6 +59,9 @@ def test_release_refuses_when_head_is_already_tagged(tmp_path: Path):
     proc = subprocess.run(
         ["bash", "scripts/release.sh", "0.6.41"],
         cwd=repo, capture_output=True, text=True, timeout=120,
+        # Run as a human would: under an agent session CLAUDECODE trips the
+        # agent guard first and the head-tag guard under test never runs.
+        env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"},
     )
     err = proc.stderr
     assert proc.returncode != 0, f"release.sh did not refuse:\n{proc.stdout}"
