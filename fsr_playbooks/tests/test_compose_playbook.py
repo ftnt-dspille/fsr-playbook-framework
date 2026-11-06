@@ -205,3 +205,89 @@ def test_both_alias_and_canonical_is_rejected():
     r = _one({"kind": "set_variable", "name": "S", "vars": {"a": "b"},
               "values": {"c": "d"}})
     assert r["ok"] is False
+
+
+# --- record steps: the live Sonnet turn that burned ~12 compose retries --------
+# The model wanted "update the triggering alert". compose's record step had no
+# key for the update target, so it tried `record`, `inputs`, `query`, `fields.record`
+# in turn; some of those returned ok:true with YAML the compiler then rejected.
+
+_SET_LOOKBACK = {"kind": "set_variable", "name": "Set Lookback",
+                 "vars": {"lookback_hours": 24}}
+
+
+def _rec(**kw):
+    return {"kind": "record", "name": "Comment Alert", "action": "update",
+            "module": "alerts", **kw}
+
+
+def test_update_record_targets_the_trigger_record_first_time():
+    r = compose_playbook(
+        steps=[_SET_LOOKBACK,
+               _rec(record={"from_step": "__input__", "output": "@id"},
+                    fields={"comments": "seen"})],
+        name="Stamp", module="alerts")
+    assert r["ok"] is True, r
+    assert r["compile_summary"]["ok"] is True
+    # `@id` is not a jinja identifier: bracketed, and no `operation: Create`
+    # leaks onto an update.
+    assert "record: '{{ vars.input.records[0][''@id''] }}'" in r["yaml"]
+    assert "operation: Create" not in r["yaml"]
+
+
+def test_failed_record_shapes_from_the_session_name_the_exact_fix():
+    wrong = [
+        _rec(query={"field": "id", "value": "1"}, fields={"comments": "x"}),
+        _rec(inputs={"record": {"from_step": "__input__", "output": "@id"}},
+             fields={"comments": "x"}),
+        _rec(fields={"comments": "x",
+                     "record": {"from_step": "__input__", "output": "@id"}}),
+        _rec(fields={"comments": "x"}),            # no target at all
+    ]
+    for step in wrong:
+        r = compose_playbook(steps=[step], name="P", module="alerts")
+        assert r["ok"] is False and r["code"] == "bad_plan", step
+        text = " ".join(r["errors"])
+        # the corrected example for THIS step kind, with the `record` key
+        assert '"action": "update"' in text and '"record":' in text, text
+        assert r["message"] == "; ".join(r["errors"])
+
+
+def test_find_then_update_wires_the_first_match_and_filters_resolve():
+    r = compose_playbook(
+        steps=[{"kind": "record", "name": "Find This Alert", "action": "find",
+                "module": "alerts",
+                "query": [{"field": "id", "operator": "eq",
+                           "value": {"from_step": "__input__",
+                                     "output": "id"}}]},   # list `query` = filters
+               _rec(record={"from_step": "Find This Alert", "output": "@id"},
+                    fields={"comments": "seen"})],
+        name="Stamp", module="alerts")
+    assert r["ok"] is True, r
+    y = r["yaml"]
+    assert "from_step" not in y                       # no raw ref leaked
+    assert "{{ vars.input.records[0].id }}" in y
+    assert "{{ vars.steps.Find_This_Alert[0][''@id''] }}" in y  # YAML-quoted
+    assert "operation: Create" not in y
+
+
+def test_compile_failure_is_not_reported_as_ok():
+    # an unknown connector compiles to YAML the compiler rejects: one honest
+    # failure with the text, not ok:true with the verdict in compile_summary
+    r = compose_playbook(
+        steps=[{"kind": "connector", "name": "X", "connector": "no-such-conn",
+                "operation": "nope"}],
+        name="P", module="alerts")
+    assert r["ok"] is False and r["code"] == "compile_failed"
+    assert "no-such-conn" in r["message"] and r["yaml"]
+
+
+def test_tool_description_is_built_from_the_record_shapes_table():
+    from fsr_playbooks.mcp_server import tools_compose as tc
+    doc = tc.compose_playbook.__doc__ if callable(tc.compose_playbook) \
+        else tc.compose_playbook.fn.__doc__
+    doc = doc or getattr(tc.compose_playbook, "description", "")
+    for action, spec in tc._RECORD_SHAPES.items():
+        assert f"action `{action}`" in doc
+        for key in list(spec["required"]) + list(spec["optional"]):
+            assert key in doc

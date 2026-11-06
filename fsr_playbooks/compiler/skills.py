@@ -136,9 +136,10 @@ def _make_record_compile(step_type: str) -> CompileHook:
         fields = merged.get("fields")
         if isinstance(fields, dict) and fields:
             step["fields"] = fields
-        # find_record carries a query rather than fields.
-        if merged.get("query") is not None:
-            step["query"] = merged["query"]
+        # update_record's target IRI; find_record's filters / limit / sort.
+        for k in ("record", "filters", "limit", "sort", "query"):
+            if merged.get(k) is not None:
+                step[k] = merged[k]
         return step
     return _compile
 

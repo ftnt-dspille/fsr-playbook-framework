@@ -17,6 +17,8 @@ trigger are the plan's vocabulary.
 """
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from ._shared import mcp
@@ -34,6 +36,60 @@ _RECORD_ACTION_TO_SKILL = {
     "update": "update_record",
     "find": "find_record",
 }
+# The ONE description of each record action's accepted keys and a worked
+# example. The validator, the error text and the tool description are all
+# derived from this table, so they cannot drift apart. `required` keys must be
+# present; `optional` may be.
+_RECORD_SHAPES: dict[str, dict[str, Any]] = {
+    "create": {
+        "required": ("module",),
+        "optional": ("fields", "operation"),
+        "example": {
+            "kind": "record", "name": "Open Incident", "action": "create",
+            "module": "incidents",
+            "fields": {"name": "Phishing follow-up",
+                       "description": {"from_step": "__input__",
+                                       "output": "name"}}},
+    },
+    "update": {
+        # `record` is the IRI of the record to write to (the compiler's
+        # update_record has nothing to write to without it).
+        "required": ("module", "record"),
+        "optional": ("fields", "operation"),
+        "example": {
+            "kind": "record", "name": "Stamp Alert", "action": "update",
+            "module": "alerts",
+            "record": {"from_step": "__input__", "output": "@id"},
+            "fields": {"description": {"from_step": "Lookup",
+                                       "output": "summary"}}},
+    },
+    "find": {
+        "required": ("module",),
+        "optional": ("filters", "limit", "sort"),
+        "example": {
+            "kind": "record", "name": "Find Open Alerts", "action": "find",
+            "module": "alerts",
+            "filters": [{"field": "status", "operator": "eq",
+                         "value": "Open"}]},
+    },
+}
+
+
+def _record_example(action: str) -> str:
+    return json.dumps(_RECORD_SHAPES[action]["example"])
+
+
+def _record_shape_doc() -> str:
+    """The `record` bullet of the tool description, built from the table."""
+    lines = []
+    for action, spec in _RECORD_SHAPES.items():
+        keys = ", ".join(list(spec["required"]) +
+                         [k + "?" for k in spec["optional"]])
+        lines.append(f"        action `{action}`: `{{kind, name, action, "
+                     f"{keys}}}` e.g. {_record_example(action)}")
+    return "\n".join(lines)
+
+
 # The connector envelope defaults to `.data` (get_op_schema's binding rule); the
 # other skills publish their outputs at the step root.
 _DEFAULT_REF_PREFIX = {"connector": "data"}
@@ -47,36 +103,61 @@ def _jkey(step_name: str) -> str:
 _INPUT_STEP = "__input__"
 
 
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])*$")
+
+
+def _path_suffix(path: str) -> str:
+    """Render an output path to jinja. A plain name is `.name`; a name that is
+    not an identifier (`@id`, `a-b`) is bracketed, `['@id']`, because
+    `vars.x.@id` is not valid jinja."""
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if path.startswith(("[", ".")):
+        return path
+    out = ""
+    for tok in path.split("."):
+        out += f".{tok}" if _IDENT.match(tok) else f"['{tok}']"
+    return out
+
+
 def _wire_ref(from_step: str, output: str, ref_prefix: str) -> str:
     """A cross-step reference the author declared structurally, rendered to the
     one correct jinja path -- the error-prone part the model no longer types.
 
     `from_step == "__input__"` means a field of the triggering record, which
-    lives at `vars.input.records[0].<field>`, not under a step."""
-    path = (output or "").strip()
+    lives at `vars.input.records[0].<field>`, not under a step. A `find` record
+    step's output is a LIST, so its prefix is `[0]` (the first match)."""
     if from_step == _INPUT_STEP:
         base = "vars.input.records[0]"
     else:
         base = f"vars.steps.{_jkey(from_step)}"
         if ref_prefix:
-            base += f".{ref_prefix}"
-    if path and not path.startswith(("[", ".")):
-        path = "." + path
-    return "{{ " + base + path + " }}"
+            base += ref_prefix if ref_prefix.startswith("[") \
+                else f".{ref_prefix}"
+    return "{{ " + base + _path_suffix(output) + " }}"
+
+
+def _resolve_value(val: Any, ref_prefix_by_step: dict[str, str]) -> Any:
+    """Translate every `{from_step, output}` ref inside a value (nested in a
+    list or object too, e.g. a `filters` entry's `value`) to jinja."""
+    if isinstance(val, dict):
+        if "from_step" in val:
+            src = str(val.get("from_step") or "")
+            return _wire_ref(src, str(val.get("output") or ""),
+                             ref_prefix_by_step.get(src, "data"))
+        return {k: _resolve_value(v, ref_prefix_by_step)
+                for k, v in val.items()}
+    if isinstance(val, list):
+        return [_resolve_value(v, ref_prefix_by_step) for v in val]
+    return val
 
 
 def _resolve_inputs(raw: dict[str, Any],
                     ref_prefix_by_step: dict[str, str]) -> dict[str, Any]:
     """Pass literals through; translate a `{from_step, output}` ref to jinja."""
-    out: dict[str, Any] = {}
-    for key, val in (raw or {}).items():
-        if isinstance(val, dict) and "from_step" in val:
-            src = str(val.get("from_step") or "")
-            out[key] = _wire_ref(src, str(val.get("output") or ""),
-                                 ref_prefix_by_step.get(src, "data"))
-        else:
-            out[key] = val
-    return out
+    return {key: _resolve_value(val, ref_prefix_by_step)
+            for key, val in (raw or {}).items()}
 
 
 def _resolve_for_each(raw: dict[str, Any],
@@ -103,7 +184,9 @@ _COMMON_STEP_KEYS = frozenset({"kind", "name", "for_each"})
 _STEP_KEYS: dict[str, frozenset[str]] = {
     "connector": frozenset({"connector", "operation", "inputs", "params",
                             "config"}),
-    "record": frozenset({"action", "module", "operation", "fields", "query"}),
+    "record": frozenset({"action"}).union(
+        *(set(v["required"]) | set(v["optional"])
+          for v in _RECORD_SHAPES.values())),
     "decision": frozenset({"conditions", "default"}),
     "manual_input": frozenset({"message", "options", "fields"}),
     "set_variable": frozenset({"values", "vars"}),
@@ -155,28 +238,65 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
                     f"{sorted(list(_KIND_TO_SKILL) + ['record'])}")
                 continue
         accepted = _STEP_KEYS.get(kind, frozenset())
+        if kind == "record":
+            spec = _RECORD_SHAPES[action]
+            accepted = frozenset({"action"} | set(spec["required"])
+                                 | set(spec["optional"]))
+            # `query` as a list of {field, operator, value} IS `filters`; one
+            # obvious spelling, not an ambiguity.
+            if (action == "find" and "filters" not in step
+                    and isinstance(step.get("query"), list)):
+                step = {**{k: v for k, v in step.items() if k != "query"},
+                        "filters": step["query"]}
         unknown = sorted(k for k in step
                          if k not in accepted and k not in _COMMON_STEP_KEYS)
         if unknown:
+            hint = (f"; example: {_record_example(action)}"
+                    if kind == "record" else "")
             errors.append(
-                f"step {i} ({name!r}): unknown key(s) {unknown} for a {kind!r} "
+                f"step {i} ({name!r}): unknown key(s) {unknown} for a "
+                f"{(kind + ' ' + action) if kind == 'record' else repr(kind)} "
                 f"step; accepted keys: "
-                f"{sorted(accepted | _COMMON_STEP_KEYS)}")
+                f"{sorted((accepted - {'kind'}) | _COMMON_STEP_KEYS)}{hint}")
             continue
         ref_prefix = _DEFAULT_REF_PREFIX.get(kind, "")
+        if kind == "record" and action == "find":
+            ref_prefix = "[0]"   # find_record output is a list of records
         ref_prefix_by_step[name] = ref_prefix
 
         if kind == "record":
-            resolved = {"module": step.get("module") or module or "",
-                        "operation": step.get("operation") or "Create"}
+            missing = [k for k in spec["required"]
+                       if not step.get(k) and not (k == "module" and module)]
+            if missing:
+                errors.append(
+                    f"step {i} ({name!r}): a record {action} step needs "
+                    f"{['`' + k + '`' for k in missing]}; example: "
+                    f"{_record_example(action)}")
+                continue
+            resolved = {"module": step.get("module") or module}
+            if action == "create":
+                resolved["operation"] = step.get("operation") or "Create"
+            elif step.get("operation"):
+                resolved["operation"] = step["operation"]
             raw_fields = step.get("fields") or {}
-            resolved["fields"] = _resolve_inputs(dict(raw_fields),
-                                                 ref_prefix_by_step)
-            if step.get("query") is not None:
-                resolved["query"] = step["query"]
-            if not resolved["module"]:
-                errors.append(f"step {i} ({name!r}): a record step needs a "
-                              "`module`")
+            if not isinstance(raw_fields, dict):
+                errors.append(f"step {i} ({name!r}): `fields` must be an "
+                              "object mapping field names to values; "
+                              f"example: {_record_example(action)}")
+                continue
+            if action == "update" and "record" in raw_fields:
+                errors.append(
+                    f"step {i} ({name!r}): `record` is the target of the "
+                    "update, a step key beside `fields`, not a field in it; "
+                    f"example: {_record_example('update')}")
+                continue
+            if raw_fields:
+                resolved["fields"] = _resolve_inputs(dict(raw_fields),
+                                                     ref_prefix_by_step)
+            for key in ("record", "filters", "limit", "sort"):
+                if step.get(key) is not None:
+                    resolved[key] = _resolve_value(step[key],
+                                                   ref_prefix_by_step)
         elif kind == "connector":
             inputs = _merged_alias(step, "inputs", "params",
                                    f"step {i} ({name!r})", errors)
@@ -220,12 +340,7 @@ def _plan_to_trace(steps: list[dict[str, Any]], module: str):
     return SkillTrace(calls=calls, module=module or None), errors
 
 
-@mcp.tool()
-def compose_playbook(steps: list[dict[str, Any]],
-                     name: str = "New Playbook",
-                     module: str = "",
-                     guard_containment: bool = True) -> dict[str, Any]:
-    """Build a playbook from a typed plan -- you declare the steps, this writes
+_COMPOSE_DOC = """Build a playbook from a typed plan -- you declare the steps, this writes
     and verifies the YAML. Do NOT hand-author YAML when you can use this.
 
     `steps` is the ordered plan, each a small object with a `kind` and a `name`:
@@ -234,9 +349,13 @@ def compose_playbook(steps: list[dict[str, Any]],
         maps each parameter to a literal, or to `{from_step, output}` to read an
         earlier step's output (this writes the correct `vars.steps...` path for
         you; never type jinja yourself).
-      - `record`: `{kind, name, action, module, operation?, fields?}` where
-        `action` is `create` / `update` / `find` -- a record action on an FSR
-        module. `fields` values may also be `{from_step, output}` refs.
+      - `record`: a record action on an FSR module, `action` is `create` /
+        `update` / `find`. The accepted keys differ per action (`?` = optional);
+        `fields` / `record` / filter values may be `{from_step, output}` refs
+        (`from_step: "__input__"` is the triggering record, `output: "@id"` its
+        IRI; a `find` step's output is its first match). `update` MUST name its
+        target with `record`:
+{RECORD_SHAPES}
       - `decision`: `{kind, name, conditions, default?}` -- route on conditions
         over earlier outputs.
       - `manual_input`: `{kind, name, message?, options?, fields?}` -- a human
@@ -259,6 +378,12 @@ def compose_playbook(steps: list[dict[str, Any]],
     could not be wired -- fix the plan and compose again; do not paper over it in
     prose. Deliver the returned YAML with `emit_playbook_offer`.
     """
+
+
+def compose_playbook(steps: list[dict[str, Any]],
+                     name: str = "New Playbook",
+                     module: str = "",
+                     guard_containment: bool = True) -> dict[str, Any]:
     if not isinstance(steps, list) or not steps:
         return {"ok": False, "code": "no_steps",
                 "message": "pass a non-empty ordered list of plan steps"}
@@ -268,7 +393,8 @@ def compose_playbook(steps: list[dict[str, Any]],
 
     trace, errors = _plan_to_trace(steps, module)
     if errors:
-        return {"ok": False, "code": "bad_plan", "errors": errors}
+        return {"ok": False, "code": "bad_plan", "errors": errors,
+                "message": "; ".join(errors)}
     if len(trace) == 0:
         return {"ok": False, "code": "no_steps",
                 "message": "the plan produced no compilable steps"}
@@ -305,8 +431,23 @@ def compose_playbook(steps: list[dict[str, Any]],
     except ImportError as exc:  # noqa: BLE001
         compile_summary = {"ok": False, "errors": [str(exc)]}
 
+    # A plan that compiles to YAML the compiler then rejects is not a success:
+    # report it as one failure with the error text, yaml attached, instead of
+    # `ok: true` with the real verdict buried in compile_summary.
+    hard = [e for e in compile_summary.get("errors") or []
+            if not isinstance(e, dict) or e.get("severity", "error") == "error"]
+    ok = bool(compile_summary.get("ok")) or not hard
+    extra: dict[str, Any] = {}
+    if not ok:
+        extra = {"code": "compile_failed",
+                 "errors": [(f"{e.get('path', '')}: {e.get('message', '')}"
+                             if isinstance(e, dict) else str(e))
+                            for e in hard]}
+        extra["message"] = "; ".join(extra["errors"])
+
     return {
-        "ok": True,
+        "ok": ok,
+        **extra,
         "yaml": yaml_text,
         "compile_summary": compile_summary,
         "verified": compiled.get("verified", {}),
@@ -319,3 +460,8 @@ def compose_playbook(steps: list[dict[str, Any]],
         "pruned": compiled.get("pruned", {}),
         "static_errors": compiled.get("static_errors", []),
     }
+
+
+compose_playbook.__doc__ = _COMPOSE_DOC.replace("{RECORD_SHAPES}",
+                                                _record_shape_doc())
+compose_playbook = mcp.tool()(compose_playbook)
