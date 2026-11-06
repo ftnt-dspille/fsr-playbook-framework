@@ -1730,6 +1730,21 @@ _AUTHORING_YAML_TOOLS = frozenset({
 _INVOKE_FAILURE = "_invoke_failure"
 
 
+def _leaf_exception(exc: BaseException) -> BaseException:
+    """Innermost real error of an ExceptionGroup ("unhandled errors in a
+    TaskGroup") or ``__cause__`` chain, so the model sees the cause, not the
+    wrapper."""
+    for _ in range(20):
+        subs = getattr(exc, "exceptions", None)
+        if subs:
+            exc = subs[0]
+        elif exc.__cause__ is not None:
+            exc = exc.__cause__
+        else:
+            break
+    return exc
+
+
 def _invoke(spec: ToolSpec, name: str, raw_args: dict[str, Any]) -> Any:
     """Call the tool, telling a bad CALL apart from a failing TOOL.
 
@@ -1748,6 +1763,7 @@ def _invoke(spec: ToolSpec, name: str, raw_args: dict[str, Any]) -> Any:
         return spec.fn(**raw_args)
     except Exception as e:  # noqa: BLE001 -- surface to the LLM, not a 500
         logging.getLogger(__name__).exception("tool %s raised", name)
+        e = _leaf_exception(e)   # an ExceptionGroup/cause chain hides the real error
         return {"ok": False, "code": "tool_error", "tool": name,
                 "error": f"{name} failed internally ({type(e).__name__}: {e}). "
                          "This is a tool fault, not your arguments -- do not "

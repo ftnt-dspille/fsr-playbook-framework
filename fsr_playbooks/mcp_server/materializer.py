@@ -805,12 +805,13 @@ def _make_fn(
     def fn(**kwargs: Any) -> Any:
         if url:
             call_headers = _auth_headers(rule) if rule is not None else (headers or {})
-            raw = client.mcp.call_tool_at(
+            raw = _guarded(lambda: client.mcp.call_tool_at(
                 url, call_headers, tool_name,
-                arguments=kwargs or None, verify=verify)
-            return _envelope(raw)
-        raw = client.mcp.call_tool(server, tool_name, arguments=kwargs or None)
-        env = _envelope(raw)
+                arguments=kwargs or None, verify=verify))
+            return _envelope(_failed_result(raw))
+        raw = _guarded(lambda: client.mcp.call_tool(
+            server, tool_name, arguments=kwargs or None))
+        env = _envelope(_failed_result(raw))
         # On-box Power-2 calls only: an EXTERNAL server is not an installed
         # connector, so it has no direct connector step to compile to even if an
         # operator named its rule "connector:…".
@@ -818,6 +819,70 @@ def _make_fn(
         return env
     fn.__name__ = _make_name(server, tool_name)
     return fn
+
+
+_LOOKUP_UNAVAILABLE = (
+    "Native record reads are not available here. Use search_module_records or "
+    "get_record for record data. If you cannot read the record, tell the "
+    "analyst the lookup failed; do not infer field names or values.")
+_LOOKUP_TIMEOUT = (
+    "The native lookup timed out before the platform answered. Use "
+    "search_module_records or get_record for record data. If you cannot read "
+    "the record, tell the analyst the lookup failed; do not infer field names "
+    "or values.")
+
+
+def _leaf(exc: BaseException) -> BaseException:
+    """Innermost real error: anyio/mcp wrap a transport failure in an
+    ExceptionGroup ("unhandled errors in a TaskGroup") or chain it by cause."""
+    for _ in range(20):
+        subs = getattr(exc, "exceptions", None)
+        if subs:
+            exc = subs[0]
+        elif exc.__cause__ is not None:
+            exc = exc.__cause__
+        else:
+            break
+    return exc
+
+
+def _failure_code(text: str) -> str | None:
+    t = (text or "").lower()
+    if any(m in t for m in ("401", "403", "unauthorized", "forbidden")):
+        return "mcp_auth_unavailable"
+    if any(m in t for m in ("timeout", "timed out", "stream ended")):
+        return "mcp_timeout"
+    return None
+
+
+def _failure_envelope(code: str, detail: str) -> dict[str, Any]:
+    return {"ok": False, "code": code,
+            "error": _LOOKUP_TIMEOUT if code == "mcp_timeout" else _LOOKUP_UNAVAILABLE,
+            "detail": detail[:300]}
+
+
+def _guarded(call: Callable[[], Any]) -> Any:
+    """Run an MCP call; a recognizable auth/timeout transport error becomes a
+    stable error envelope, anything else is re-raised as its LEAF error."""
+    try:
+        return call()
+    except Exception as exc:  # noqa: BLE001
+        leaf = _leaf(exc)
+        code = _failure_code(f"{type(leaf).__name__}: {leaf}")
+        if code:
+            return _failure_envelope(code, str(leaf))
+        if leaf is exc:
+            raise
+        raise leaf from exc
+
+
+def _failed_result(raw: Any) -> Any:
+    """A gateway ``{"status": "failed", "error": ...}`` result is a failure, not
+    data: it used to pass through as a success and the model guessed fields."""
+    if isinstance(raw, dict) and str(raw.get("status", "")).lower() == "failed":
+        detail = str(raw.get("error") or raw.get("message") or raw)
+        return _failure_envelope(_failure_code(detail) or "mcp_tool_failed", detail)
+    return raw
 
 
 def _envelope(raw: Any) -> Any:

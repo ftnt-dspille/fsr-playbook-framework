@@ -970,3 +970,69 @@ def test_a_corrupt_shared_cache_falls_back_to_minting(monkeypatch):
     M.ensure_initialized()
     assert calls["n"] == 1
     assert client.calls["list"]["headers"] == {"Authorization": "Bearer tokOK"}
+
+
+# --- native record lookups under HMAC (tracker A1.6) -------------------------
+
+def _client_returning(result=None, exc=None):
+    class _MCP:
+        def list_tools(self, server):
+            return [{"name": "query_records", "description": "q",
+                     "input_schema": {"type": "object", "properties": {}}}]
+        def call_tool(self, server, name, arguments=None):
+            if exc is not None:
+                raise exc
+            return result
+    class _Client:
+        def supports_native_mcp(self):
+            return True
+        mcp = _MCP()
+    return _Client()
+
+
+def _call(client):
+    M.configure(mcp_allowlist={"modules": {"tools": "*"}}, client_factory=lambda: client)
+    M.ensure_initialized()
+    return T.REGISTRY["mcp_modules__query_records"].fn()
+
+
+def test_failed_401_result_is_an_auth_error_envelope():
+    res = _call(_client_returning(
+        {"status": "failed", "error": "Client error '401 Unauthorized' for url /api/3/alerts"}))
+    assert res["ok"] is False and res["code"] == "mcp_auth_unavailable"
+    assert "Native record reads are not available here" in res["error"]
+    assert "do not infer field names or values" in res["error"]
+
+
+def test_failed_timeout_result_is_a_timeout_envelope():
+    res = _call(_client_returning({"status": "failed", "error": "read timeout"}))
+    assert res["ok"] is False and res["code"] == "mcp_timeout"
+
+
+def test_stream_ended_exception_group_maps_to_timeout():
+    leaf = RuntimeError("MCPError: SSE stream ended without a response")
+    grp = ExceptionGroup("unhandled errors in a TaskGroup", [leaf])  # noqa: F821
+    res = _call(_client_returning(exc=grp))
+    assert res["ok"] is False and res["code"] == "mcp_timeout"
+
+
+def test_other_failed_result_is_still_an_error_not_success():
+    res = _call(_client_returning({"status": "failed", "error": "boom"}))
+    assert res["ok"] is False and res["code"] == "mcp_tool_failed"
+
+
+def test_success_result_passes_through():
+    ok = {"status": "success", "records": [1]}
+    assert _call(_client_returning(ok)) == ok
+
+
+def test_invoke_reports_leaf_of_exception_group():
+    leaf = ValueError("the real cause")
+    grp = ExceptionGroup("unhandled errors in a TaskGroup", [leaf])  # noqa: F821
+
+    def boom():
+        raise grp
+    spec = T.ToolSpec(name="x", description="d", input_schema={"type": "object", "properties": {}}, fn=boom)
+    out = T._invoke(spec, "x", {})
+    assert "ValueError: the real cause" in out["error"]
+    assert "TaskGroup" not in out["error"]
