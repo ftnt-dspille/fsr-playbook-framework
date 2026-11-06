@@ -11,6 +11,7 @@ Playbook.tags / Collection.tags.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -350,6 +351,33 @@ def _hoist_args(out: dict, args: dict) -> None:
     out.update(args)
 
 
+def _names_for_ids(out: dict, args: dict, db: sqlite3.Connection) -> None:
+    def q(sql: str, *a):
+        try:
+            return db.execute(sql, a).fetchone()
+        except sqlite3.OperationalError:
+            return None
+    agent_id = ""
+    ag = out.get("agent")
+    if isinstance(ag, str) and re.fullmatch(r"[0-9a-f]{32}", ag):
+        row = q("SELECT name, is_self FROM agents WHERE agent_id = ?", ag)
+        if row:
+            out.pop("agent")
+            agent_id = "" if row[1] else ag
+            if not row[1]:
+                out["on_remote"] = row[0]
+                if out.get("pickFromTenant") is False:
+                    out.pop("pickFromTenant")
+        else:
+            agent_id = ag
+    cfg = args.get("config")
+    if isinstance(cfg, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", cfg):
+        row = q("SELECT config_name FROM connector_configs WHERE config_id = ? "
+                "AND agent_id = ? AND config_name != '__default__'", cfg, agent_id)
+        if row:
+            args["config"] = row[0]
+
+
 def _decompile_step(s, pb_name: str | None = None,
                      db: sqlite3.Connection | None = None) -> dict:
     """Emit a step in the canonical authoring surface:
@@ -385,6 +413,13 @@ def _decompile_step(s, pb_name: str | None = None,
                     except (ValueError, TypeError):
                         pass
                 out[env_key] = val
+
+        # Readable names instead of ids, when the warmed catalog knows them:
+        # `agent: <agentId>` -> `on_remote: <agent name>`, and a config UUID ->
+        # its config name. The compiler resolves both back (scoped to the agent),
+        # so the YAML survives a box where the ids differ.
+        if db is not None:
+            _names_for_ids(out, args, db)
 
         # Data Ingestion Wizard: the Fetch playbook's Start step carries the
         # configuration-form schema as a JSON *string* under

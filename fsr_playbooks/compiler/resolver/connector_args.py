@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any
 
 from ..errors import CompileError, ErrorCode
 from ..ir import Playbook, Step
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_AGENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 from ..typed_args.steps import expand_connector as _expand_connector_typed
 from ..typed_args.steps import (
     expand_trigger_tenant_playbook as _expand_trigger_tenant_playbook_typed,
@@ -264,7 +267,13 @@ class ConnectorArgsMixin:
         ) -> tuple[str | None, str | None]: ...
         def resolve_config_id(
             self, connector: str, config_name: str | None = None,
+            agent_id: str | None = None,
         ) -> str | None: ...
+        def config_locations(self, connector: str, config_name: str) -> list[str]: ...
+        def config_names(self, connector: str, agent_id: str | None = None) -> list[str]: ...
+        def agents_warmed(self) -> bool: ...
+        def resolve_agent_id(self, name_or_id: str) -> str | None: ...
+        def agent_name(self, agent_id: str) -> str | None: ...
 
         # from NormalizerMixin (normalizers.py)
         def _check_param_visibility(
@@ -730,9 +739,61 @@ class ConnectorArgsMixin:
         # on the box), fall back to the `""` sentinel ("use the connector's
         # default config") -- the original behavior -- so a portable/library
         # playbook compiled offline stays config-free.
+        # Where the step runs: `on_remote:` / `agent:` name a remote agent. The
+        # wire wants the agent's hex `agentId`; YAML keeps the readable name.
+        agent_id = self._resolve_step_agent(a, path, errors)
+        # `config:` in YAML is the config NAME; the wire wants the UUID of that
+        # config ON THE AGENT the step runs on (an agent-bound config cannot run
+        # on the hub and vice versa -- the step hangs or fails INTEGRATION-12).
+        cfg = a.get("config")
+        if isinstance(cfg, str) and cfg and not _UUID_RE.match(cfg) and "{{" not in cfg:
+            cid = self.resolve_config_id(connector, cfg, agent_id)
+            if cid:
+                a["config"] = cid
+            elif self.agents_warmed():
+                where = self.config_locations(connector, cfg)
+                here = self.agent_name(agent_id) if agent_id else "self (the hub)"
+                avail = self.config_names(connector, agent_id)
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"{connector} config {cfg!r} does not exist on {here}"
+                             + (f"; it exists on: {', '.join(where)}" if where else "")),
+                    path=f"{path}.arguments.config",
+                    suggestion=(
+                        f"set on_remote: {where[0]}" if where and where[0] != "self"
+                         else "drop on_remote to run on the hub" if where else
+                         (f"configs there: {', '.join(avail)}" if avail
+                          else "create the config there first")),
+                ))
         if not a.get("config"):
-            cid = self.resolve_config_id(connector)
+            cid = self.resolve_config_id(connector, None, agent_id)
             a["config"] = cid if cid else ""
+
+    def _resolve_step_agent(self, a: dict, path: str, errors: list) -> str:
+        """Turn the step's `agent` (name or id) into the wire `agentId`.
+
+        Returns the agent id the step runs on (`''` = the hub). An agent name
+        the warmed catalog does not know is an error when agents are warmed;
+        unwarmed, the value passes through untouched.
+        """
+        agent = a.get("agent")
+        if not isinstance(agent, str) or not agent or agent == "Pick From Record Ownership" \
+                or "{{" in agent:
+            return ""
+        aid = self.resolve_agent_id(agent)
+        if aid is None:
+            if self.agents_warmed() and not _AGENT_ID_RE.match(agent):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=f"unknown agent {agent!r} (not on the warmed box)",
+                    path=f"{path}.arguments.agent",
+                ))
+            return agent if _AGENT_ID_RE.match(agent) else ""
+        if aid == "":
+            a.pop("agent", None)  # the hub's own agent: run locally
+            return ""
+        a["agent"] = aid
+        return aid
 
     def _resolve_workflow_reference_args(
         self, step: Step, path: str, errors: list[CompileError],

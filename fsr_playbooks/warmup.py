@@ -45,11 +45,19 @@ TEAMS_URL = "/api/3/teams?$limit=2147483647&$orderby=name"
 CONNECTORS_URL = "/api/integration/connectors/"
 INSTALLED_LIST_PARAMS = {"page_size": 1000, "active": "true"}
 CONFIG_LIST_PARAMS = {"page_size": 1000}
+#: Every connector configuration on the box, hub AND remote agents. The
+#: connectors listing above omits agent-bound configs (an agent's connector is a
+#: separate record that only appears with ``?agent=<agentId>``), so a config that
+#: lives only on an agent was never warmed.
+CONFIGURATION_URL = "/api/integration/configuration/"
+AGENTS_URL = "/api/3/agents"
+#: Name the hub's own (local) agent is stored under in the ``agents`` table.
+SELF_AGENT = "self"
 
 #: Tables that belong to the box. ``warm_catalog`` replaces their contents.
 BOX_TABLES = (
     "modules", "module_fields", "picklists", "tags", "teams",
-    "connectors", "operations", "operation_params", "connector_configs",
+    "connectors", "operations", "operation_params", "connector_configs", "agents",
 )
 #: Collections whose row count is stamped, so a later freshness check sees drift.
 COUNT_COLLECTIONS = ("model_metadatas", "attribute_metadatas", "picklists",
@@ -161,7 +169,59 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
     mcols = {r[1] for r in conn.execute("PRAGMA table_info(modules)")}
     if "unique_constraint" not in mcols:
         conn.execute("ALTER TABLE modules ADD COLUMN unique_constraint TEXT")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS agents ("
+        "  name TEXT PRIMARY KEY,"
+        "  agent_id TEXT NOT NULL,"
+        "  is_self INTEGER DEFAULT 0)"
+    )
+    _migrate_connector_configs_agent(conn)
     _catalog_meta.ensure_table(conn)
+
+
+def _migrate_connector_configs_agent(conn: sqlite3.Connection) -> None:
+    """Give ``connector_configs`` an ``agent_id`` column, keyed into the PK.
+
+    ``''`` is the hub (self); a remote agent's config carries its ``agentId``.
+    The same config name may exist on the hub and on an agent, so the primary
+    key must include the agent. SQLite cannot alter a PK, so the table is
+    rebuilt, keeping every existing column (e.g. ``allow_imports``).
+    """
+    info = list(conn.execute("PRAGMA table_info(connector_configs)"))
+    if not info:
+        conn.execute(
+            "CREATE TABLE connector_configs ("
+            "  connector TEXT NOT NULL,"
+            "  config_name TEXT NOT NULL,"
+            "  config_id TEXT,"
+            "  is_default INTEGER DEFAULT 0,"
+            "  agent_id TEXT NOT NULL DEFAULT '',"
+            "  PRIMARY KEY (connector, config_name, agent_id))"
+        )
+        return
+    cols = [r[1] for r in info]
+    if "agent_id" in cols:
+        return
+    extra = [f"{r[1]} {r[2] or ''}".strip() for r in info
+             if r[1] not in ("connector", "config_name", "config_id", "is_default")]
+    keep = ", ".join(cols)
+    # legacy_alter_table: a rename otherwise re-validates every view in the
+    # schema, and one stale view (unrelated to this table) aborts the rebuild.
+    conn.execute("PRAGMA legacy_alter_table=ON")
+    conn.execute("ALTER TABLE connector_configs RENAME TO _connector_configs_old")
+    conn.execute(
+        "CREATE TABLE connector_configs ("
+        "  connector TEXT NOT NULL,"
+        "  config_name TEXT NOT NULL,"
+        "  config_id TEXT,"
+        "  is_default INTEGER DEFAULT 0,"
+        + "".join(f"  {c}," for c in extra)
+        + "  agent_id TEXT NOT NULL DEFAULT '',"
+        "  PRIMARY KEY (connector, config_name, agent_id))"
+    )
+    conn.execute(f"INSERT INTO connector_configs ({keep}) SELECT {keep} FROM _connector_configs_old")
+    conn.execute("DROP TABLE _connector_configs_old")
+    conn.execute("PRAGMA legacy_alter_table=OFF")
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -674,7 +734,7 @@ def fetch_connector_configs(client) -> tuple[list[dict], str | None]:
     return resp.json().get("data") or [], resp.headers.get("ETag")
 
 
-def _rows_for(connector: str, configs: list[dict]) -> list[tuple]:
+def _rows_for(connector: str, configs: list[dict], agent_id: str = "") -> list[tuple]:
     rows: list[tuple] = []
     default = None
     for c in configs:
@@ -683,18 +743,24 @@ def _rows_for(connector: str, configs: list[dict]) -> list[tuple]:
         is_def = bool(c.get("default"))
         if name is None:
             continue
-        rows.append((connector, name, cid, 1 if is_def else 0))
+        rows.append((connector, name, cid, 1 if is_def else 0, agent_id))
         if is_def and default is None:
             default = cid
     if default is None and configs:
         default = configs[0].get("config_id")
     if default is not None or configs:
-        rows.append((connector, "__default__", default, 1))
+        rows.append((connector, "__default__", default, 1, agent_id))
     return rows
 
 
 def write_connector_configs(conn: sqlite3.Connection, members: list[dict]) -> tuple[int, int]:
-    """Replace connector_configs from the connector rows. Returns (connectors, rows)."""
+    """Replace connector_configs from the connector rows. Returns (connectors, rows).
+
+    ``members`` are connector-listing rows (each with a ``configuration`` list).
+    A row may carry ``_agent_id``: the remote agent its configs live on (``''``
+    or absent = the hub). See :func:`fetch_all_connector_configs`.
+    """
+    _migrate_connector_configs_agent(conn)  # older catalogs: add agent_id first
     conn.execute("DELETE FROM connector_configs")
     n_conn = 0
     all_rows: list[tuple] = []
@@ -703,13 +769,13 @@ def write_connector_configs(conn: sqlite3.Connection, members: list[dict]) -> tu
         configs = m.get("configuration") or []
         if not name or not configs:
             continue
-        rows = _rows_for(name, configs)
+        rows = _rows_for(name, configs, m.get("_agent_id") or "")
         if rows:
             n_conn += 1
             all_rows.extend(rows)
     conn.executemany(
         "INSERT OR REPLACE INTO connector_configs "
-        "(connector, config_name, config_id, is_default) VALUES (?, ?, ?, ?)",
+        "(connector, config_name, config_id, is_default, agent_id) VALUES (?, ?, ?, ?, ?)",
         all_rows,
     )
     record_verification(
@@ -719,6 +785,88 @@ def write_connector_configs(conn: sqlite3.Connection, members: list[dict]) -> tu
         notes=f"connectors_with_config={n_conn}, rows={len(all_rows)}",
     )
     return n_conn, len(all_rows)
+
+
+def _paged(client, url: str, params: dict) -> list[dict]:
+    """All ``data`` rows of an integration-API listing (follows ``nextPage``)."""
+    out: list[dict] = []
+    page = 1
+    while True:
+        body = client.get(url, params={**params, "page": page})
+        rows = body.get("data", []) if isinstance(body, dict) else (body or [])
+        out.extend(r for r in rows if isinstance(r, dict))
+        if not (isinstance(body, dict) and body.get("nextPage")) or not rows:
+            return out
+        page += 1
+
+
+def fetch_agents(client) -> tuple[dict[str, str], str | None]:
+    """``({agent name: agentId}, self_agent_id)``.
+
+    Remote agents come from ``/api/3/agents``. The hub's own agent is not listed
+    there; its id is the ``agent`` stamped on the hub's connector records.
+    """
+    body = client.get(AGENTS_URL, params={"$limit": 2147483647})
+    members = body.get("hydra:member", []) if isinstance(body, dict) else []
+    agents = {a["name"]: a["agentId"] for a in members
+              if isinstance(a, dict) and a.get("name") and a.get("agentId")}
+    hub = _paged(client, CONNECTORS_URL, dict(CONFIG_LIST_PARAMS))
+    ids = [r.get("agent") for r in hub if r.get("agent")]
+    self_id = max(set(ids), key=ids.count) if ids else None
+    return agents, self_id
+
+
+def fetch_all_connector_configs(client) -> tuple[list[dict], dict[str, str], str | None]:
+    """Every config on the box as connector rows for :func:`write_connector_configs`.
+
+    Returns ``(members, agents, self_id)``. Each member is ``{name, _agent_id,
+    configuration: [...]}``: one per (connector, agent). Hub configs get
+    ``_agent_id=''``; a remote agent's configs get its ``agentId``. Connector ids
+    on agent configs point at the agent's own connector record, which only the
+    ``?agent=<agentId>`` listing returns, so each such agent is listed once.
+    """
+    agents, self_id = fetch_agents(client)
+    configs = _paged(client, CONFIGURATION_URL, {"page_size": 1000, "format": "json"})
+    by_agent: dict[str, list[dict]] = {}
+    for c in configs:
+        by_agent.setdefault(c.get("agent") or "", []).append(c)
+    conn_name: dict[tuple[str, int], str] = {}
+    for agent in by_agent:
+        params = dict(CONFIG_LIST_PARAMS)
+        if agent and agent != self_id:
+            params["agent"] = agent
+        for r in _paged(client, CONNECTORS_URL, params):
+            if r.get("id") is not None and r.get("name"):
+                conn_name[(agent, r["id"])] = r["name"]
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for agent, rows in by_agent.items():
+        aid = "" if (not agent or agent == self_id) else agent
+        for c in rows:
+            name = conn_name.get((agent, c.get("connector")))
+            if name:
+                grouped.setdefault((name, aid), []).append(c)
+    members = [{"name": n, "_agent_id": a, "configuration": cfgs}
+               for (n, a), cfgs in sorted(grouped.items())]
+    return members, agents, self_id
+
+
+def write_agents(conn: sqlite3.Connection, agents: dict[str, str], self_id: str | None) -> int:
+    conn.execute("DELETE FROM agents")
+    rows = [(n, a, 0) for n, a in agents.items()]
+    if self_id:
+        rows.append((SELF_AGENT, self_id, 1))
+    conn.executemany("INSERT OR REPLACE INTO agents (name, agent_id, is_self) VALUES (?, ?, ?)", rows)
+    return len(rows)
+
+
+def configs_fingerprint(members: list[dict]) -> str:
+    """A stable hash of (connector, agent, config name, config id) -- the freshness key."""
+    import hashlib
+    items = sorted(
+        (m.get("name") or "", m.get("_agent_id") or "", c.get("name") or "", c.get("config_id") or "")
+        for m in members for c in (m.get("configuration") or [])
+    )
+    return hashlib.sha256(json.dumps(items).encode()).hexdigest()[:16]
 
 
 # ----------------------- modules: the orchestrated read -----------------------
@@ -936,13 +1084,13 @@ def _warm_in_transaction(
     errors.extend(conn_errs)
 
     try:
-        members, cfg_etag = fetch_connector_configs(client)
+        members, agents, self_id = fetch_all_connector_configs(client)
     except Exception as e:  # noqa: BLE001
         errors.append(f"connector_configs: {e!r}")
     else:
         write_connector_configs(conn, members)
-        if cfg_etag:
-            etags["connector_configs"] = cfg_etag
+        write_agents(conn, agents, self_id)
+        _catalog_meta.set_(conn, "configs_fingerprint", configs_fingerprint(members))
 
     identity = stamp_provenance(conn, client, instance_label=instance_label)
     record_warm_markers(conn, etags)
@@ -1066,11 +1214,20 @@ def box_catalog(client, cache_dir: str | Path | None = None, *, instance_label: 
         try:
             status, _, _ = _catalog_meta.check_instance(conn, base_url)
             recorded = {c: _catalog_meta.get(conn, f"count:{c}") for c in _FRESHNESS_COLLECTIONS}
+            recorded_fp = _catalog_meta.get(conn, "configs_fingerprint")
         finally:
             conn.close()
         live = _live_counts(client)
+        # Connector configs move independently of modules (a config added,
+        # renamed or moved to an agent), and a stale config row compiles a step
+        # against the wrong config -- so they are part of freshness too.
+        try:
+            live_fp = configs_fingerprint(fetch_all_connector_configs(client)[0])
+        except Exception:  # noqa: BLE001
+            live_fp = None  # cannot read configs: judge freshness by modules alone
         if status == "ok" and all(live[c] is not None and str(live[c]) == recorded[c]
-                                  for c in _FRESHNESS_COLLECTIONS):
+                                  for c in _FRESHNESS_COLLECTIONS) \
+                and (live_fp is None or live_fp == recorded_fp):
             return path
     fresh = not path.exists()
     try:

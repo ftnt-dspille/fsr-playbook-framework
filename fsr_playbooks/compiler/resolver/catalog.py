@@ -187,40 +187,123 @@ class CatalogLookupMixin:
         ))
         return name
 
+    def _has_agent_col(self) -> bool:
+        try:
+            return any(r[1] == "agent_id" for r in self.conn.execute(
+                "PRAGMA table_info(connector_configs)"))
+        except sqlite3.OperationalError:
+            return False
+
     def resolve_config_id(
-        self, connector: str, config_name: str | None = None
+        self, connector: str, config_name: str | None = None,
+        agent_id: str | None = None,
     ) -> str | None:
         """Return the per-instance config UUID for ``connector`` (+ optional
         friendly ``config_name``), read from the warmed ``connector_configs``
         table. ``None`` when unwarmed or unknown.
 
+        ``agent_id`` scopes the lookup to where the step runs: ``None``/``''`` is
+        the hub, a hex ``agentId`` a remote agent. A config of the same name on
+        another agent does not match -- running there would use the wrong one.
+
         This is the in-package replacement for the dev-only
         ``tooling/connector_configs.py``: the compiler must resolve configs
         offline from the warmed catalog, never by importing ``tooling/`` or
         hitting the network. When ``config_name`` is None we return the
-        instance's default config (``config_name = '__default__'``), falling
+        default config for that agent (``config_name = '__default__'``), falling
         back to any single config for the connector.
         """
+        scope: str = ""
+        args: tuple[str, ...] = ()
+        if self._has_agent_col():
+            scope, args = " AND agent_id = ?", (agent_id or "",)
         try:
             if config_name:
                 row = self.conn.execute(
                     "SELECT config_id FROM connector_configs "
-                    "WHERE connector = ? AND config_name = ?",
-                    (connector, config_name),
+                    "WHERE connector = ? AND config_name = ?" + scope,
+                    (connector, config_name, *args),
                 ).fetchone()
                 return (row[0] or None) if row else None
             # default: the '__default__' row, else the is_default row, else any.
             row = self.conn.execute(
                 "SELECT config_id FROM connector_configs "
-                "WHERE connector = ? "
+                "WHERE connector = ?" + scope + " "
                 "ORDER BY (config_name = '__default__') DESC, is_default DESC "
                 "LIMIT 1",
-                (connector,),
+                (connector, *args),
             ).fetchone()
             return (row[0] or None) if row else None
         except sqlite3.OperationalError:
             # Table absent on an old/slim DB -- unwarmed, nothing to resolve.
             return None
+
+    def config_locations(self, connector: str, config_name: str) -> list[str]:
+        """Where a named config exists: agent names (``self`` = the hub)."""
+        if not self._has_agent_col():
+            return []
+        try:
+            rows = self.conn.execute(
+                "SELECT c.agent_id, a.name FROM connector_configs c "
+                "LEFT JOIN agents a ON a.agent_id = c.agent_id "
+                "WHERE c.connector = ? AND c.config_name = ?",
+                (connector, config_name),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return sorted({(r[1] or r[0]) if r[0] else "self" for r in rows})
+
+    def config_names(self, connector: str, agent_id: str | None = None) -> list[str]:
+        if not self._has_agent_col():
+            return []
+        try:
+            return [r[0] for r in self.conn.execute(
+                "SELECT config_name FROM connector_configs WHERE connector = ? "
+                "AND agent_id = ? AND config_name != '__default__' ORDER BY config_name",
+                (connector, agent_id or ""))]
+        except sqlite3.OperationalError:
+            return []
+
+    def config_by_id(self, config_id: str) -> tuple[str, str, str] | None:
+        """``(connector, config_name, agent_id)`` for a config UUID, or None."""
+        if not self._has_agent_col():
+            return None
+        try:
+            row = self.conn.execute(
+                "SELECT connector, config_name, agent_id FROM connector_configs "
+                "WHERE config_id = ? AND config_name != '__default__'", (config_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        return (row[0], row[1], row[2]) if row else None
+
+    def agents_warmed(self) -> bool:
+        try:
+            return bool(self.conn.execute("SELECT count(*) FROM agents").fetchone()[0])
+        except sqlite3.OperationalError:
+            return False
+
+    def resolve_agent_id(self, name_or_id: str) -> str | None:
+        """An agent's ``agentId`` from its name (or the id itself). ``self``/the
+        hub's own id resolve to ``''``. None when unknown or unwarmed."""
+        try:
+            row = self.conn.execute(
+                "SELECT agent_id, is_self FROM agents WHERE name = ? OR agent_id = ?",
+                (name_or_id, name_or_id),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        if not row:
+            return None
+        return "" if row[1] else row[0]
+
+    def agent_name(self, agent_id: str) -> str | None:
+        try:
+            row = self.conn.execute(
+                "SELECT name FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        return row[0] if row else None
 
     def connector(self, name: str) -> sqlite3.Row | None:
         return self.conn.execute(

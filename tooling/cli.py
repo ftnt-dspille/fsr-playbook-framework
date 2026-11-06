@@ -70,6 +70,25 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     return 0
 
 
+def _box_db(client) -> Path:
+    """The per-box reference catalog for ``client``, warmed when missing or stale.
+
+    Stale = another box's stamp, moved module/field totals, or a changed set of
+    connector configs (added, renamed, or moved between the hub and an agent).
+    Compiling against it resolves `config:` names and `on_remote:` agents to the
+    ids THIS box uses.
+    """
+    from fsr_playbooks.warmup import box_catalog
+    path = box_catalog(client)
+    print(f"catalog: {path}", file=sys.stderr)
+    return path
+
+
+def _instance_client(name: str):
+    from pyfsr.instances import InstanceRegistry  # type: ignore
+    return InstanceRegistry.load().client(name)
+
+
 def cmd_compile(args: argparse.Namespace) -> int:
     from fsr_playbooks.compiler import compile_yaml
     from fsr_playbooks.compiler.errors import ErrorCode
@@ -77,7 +96,10 @@ def cmd_compile(args: argparse.Namespace) -> int:
     lax_codes = None
     if getattr(args, "lax", False):
         lax_codes = {ErrorCode.UNKNOWN_PARAM, ErrorCode.UNKNOWN_CONNECTOR}
-    result = compile_yaml(text, Path(args.db), lax_codes=lax_codes)
+    db = Path(args.db)
+    if getattr(args, "instance", None):
+        db = _box_db(_instance_client(args.instance))
+    result = compile_yaml(text, db, lax_codes=lax_codes)
     if not result.ok:
         _print_errors(result.errors)
         return 1
@@ -755,6 +777,13 @@ def cmd_push(args: argparse.Namespace) -> int:
     if getattr(args, "url", None) or getattr(args, "user", None) or getattr(args, "password", None):
         _env._cached_cfg = None  # force re-read with updated env
 
+    if getattr(args, "instance", None):
+        _client = _instance_client(args.instance)
+        _env.get_client = lambda: _client  # push to the named instance
+        _env.get_config().is_live = lambda: True  # type: ignore[method-assign]
+        args.db = str(_box_db(_client))
+    elif _env.get_config().is_live() and not getattr(args, "no_box_catalog", False):
+        args.db = str(_box_db(_env.get_client()))
     text = _push_input_text(Path(args.input).read_text(), Path(args.db))
     result = compile_yaml(text, Path(args.db))
     if not result.ok:
@@ -5123,6 +5152,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_refresh)
 
     sp = sub.add_parser("compile", help="YAML -> FSR JSON")
+    sp.add_argument("--instance", metavar="NAME", default=None,
+                    help="pyfsr instance to compile for: warms (or reuses) that box's "
+                         "catalog and resolves config names / on_remote agents to its ids")
     sp.add_argument("input")
     sp.add_argument("-o", "--output", required=True)
     sp.add_argument("--lax", action="store_true",
@@ -5300,6 +5332,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("push", help="compile + POST to /api/3/import_jobs (upsert)")
     sp.add_argument("input")
+    sp.add_argument("--instance", metavar="NAME", default=None,
+                    help="pyfsr instance to push to (instead of FSR_BASE_URL / .env); "
+                         "compiles against that box's auto-warmed catalog")
+    sp.add_argument("--no-box-catalog", action="store_true",
+                    help="compile against --db instead of the target box's auto-warmed catalog")
     sp.add_argument("--url", metavar="URL",
                     help="FortiSOAR base URL (overrides FSR_BASE_URL / .env)")
     sp.add_argument("--user", metavar="USER",

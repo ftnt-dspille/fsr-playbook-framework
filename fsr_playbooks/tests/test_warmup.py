@@ -50,13 +50,27 @@ METADATA = {"hydra:member": [
      "attributes": [{"name": "title", "title": "Title", "type": "text"}]},
 ]}
 # Connector list: one connector with two configurations, one with none.
+SELF_ID = "5" * 32       # the hub's own agent: stamped on hub connector records
+AGENT_ID = "a" * 32      # a remote agent
 CONNECTORS = {"data": [
-    {"name": "fortinet-soc", "version": "1.0.0", "configuration": [
+    {"id": 1, "name": "fortinet-soc", "version": "1.0.0", "agent": SELF_ID, "configuration": [
         {"config_id": "cfg-a", "name": "Default", "default": True},
         {"config_id": "cfg-b", "name": "Lab", "default": False},
     ]},
-    {"name": "smtp", "version": "2.0.0", "configuration": []},
+    {"id": 2, "name": "smtp", "version": "2.0.0", "agent": SELF_ID, "configuration": []},
 ]}
+# The remote agent's own connector record (only listed with ?agent=<id>).
+AGENT_CONNECTORS = {"data": [
+    {"id": 99, "name": "activedirectory", "version": "2.4.0", "agent": AGENT_ID, "configuration": []},
+]}
+# Every config on the box: the hub's two plus one that lives only on the agent
+# (the connectors listing never shows it).
+CONFIGURATIONS = {"data": [
+    {"config_id": "cfg-a", "name": "Default", "default": True, "connector": 1, "agent": SELF_ID},
+    {"config_id": "cfg-b", "name": "Lab", "default": False, "connector": 1, "agent": SELF_ID},
+    {"config_id": "cfg-ad", "name": "Lab AD", "default": True, "connector": 99, "agent": AGENT_ID},
+], "nextPage": None}
+AGENTS = {"hydra:member": [{"name": "branch-agent", "agentId": AGENT_ID}]}
 DETAILS = {
     ("fortinet-soc", "1.0.0"): {
         "name": "fortinet-soc", "version": "1.0.0", "label": "FortiSOC",
@@ -81,7 +95,7 @@ EXPECTED_PATHS = {
     "/api/integration/connectors/{name}/{version}/",
     "/api/version", "/api/publish/error", "/api/auth/license",
     "/api/3/model_metadatas", "/api/3/attribute_metadatas",
-    "/api/3/picklists",
+    "/api/3/picklists", "/api/integration/configuration/", "/api/3/agents",
 }
 
 
@@ -143,7 +157,11 @@ class FakeBox:
         if base in self._get_routes:
             return self._get_routes[base]
         if base == "/api/integration/connectors/":
-            return CONNECTORS
+            return AGENT_CONNECTORS if (params or {}).get("agent") == AGENT_ID else CONNECTORS
+        if base == "/api/integration/configuration/":
+            return CONFIGURATIONS
+        if base == "/api/3/agents":
+            return AGENTS
         raise KeyError(path)
 
     def post(self, path, data=None, **_):
@@ -190,7 +208,7 @@ def test_populates_box_tables_and_stamps_identity(tmp_path):
     assert report["counts"] == {
         "modules": 2, "module_fields": 4, "picklists": 3, "tags": 2,
         "teams": 1, "connectors": 2, "operations": 2, "operation_params": 2,
-        "connector_configs": 3,
+        "connector_configs": 5, "agents": 2,
     }
     # Installed-only: the 13 connectors the packaged seed ships are replaced.
     assert {r[0] for r in _rows(target, "SELECT name FROM connectors")} == {"fortinet-soc", "smtp"}
@@ -205,6 +223,15 @@ def test_populates_box_tables_and_stamps_identity(tmp_path):
     assert _rows(target, "SELECT config_name FROM connector_configs "
                          "WHERE connector='fortinet-soc' ORDER BY config_name") == [
         ("Default",), ("Lab",), ("__default__",)]
+    # The agent-only config is warmed, keyed to its agent; hub configs carry ''.
+    assert _rows(target, "SELECT connector, config_name, config_id, agent_id FROM connector_configs "
+                         "WHERE connector='activedirectory' ORDER BY config_name") == [
+        ("activedirectory", "Lab AD", "cfg-ad", AGENT_ID),
+        ("activedirectory", "__default__", "cfg-ad", AGENT_ID)]
+    assert _rows(target, "SELECT DISTINCT agent_id FROM connector_configs "
+                         "WHERE connector='fortinet-soc'") == [("",)]
+    assert sorted(_rows(target, "SELECT name, agent_id, is_self FROM agents")) == [
+        ("branch-agent", AGENT_ID, 0), ("self", SELF_ID, 1)]
 
     assert report["stamp"]["instance_label"] == "lab-a"
     assert report["stamp"]["base_url"] == "fsr.example.com"
@@ -371,6 +398,48 @@ def test_box_catalog_warms_once_then_rewarms_when_the_module_counts_move(tmp_pat
     p1 = W.box_catalog(c, tmp_path)
     assert W.box_catalog(c, tmp_path) == p1 and len(calls) == 1  # fresh: no re-warm
     c.counts = {"model_metadatas": 47, "attribute_metadatas": 1005}
+    W.box_catalog(c, tmp_path)
+    assert len(calls) == 2
+
+
+def test_box_catalog_rewarms_when_a_connector_config_moves(tmp_path, monkeypatch):
+    """A config added, renamed or moved to an agent re-warms the catalog, even
+    with the module totals unchanged -- a stale row compiles against the wrong
+    config."""
+    from fsr_playbooks import _catalog_meta
+    from fsr_playbooks import warmup as W
+
+    calls = []
+    state = {"members": [{"name": "activedirectory", "_agent_id": "", "configuration": [
+        {"name": "Lab AD", "config_id": "c1"}]}]}
+
+    def fake_warm(client, path, **kw):
+        calls.append(path)
+        conn = sqlite3.connect(path)
+        _catalog_meta.ensure_table(conn)
+        _catalog_meta.stamp_instance(conn, instance_label=None, base_url=client.base_url)
+        for c, n in client.counts.items():
+            _catalog_meta.record_count(conn, c, n)
+        _catalog_meta.set_(conn, "configs_fingerprint", W.configs_fingerprint(state["members"]))
+        conn.commit()
+        conn.close()
+        return {"committed": True, "errors": []}
+
+    class C:
+        base_url = "https://fortisoar.example.com"
+        counts = {"model_metadatas": 46, "attribute_metadatas": 1003}
+
+        def get(self, url, params=None):
+            return {"hydra:totalItems": self.counts[url.rsplit("/", 1)[-1]]}
+
+    monkeypatch.setattr(W, "warm_catalog", fake_warm)
+    monkeypatch.setattr(W, "fetch_all_connector_configs", lambda client: (state["members"], {}, None))
+    c = C()
+    W.box_catalog(c, tmp_path)
+    W.box_catalog(c, tmp_path)
+    assert len(calls) == 1
+    state["members"] = [{"name": "activedirectory", "_agent_id": "a" * 32, "configuration": [
+        {"name": "Lab AD", "config_id": "c1"}]}]
     W.box_catalog(c, tmp_path)
     assert len(calls) == 2
 

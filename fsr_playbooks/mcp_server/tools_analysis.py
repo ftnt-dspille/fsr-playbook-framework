@@ -153,6 +153,7 @@ def step_through_playbook(yaml_text: str = "",
         if isinstance(s, dict) and "id" not in s and s.get("name"):
             s["id"] = s["name"]
     _normalize_friendly_steps(steps)
+    _branches_from_routes(steps)
     by_id = {s["id"]: s for s in steps if isinstance(s, dict) and "id" in s}
     # Routes may name a step by its slug (`next: generate_report`) -- every
     # decompiled / designer-mounted playbook does -- so index those too, or
@@ -1692,6 +1693,34 @@ def _simulate_loop_body(stype: str, rendered_body: dict[str, Any]) -> dict[str, 
             out.update(mock)
     out.setdefault("task_id", "<simulated>")
     return out
+
+
+def _branches_from_routes(steps: list) -> None:
+    """Give decision / manual-input steps a ``branches`` map from their routes.
+
+    The stepper navigates by ``branches: {label: next}``, but the canonical
+    authoring surface (and every ``fsrpb decompile`` output) writes routes as
+    ``conditions: [{display, when, next}]`` / ``options: [{option, next}]``.
+    Without this the walk found no next step at the first gate and ended
+    there, reporting a 40-step playbook as a clean 4-step one.
+    """
+    for s in steps:
+        if not isinstance(s, dict) or s.get("branches"):
+            continue
+        routes: dict[str, str] = {}
+        args = s.get("arguments") if isinstance(s.get("arguments"), dict) else {}
+        for c in (s.get("conditions") or args.get("conditions") or []):
+            if isinstance(c, dict) and c.get("next"):
+                label = c.get("display") or c.get("label") or c.get("option")
+                if label:
+                    routes.setdefault(str(label), c["next"])
+        for o in (s.get("options") or args.get("options") or []):
+            if isinstance(o, dict) and o.get("next"):
+                label = o.get("option") or o.get("label") or o.get("display")
+                if label:
+                    routes.setdefault(str(label), o["next"])
+        if routes:
+            s["branches"] = routes
 
 
 def _decision_pick_branch(rendered_args: dict[str, Any],
