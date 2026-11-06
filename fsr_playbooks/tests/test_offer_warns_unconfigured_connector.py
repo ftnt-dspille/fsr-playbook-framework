@@ -126,3 +126,37 @@ def test_a_connector_that_needs_no_configuration_is_never_flagged(monkeypatch):
     assert _needs_configuration("cyops_utilities") is False
     assert _needs_configuration("fortigate-firewall") is True
     assert _needs_configuration("no-such-connector-xyz") is False
+
+
+def _warmed_row_db(schema_json: str):
+    """An in-memory catalog shaped like a box-warmed one: the box listing puts
+    the SAVED CONFIGURATIONS (a list) where the schema column is."""
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE connectors (name TEXT, version TEXT, config_schema_json TEXT)")
+    db.execute("INSERT INTO connectors VALUES ('crowd-strike-falcon', '3.2.0', ?)",
+               (schema_json,))
+    return db
+
+
+def test_box_warmed_row_reads_the_schema_from_the_box(monkeypatch):
+    # Seen live: every connector on a warmed box read as config-free, so an
+    # offer on an unconfigured CrowdStrike Falcon carried no setup notice.
+    from fsr_playbooks.mcp_server import tools_emit
+    monkeypatch.setattr(tools_emit, "_db", lambda: _warmed_row_db("[]"))
+    monkeypatch.setattr(tools_emit, "_LIVE_SCHEMA_CACHE", {})
+    asked = []
+
+    def fake(connector, version):
+        asked.append((connector, version))
+        return {"fields": [{"name": "server_url", "required": True}]}
+    monkeypatch.setattr(tools_emit, "_box_config_schema", fake)
+    assert tools_emit._needs_configuration("crowd-strike-falcon") is True
+    assert asked == [("crowd-strike-falcon", "3.2.0")]
+
+
+def test_box_warmed_row_fails_open_when_the_box_cannot_be_asked(monkeypatch):
+    from fsr_playbooks.mcp_server import tools_emit
+    monkeypatch.setattr(tools_emit, "_db", lambda: _warmed_row_db('[{"name": "x"}]'))
+    monkeypatch.setattr(tools_emit, "_box_config_schema", lambda c, v: None)
+    assert tools_emit._needs_configuration("crowd-strike-falcon") is False

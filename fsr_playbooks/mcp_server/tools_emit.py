@@ -821,25 +821,68 @@ def _yaml_connectors(yaml_text: str) -> list[str]:
     return seen
 
 
+_LIVE_SCHEMA_CACHE: dict[str, dict | None] = {}
+
+
+def _box_config_schema(connector: str, version: str) -> dict | None:
+    """The connector's config schema read from THIS box's per-connector detail
+    endpoint (the only FortiSOAR endpoint that carries it: the listing and
+    connector_details return saved configurations, not the schema). None when
+    the box cannot be asked. Cached per process: a schema changes only on an
+    upgrade, which recycles the workers."""
+    key = f"{connector}@{version}"
+    if key in _LIVE_SCHEMA_CACHE:
+        return _LIVE_SCHEMA_CACHE[key]
+    out: dict | None = None
+    try:
+        from probes._env import get_client
+        client = get_client()
+        r = client.session.post(
+            client.base_url
+            + f"/api/integration/connectors/{connector}/{version}/?format=json",
+            json={}, verify=client.verify_ssl, timeout=20)
+        if getattr(r, "status_code", 200) == 200:
+            cs = (r.json() or {}).get("config_schema")
+            out = cs if isinstance(cs, dict) else {}
+    except Exception:  # noqa: BLE001 -- fail open: unknown, never a block
+        out = None
+    _LIVE_SCHEMA_CACHE[key] = out
+    return out
+
+
 def _needs_configuration(connector: str) -> bool:
     """Whether the connector can only run with a saved configuration. One whose
-    catalog config schema declares no fields (cyops_utilities) runs bare.
-    Unknown to the catalog -> False: verify already rejects an unknown
-    connector, and a slim catalog missing a built-in must not block it here."""
+    config schema declares no fields (cyops_utilities) runs bare.
+    Unknown -> False: verify already rejects an unknown connector, and a slim
+    catalog missing a built-in must not block it here.
+
+    A box-warmed catalog row does NOT hold the schema: the box's listing puts
+    the saved configurations where the schema would be (a list), so for those
+    rows the schema is read from the box's detail endpoint instead. Without
+    this, every connector on a live box read as config-free and the offer's
+    `runs_after_setup` notice never fired."""
     import json
     try:
         row = _db().execute(
-            "SELECT config_schema_json FROM connectors WHERE name=?",
+            "SELECT config_schema_json, version FROM connectors WHERE name=?",
             (connector,)).fetchone()
     except Exception:  # noqa: BLE001
         return False
-    if row is None or not row[0]:
+    if row is None:
         return False
-    try:
-        schema = json.loads(row[0])
-    except (TypeError, ValueError):
-        return True
-    return bool(isinstance(schema, dict) and schema.get("fields"))
+    raw, version = row[0], (row[1] or "")
+    schema: Any = None
+    if raw:
+        try:
+            schema = json.loads(raw)
+        except (TypeError, ValueError):
+            return True
+    if isinstance(schema, dict):
+        return bool(schema.get("fields"))
+    if not version:
+        return False
+    live = _box_config_schema(connector, version)
+    return bool(isinstance(live, dict) and live.get("fields"))
 
 
 def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str], list[str]]:
