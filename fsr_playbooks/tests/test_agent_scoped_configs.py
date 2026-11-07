@@ -83,12 +83,12 @@ def test_agent_name_and_config_name_resolve_to_that_agents_ids(db):
     assert args["config"] == "11111111-1111-1111-1111-111111111111"
 
 
-def test_agent_config_on_a_hub_step_is_refused_and_names_where_it_lives(db):
+def test_config_only_on_one_agent_runs_there_without_on_remote(db):
     res = compile_yaml(_yaml(AD_STEP.format(extra="")), db)
-    errs = [e for e in res.errors if e.severity != "warning"]
-    assert not res.ok
-    assert any("does not exist on self" in e.message and "branch-agent" in e.message for e in errs)
-    assert any(e.suggestion == "set on_remote: branch-agent" for e in errs)
+    assert res.ok, [e for e in res.errors if e.severity != "warning"]
+    args = _step(res, "Lookup")
+    assert args["agent"] == AGENT
+    assert args["config"] == "11111111-1111-1111-1111-111111111111"
 
 
 def test_unknown_agent_name_is_refused(db):
@@ -133,3 +133,25 @@ def test_analyzer_follows_conditions_routes():
     _branches_from_routes(steps)
     assert steps[0]["branches"] == {"yes": "a", "Else": "b"}
     assert _next_step(steps[0], "Else", {}) == "b"
+
+
+def test_agent_name_is_refused_when_agents_are_not_warmed(db):
+    # An unresolved name must never reach the wire: the hub cannot route it
+    # ("No agent found with provided agent id" 404, or the step never returns).
+    conn = sqlite3.connect(db)
+    conn.execute("DELETE FROM agents")
+    conn.commit()
+    conn.close()
+    res = compile_yaml(_yaml(AD_STEP.format(extra="    on_remote: branch-agent\n")), db)
+    assert not res.ok
+    assert any("agent 'branch-agent'" in e.message and "not warmed" in e.message
+               for e in res.errors if e.severity != "warning")
+
+
+def test_agent_id_passes_when_agents_are_not_warmed(db):
+    conn = sqlite3.connect(db)
+    conn.execute("DELETE FROM agents")
+    conn.commit()
+    conn.close()
+    res = compile_yaml(_yaml(AD_STEP.format(extra=f"    on_remote: {AGENT}\n")), db)
+    assert _step(res, "Lookup")["agent"] == AGENT

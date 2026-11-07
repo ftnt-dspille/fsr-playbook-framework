@@ -253,6 +253,19 @@ class CatalogLookupMixin:
             return []
         return sorted({(r[1] or r[0]) if r[0] else "self" for r in rows})
 
+    def config_agent_ids(self, connector: str, config_name: str) -> list[str]:
+        """The agentIds holding a config of this name (``''`` = the hub), hub first."""
+        if not self._has_agent_col():
+            return []
+        try:
+            rows = self.conn.execute(
+                "SELECT DISTINCT agent_id FROM connector_configs "
+                "WHERE connector = ? AND config_name = ?", (connector, config_name),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return sorted({r[0] or "" for r in rows}, key=lambda x: (x != "", x))
+
     def config_names(self, connector: str, agent_id: str | None = None) -> list[str]:
         if not self._has_agent_col():
             return []

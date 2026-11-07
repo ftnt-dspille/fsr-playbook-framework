@@ -270,6 +270,7 @@ class ConnectorArgsMixin:
             agent_id: str | None = None,
         ) -> str | None: ...
         def config_locations(self, connector: str, config_name: str) -> list[str]: ...
+        def config_agent_ids(self, connector: str, config_name: str) -> list[str]: ...
         def config_names(self, connector: str, agent_id: str | None = None) -> list[str]: ...
         def agents_warmed(self) -> bool: ...
         def resolve_agent_id(self, name_or_id: str) -> str | None: ...
@@ -741,11 +742,40 @@ class ConnectorArgsMixin:
         # playbook compiled offline stays config-free.
         # Where the step runs: `on_remote:` / `agent:` name a remote agent. The
         # wire wants the agent's hex `agentId`; YAML keeps the readable name.
+        explicit_agent = bool(a.get("agent"))
         agent_id = self._resolve_step_agent(a, path, errors)
         # `config:` in YAML is the config NAME; the wire wants the UUID of that
         # config ON THE AGENT the step runs on (an agent-bound config cannot run
         # on the hub and vice versa -- the step hangs or fails INTEGRATION-12).
         cfg = a.get("config")
+        # No `on_remote:` -- the config name alone says where the step runs.
+        # Only on one agent: run there. On the hub and elsewhere: the hub, with
+        # a warning. On several agents and not the hub: ambiguous, an error.
+        if (not explicit_agent and isinstance(cfg, str) and cfg
+                and not _UUID_RE.match(cfg) and "{{" not in cfg):
+            homes = self.config_agent_ids(connector, cfg)
+            remote = [h for h in homes if h]
+            names = [self.agent_name(h) or h for h in remote]
+            if remote and "" not in homes and len(remote) == 1:
+                agent_id = remote[0]
+                a["agent"] = agent_id
+            elif remote and "" in homes:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE, severity="warning",
+                    message=(f"{connector} config {cfg!r} exists on the hub and on "
+                             f"{', '.join(names)}; using the hub's"),
+                    path=f"{path}.arguments.config",
+                    suggestion=f"set on_remote: {names[0]} to run it on that agent",
+                ))
+            elif len(remote) > 1:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"{connector} config {cfg!r} exists on several agents "
+                             f"({', '.join(names)}) and not on the hub"),
+                    path=f"{path}.arguments.config",
+                    suggestion=f"set on_remote: to one of {', '.join(names)}",
+                ))
+                return
         if isinstance(cfg, str) and cfg and not _UUID_RE.match(cfg) and "{{" not in cfg:
             cid = self.resolve_config_id(connector, cfg, agent_id)
             if cid:
@@ -773,8 +803,9 @@ class ConnectorArgsMixin:
         """Turn the step's `agent` (name or id) into the wire `agentId`.
 
         Returns the agent id the step runs on (`''` = the hub). An agent name
-        the warmed catalog does not know is an error when agents are warmed;
-        unwarmed, the value passes through untouched.
+        that does not resolve is always an error (warmed or not): the hub routes
+        by agentId only, so a name on the wire fails "No agent found" (404) or
+        never returns. A hex agentId passes through when it is not in the catalog.
         """
         agent = a.get("agent")
         if not isinstance(agent, str) or not agent or agent == "Pick From Record Ownership" \
@@ -782,11 +813,17 @@ class ConnectorArgsMixin:
             return ""
         aid = self.resolve_agent_id(agent)
         if aid is None:
-            if self.agents_warmed() and not _AGENT_ID_RE.match(agent):
+            if not _AGENT_ID_RE.match(agent):
+                warmed = self.agents_warmed()
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
-                    message=f"unknown agent {agent!r} (not on the warmed box)",
+                    message=(f"unknown agent {agent!r} (not on the warmed box)" if warmed
+                             else f"agent {agent!r} cannot be resolved: agents are not "
+                                  "warmed in this catalog"),
                     path=f"{path}.arguments.agent",
+                    suggestion=(None if warmed else
+                                "compile against the target box's catalog (fsrpb warmup / "
+                                "--instance), or give the agent's hex agentId"),
                 ))
             return agent if _AGENT_ID_RE.match(agent) else ""
         if aid == "":
