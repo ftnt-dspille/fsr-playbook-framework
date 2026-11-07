@@ -814,12 +814,18 @@ class ConnectorArgsMixin:
         aid = self.resolve_agent_id(agent)
         if aid is None:
             if not _AGENT_ID_RE.match(agent):
+                # Warmed (compiling FOR a box): an unknown name is an error.
+                # Unwarmed (an offline, portable compile -- library playbooks
+                # name agents that exist only on the target): a loud warning,
+                # since the name will fail on the hub unless recompiled there.
                 warmed = self.agents_warmed()
                 errors.append(CompileError(
                     code=ErrorCode.BAD_VALUE,
+                    severity="error" if warmed else "warning",
                     message=(f"unknown agent {agent!r} (not on the warmed box)" if warmed
-                             else f"agent {agent!r} cannot be resolved: agents are not "
-                                  "warmed in this catalog"),
+                             else f"agent {agent!r} is not resolved (no agents in this "
+                                  "catalog): the hub routes by agentId only, so this step "
+                                  "fails 'No agent found' unless compiled against its box"),
                     path=f"{path}.arguments.agent",
                     suggestion=(None if warmed else
                                 "compile against the target box's catalog (fsrpb warmup / "

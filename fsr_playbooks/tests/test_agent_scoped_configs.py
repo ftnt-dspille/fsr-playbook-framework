@@ -135,17 +135,19 @@ def test_analyzer_follows_conditions_routes():
     assert _next_step(steps[0], "Else", {}) == "b"
 
 
-def test_agent_name_is_refused_when_agents_are_not_warmed(db):
-    # An unresolved name must never reach the wire: the hub cannot route it
-    # ("No agent found with provided agent id" 404, or the step never returns).
+def test_agent_name_warns_loudly_when_agents_are_not_warmed(db):
+    # Offline/portable compile: a name cannot be checked, so it warns (the hub
+    # routes by agentId only -- "No agent found" 404 unless compiled on its box).
+    # Against a warmed box an unknown name is an error (test_unknown_agent_name_is_refused).
     conn = sqlite3.connect(db)
     conn.execute("DELETE FROM agents")
     conn.commit()
     conn.close()
     res = compile_yaml(_yaml(AD_STEP.format(extra="    on_remote: branch-agent\n")), db)
-    assert not res.ok
-    assert any("agent 'branch-agent'" in e.message and "not warmed" in e.message
-               for e in res.errors if e.severity != "warning")
+    warns = [e for e in res.errors if e.severity == "warning"]
+    assert any("agent 'branch-agent' is not resolved" in e.message and "No agent found" in e.message
+               for e in warns), warns
+    assert not any("agent 'branch-agent'" in e.message for e in res.errors if e.severity != "warning")
 
 
 def test_agent_id_passes_when_agents_are_not_warmed(db):
