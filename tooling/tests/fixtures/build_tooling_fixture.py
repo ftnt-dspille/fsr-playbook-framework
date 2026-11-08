@@ -58,7 +58,7 @@ CONN = [
     "infoblox-ddi", "openai", "sailpoint-identitynow", "screenshot",
     "servicenow", "servicenow-cmdb", "slack",
     # Additional connectors in the full dev DB after probe
-    "aiassistant-utils", "code-snippet", "connector-fsr-soc-assistant",
+    "aiassistant-utils", "code-snippet", "connector-fsr-agentic-assistant",
     "exchange", "file-content-extraction", "fortinet-fortiai-proxy",
     "fortinet-forticlient-ems", "fsr-agent-communication-bridge",
     "generic-http", "imap", "phishing-classifier", "whois-rdap",

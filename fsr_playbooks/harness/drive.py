@@ -1,4 +1,4 @@
-"""The one conversation driver for every harness that talks a SOC-assistant chat.
+"""The one conversation driver for every harness that talks an Agentic Assistant chat.
 
 `drive()` sends a conversation's user steps and resume steps through a
 transport, follows halts (approvals, cards, manual inputs) through an `answer`

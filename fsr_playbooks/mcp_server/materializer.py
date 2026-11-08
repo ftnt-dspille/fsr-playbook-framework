@@ -671,7 +671,7 @@ _CONNECTOR_PREFIX = "connector:"
 
 # The connector whose `call_mcp_tool` op replays a materialized MCP tool from a
 # playbook step. A built-in server's tool compiles to a step against this.
-SOC_ASSISTANT_CONNECTOR = "connector-fsr-soc-assistant"
+AGENTIC_ASSISTANT_CONNECTOR = "connector-fsr-agentic-assistant"
 
 # Materialized built-in tools dropped from the trace because they're mutating and
 # `call_mcp_tool` can't invoke them. Surfaced on the compile result so the omission
@@ -746,7 +746,7 @@ def _record_connector_trace(server: str, tool_name: str,
     for an agent-bound connector is already the agent config, making this moot.
 
     A BUILT-IN server's tool (``soc``, ``utility``, …) has no connector of its own,
-    but it is still replayable from a playbook: the SOC-assistant connector's
+    but it is still replayable from a playbook: the Agentic Assistant connector's
     ``call_mcp_tool`` op invokes any materialized tool by name. So those record as a
     connector step against that op rather than being dropped -- one uniform compile
     target for every MCP call, and no new skill or step type.
@@ -767,13 +767,13 @@ def _record_connector_trace(server: str, tool_name: str,
             _record(name, tool_name, args, data, ref_prefix=prefix)
             return
 
-        # Built-in: replay through the SOC-assistant connector's call_mcp_tool.
+        # Built-in: replay through the Agentic Assistant connector's call_mcp_tool.
         materialized = _make_name(server, tool_name)
         if _is_mutating(materialized):
             _note_dropped_mutating(materialized)
             return
         _record(
-            SOC_ASSISTANT_CONNECTOR, "call_mcp_tool",
+            AGENTIC_ASSISTANT_CONNECTOR, "call_mcp_tool",
             {"tool": materialized, "args": dict(args or {})},
             data, step_name=_titleize(tool_name), ref_prefix=prefix,
         )

@@ -320,7 +320,7 @@ def test_connector_name_env_override():
     base = {k: v for k, v in os.environ.items() if k != "FSR_BUILDER_CONNECTOR"}
     out = subprocess.run([sys.executable, "-c", code], env={**base, "PYTHONPATH": tooling},
                          capture_output=True, text=True, check=True).stdout.strip()
-    assert out == "connector-fsr-soc-assistant"
+    assert out == "connector-fsr-agentic-assistant"
     out = subprocess.run([sys.executable, "-c", code],
                          env={**base, "PYTHONPATH": tooling,
                               "FSR_BUILDER_CONNECTOR": "connector-x"},

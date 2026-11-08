@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tracker.sh -- one-liner card ops for the SOC Assistant tracker
+# tracker.sh -- one-liner card ops for the Agentic Assistant tracker
 #
 # The gh CLI's `gh issue` commands hit a Projects-classic GraphQL deprecation
 # on the tracker repo, and `gh project item-edit` needs opaque field/option IDs.
@@ -27,7 +27,7 @@
 #
 set -euo pipefail
 
-REPO="ftnt-dspille/soc-assistant-tracker"
+REPO="ftnt-dspille/agentic-assistant-tracker"
 PROJECT_ID="PVT_kwHOBe8ius4BfHXd"
 PROJECT_NUM="1"
 OWNER="ftnt-dspille"

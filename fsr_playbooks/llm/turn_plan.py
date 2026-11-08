@@ -3,7 +3,7 @@
 Phase 1 consolidated the tool *surface*; this module consolidates the
 *routing*. Historically a turn's prompt, tool slice, and tier behavior were
 resolved at three independent points that never saw each other (intent
-derivation, tool slicing, prompt layering -- see the SOC Assistant Design
+derivation, tool slicing, prompt layering -- see the Agentic Assistant Design
 Assessment §1a). The consequences were structural: the model could not reach a
 capability the router didn't anticipate, affordances appeared and disappeared
 opaquely, and a request that crossed the triage/build boundary dead-ended in

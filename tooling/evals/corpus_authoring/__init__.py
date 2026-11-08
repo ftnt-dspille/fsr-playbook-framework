@@ -1,1 +1,1 @@
-"""Corpus-driven authoring eval for the SOC Assistant toolkit."""
+"""Corpus-driven authoring eval for the Agentic Assistant toolkit."""

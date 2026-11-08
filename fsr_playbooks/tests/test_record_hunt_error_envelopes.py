@@ -1,6 +1,6 @@
 """Every record/hunt/playbook-run tool ERROR envelope speaks `code` + `message`.
 
-Moved here with the tools from the SOC assistant connector, whose
+Moved here with the tools from the Agentic assistant connector, whose
 `tests/test_tool_envelope_vocabulary.py` asserts the same over the tools it
 still owns. A source scan on purpose: these tools mostly fail against a live
 appliance, so their error paths are exactly the ones a unit suite does not

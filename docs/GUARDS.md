@@ -39,7 +39,7 @@ does the step itself and the audit below counts it under the same name.
 ## Audit (local session store)
 
 Source: `agent_usage.stop_reason` in the local session DB
-(`~/.connector_fsr_soc_assistant.db`, read-only copy), 2026-07-29 to 2026-10-10,
+(`~/.connector_fsr_agentic_assistant.db`, read-only copy), 2026-07-29 to 2026-10-10,
 31,618 usage rows over 14,244 sessions. Counts are rows with that marker, and
 the date is the last fire seen. Rows written before 2026-10-09 may predate the
 loop-delivery change in `c48e97f`. Figures marked "earlier" come from the

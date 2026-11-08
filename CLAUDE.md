@@ -53,7 +53,7 @@ Notes:
 
 ## Product context
 
-The framework is the **P4 "bottle it"** engine of the FortiSOAR SOC Assistant
+The framework is the **P4 "bottle it"** engine of the FortiSOAR Agentic Assistant
 ("AI finds the pattern. A playbook runs it forever."): it compiles an investigation
 into a deterministic playbook. The other promises (cited investigation, tier-gated
 approvals, reach to on-prem targets) live mostly in the connector and widget. Work

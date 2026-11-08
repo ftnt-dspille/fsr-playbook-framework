@@ -1,7 +1,7 @@
 """Record writes: ``create_record`` / ``update_record``.
 
 Mechanism only. Who may write to which module is the host's policy, asked
-through ``_shared.record_write_gate`` (the SOC assistant connector answers it
+through ``_shared.record_write_gate`` (the Agentic assistant connector answers it
 from the active persona's ``may_write`` scope). With no host policy every write
 is refused. Two guards wrap every call:
 

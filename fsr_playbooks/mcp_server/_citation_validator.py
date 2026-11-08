@@ -99,7 +99,7 @@ def get_turn_evidence() -> TurnEvidence | None:
 
 
 # (connector, op, params, result) -> {verdict, severity, source, ...} | None.
-# Installed by the host (the SOC Assistant connector installs its threat-intel
+# Installed by the host (the Agentic Assistant connector installs its threat-intel
 # card reader), so the autonomy policy can test what a cited lookup SAID, not
 # just that one ran: live, a block was justified by lookups that rated the
 # target clean or found nothing at all.

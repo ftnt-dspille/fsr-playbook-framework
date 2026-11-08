@@ -17,7 +17,7 @@ summary: 'One agent loop in fsr_playbooks.llm: providers, turn plan, dispatch
 # Agent-loop architecture -- the shared `fsr_playbooks.llm` wiring
 
 The investigate→triage→build agent loop is **one implementation in
-`fsr_playbooks`**. Front-ends (the SOC Assistant connector, the web backend)
+`fsr_playbooks`**. Front-ends (the Agentic Assistant connector, the web backend)
 assemble a provider, a system prompt, a message list and a tool list, and call
 it. Line numbers drift; grep the symbol.
 
@@ -243,7 +243,7 @@ above.
 
 ## Front-ends
 
-| Concern | Connector (`connector-fsr-soc-assistant`) | Web (`web/backend/routes/chat.py`) |
+| Concern | Connector (`connector-fsr-agentic-assistant`) | Web (`web/backend/routes/chat.py`) |
 |---|---|---|
 | Entry | `chat_turn` / `chat_resume` (sync op, `asyncio.run`, detached with `chat_poll`) | `POST /api/chat` / approvals route (SSE) |
 | Config provider | platform-decrypted `config` dict | `backend.settings` adapter |

@@ -8,7 +8,7 @@ are resolved name -> IRI via ``picklists.resolve_module_fields`` when live.
 
 Pairs with:
   * ``gen_fs_recipes.py`` -- stands up the matching FS fault so FAZ/FMG reflect it.
-  * the SOC Assistant widget -- open it on the printed IRI / deep-link to triage.
+  * the Agentic Assistant widget -- open it on the printed IRI / deep-link to triage.
 
 Usage:
     python tooling/scratch/seed_noc_alert.py --scenario vpn_tunnel_down --dry-run

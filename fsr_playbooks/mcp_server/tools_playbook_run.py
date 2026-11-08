@@ -17,7 +17,7 @@ Policy belongs to the host, through ``_shared`` hooks:
     assistant refuses an unattended run with no persona). No gate: permitted;
     the LLM path is still governed by tier 3 (an approval card).
   * ``set_playbook_run_annotator`` -- extra fields on a finished run's result
-    (the SOC assistant flags a playbook outside the persona's allowlist).
+    (the Agentic assistant flags a playbook outside the persona's allowlist).
   * ``llm.tools.set_run_playbook_auto_resolver`` -- which runs skip the card.
 
 A human approval reaches the body inside :func:`approved_dispatch`, which the
@@ -832,7 +832,7 @@ def _run_playbook_impl(playbook: str = "",
     actually returns data before saving.
 
     Gated by approval, not refusal: a run is surfaced as an approval card
-    unless the host designates the playbook auto-runnable (the SOC assistant:
+    unless the host designates the playbook auto-runnable (the Agentic assistant:
     the persona's ``run_playbook.auto`` subset).
 
     Args:
@@ -1022,7 +1022,7 @@ def _run_playbook_impl(playbook: str = "",
         why = _run_failure_detail(playbooks, run)
         if why:
             out["failure"] = why
-    # Host annotations (the SOC assistant flags a playbook outside the
+    # Host annotations (the Agentic assistant flags a playbook outside the
     # persona's advisory allowlist, for the audit trail and the summary).
     for k, v in _shared.playbook_run_annotations(playbook).items():
         out.setdefault(k, v)

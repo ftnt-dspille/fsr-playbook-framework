@@ -227,7 +227,7 @@ def test_json_blob_field_whole_value_match():
     t = SkillTrace(module="incidents",
                    record_fields={"destinationIp": "102.220.160.21",
                                   "sourcedata": blob})
-    t.record_run_op("fortinet-fsr-soc-assistant", "call_mcp_tool",
+    t.record_run_op("fortinet-fsr-agentic-assistant", "call_mcp_tool",
                     {"tool": "siem_search_host",
                      "args": {"host": "smithDesktop", "window": "2h"}},
                     {"results": []}, step_name="siem_search_host")
@@ -253,7 +253,7 @@ def test_json_blob_field_simple_field_still_works():
                                   "sourcedata": blob})
     t.record_run_op("virustotal", "query_ip", {"ip": "10.0.0.5"},
                     {"attributes": {}}, ref_prefix="data")
-    t.record_run_op("fortinet-fsr-soc-assistant", "call_mcp_tool",
+    t.record_run_op("fortinet-fsr-agentic-assistant", "call_mcp_tool",
                     {"tool": "siem_search_host",
                      "args": {"host": "smithDesktop", "window": "2h"}},
                     {"results": []}, step_name="siem_search_host")
@@ -275,7 +275,7 @@ def test_json_blob_field_not_json_stays_literal():
     break compilation -- the gap param stays literal."""
     t = SkillTrace(module="incidents",
                    record_fields={"sourcedata": "{not valid json"})
-    t.record_run_op("fortinet-fsr-soc-assistant", "call_mcp_tool",
+    t.record_run_op("fortinet-fsr-agentic-assistant", "call_mcp_tool",
                     {"tool": "siem_search_host",
                      "args": {"host": "smithDesktop", "window": "2h"}},
                     {"results": []}, step_name="siem_search_host")
@@ -441,7 +441,7 @@ def test_a_trace_compiled_playbook_reports_no_unmocked_containment():
 def test_a_second_compile_of_the_active_trace_still_stages_the_inputs():
     from fsr_playbooks.agent import skill_trace as st
     t = SkillTrace(module="alerts", record_fields={"destinationIp": "198.51.100.77"})
-    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+    t.record_run_op("connector-fsr-agentic-assistant", "call_mcp_tool",
                     {"tool": "siem_search",
                      "args": {"by": "ip", "value": "198.51.100.77", "window": "2h"}},
                     {"results": []}, step_name="siem_search")
@@ -495,7 +495,7 @@ def _offer_after_build(edit=None):
     from fsr_playbooks.agent import skill_trace as st
     from fsr_playbooks.mcp_server.tools_emit import emit_playbook_offer
     t = SkillTrace(module="alerts", record_fields={"destinationIp": "198.51.100.77"})
-    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+    t.record_run_op("connector-fsr-agentic-assistant", "call_mcp_tool",
                     {"tool": "siem_search",
                      "args": {"by": "ip", "value": "198.51.100.77", "window": "2h"}},
                     {"results": []}, step_name="siem_search")
@@ -538,7 +538,7 @@ def test_call_mcp_tool_wire_goes_through_data_envelope():
     # which models the step's runtime .data envelope. The recorder now marks
     # call_mcp_tool as "data", so the wire goes through .data and compiles.
     t = SkillTrace()
-    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+    t.record_run_op("connector-fsr-agentic-assistant", "call_mcp_tool",
                     {"tool": "siem_search", "args": {"by": "ip", "value": "9.9.9.9"}},
                     {"events": [{"srcIp": "9.9.9.9"}]}, step_name="siem_search")
     t.record_run_op("virustotal", "query_ip", {"ip": "9.9.9.9"},

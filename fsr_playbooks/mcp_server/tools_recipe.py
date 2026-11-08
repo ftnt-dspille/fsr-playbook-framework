@@ -25,7 +25,7 @@ DB_PATH = _shared.DB_PATH
 # --- failed-run provider hook ---------------------------------------------
 # Finding a recent FAILED run needs a live client the host provides: the
 # finder (`tools_triage.list_recent_failed_runs`) reaches the box through
-# `probes._env`, which the SOC assistant connector bridges onto its crudhub
+# `probes._env`, which the Agentic assistant connector bridges onto its crudhub
 # client. So the host opts in by injecting it here at import time, exactly as
 # it does for the run_playbook auto-resolver
 # (`llm.tools.set_run_playbook_auto_resolver`). Absent a host, the

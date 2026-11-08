@@ -1,6 +1,6 @@
 """The record and hunt tools, as the library itself now serves them.
 
-They moved here from the SOC assistant connector. Three things only worked, or
+They moved here from the Agentic assistant connector. Three things only worked, or
 only looked right, while the connector supplied them:
 
   * the MCP server listed `_relationship_fields` and `_mounted_siem_context` as

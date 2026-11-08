@@ -210,7 +210,7 @@ def test_call_mcp_tool_without_prefix_records_data_envelope():
     # call_mcp_tool step with a flat envelope and pass no ref_prefix; the step
     # is enveloped at runtime, so the recorder must still mark "data".
     t = SkillTrace()
-    t.record_run_op("connector-fsr-soc-assistant", "call_mcp_tool",
+    t.record_run_op("connector-fsr-agentic-assistant", "call_mcp_tool",
                     {"tool": "siem_search", "args": {"by": "ip", "value": "1.2.3.4"}},
                     {"events": [{"srcIp": "1.2.3.4"}]}, step_name="siem_search")
     assert t.calls[-1].ref_prefix == "data"

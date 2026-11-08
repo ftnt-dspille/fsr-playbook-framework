@@ -1312,7 +1312,7 @@ def host_connector_name() -> str | None:
 # ---------------------------------------------------------------------------
 #
 # The record writes (tools_records) are mechanism; who may write to which
-# module is the host's policy (the SOC assistant connector answers it from the
+# module is the host's policy (the Agentic assistant connector answers it from the
 # active persona's may_write scope). Unlike the read hooks above, the default
 # is the safe answer for a write: with no host policy, every write is refused.
 
@@ -1349,7 +1349,7 @@ def record_write_gate(module: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 #
 # The playbook runs (tools_playbook_run) are mechanism. Whether a run may
-# proceed at all is the host's policy (the SOC assistant refuses an unattended
+# proceed at all is the host's policy (the Agentic assistant refuses an unattended
 # run when no persona is bound). Unlike the record writes, the default here is
 # to PERMIT: standalone (fsrpb MCP, a developer's agent) has always been able
 # to run a playbook, and on the LLM path every run is still tier 3, so an

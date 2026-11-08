@@ -47,10 +47,10 @@ from fsr_playbooks.harness.drive import FsrTransport, drive  # noqa: E402
 from fsr_playbooks.harness.frames import assistant_text  # noqa: E402
 
 # The deployed connector's `name` (info.json), NOT the repo/dir name. It was
-# renamed fsr-playbook-builder -> connector-fsr-soc-assistant; env-overridable so
+# renamed fsr-playbook-builder -> connector-fsr-agentic-assistant; env-overridable so
 # a future rename doesn't need a code edit (see the "read info.json, don't
 # hardcode" rule). A stale value here surfaces as "Connector ... does not exists".
-CONN = os.environ.get("FSR_BUILDER_CONNECTOR", "connector-fsr-soc-assistant")
+CONN = os.environ.get("FSR_BUILDER_CONNECTOR", "connector-fsr-agentic-assistant")
 # None: the box resolves the ACTIVE installed version. A pinned literal went
 # stale with the next release and failed every run with "does not exists".
 DEFAULT_VERSION: str | None = None

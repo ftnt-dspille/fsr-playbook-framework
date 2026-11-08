@@ -17,7 +17,7 @@ summary: 'Architecture & end-state: three authoring surfaces (CLI/agent/visual) 
 
 # fsr-playbook-framework -- architecture & end state
 
-**Status**: living doc. The compiler, reference store, live e2e (push/run/poll/env), MCP server and the agent-in-the-loop authoring flow are all live and shipped in the SOC Assistant connector. The compiler has grown well past the original `parser -> resolver -> validator -> emitter` sketch into a multi-stage pipeline with a verification layer (typed walker, effect inventory, `verify_playbook` / `verify_enhancement`) and a save-time prewrite guard; those are described under Components below.
+**Status**: living doc. The compiler, reference store, live e2e (push/run/poll/env), MCP server and the agent-in-the-loop authoring flow are all live and shipped in the Agentic Assistant connector. The compiler has grown well past the original `parser -> resolver -> validator -> emitter` sketch into a multi-stage pipeline with a verification layer (typed walker, effect inventory, `verify_playbook` / `verify_enhancement`) and a save-time prewrite guard; those are described under Components below.
 
 ## North star
 

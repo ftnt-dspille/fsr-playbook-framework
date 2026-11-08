@@ -87,7 +87,7 @@ def test_limit_is_respected_across_the_word_union():
 
 def test_true_miss_still_returns_a_suggestion():
     # Every token must be absent from the catalog. NB: ordinary-looking words
-    # like "connector" ARE catalog tokens (connector-fsr-soc-assistant), and
+    # like "connector" ARE catalog tokens (connector-fsr-agentic-assistant), and
     # now that every word is searched they legitimately match -- so a "miss"
     # query has to avoid them.
     r = find_connector("zzqqx wibblefrotz plughxyzzy")

@@ -59,7 +59,7 @@ def _connector_on_path() -> None:
     repo = os.environ.get("FSR_CONNECTOR_REPO", "").strip()
     if not repo:
         return
-    for cand in (Path(repo) / "connector-fsr-soc-assistant", Path(repo)):
+    for cand in (Path(repo) / "connector-fsr-agentic-assistant", Path(repo)):
         if (cand / "fsr_soc_triage").is_dir() and str(cand) not in sys.path:
             sys.path.insert(0, str(cand))
             return

@@ -272,7 +272,7 @@ def register_triage_tools_if_available() -> str:
         # dir -- pointing at the repo root is the natural thing to pass and
         # on its own imports nothing, so accept both and let the caller be
         # right either way.
-        for cand in (Path(repo) / "connector-fsr-soc-assistant", Path(repo)):
+        for cand in (Path(repo) / "connector-fsr-agentic-assistant", Path(repo)):
             if (cand / "fsr_soc_triage").is_dir() and str(cand) not in sys.path:
                 # The connector's own modules must PRECEDE the framework on
                 # the path or its shadowing copies resolve to the wrong one.

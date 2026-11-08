@@ -1,4 +1,4 @@
-"""What every harness that drives a SOC-assistant chat turn shares.
+"""What every harness that drives an Agentic Assistant chat turn shares.
 
 There are about twenty such harnesses across the framework, the connector and
 the widget repos (local_turn, conv/chat-sweep, analyst-sim, the live scripts,

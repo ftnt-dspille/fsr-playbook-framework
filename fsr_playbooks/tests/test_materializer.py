@@ -676,7 +676,7 @@ def test_power2_mcp_call_lands_on_the_trace_as_a_connector_action(_trace):
 
 def test_builtin_server_call_compiles_via_call_mcp_tool(_trace):
     """A built-in (`soc`/`utility`) tool has no connector of its own, but the
-    SOC-assistant connector's `call_mcp_tool` op can replay it -- so it records
+    Agentic Assistant connector's `call_mcp_tool` op can replay it -- so it records
     as a step against that op rather than being dropped."""
     M.configure(mcp_allowlist={"soc": {"tools": "*", "tier": "read_only"}},
                 client_factory=lambda: _stub_client({"soc": SOC_TOOLS}))
@@ -686,7 +686,7 @@ def test_builtin_server_call_compiles_via_call_mcp_tool(_trace):
 
     assert len(_trace.calls) == 1, "built-in MCP call never reached the trace"
     ri = _trace.calls[0].resolved_inputs
-    assert ri["connector"] == M.SOC_ASSISTANT_CONNECTOR
+    assert ri["connector"] == M.AGENTIC_ASSISTANT_CONNECTOR
     assert ri["operation"] == "call_mcp_tool"
     assert ri["tool"] == "mcp_soc__enrich_indicator"
     assert ri["args"] == {"indicator": "1.2.3.4"}

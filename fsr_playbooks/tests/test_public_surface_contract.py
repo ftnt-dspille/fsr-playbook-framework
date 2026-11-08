@@ -1,6 +1,6 @@
 """Frozen public-surface contract (REORG_PLAN Phase 0).
 
-The FortiSOAR SOC connector (`connector-fsr-soc-assistant`) imports ~50 deep
+The FortiSOAR SOC connector (`connector-fsr-agentic-assistant`) imports ~50 deep
 paths into this library. REORG_PLAN names these "surface A" -- the authoring /
 runtime code that STAYS in `fsr_playbooks` and must remain importable at stable
 paths through every later refactor phase.

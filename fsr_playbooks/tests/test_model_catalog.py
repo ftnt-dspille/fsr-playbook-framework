@@ -24,7 +24,7 @@ from fsr_playbooks.llm.model_catalog import (
 #: The connector, when it is checked out beside this repo. Absent in CI.
 CONNECTOR_INFO = (Path(__file__).resolve().parents[3]
                   / "ConnectorsV2" / "fsr-playbook-builder"
-                  / "connector-fsr-soc-assistant" / "info.json")
+                  / "connector-fsr-agentic-assistant" / "info.json")
 
 
 def test_a_measured_failure_is_refused_and_says_what_broke() -> None:

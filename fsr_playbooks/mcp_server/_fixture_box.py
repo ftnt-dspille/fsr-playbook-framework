@@ -155,7 +155,7 @@ def _record_roots() -> list[Path]:
         # The repo root and the connector package dir are both natural things
         # to point at; accept either rather than making the caller be right.
         roots += [Path(repo) / sub / "fsr_soc_triage" / "tests" / "fixtures"
-                  / "triage" for sub in ("connector-fsr-soc-assistant", ".")]
+                  / "triage" for sub in ("connector-fsr-agentic-assistant", ".")]
     # This package's OWN triage fixtures, last. `soc_invest_surface` ships here
     # and references records that also ship here, so without this the bundle
     # cannot load in its own repo without an env var pointing at itself -- and
