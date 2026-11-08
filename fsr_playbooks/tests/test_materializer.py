@@ -6,6 +6,8 @@ prompt rules policed can't happen), tier is wired into ``TOOL_TIERS`` (which
 ``_resolve_tier`` reads, not ``spec.tier``), and every failure path leaves
 REGISTRY unchanged.
 """
+import sys
+
 import pytest
 
 from fsr_playbooks.llm import tools as T
@@ -1009,6 +1011,7 @@ def test_failed_timeout_result_is_a_timeout_envelope():
     assert res["ok"] is False and res["code"] == "mcp_timeout"
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="ExceptionGroup is builtin from 3.11")
 def test_stream_ended_exception_group_maps_to_timeout():
     leaf = RuntimeError("MCPError: SSE stream ended without a response")
     grp = ExceptionGroup("unhandled errors in a TaskGroup", [leaf])  # noqa: F821
@@ -1026,6 +1029,7 @@ def test_success_result_passes_through():
     assert _call(_client_returning(ok)) == ok
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="ExceptionGroup is builtin from 3.11")
 def test_invoke_reports_leaf_of_exception_group():
     leaf = ValueError("the real cause")
     grp = ExceptionGroup("unhandled errors in a TaskGroup", [leaf])  # noqa: F821
