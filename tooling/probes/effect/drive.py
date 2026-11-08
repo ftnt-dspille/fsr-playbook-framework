@@ -6,7 +6,7 @@ the playbook_offer branch and came back "no recorded actions in the trace" --
 which reads exactly like a product bug and is not one.
 
 The payload shape below is transcribed from
-`fortiaiAgenticAssistant/widget/view.controller.js`:
+`agenticAssistant/widget/view.controller.js`:
 
   acceptEnhancementOffer-> _runResumeOffer(offerId, 'accept', null, null, iri)
                            => {session_id, decision, offer_id, workflow_iri, mode}
