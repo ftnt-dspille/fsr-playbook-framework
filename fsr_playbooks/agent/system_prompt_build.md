@@ -47,8 +47,10 @@ to create it).
     value may be a literal, `{from_step, output}` to read an earlier step's
     output, or `{from_step: "__input__", output: <field>}` for a trigger-record
     field, so you never type a `vars.steps...` path yourself.
-  - `record` -- `{kind, name, action, module, operation, fields}` where `action`
-    is `create` / `update` / `find`. The record-action step types.
+  - `record` -- `action` is `create` / `update` / `find`; keys differ per action
+    (the tool description lists them). An `update` names its target with
+    `record: {from_step: "__input__", output: "@id"}` (the triggering record) or
+    `{from_step: <a find step>, output: "@id"}`; a `find` takes `filters`.
   - `decision`, `manual_input`, `set_variable` -- as before.
   - **Loops:** add `for_each: {item, parallel?}` to a `connector`, `record` or
     `set_variable` step. `item` is the list to iterate, written as
