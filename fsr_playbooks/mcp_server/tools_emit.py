@@ -999,7 +999,7 @@ def _unknown_config_pins(yaml_text: str) -> list[dict[str, Any]]:
         for st in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
             if not isinstance(st, dict):
                 continue
-            args = st.get("arguments") if isinstance(st.get("arguments"), dict) else {}
+            args: dict = st["arguments"] if isinstance(st.get("arguments"), dict) else {}
             conn = st.get("connector") or args.get("connector")
             cfg = st.get("config", args.get("config"))
             if not (isinstance(conn, str) and isinstance(cfg, str)):

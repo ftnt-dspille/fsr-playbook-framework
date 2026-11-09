@@ -1763,7 +1763,7 @@ def _invoke(spec: ToolSpec, name: str, raw_args: dict[str, Any]) -> Any:
         return spec.fn(**raw_args)
     except Exception as e:  # noqa: BLE001 -- surface to the LLM, not a 500
         logging.getLogger(__name__).exception("tool %s raised", name)
-        e = _leaf_exception(e)   # an ExceptionGroup/cause chain hides the real error
+        e = _leaf_exception(e)  # type: ignore[assignment]  # an ExceptionGroup/cause chain hides the real error
         return {"ok": False, "code": "tool_error", "tool": name,
                 "error": f"{name} failed internally ({type(e).__name__}: {e}). "
                          "This is a tool fault, not your arguments -- do not "

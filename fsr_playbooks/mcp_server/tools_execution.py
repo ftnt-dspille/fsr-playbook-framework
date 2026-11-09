@@ -1007,7 +1007,7 @@ def _preflight_connector(client, connector: str,
         # A named config this analyst cannot see (another team's, or none by
         # that name). Running with "" would fall back to the connector's
         # default -- possibly another team's -- so refuse.
-        visible = sorted({c.get("name") for r in rows if r.get("name") == connector
+        visible = sorted({str(c["name"]) for r in rows if r.get("name") == connector
                           for c in (r.get("configuration") or [])
                           if isinstance(c, dict) and c.get("name")})
         return _err(

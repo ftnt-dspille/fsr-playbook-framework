@@ -1322,7 +1322,7 @@ def list_configured_connectors(probe: bool = False,
         if current_caller():
             from .tools_execution import _all_configured_rows
             shown = {i["name"] for i in out}
-            not_shared = sorted({r.get("name") for r in _all_configured_rows(client)
+            not_shared = sorted({str(r["name"]) for r in _all_configured_rows(client)
                                  if r.get("name") and r.get("name") not in shown})
     except Exception:  # noqa: BLE001
         not_shared = []

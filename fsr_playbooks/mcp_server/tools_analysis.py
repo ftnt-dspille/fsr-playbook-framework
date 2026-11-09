@@ -1708,7 +1708,7 @@ def _branches_from_routes(steps: list) -> None:
         if not isinstance(s, dict) or s.get("branches"):
             continue
         routes: dict[str, str] = {}
-        args = s.get("arguments") if isinstance(s.get("arguments"), dict) else {}
+        args: dict = s["arguments"] if isinstance(s.get("arguments"), dict) else {}
         for c in (s.get("conditions") or args.get("conditions") or []):
             if isinstance(c, dict) and c.get("next"):
                 label = c.get("display") or c.get("label") or c.get("option")
