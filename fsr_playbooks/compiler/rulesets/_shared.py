@@ -366,7 +366,10 @@ def rule_connector_param_visibility(doc: dict) -> Iterable[Issue]:
                     entries = by_name.get(p_name)
                     if not entries:
                         continue
-                    if any(parent is None for parent, _ in entries):
+                    # The provisioner stores "no parent" as '' (SQLite treats
+                    # NULLs as distinct in a UNIQUE index), so a top-level
+                    # param is any falsy parent, not just None.
+                    if any(not parent for parent, _ in entries):
                         continue
                     satisfied = False
                     for parent, cond in entries:
