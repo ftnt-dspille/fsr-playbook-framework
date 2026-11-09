@@ -362,7 +362,7 @@ db-restore: ## restore data/fsr_reference.db from FROM=<backup> (default .db.bak
 	sqlite3 "$$dst" "pragma quick_check;" | grep -qx ok \
 	  || { echo "restore FAILED integrity check"; exit 1; }; \
 	echo "✓ restored $$dst from $$src"; \
-	$(VENV_PY) -m fsr_playbooks.doctor
+	$(VENV_PY) -m fsr_playbooks.doctor --offline
 
 jinja-export: ## LIVE (SSH): dump every Jinja filter/global/test + signature from a box: make jinja-export INSTANCE=<alias>
 	@[ -n "$(INSTANCE)" ] || { echo "usage: make jinja-export INSTANCE=<pyfsr instance alias>"; exit 2; }
@@ -387,7 +387,7 @@ verify: ## green-check for the fsr_playbooks + connector axis (offline)
 	@# an ancient pyfsr broke suite collection, and an empty reference DB makes
 	@# broken YAML validate clean. Diagnosing those from the test output costs
 	@# hours; diagnosing them from here costs one line.
-	$(VENV_PY) -m fsr_playbooks.doctor
+	$(VENV_PY) -m fsr_playbooks.doctor --offline
 	@echo "→ [1/5] mypy (fsr_playbooks/compiler)"
 	$(VENV_PY) -m mypy
 	@echo "→ [2/5] mypy ratchet (fsr_playbooks/llm + mcp_server)"

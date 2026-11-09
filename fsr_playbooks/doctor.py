@@ -291,9 +291,17 @@ CHECKS = (
 )
 
 
-def run() -> list[Check]:
+#: Checks that go over the network. ``--offline`` (``make verify``) skips them: the
+#: gate must not depend on the VPN, and the eval sweeps that need the gateway run
+#: their own preflight (``calibrate_investigation``).
+NETWORK_CHECKS = (check_llm_gateway,)
+
+
+def run(*, offline: bool = False) -> list[Check]:
     results = []
     for fn in CHECKS:
+        if offline and fn in NETWORK_CHECKS:
+            continue
         try:
             results.append(fn())
         except Exception as e:  # noqa: BLE001 - a check must never mask itself
@@ -301,15 +309,22 @@ def run() -> list[Check]:
     return results
 
 
-def main() -> int:
-    results = run()
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    p = argparse.ArgumentParser(prog="python -m fsr_playbooks.doctor", description="environment preflight")
+    p.add_argument("--offline", action="store_true",
+                   help="skip checks that need the network (the LLM gateway); used by `make verify`")
+    args = p.parse_args(argv)
+    results = run(offline=args.offline)
     print("fsr_playbooks environment doctor")
     print("=" * 60)
     for c in results:
         print(c.render())
     bad = [c for c in results if not c.ok]
     print("=" * 60)
-    print(f"{len(results) - len(bad)}/{len(results)} checks passed")
+    print(f"{len(results) - len(bad)}/{len(results)} checks passed"
+          + (" (offline: network checks skipped)" if args.offline else ""))
     return 1 if bad else 0
 
 

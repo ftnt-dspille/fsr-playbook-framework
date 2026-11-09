@@ -248,3 +248,14 @@ def test_the_providers_friendly_wrapper_is_still_a_transport_failure(msg: str) -
 def test_the_friendly_wrapper_still_distinguishes_a_real_rejection(msg: str) -> None:
     """A bad key or a rejected request is a RESULT. Retrying buys it twice."""
     assert _is_transport_failure(msg) is False
+
+
+def test_offline_doctor_skips_the_gateway_but_the_full_doctor_runs_it(monkeypatch) -> None:
+    from fsr_playbooks import doctor
+
+    called = []
+    monkeypatch.setattr(doctor, "CHECKS", (lambda: called.append(1) or doctor.Check("gw", False, "down"),))
+    monkeypatch.setattr(doctor, "NETWORK_CHECKS", doctor.CHECKS)
+    assert doctor.run(offline=True) == [] and called == []
+    assert [c.ok for c in doctor.run()] == [False] and called == [1]
+    assert doctor.main(["--offline"]) == 0
