@@ -33,3 +33,14 @@ def _clear_approval_grants():
         yield
     finally:
         authorization._APPROVAL_GRANTS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_connector_defs(tmp_path_factory, monkeypatch):
+    """Give every test its own connector-definition cache (``warmup.defs_cache_root``).
+
+    The cache defaults to ``~/.cache``; a definition one test writes would otherwise
+    be served to the next, which then never makes the read it means to check.
+    """
+    monkeypatch.setenv("FSRPB_DEFS_CACHE", str(tmp_path_factory.mktemp("connector-defs")))
+    monkeypatch.setenv("FSRPB_WARM_RECHECK", "0")

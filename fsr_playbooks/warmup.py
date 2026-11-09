@@ -18,10 +18,18 @@ never leaves that table empty.
 """
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
 import os
+import re
 import sqlite3
+import tempfile
+import time
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -238,10 +246,21 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
 # ----------------------- fetch -----------------------
 
+def _http_timeout() -> float:
+    """Seconds before a stalled read gives up (``$FSRPB_HTTP_TIMEOUT``, default 120).
+
+    Without one, a connection the box stops answering hangs the warm forever.
+    """
+    try:
+        return float(os.environ.get("FSRPB_HTTP_TIMEOUT", "120"))
+    except ValueError:
+        return 120.0
+
+
 def _get(client, url: str, params: dict | None = None):
     """GET through the client's session. The raw response keeps the ETag header."""
     resp = client.session.get(
-        client.base_url + url, params=params, verify=client.verify_ssl,
+        client.base_url + url, params=params, verify=client.verify_ssl, timeout=_http_timeout(),
     )
     resp.raise_for_status()
     return resp
@@ -283,9 +302,16 @@ def parse_picklists(body: Any) -> tuple[dict[str, str], dict[str, list[str]],
     return item_id_to_value, list_name_to_options, items_rows, len(members)
 
 
-def write_picklists(conn: sqlite3.Connection, items_rows: list, n_lists: int) -> None:
-    """Replace the picklists table. ``items_rows`` is (list_name, value, iri)."""
-    conn.execute("DELETE FROM picklists")
+def write_picklists(conn: sqlite3.Connection, items_rows: list, n_lists: int,
+                    *, only: Iterable[str] | None = None) -> None:
+    """Replace the picklists table. ``items_rows`` is (list_name, value, iri).
+
+    ``only`` replaces just those lists and keeps the rest (a targeted warm).
+    """
+    if only is None:
+        conn.execute("DELETE FROM picklists")
+    else:
+        conn.executemany("DELETE FROM picklists WHERE list_name = ?", [(n,) for n in only])
     conn.executemany(
         "INSERT OR REPLACE INTO picklists (list_name, item_value, item_iri) "
         "VALUES (?, ?, ?)",
@@ -456,18 +482,25 @@ def write_modules(
     *,
     method: str = "live_api_get",
     module_status: str = "tested_pass",
+    replace_all: bool = True,
 ) -> tuple[int, int]:
     """Replace modules / module_fields and record their verifications.
 
     ``method``/``module_status`` let the local schema.json fallback reuse this
     writer as ``seen`` rows. Field verifications are ``seen`` on both paths.
+    ``replace_all=False`` replaces only the modules in ``members`` (a targeted warm).
     """
-    conn.execute("DELETE FROM module_fields")
-    conn.execute("DELETE FROM modules")
-    conn.execute(
-        "DELETE FROM verifications WHERE kind IN ('module','module_field') "
-        "AND method IN ('live_api_get','schema_json')"
-    )
+    if replace_all:
+        conn.execute("DELETE FROM module_fields")
+        conn.execute("DELETE FROM modules")
+        conn.execute(
+            "DELETE FROM verifications WHERE kind IN ('module','module_field') "
+            "AND method IN ('live_api_get','schema_json')"
+        )
+    else:
+        names = [(m["type"],) for m in members if isinstance(m, dict) and m.get("type")]
+        conn.executemany("DELETE FROM module_fields WHERE module_name = ?", names)
+        conn.executemany("DELETE FROM modules WHERE name = ?", names)
     n_mod = n_fld = 0
     for m in members:
         if not isinstance(m, dict) or not m.get("type"):
@@ -661,6 +694,8 @@ def _drop_connector_rows(conn: sqlite3.Connection) -> None:
 
 def load_installed_connectors(
     conn: sqlite3.Connection, client, *, replace: bool = False,
+    only: Iterable[str] | None = None,
+    listing: Any = None,
 ) -> tuple[int, list[str]]:
     """Read the box's active connectors with their operations and params.
 
@@ -670,10 +705,13 @@ def load_installed_connectors(
     ``replace`` off and upsert incrementally, because their RPM and catalog
     tiers own rows this path never reads.
     """
-    try:
-        listing = client.get(CONNECTORS_URL, params=INSTALLED_LIST_PARAMS)
-    except Exception as e:  # noqa: BLE001
-        return 0, [f"GET list failed: {e!r}"]
+    if isinstance(listing, Exception):
+        return 0, [f"GET list failed: {listing!r}"]
+    if listing is None:
+        try:
+            listing = client.get(CONNECTORS_URL, params=INSTALLED_LIST_PARAMS)
+        except Exception as e:  # noqa: BLE001
+            return 0, [f"GET list failed: {e!r}"]
 
     summaries = listing.get("data", []) if isinstance(listing, dict) else []
     record_verification(
@@ -690,26 +728,15 @@ def load_installed_connectors(
         status="tested_fail",
         notes="404 'No route found' on this instance; use /api/integration/connectors/",
     )
-    if replace:
+    if replace and only is None:
         _drop_connector_rows(conn)
 
-    errors: list[str] = []
+    wanted = set(only) if only is not None else None
+    summaries = [x for x in summaries if x.get("name") and x.get("version")
+                 and (wanted is None or x.get("name") in wanted)]
+    details, errors, _ = fetch_connector_details(client, summaries)
     count = 0
-    for s in summaries:
-        cn, ver = s.get("name"), s.get("version")
-        if not cn or not ver:
-            continue
-        try:
-            detail = client.post(
-                f"/api/integration/connectors/{cn}/{ver}/?format=json",
-                data={},
-            )
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"{cn} {ver}: {e!r}")
-            continue
-        if not isinstance(detail, dict):
-            errors.append(f"{cn} {ver}: detail not dict ({type(detail).__name__})")
-            continue
+    for detail in details:
         upsert_connector_detail(conn, detail, source="live_api_get")
         count += 1
 
@@ -734,23 +761,43 @@ def fetch_connector_configs(client) -> tuple[list[dict], str | None]:
     return resp.json().get("data") or [], resp.headers.get("ETag")
 
 
+def _allow_imports(c: dict) -> int | None:
+    v = (c.get("config") or {}).get("allow_imports") if isinstance(c.get("config"), dict) else None
+    return None if not isinstance(v, bool) else int(v)
+
+
+def _health(c: dict) -> str | None:
+    h = c.get("health_status")
+    if isinstance(h, dict):
+        h = h.get("status")
+    return str(h) if h not in (None, "") else None
+
+
 def _rows_for(connector: str, configs: list[dict], agent_id: str = "") -> list[tuple]:
     rows: list[tuple] = []
-    default = None
+    default: dict | None = None
     for c in configs:
         cid = c.get("config_id")
         name = c.get("name")
         is_def = bool(c.get("default"))
         if name is None:
             continue
-        rows.append((connector, name, cid, 1 if is_def else 0, agent_id))
+        rows.append((connector, name, cid, 1 if is_def else 0, agent_id, _allow_imports(c), _health(c)))
         if is_def and default is None:
-            default = cid
+            default = c
     if default is None and configs:
-        default = configs[0].get("config_id")
-    if default is not None or configs:
-        rows.append((connector, "__default__", default, 1, agent_id))
+        default = configs[0]
+    if default is not None:
+        rows.append((connector, "__default__", default.get("config_id"), 1, agent_id,
+                     _allow_imports(default), _health(default)))
     return rows
+
+
+def _ensure_config_columns(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(connector_configs)")}
+    for col, typ in (("allow_imports", "INTEGER"), ("health_status", "TEXT")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE connector_configs ADD COLUMN {col} {typ}")
 
 
 def write_connector_configs(conn: sqlite3.Connection, members: list[dict]) -> tuple[int, int]:
@@ -761,6 +808,7 @@ def write_connector_configs(conn: sqlite3.Connection, members: list[dict]) -> tu
     or absent = the hub). See :func:`fetch_all_connector_configs`.
     """
     _migrate_connector_configs_agent(conn)  # older catalogs: add agent_id first
+    _ensure_config_columns(conn)
     conn.execute("DELETE FROM connector_configs")
     n_conn = 0
     all_rows: list[tuple] = []
@@ -775,7 +823,8 @@ def write_connector_configs(conn: sqlite3.Connection, members: list[dict]) -> tu
             all_rows.extend(rows)
     conn.executemany(
         "INSERT OR REPLACE INTO connector_configs "
-        "(connector, config_name, config_id, is_default, agent_id) VALUES (?, ?, ?, ?, ?)",
+        "(connector, config_name, config_id, is_default, agent_id, allow_imports, health_status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         all_rows,
     )
     record_verification(
@@ -869,6 +918,147 @@ def configs_fingerprint(members: list[dict]) -> str:
     return hashlib.sha256(json.dumps(items).encode()).hexdigest()[:16]
 
 
+# ----------------------- concurrency and the connector definition cache -----------------------
+
+#: Box-specific keys on a connector detail. The rest is the definition, identical on
+#: every box for one (name, version) of a Fortinet RPM install.
+_BOX_KEYS = frozenset({
+    "configuration", "id", "agent", "created", "modified", "status", "config_count",
+    "install_result", "remote_status", "installed", "requirements_installed", "active",
+})
+_SAFE_PART = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}$")
+
+
+def _warm_workers() -> int:
+    try:
+        return max(1, int(os.environ.get("FSRPB_WARM_WORKERS", "8")))
+    except ValueError:
+        return 8
+
+
+def _parallel(tasks: dict[str, Callable[[], Any]]) -> dict[str, Any]:
+    """Run independent reads at once. Each value is the result or the exception raised."""
+    if not tasks:
+        return {}
+    out: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=min(_warm_workers(), len(tasks))) as ex:
+        futures = {key: ex.submit(fn) for key, fn in tasks.items()}
+        for key, fut in futures.items():
+            try:
+                out[key] = fut.result()
+            except Exception as e:  # noqa: BLE001 - the caller decides per section
+                out[key] = e
+    return out
+
+
+def defs_cache_root() -> Path:
+    env = os.environ.get("FSRPB_DEFS_CACHE")
+    if env:
+        return Path(env)
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "fsr_playbooks" / "connector_defs"
+
+
+def _def_cache_path(summary: dict, base_url: str) -> Path | None:
+    """Where a connector definition is cached, or None when its name is unsafe as a path.
+
+    A Fortinet RPM install is the same on every box, so it is shared across boxes.
+    Anything else (an uploaded or locally built connector) is cached for its box only,
+    keyed by its install time, because one name and version can differ between boxes.
+    """
+    name, ver = str(summary.get("name") or ""), str(summary.get("version") or "")
+    if not (_SAFE_PART.match(name) and _SAFE_PART.match(ver)) or ".." in name or ".." in ver:
+        return None
+    root = defs_cache_root()
+    if summary.get("rpm_installed") is True and str(summary.get("publisher") or "").startswith("Fortinet"):
+        return root / "shared" / f"{name}@{ver}.json"
+    stamp = hashlib.sha256(str(summary.get("modified") or "").encode()).hexdigest()[:12]
+    return root / _catalog_meta.base_url_hash(base_url) / f"{name}@{ver}@{stamp}.json"
+
+
+def _read_def(path: Path) -> dict | None:
+    try:
+        d = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _write_def(path: Path, definition: dict) -> None:
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+        with os.fdopen(fd, "w") as fh:
+            json.dump(definition, fh)
+        os.replace(tmp, path)
+
+
+def fetch_connector_details(client, summaries: list[dict]) -> tuple[list[dict], list[str], dict[str, int]]:
+    """Each listed connector's detail: from the definition cache, else fetched in parallel.
+
+    Returns ``(details, errors, {"cached": n, "fetched": n})``. A cached definition is
+    merged with the box's own listing row, so per-box fields (configurations, ids,
+    status) always come from this box.
+    """
+    base_url = client.base_url
+    out: list[dict | None] = [None] * len(summaries)
+    todo: list[tuple[int, dict, Path | None]] = []
+    stats = {"cached": 0, "fetched": 0}
+    for i, summ in enumerate(summaries):
+        path = _def_cache_path(summ, base_url)
+        cached = _read_def(path) if path else None
+        if cached is not None:
+            out[i] = {**cached, **{k: summ[k] for k in _BOX_KEYS if k in summ}}
+            stats["cached"] += 1
+        else:
+            todo.append((i, summ, path))
+
+    def one(item: tuple[int, dict, Path | None]) -> tuple[int, dict]:
+        i, summ, path = item
+        detail = client.post(f"/api/integration/connectors/{summ['name']}/{summ['version']}/?format=json", data={})
+        if not isinstance(detail, dict):
+            raise ValueError(f"detail not dict ({type(detail).__name__})")
+        if path is not None:
+            _write_def(path, {k: v for k, v in _strip_icons(detail).items() if k not in _BOX_KEYS})
+        return i, detail
+
+    errors: list[str] = []
+    results = _parallel({str(i): partial(one, item) for i, item in enumerate(todo)})
+    for key, res in results.items():
+        _, summ, _ = todo[int(key)]
+        if isinstance(res, Exception):
+            errors.append(f"{summ.get('name')} {summ.get('version')}: {res!r}")
+        else:
+            out[res[0]] = res[1]
+            stats["fetched"] += 1
+    return [d for d in out if d is not None], errors, stats
+
+
+def _in_filter(names: Iterable[str]) -> str | None:
+    vals = sorted({n for n in names if n and "|" not in n})
+    return "|".join(vals) if vals else None
+
+
+def fetch_module_metadata(client, modules: Iterable[str]) -> list[dict]:
+    """Staging metadata for just these modules, in one call."""
+    flt = _in_filter(modules)
+    if flt is None:
+        return []
+    body = _get(client, "/api/3/staging_model_metadatas",
+                {"type$in": flt, "$relationships": "true", "$limit": 500}).json()
+    return body.get("hydra:member", []) if isinstance(body, dict) else []
+
+
+def fetch_picklists_body(client, names: Iterable[str]) -> dict:
+    """A picklist_names body holding just these lists, in one call."""
+    flt = _in_filter(names)
+    if flt is None:
+        return {"hydra:member": []}
+    resp = _get(client, "/api/3/picklist_names",
+                {"name$in": flt, "$relationships": "true", "$limit": 1000})
+    body = resp.json()
+    return body if isinstance(body, dict) else {"hydra:member": []}
+
+
 # ----------------------- modules: the orchestrated read -----------------------
 
 def warm_modules(
@@ -888,10 +1078,21 @@ def warm_modules(
     etags: dict[str, str] = {}
     errors: list[str] = []
 
+    tasks: dict[str, Callable[[], Any]] = {
+        "tags": lambda: _get(client, TAGS_URL),
+        "teams": lambda: _get(client, TEAMS_URL),
+        "metadata": lambda: _get(client, METADATA_URL),
+    }
+    if picklists_body is None:
+        tasks["picklists"] = lambda: _get(client, PICKLISTS_URL)
+    got = _parallel(tasks)
+
     try:
         picklist_resp = None
         if picklists_body is None:
-            picklist_resp = _get(client, PICKLISTS_URL)
+            if isinstance(got["picklists"], Exception):
+                raise got["picklists"]
+            picklist_resp = got["picklists"]
             picklists_body = picklist_resp.json()
         picklist_items, picklist_lists, items_rows, n_lists = parse_picklists(picklists_body)
     except Exception as e:  # noqa: BLE001
@@ -901,21 +1102,25 @@ def warm_modules(
 
     tag_rows: list[tuple[str, str]] | None = None
     try:
-        tags_resp = _get(client, TAGS_URL)
-        tag_rows = _tag_rows(tags_resp.json().get("hydra:member") or [])
-        _note_etag(etags, "tags", tags_resp)
+        if isinstance(got["tags"], Exception):
+            raise got["tags"]
+        tag_rows = _tag_rows(got["tags"].json().get("hydra:member") or [])
+        _note_etag(etags, "tags", got["tags"])
     except Exception as e:  # noqa: BLE001
         errors.append(f"tags: {e!r}")
 
     team_rows: list[tuple[str, str]] | None = None
     try:
-        teams_resp = _get(client, TEAMS_URL)
-        team_rows = _team_rows(teams_resp.json().get("hydra:member") or [])
+        if isinstance(got["teams"], Exception):
+            raise got["teams"]
+        team_rows = _team_rows(got["teams"].json().get("hydra:member") or [])
     except Exception as e:  # noqa: BLE001
         errors.append(f"teams: {e!r}")
 
     try:
-        metadata_resp = _get(client, METADATA_URL)
+        if isinstance(got["metadata"], Exception):
+            raise got["metadata"]
+        metadata_resp = got["metadata"]
         metadata = metadata_resp.json()
     except Exception as e:  # noqa: BLE001
         raise WarmupFatal(f"metadata: {e!r}") from e
@@ -965,21 +1170,18 @@ def stamp_provenance(
     ``base_url`` defaults to ``client.base_url``. Best-effort: the extra GETs are
     cheap, and a failure here must not fail the warm. Returns the identity fields.
     """
-    fsr_version = None
-    last_publish = None
-    try:  # public, no-auth, ~25 B -- Tier-0 upgrade gate
-        v = client.get("/api/version")
-        if isinstance(v, dict):
-            fsr_version = v.get("version")
-    except Exception:  # noqa: BLE001
-        pass
-    try:  # appliance-wide publish watermark -- Tier-1 gate
-        p = client.get("/api/publish/error")
-        if isinstance(p, dict):
-            last_publish = p.get("last_publish_time")
-    except Exception:  # noqa: BLE001
-        pass
-    serial = live_license_serial(client)
+    tasks: dict[str, Callable[[], Any]] = {
+        "version": lambda: client.get("/api/version"),  # public, ~25 B -- Tier-0 upgrade gate
+        "publish": lambda: client.get("/api/publish/error"),  # appliance-wide publish watermark
+        "serial": lambda: live_license_serial(client),
+    }
+    for coll in COUNT_COLLECTIONS:
+        tasks[f"count:{coll}"] = partial(client.get, f"/api/3/{coll}?$limit=0")
+    got = _parallel(tasks)
+    v, p = got["version"], got["publish"]
+    fsr_version = v.get("version") if isinstance(v, dict) else None
+    last_publish = p.get("last_publish_time") if isinstance(p, dict) else None
+    serial = got["serial"] if isinstance(got["serial"], str) else None
     _catalog_meta.stamp_instance(
         conn,
         instance_label=instance_label,
@@ -991,13 +1193,10 @@ def stamp_provenance(
     # Baseline the cheap row counts so a later freshness check can detect
     # add/delete drift, including picklist value adds that publish nothing.
     for coll in COUNT_COLLECTIONS:
-        try:
-            r = client.get(f"/api/3/{coll}?$limit=0")
-            total = r.get("hydra:totalItems") if isinstance(r, dict) else None
-            if isinstance(total, int):
-                _catalog_meta.record_count(conn, coll, total)
-        except Exception:  # noqa: BLE001
-            pass
+        r = got[f"count:{coll}"]
+        total = r.get("hydra:totalItems") if isinstance(r, dict) else None
+        if isinstance(total, int):
+            _catalog_meta.record_count(conn, coll, total)
     return {"fsr_version": fsr_version, "last_publish_time": last_publish,
             "instance_serial": serial}
 
@@ -1076,18 +1275,28 @@ def _warm_in_transaction(
     base_url = client.base_url
     etags: dict[str, str] = {}
 
-    n_mod, n_fld, mod_errs, mod_etags = warm_modules(conn, client)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        listing_f = ex.submit(client.get, CONNECTORS_URL, params=INSTALLED_LIST_PARAMS)
+        configs_f = ex.submit(fetch_all_connector_configs, client)
+        n_mod, n_fld, mod_errs, mod_etags = warm_modules(conn, client)
+        try:
+            listing: Any = listing_f.result()
+        except Exception as e:  # noqa: BLE001
+            listing = e
+        try:
+            configs_res: Any = configs_f.result()
+        except Exception as e:  # noqa: BLE001
+            configs_res = e
     etags.update(mod_etags)
     errors.extend(mod_errs)
 
-    _, conn_errs = load_installed_connectors(conn, client, replace=True)
+    _, conn_errs = load_installed_connectors(conn, client, replace=True, listing=listing)
     errors.extend(conn_errs)
 
-    try:
-        members, agents, self_id = fetch_all_connector_configs(client)
-    except Exception as e:  # noqa: BLE001
-        errors.append(f"connector_configs: {e!r}")
+    if isinstance(configs_res, Exception):
+        errors.append(f"connector_configs: {configs_res!r}")
     else:
+        members, agents, self_id = configs_res
         write_connector_configs(conn, members)
         write_agents(conn, agents, self_id)
         _catalog_meta.set_(conn, "configs_fingerprint", configs_fingerprint(members))
@@ -1193,52 +1402,287 @@ def _live_counts(client) -> dict[str, int | None]:
     return out
 
 
-def box_catalog(client, cache_dir: str | Path | None = None, *, instance_label: str | None = None) -> Path:
-    """The reference catalog for ``client``'s box, warming it when needed.
-
-    One file per box under ``cache_dir`` (default ``$XDG_CACHE_HOME`` or
-    ``~/.cache``, then ``fsr_playbooks/boxes``), named by the box's URL hash. It
-    is (re)warmed when missing, stamped for another box, or when the box's
-    module/field totals differ from the ones recorded at the last warm (the
-    agent created a module since). Returns the path for ``compile_yaml``.
-    """
-    from . import _catalog_meta
-
+def box_catalog_path(base_url: str, cache_dir: str | Path | None = None) -> Path:
+    """The one catalog file for a box, shared by every tool that compiles for it."""
     root = Path(cache_dir) if cache_dir else Path(
         os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "fsr_playbooks" / "boxes"
     root.mkdir(parents=True, exist_ok=True)
-    base_url = client.base_url
-    path = root / f"catalog-{_catalog_meta.base_url_hash(base_url)}.db"
-    if path.exists() and path.stat().st_size:
-        conn = sqlite3.connect(path)
-        try:
-            status, _, _ = _catalog_meta.check_instance(conn, base_url)
-            recorded = {c: _catalog_meta.get(conn, f"count:{c}") for c in _FRESHNESS_COLLECTIONS}
-            recorded_fp = _catalog_meta.get(conn, "configs_fingerprint")
-        finally:
-            conn.close()
-        live = _live_counts(client)
-        # Connector configs move independently of modules (a config added,
-        # renamed or moved to an agent), and a stale config row compiles a step
-        # against the wrong config -- so they are part of freshness too.
-        try:
-            live_fp = configs_fingerprint(fetch_all_connector_configs(client)[0])
-        except Exception:  # noqa: BLE001
-            live_fp = None  # cannot read configs: judge freshness by modules alone
-        if status == "ok" and all(live[c] is not None and str(live[c]) == recorded[c]
-                                  for c in _FRESHNESS_COLLECTIONS) \
-                and (live_fp is None or live_fp == recorded_fp):
-            return path
+    return root / f"catalog-{_catalog_meta.base_url_hash(base_url)}.db"
+
+
+def _remove_catalog(path: Path) -> None:
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{path}{suffix}").unlink(missing_ok=True)
+
+
+def _full_warm(client, path: Path, instance_label: str | None) -> None:
     fresh = not path.exists()
     try:
-        report = warm_catalog(client, path, instance_label=instance_label)
+        report = warm_catalog(client, path, instance_label=instance_label, seed_from=PACKAGED_SLIM_DB)
         if not report.get("committed"):
-            raise WarmupError(f"warming the catalog for {base_url} failed: {report.get('errors')}")
+            raise WarmupError(f"warming the catalog for {client.base_url} failed: {report.get('errors')}")
+        conn = sqlite3.connect(path)
+        try:
+            for key in [k for k in _catalog_meta.get_all(conn) if k.startswith("scope:")]:
+                _catalog_meta.set_(conn, key, None)
+            _catalog_meta.set_(conn, "scope:full", _utcnow())
+            _catalog_meta.set_(conn, "probed_at", str(time.time()))
+            conn.commit()
+        finally:
+            conn.close()
     except Exception:
         # A failed first warm leaves only the seed copy: another box's catalog
         # under this box's name. Remove it so the next call retries.
         if fresh:
-            for suffix in ("", "-wal", "-shm"):
-                Path(f"{path}{suffix}").unlink(missing_ok=True)
+            _remove_catalog(path)
         raise
+
+
+def _stamp_probed(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        _catalog_meta.set_(conn, "probed_at", str(time.time()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _recheck_seconds() -> float:
+    try:
+        return float(os.environ.get("FSRPB_WARM_RECHECK", "30"))
+    except ValueError:
+        return 30.0
+
+
+def _total(r: Any) -> int | None:
+    t = r.get("hydra:totalItems") if isinstance(r, dict) else None
+    return t if isinstance(t, int) else None
+
+
+def warm_for_playbook(client, path: Path, playbook: str, *,
+                      instance_label: str | None = None) -> dict[str, Any]:
+    """Warm only what ``playbook`` uses into the box's catalog at ``path``.
+
+    Fetches the definitions, configurations and health of the connectors its steps
+    call, the metadata of the modules its record steps touch, and the picklists those
+    fields bind to (plus any named in Jinja). What is already warmed and still
+    current is not fetched again. Freshness is judged from cheap reads made in
+    parallel (row counts, the connector listing, the configurations), and skipped
+    entirely within ``$FSRPB_WARM_RECHECK`` seconds (default 30) of the last check.
+    Returns a report of what was fetched.
+    """
+    from .playbook_needs import playbook_needs
+
+    needs = playbook_needs(playbook)
+    started = time.perf_counter()
+    report: dict[str, Any] = {"level": "targeted", "db": str(path), "fetched": {}, "errors": []}
+    first = not (path.exists() and path.stat().st_size)
+    _seed_if_absent(path, PACKAGED_SLIM_DB)
+    conn = _open(path)
+    try:
+        ensure_schema(conn)
+        meta = _catalog_meta.get_all(conn)
+        status, _, _ = _catalog_meta.check_instance(conn, client.base_url)
+        if status == "mismatch":
+            report["level"] = "mismatch"
+            return report
+        full = "scope:full" in meta
+
+        def have(kind: str, name: str) -> bool:
+            return full or f"scope:{kind}:{name}" in meta
+
+        installed = {r[0]: r[1] for r in conn.execute("SELECT name, version FROM connectors")}
+        missing = ([c for c in needs.connectors if not have("connector", c) or c not in installed]
+                   + [m for m in needs.modules if not have("module", m)]
+                   + [p for p in needs.picklists if not have("picklist", p)])
+        probed_at = float(meta.get("probed_at") or 0)
+        if not first and not missing and time.time() - probed_at < _recheck_seconds():
+            report["seconds"] = round(time.perf_counter() - started, 3)
+            return report
+
+        probes: dict[str, Callable[[], Any]] = {
+            f"count:{c}": partial(client.get, f"/api/3/{c}?$limit=0") for c in COUNT_COLLECTIONS}
+        probes["listing"] = lambda: client.get(CONNECTORS_URL, params=INSTALLED_LIST_PARAMS)
+        probes["configs"] = lambda: fetch_all_connector_configs(client)
+        got = _parallel(probes)
+
+        changed = {c for c in COUNT_COLLECTIONS
+                   if _total(got[f"count:{c}"]) is not None
+                   and str(_total(got[f"count:{c}"])) != meta.get(f"count:{c}")}
+        modules_stale = bool(changed & {"model_metadatas", "attribute_metadatas"}) and not first
+        picklists_stale = bool(changed & {"picklists", "picklist_names"}) and not first
+        if modules_stale or picklists_stale:
+            for key in [k for k in meta if k == "scope:full"
+                        or (modules_stale and k.startswith("scope:module:"))
+                        or (picklists_stale and k.startswith("scope:picklist:"))]:
+                _catalog_meta.set_(conn, key, None)
+                meta.pop(key, None)
+            full = False
+
+        listing = got["listing"]
+        summaries = {x["name"]: x for x in (listing.get("data", []) if isinstance(listing, dict) else [])
+                     if x.get("name") and x.get("version")}
+        conn_todo = [summaries[c] for c in sorted(needs.connectors)
+                     if c in summaries and installed.get(c) != summaries[c]["version"]]
+        mod_todo = sorted(m for m in needs.modules if modules_stale or not have("module", m))
+        tags_todo = first or "tags" in changed or not have("box", "tags")
+
+        stage1: dict[str, Callable[[], Any]] = {}
+        if mod_todo:
+            stage1["modules"] = lambda: fetch_module_metadata(client, mod_todo)
+        if conn_todo:
+            stage1["connectors"] = lambda: fetch_connector_details(client, conn_todo)
+        if tags_todo:
+            stage1["tags"] = lambda: _get(client, TAGS_URL).json()
+            stage1["teams"] = lambda: _get(client, TEAMS_URL).json()
+        s1 = _parallel(stage1)
+
+        mods_res = s1.get("modules")
+        members: list[dict] = mods_res if isinstance(mods_res, list) else []
+        if isinstance(s1.get("modules"), Exception):
+            report["errors"].append(f"modules: {s1['modules']!r}")
+        bound: set[str] = set(needs.picklists)
+        for m in members:
+            for attr in m.get("attributes") or []:
+                name = _picklist_list_name(attr) if isinstance(attr, dict) else None
+                if name:
+                    bound.add(name)
+        for mod in needs.modules:
+            bound.update(r[0] for r in conn.execute(
+                "SELECT DISTINCT picklist_name FROM module_fields WHERE module_name = ? "
+                "AND picklist_name IS NOT NULL", (mod,)))
+        pl_todo = sorted(n for n in bound if picklists_stale or not have("picklist", n)
+                         or any(m.get("type") for m in members))
+        picklist_lists: dict[str, list[str]] = {}
+        if pl_todo:
+            try:
+                _, picklist_lists, items_rows, n_lists = parse_picklists(fetch_picklists_body(client, pl_todo))
+                write_picklists(conn, items_rows, n_lists, only=pl_todo)
+                for n in pl_todo:
+                    _catalog_meta.set_(conn, f"scope:picklist:{n}", _utcnow())
+                report["fetched"]["picklists"] = pl_todo
+            except Exception as e:  # noqa: BLE001
+                report["errors"].append(f"picklists: {e!r}")
+        if members:
+            write_modules(conn, members, picklist_lists, replace_all=False)
+            for m in members:
+                _catalog_meta.set_(conn, f"scope:module:{m['type']}", _utcnow())
+            report["fetched"]["modules"] = [m["type"] for m in members]
+
+        res = s1.get("connectors")
+        if isinstance(res, Exception):
+            report["errors"].append(f"connectors: {res!r}")
+        elif res is not None:
+            details, errs, stats = res
+            for d in details:
+                upsert_connector_detail(conn, d, source="live_api_get")
+                _catalog_meta.set_(conn, f"scope:connector:{d.get('name')}", str(d.get("version")))
+            report["errors"].extend(errs)
+            report["fetched"]["connectors"] = [d.get("name") for d in details]
+            report["fetched"]["connector_defs_from_cache"] = stats["cached"]
+
+        cfg = got["configs"]
+        if isinstance(cfg, Exception):
+            report["errors"].append(f"connector_configs: {cfg!r}")
+        else:
+            cmembers, agents, self_id = cfg
+            fp = configs_fingerprint(cmembers)
+            if first or fp != meta.get("configs_fingerprint") or not have("box", "configs"):
+                write_connector_configs(conn, cmembers)
+                write_agents(conn, agents, self_id)
+                _catalog_meta.set_(conn, "configs_fingerprint", fp)
+                _catalog_meta.set_(conn, "scope:box:configs", _utcnow())
+                report["fetched"]["configs"] = True
+
+        if tags_todo:
+            if not isinstance(s1.get("tags"), Exception):
+                write_tags(conn, _tag_rows(s1["tags"].get("hydra:member") or []))
+            if not isinstance(s1.get("teams"), Exception):
+                write_teams(conn, _team_rows(s1["teams"].get("hydra:member") or []))
+            _catalog_meta.set_(conn, "scope:box:tags", _utcnow())
+            report["fetched"]["tags_teams"] = True
+
+        if status != "ok":
+            stamp_provenance(conn, client, instance_label=instance_label)
+        else:
+            for c in COUNT_COLLECTIONS:
+                total = _total(got[f"count:{c}"])
+                if total is not None:
+                    _catalog_meta.record_count(conn, c, total)
+        _catalog_meta.set_(conn, "probed_at", str(time.time()))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        if first:
+            conn.close()
+            _remove_catalog(path)
+            raise
+        raise
+    finally:
+        with contextlib.suppress(Exception):
+            conn.close()
+    report["seconds"] = round(time.perf_counter() - started, 3)
+    return report
+
+
+def box_catalog(
+    client,
+    cache_dir: str | Path | None = None,
+    *,
+    instance_label: str | None = None,
+    playbook: str | None = None,
+    full: bool = False,
+) -> Path:
+    """The reference catalog for ``client``'s box, warmed to the level asked for.
+
+    One file per box under ``cache_dir`` (default ``$XDG_CACHE_HOME`` or
+    ``~/.cache``, then ``fsr_playbooks/boxes``), named by the box's normalized URL
+    hash, so every tool compiling for that box shares it and switching boxes is a
+    file switch, never a re-warm. New files are seeded from the packaged catalog.
+
+    - ``playbook=<yaml>``: targeted. Only the connectors, modules and picklists that
+      playbook uses are fetched, and only when missing or stale (see
+      :func:`warm_for_playbook`).
+    - ``full=True``: everything is re-read now, sections in parallel.
+    - neither: everything, when the file is missing, stamped for another box, or the
+      box's module/field totals or connector configurations changed since the last warm.
+
+    Returns the path for ``compile_yaml``.
+    """
+    path = box_catalog_path(client.base_url, cache_dir)
+    if full:
+        _full_warm(client, path, instance_label)
+        return path
+    if playbook is not None:
+        rep = warm_for_playbook(client, path, playbook, instance_label=instance_label)
+        if rep.get("level") == "mismatch":
+            _remove_catalog(path)
+            _full_warm(client, path, instance_label)
+        return path
+    if path.exists() and path.stat().st_size:
+        conn = sqlite3.connect(path)
+        try:
+            status, _, _ = _catalog_meta.check_instance(conn, client.base_url)
+            recorded = {c: _catalog_meta.get(conn, f"count:{c}") for c in _FRESHNESS_COLLECTIONS}
+            recorded_fp = _catalog_meta.get(conn, "configs_fingerprint")
+            is_full = _catalog_meta.get(conn, "scope:full") is not None or recorded_fp is not None
+            probed = _catalog_meta.get(conn, "probed_at")
+        finally:
+            conn.close()
+        try:
+            recent = probed is not None and time.time() - float(probed) < _recheck_seconds()
+        except ValueError:
+            recent = False
+        if status == "ok" and is_full and recent:
+            return path
+        got = _parallel({"counts": lambda: _live_counts(client),
+                         "configs": lambda: fetch_all_connector_configs(client)[0]})
+        live = got["counts"] if isinstance(got["counts"], dict) else {c: None for c in _FRESHNESS_COLLECTIONS}
+        live_fp = configs_fingerprint(got["configs"]) if isinstance(got["configs"], list) else None
+        if status == "ok" and is_full and all(
+                live[c] is not None and str(live[c]) == recorded[c] for c in _FRESHNESS_COLLECTIONS) \
+                and (live_fp is None or live_fp == recorded_fp):
+            _stamp_probed(path)
+            return path
+    _full_warm(client, path, instance_label)
     return path

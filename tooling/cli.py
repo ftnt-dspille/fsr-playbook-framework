@@ -70,18 +70,35 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     return 0
 
 
-def _box_db(client) -> Path:
+def _box_db(client, playbook: str | None = None) -> Path:
     """The per-box reference catalog for ``client``, warmed when missing or stale.
 
-    Stale = another box's stamp, moved module/field totals, or a changed set of
-    connector configs (added, renamed, or moved between the hub and an agent).
-    Compiling against it resolves `config:` names and `on_remote:` agents to the
-    ids THIS box uses.
+    With ``playbook`` only what that playbook uses is warmed (its connectors,
+    modules and picklists); without it, everything. Stale = another box's stamp,
+    moved module/field totals, or a changed set of connector configs. Compiling
+    against it resolves `config:` names and `on_remote:` agents to the ids THIS
+    box uses.
     """
     from fsr_playbooks.warmup import box_catalog
-    path = box_catalog(client)
+    path = box_catalog(client, playbook=playbook)
     print(f"catalog: {path}", file=sys.stderr)
     return path
+
+
+def cmd_warm(args: argparse.Namespace) -> int:
+    """Warm a box's catalog: what a playbook uses, everything stale, or everything now (--full)."""
+    import time as _time
+
+    from probes import _env  # type: ignore
+
+    from fsr_playbooks.warmup import box_catalog
+    client = _instance_client(args.instance) if args.instance else _env.get_client()
+    playbook = Path(args.playbook).read_text() if args.playbook else None
+    t = _time.perf_counter()
+    path = box_catalog(client, playbook=playbook, full=args.full)
+    level = "full" if args.full else ("playbook" if playbook else "stale sections")
+    print(f"catalog: {path} ({level}, {_time.perf_counter() - t:.1f}s)")
+    return 0
 
 
 def _instance_client(name: str):
@@ -98,7 +115,7 @@ def cmd_compile(args: argparse.Namespace) -> int:
         lax_codes = {ErrorCode.UNKNOWN_PARAM, ErrorCode.UNKNOWN_CONNECTOR}
     db = Path(args.db)
     if getattr(args, "instance", None):
-        db = _box_db(_instance_client(args.instance))
+        db = _box_db(_instance_client(args.instance), text)
     result = compile_yaml(text, db, lax_codes=lax_codes)
     if not result.ok:
         _print_errors(result.errors)
@@ -781,9 +798,9 @@ def cmd_push(args: argparse.Namespace) -> int:
         _client = _instance_client(args.instance)
         _env.get_client = lambda: _client  # push to the named instance
         _env.get_config().is_live = lambda: True  # type: ignore[method-assign]
-        args.db = str(_box_db(_client))
+        args.db = str(_box_db(_client, Path(args.input).read_text()))
     elif _env.get_config().is_live() and not getattr(args, "no_box_catalog", False):
-        args.db = str(_box_db(_env.get_client()))
+        args.db = str(_box_db(_env.get_client(), Path(args.input).read_text()))
     text = _push_input_text(Path(args.input).read_text(), Path(args.db))
     result = compile_yaml(text, Path(args.db))
     if not result.ok:
@@ -5150,6 +5167,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "re-pull. Live-validate ETags on a box before relying "
                          "on this.")
     sp.set_defaults(func=cmd_refresh)
+
+    sp = sub.add_parser("warm", help="warm a box's catalog: a playbook's needs, stale sections, or --full")
+    sp.add_argument("playbook", nargs="?", help="warm only what this playbook uses")
+    sp.add_argument("--full", action="store_true", help="re-read everything now")
+    sp.add_argument("--instance", metavar="NAME", default=None, help="pyfsr instance (default: .env box)")
+    sp.set_defaults(func=cmd_warm)
 
     sp = sub.add_parser("compile", help="YAML -> FSR JSON")
     sp.add_argument("--instance", metavar="NAME", default=None,

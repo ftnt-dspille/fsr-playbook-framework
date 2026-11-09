@@ -109,6 +109,7 @@ bypass-selection = true
 "../../fsr_playbooks/_db.py" = "fsr_playbooks/_db.py"
 "../../fsr_playbooks/run_failure.py" = "fsr_playbooks/run_failure.py"
 "../../fsr_playbooks/_yaml_hygiene.py" = "fsr_playbooks/_yaml_hygiene.py"
+"../../fsr_playbooks/playbook_needs.py" = "fsr_playbooks/playbook_needs.py"
 "../../fsr_playbooks/catalog.py" = "fsr_playbooks/catalog.py"
 "../../fsr_playbooks/doctor.py" = "fsr_playbooks/doctor.py"
 "../../fsr_playbooks/execution_api.py" = "fsr_playbooks/execution_api.py"
