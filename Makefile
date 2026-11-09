@@ -35,7 +35,7 @@ sync: ## create .venv (if missing) and install all editable deps via uv
 	@# pytest-randomly powers `make tests-random` (the order-dependence gate).
 	# mypy is the `typing` extra. `make verify` and `make mypy-gate` need it, pinned to
 	# the uv.lock version: the ratchet baseline was measured on that mypy, not on a newer one.
-	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest pytest-randomly requests-mock anyio ruff mypy==2.1.0
+	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest pytest-randomly requests-mock anyio httpx ruff mypy==2.1.0
 
 preflight: ## check dev ports are free; print holders if not
 	@for p in $(PORT_BACKEND) $(PORT_FRONTEND); do \

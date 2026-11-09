@@ -33,7 +33,6 @@ class Check:
     name: str
     ok: bool
     detail: str
-
     def render(self) -> str:
         return f"{'PASS' if self.ok else 'FAIL'}  {self.name}\n      {self.detail}"
 
@@ -203,9 +202,11 @@ def probe_llm_gateway(base_url: str, api_key: str, model: str | None,
     gate /models but complete fine, so we report reachable-but-unverified
     rather than inventing an outage.
     """
-    import httpx
-
     url = base_url.rstrip("/") + "/models"
+    try:
+        import httpx
+    except ImportError:
+        return False, f"{url} not checked: httpx is not installed (`make sync` installs it)"
     try:
         r = httpx.get(url, timeout=timeout_s,
                       headers={"Authorization": f"Bearer {api_key}"})
