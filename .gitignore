@@ -89,8 +89,7 @@ fsrpb.db
 tooling/store/*.db
 
 # === Bucket 3: internal docs, plans, decks, infra scripts (local-only, never public) ===
-# Kept on disk for your own use; not committed. Private history lives on the
-# internal 'origin' (gitlab) remote, not the public 'github' mirror.
+# Kept on disk for your own use; never committed (the repo is public).
 docs/archive/
 docs/plans/
 docs/research/
