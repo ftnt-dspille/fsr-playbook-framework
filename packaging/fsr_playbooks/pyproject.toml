@@ -1,0 +1,132 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fsr_playbooks"
+# Version is derived from the git tag (hatch-vcs) -- the single source of truth.
+# No hardcoded version lives in the tree; tag `vX.Y.Z` and the build stamps it.
+dynamic = ["version"]
+description = "FortiSOAR playbook authoring/compiler framework: YAML->FSR-JSON compiler, LLM co-authoring, and MCP server tools."
+readme = "README.md"
+# The compiler/CLI runs off-box (CI, pyfsr's [playbooks] extra, dev laptops),
+# so the floor tracks the lowest still-supported Python (3.10; 3.9 is EOL) -- not
+# the SOAR runtime. No 3.12-only syntax is used; deps all support 3.10.
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Dylan Spille" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+# Base = compiler + agent dataclasses. Verified by import scan (2026-06-17):
+# NOT jsonschema (0 uses), NOT pyfsr (never hard-imported).
+dependencies = [
+    "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
+    "jinja2>=3.1",
+    # The typed_args compile layer (compiler/typed_args/*) hard-imports pydantic
+    # v2 (Discriminator/Tag/AliasChoices), reached unconditionally via the
+    # compiler resolver -- so it's a base runtime dep, not an extra.
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+# LLM providers -- real imports only in fsr_playbooks/llm/*_provider.py.
+llm = [
+    "openai>=3,<4",
+    "anthropic>=1,<2",
+    # The FortiAI proxy provider hard-imports httpx at MODULE level, so this is
+    # a real dependency of the extra, not a transitive convenience. It was
+    # undeclared when that provider landed and rode in on whatever the SDKs
+    # happened to pull -- which is not a guarantee (anthropic 1.x moved to
+    # httpx2), and on CI it pulled nothing: main went red for four runs and a
+    # box installing `[mcp]` would have hit the same ImportError.
+    "httpx>=0.27",
+]
+# MCP server -- mcp_server hard-imports fsr_playbooks.llm, so [mcp] implies [llm].
+mcp = [
+    "fsr_playbooks[llm]",
+    "mcp>=2,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/ftnt-dspille/fsr-playbook-framework"
+Repository = "https://github.com/ftnt-dspille/fsr-playbook-framework"
+Issues = "https://github.com/ftnt-dspille/fsr-playbook-framework/issues"
+
+# ---------------------------------------------------------------------------
+# Version. Sourced from the git tag via hatch-vcs (setuptools-scm under the
+# hood). `root = "../.."` points at the repo root where `.git` lives, since
+# this dist's pyproject sits two levels down at packaging/fsr_playbooks/.
+# `no-guess-dev` matches the pyfsr sibling so dev builds read identically.
+# The version is baked into the wheel metadata at build time; the package
+# reads it back via importlib.metadata (see fsr_playbooks/__init__.py) -- no
+# generated _version.py is written into the external source tree.
+# ---------------------------------------------------------------------------
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+root = "../.."
+version_scheme = "no-guess-dev"
+
+# ---------------------------------------------------------------------------
+# Build config. This dist lives at packaging/fsr_playbooks/ but the source tree
+# is at the repo ROOT (../../fsr_playbooks), because the root pyproject.toml is
+# taken by the `fsrpb` dist. `packages` maps the external dir into the wheel as
+# top-level `fsr_playbooks/`; hatchling ships all non-.py runtime assets under
+# it (the _data/*.db slim catalog, _data/*.json shape oracle, agent/*.md
+# prompts, mcp_server/*.json) automatically -- no package-data stanza needed.
+# Tests are not part of the shipped surface. We ship wheels only; the `..`
+# source layout cannot produce a correct sdist.
+# ---------------------------------------------------------------------------
+[tool.hatch.build.targets.wheel]
+# Hatchling forbids `..` in `packages`/`only-include`, so the external source at
+# ../../fsr_playbooks is grafted in via force-include (the one selector that
+# allows relative parent paths). bypass-selection stops hatchling from also
+# trying to auto-discover packages under this packaging dir (there are none).
+bypass-selection = true
+
+# force-include copies whole dirs verbatim and does NOT honour `exclude`, so we
+# enumerate the shipped surface explicitly rather than grafting all of
+# ../../fsr_playbooks (which would drag in fsr_playbooks/tests). This mirrors the
+# old setuptools `packages.find include=fsr_playbooks* exclude=tests*`.
+#
+# MAINTENANCE CONTRACT: when a NEW top-level module or subpackage is added under
+# fsr_playbooks/, add it here too, or it won't ship. test_packaging_manifest_
+# complete.py compares this manifest against the real tree and fails loudly if a
+# module/subpackage is missing.
+[tool.hatch.build.targets.wheel.force-include]
+# top-level modules
+"../../fsr_playbooks/__init__.py" = "fsr_playbooks/__init__.py"
+"../../fsr_playbooks/_catalog_meta.py" = "fsr_playbooks/_catalog_meta.py"
+"../../fsr_playbooks/_db.py" = "fsr_playbooks/_db.py"
+"../../fsr_playbooks/run_failure.py" = "fsr_playbooks/run_failure.py"
+"../../fsr_playbooks/_yaml_hygiene.py" = "fsr_playbooks/_yaml_hygiene.py"
+"../../fsr_playbooks/playbook_needs.py" = "fsr_playbooks/playbook_needs.py"
+"../../fsr_playbooks/catalog.py" = "fsr_playbooks/catalog.py"
+"../../fsr_playbooks/doctor.py" = "fsr_playbooks/doctor.py"
+"../../fsr_playbooks/execution_api.py" = "fsr_playbooks/execution_api.py"
+"../../fsr_playbooks/ingestion_template.py" = "fsr_playbooks/ingestion_template.py"
+"../../fsr_playbooks/module_schema.py" = "fsr_playbooks/module_schema.py"
+"../../fsr_playbooks/output_shape.py" = "fsr_playbooks/output_shape.py"
+"../../fsr_playbooks/op_param_notes.py" = "fsr_playbooks/op_param_notes.py"
+"../../fsr_playbooks/picklists.py" = "fsr_playbooks/picklists.py"
+"../../fsr_playbooks/reference_db.py" = "fsr_playbooks/reference_db.py"
+"../../fsr_playbooks/warmup.py" = "fsr_playbooks/warmup.py"
+"../../fsr_playbooks/protocols.py" = "fsr_playbooks/protocols.py"
+# subpackages (each ships its .py + bundled runtime assets)
+"../../fsr_playbooks/compiler" = "fsr_playbooks/compiler"
+"../../fsr_playbooks/agent" = "fsr_playbooks/agent"
+"../../fsr_playbooks/llm" = "fsr_playbooks/llm"
+"../../fsr_playbooks/helpers" = "fsr_playbooks/helpers"
+"../../fsr_playbooks/harness" = "fsr_playbooks/harness"
+"../../fsr_playbooks/mcp_server" = "fsr_playbooks/mcp_server"
+"../../fsr_playbooks/connectors" = "fsr_playbooks/connectors"
+"../../fsr_playbooks/_data" = "fsr_playbooks/_data"

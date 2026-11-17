@@ -1,0 +1,372 @@
+"""The build system prompt's canonical skeleton must match what validate_yaml
+accepts. It previously instructed `id:` on every step -- which is a hard
+validation error -- and omitted `next:` wiring, forcing two wasted validate
+round-trips on every build (see session yq8nhcix). Pin the corrected shape.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+_PROMPT = (Path(__file__).resolve().parents[1]
+           / "agent" / "system_prompt_build.md").read_text()
+
+
+def test_skeleton_does_not_use_step_id():
+    # `- id:` step keys are rejected by the parser ("step.id is not allowed").
+    assert "- id:" not in _PROMPT
+
+
+def test_skeleton_identifies_steps_by_name_and_wires_with_next():
+    assert "- name: Start" in _PROMPT
+    assert "next: Set Inputs" in _PROMPT
+
+
+# --- Quick-action modes (Track C1) -------------------------------------
+# The 5 build quick-action chips each route to a distinct toolset via a
+# `quick_action` key the connector threads onto the turn. The prompt must
+# document every mode so the connector's `# Active quick-action` marker has a
+# branch to land on. See PLAN_demoable_three_pillars.md (Track C / C1).
+
+_QUICK_ACTION_MODES = [
+    "create",
+    "explain",
+    "add_step",
+    "find_issues",
+    "add_error_handling",
+    "optimize",
+]
+
+
+# --- Native steps vs connector ops (D2 ③) ------------------------------
+# A real build ("create a playbook to block an ip and create an alert")
+# derailed because the model searched connectors for a `create_alert`
+# operation (there is none -- creating a record is a native `create_record`
+# step) and hallucinated. The prompt must disambiguate native steps from
+# connector ops.
+
+def test_native_steps_section_present():
+    assert "# Native step types vs connector operations" in _PROMPT
+
+
+def test_prompt_teaches_create_record_is_native_not_a_connector_op():
+    assert "create_record" in _PROMPT
+    assert "update_record" in _PROMPT
+    # It must explicitly say record CRUD is NOT a connector operation and steer
+    # the model away from find_operation for it.
+    assert "no `create_alert`" in _PROMPT or "not a connector" in _PROMPT.lower() \
+        or "native `create_record`" in _PROMPT
+
+
+def test_prompt_warns_against_faking_a_record_with_set_variable():
+    # The observed hallucination: a "Create Alert" step that only set a message
+    # string. The prompt must call that out.
+    low = _PROMPT.lower()
+    assert "set_variable" in low and "message string" in low
+
+
+def test_quick_action_modes_section_present():
+    assert "# Quick-action modes" in _PROMPT
+    assert "# Active quick-action" in _PROMPT  # referenced marker name
+
+
+def test_every_quick_action_mode_documented():
+    for key in _QUICK_ACTION_MODES:
+        # Each mode is a bolded **`key`** bullet.
+        assert f"**`{key}`**" in _PROMPT, f"missing quick-action mode: {key}"
+
+
+# --- S6: diagnose-before-fix must be ALWAYS-ON, not chip-gated -----------------
+#
+# S6 (apply the fix so a failed playbook runs) found the build persona, on a
+# free-text "the last run failed, fix it" turn, skipping `why_did_playbook_fail`
+# and guessing a cosmetic edit -- because the only instruction to diagnose a
+# runtime failure lived inside `# Quick-action modes`, which the prompt tells the
+# model to IGNORE when no `# Active quick-action` marker is present. The fix moved
+# the rule into `# The open playbook` (always in effect while a playbook is open).
+# Pin it there so it cannot regress back behind the chip gate.
+
+def _open_playbook_section() -> str:
+    start = _PROMPT.index("# The open playbook")
+    end = _PROMPT.index("# Native step types vs connector operations")
+    return _PROMPT[start:end]
+
+
+def test_runtime_failure_triggers_why_did_playbook_fail_outside_quick_actions():
+    section = _open_playbook_section()
+    # The diagnose-first rule must live in the always-on open-playbook section,
+    # not only in the chip-gated quick-action modes.
+    assert "why_did_playbook_fail" in section
+    low = section.lower()
+    assert "failed" in low and ("diagnose" in low or "diagnosis" in low)
+    # And it must not re-gate itself on a quick-action chip.
+    assert "not gated" in low or "free-text" in low or "free text" in low
+
+
+# --- P4: the prompt may only promise tools the build persona actually has -----
+#
+# The failure this pins is not hypothetical and not a typo -- it is a whole class,
+# and it cost this plan a live eval to find. S2 ran the designer persona against
+# a real box: 0/4 runs, every one dead-ending in `analyze_playbook` with nothing
+# to pass it. The cause was one sentence in this prompt --
+#
+#     "the open playbook's IRI is in the entity block, so call `analyze_playbook`
+#      on it rather than asking the analyst to paste YAML"
+#
+# -- instructing an action the tool cannot perform: `analyze_playbook` requires
+# `yaml_text` and has no IRI parameter, and NOTHING in the build slice reads a
+# live playbook. The assistant was not wrong; it was obeying a prompt that
+# promised a capability that did not exist. Auditing the prompt against the real
+# slice then found a second one already shipped: `suggest_fix_for_diagnostic`,
+# instructed by the `add_error_handling` mode, is exposed to no intent at all.
+#
+# Prose cannot be trusted to stay true to a toolset that moves underneath it
+# (C5's triage-only scoping silently removed `get_record` from build). So check
+# it mechanically, against the same registry the agent is handed.
+
+import re
+
+import pytest
+
+# Prose assertions must survive a re-wrap: this prompt is hand-wrapped at ~78
+# cols, so any phrase long enough to be worth pinning is liable to straddle a
+# newline. Flatten runs of whitespace to a single space and match against that,
+# never against the raw text.
+_FLAT = re.sub(r"\s+", " ", _PROMPT).lower()
+
+# Backticked identifiers that are deliberately NOT tools. Each needs a reason --
+# if you add one, say why, because the default answer is "then don't name it".
+_NOT_TOOLS = {
+    # Quick-action chip keys (`# Active quick-action` markers), not callables.
+    "create", "explain", "add_step", "find_issues", "add_error_handling", "optimize",
+    "quick_action",
+    # The prompt's own example of a GUESSED op that does not exist. Naming it is
+    # the point -- it teaches the model not to invent it.
+    "get_api_response",
+    # Native step types, resolved via get_step_type. Not tools. (`find_record`
+    # has a tool-shaped `find_` prefix but is a step type, not the MCP tool.)
+    "create_record", "update_record", "find_record", "set_variable", "decision",
+    "start", "end", "connector",
+    # YAML keys / fields the prompt teaches.
+    "playbooks", "templates", "type", "stepType", "next", "name", "id",
+    "parameters", "module", "yaml_text", "before_yaml", "after_yaml",
+    # Widget/connector ops the analyst's buttons call -- deliberately NOT in the
+    # agent's slice (the Save button calls update_playbook; the agent must not).
+    "update_playbook",
+}
+
+# Shapes that read as a tool name. Kept as prefixes rather than a bare
+# snake_case match so ordinary prose words never trip the check.
+_TOOLISH = re.compile(
+    r"^(find_|get_|emit_|verify_|validate_|compile_|push_|dry_run_|"
+    r"build_playbook|analyze_|step_through_|diagnose_|suggest_|list_|"
+    r"picklist_|resolve_|propose_|healthcheck_|search_|run_playbook)")
+
+
+def _build_slice_names() -> set[str]:
+    from fsr_playbooks.llm.intents import tools_for_intent
+    out = set()
+    for t in tools_for_intent("build"):
+        name = t["name"] if isinstance(t, dict) else getattr(t, "name", None)
+        if name:
+            out.add(name)
+    return out
+
+
+def _prompt_tool_mentions() -> set[str]:
+    named = set(re.findall(r"`([a-z_][a-z0-9_]*)`", _PROMPT))
+    return {n for n in named if _TOOLISH.match(n) and n not in _NOT_TOOLS}
+
+
+def test_prompt_only_names_tools_the_build_persona_actually_has():
+    missing = sorted(_prompt_tool_mentions() - _build_slice_names())
+    assert not missing, (
+        "the build prompt instructs tools that are not in tools_for_intent('build'): "
+        f"{missing}. The persona cannot call them, so the instruction is a "
+        "dead-end (this is exactly how S2 scored 0/4). Either expose the tool to "
+        "the build intent, or stop naming it."
+    )
+
+
+def test_the_mentions_check_actually_sees_the_prompts_tools():
+    # Guard the guard: if the regex or the allowlist ever swallowed everything,
+    # the test above would pass vacuously -- an oracle that only ever passes is
+    # the bug this plan exists to catch, one level up.
+    mentions = _prompt_tool_mentions()
+    # 9 since B3a: the prompt stopped naming compile_yaml, step_through,
+    # dry_run, push_playbook and diagnose_* when they left the surface.
+    assert len(mentions) >= 8, f"suspiciously few tool mentions parsed: {mentions}"
+    assert {"analyze_playbook", "verify_playbook", "get_step_type"} <= mentions
+
+
+def test_prompt_does_not_claim_a_playbook_can_be_analyzed_by_iri():
+    # The exact regression: no tool in the slice takes a playbook IRI/uuid, so
+    # any instruction to analyze/read "by IRI" is uncallable by construction.
+    low = _FLAT
+    assert "call `analyze_playbook` on it" not in low
+    for tool in ("analyze_playbook", "step_through_playbook", "verify_playbook"):
+        for prop in ("workflow_iri", "workflow_uuid"):
+            assert f"{tool}({prop}" not in low
+
+
+def _build_tool_schema(tool: str) -> dict:
+    # From the REGISTRY, not the advertised build slice: B3a retired
+    # compile_yaml / step_through_playbook from the surface, but they stay
+    # dispatchable (old sessions, approval resumes), so the contract still holds.
+    from fsr_playbooks.llm.tools import REGISTRY
+    return REGISTRY[tool].input_schema
+
+
+@pytest.mark.parametrize("tool", ["verify_playbook", "validate_yaml",
+                                  "compile_yaml"])
+def test_the_authoring_tools_really_do_require_yaml_text(tool):
+    # These check the document the MODEL wrote, so they must never fall back to
+    # the open playbook: reporting a clean compile of the OLD document would
+    # tell the model its unwritten draft is fine.
+    assert "yaml_text" in (_build_tool_schema(tool).get("required") or []), (
+        f"{tool} no longer requires yaml_text -- an authoring tool that accepts "
+        "an empty document can silently report on one the model never wrote")
+
+
+@pytest.mark.parametrize("tool", ["analyze_playbook", "step_through_playbook"])
+def test_the_read_path_tools_do_NOT_require_yaml_text(tool):
+    # This test asserted the OPPOSITE until 2026-08-01, and the prompt claim it
+    # guarded ("pass the OPEN PLAYBOOK YAML as yaml_text") was the actual
+    # defect: forcing the model to transcribe a ~20 kB document is how the
+    # document arrived corrupted (a mangled character became a NUL byte and
+    # killed a turn) and how fields silently vanished on the way to a save.
+    # Omitting yaml_text now means "the open playbook", read from the appliance.
+    # Note this is NOT an IRI argument -- the grounding is out-of-band, so
+    # test_prompt_does_not_claim_a_playbook_can_be_analyzed_by_iri still holds.
+    assert "yaml_text" not in (_build_tool_schema(tool).get("required") or []), (
+        f"{tool} requires yaml_text again, so the model must transcribe the "
+        "open playbook to analyse it -- the corruption/field-loss path is back")
+
+
+def test_the_prompt_tells_the_model_to_omit_yaml_text_for_analysis():
+    # Guard the pair: the schema allowing omission is useless if the prompt
+    # still orders the model to paste the document in.
+    assert "omit `yaml_text`" in _FLAT or "omit yaml_text" in _FLAT, (
+        "the analysis tools accept an omitted yaml_text but the build prompt "
+        "never tells the model to omit it")
+    assert "pass that text as `yaml_text`" not in _FLAT, (
+        "the prompt still instructs the model to transcribe the open playbook")
+
+
+def test_prompt_grounds_the_designer_in_the_open_playbook_block():
+    # The block name is a contract with the connector's _entity_context_block
+    # (operations.py): the prompt tells the model to look for "OPEN PLAYBOOK",
+    # so the connector must keep emitting that exact header.
+    assert "OPEN PLAYBOOK" in _PROMPT
+    assert "never ask the analyst to paste" in _FLAT
+
+
+def test_prompt_delivers_an_edit_through_the_offer_card_not_a_fence():
+    """An edit to the OPEN playbook is delivered by `emit_enhancement_offer`.
+
+    This test used to assert the OPPOSITE -- that the prompt tells the model to
+    end with "the complete revised playbook as the last ```yaml fence" --
+    because a prose fence scraped by the widget was the only write path
+    enhance mode had. Live, that path lost the edit: the model verified one
+    document, then re-typed three different ones into chat, and the widget
+    applied the last of them. The fence is no longer the contract; the card
+    is, and it carries the verified bytes so the re-typing cannot happen.
+    """
+    assert "emit_card(card_type='enhancement_offer'" in _FLAT
+    assert "verified_id" in _FLAT
+    # The old instruction must be GONE, not merely outvoted by a newer one
+    # further down the prompt.
+    assert "complete revised playbook as the last" not in _FLAT
+
+
+def test_prompt_does_not_offer_a_duplicate_when_a_playbook_is_open():
+    # emit_playbook_offer's accept path PUSHES (creates) a new playbook. Offering
+    # one while the analyst has a playbook open saves a duplicate and leaves the
+    # open record untouched, so the terminal rule has to be conditional.
+    assert "do not call `emit_card(card_type='playbook_offer')` here" in _FLAT
+    assert "duplicate" in _FLAT
+
+
+# --- Read-only turns (T1 §6g.2 F2) -------------------------------------
+# Two read-only scenarios ("Don't change anything" / "Just explain it") came
+# back with a full 1846- and 4812-char playbook. That is not chattiness: the
+# widget saves the LAST ```yaml fence over the open record, so an unrequested
+# fence is an unrequested WRITE. The terminal-action rule used to say "end the
+# turn with the complete revised playbook" unconditionally whenever a playbook
+# was open, with nothing scoping it to a CHANGE request.
+
+def test_prompt_forbids_a_yaml_fence_on_a_read_only_turn():
+    assert "```yaml fence is a write" in _PROMPT.lower()
+    assert "don't change anything" in _PROMPT.lower()
+
+
+def test_terminal_action_rule_is_scoped_to_change_requests():
+    """The fence-required rule must not read as unconditional."""
+    assert "Terminal action -- hard rule for a CHANGE request" in _PROMPT
+
+
+# --- One rule for a product the box does not have ------------------------
+# The prompt once said two things at once: "never put a connector name into a
+# playbook this box cannot run" and "offer a placeholder `connector` step". The
+# model improvised a different stand-in on each run (a connector step, then a
+# set_variable that reads like one), and a stand-in is indistinguishable from a
+# real step to anyone checking the playbook. The rule now lives once, under
+# "A product this box does not have", and says what to do instead.
+
+def _absent_product_section() -> str:
+    start = _FLAT.index("**a product this box does not have.**")
+    end = _FLAT.index("**health never blocks authoring.**")
+    return _FLAT[start:end]
+
+
+def test_absent_product_rule_is_stated_once():
+    assert _FLAT.count("**a product this box does not have.**") == 1
+
+
+def test_prompt_never_asks_for_a_placeholder_step():
+    # Every placeholder instruction was the contradiction. None may come back.
+    assert "placeholder" not in _FLAT
+
+
+def test_absent_product_rule_forbids_a_stand_in_for_the_missing_step():
+    section = _absent_product_section()
+    assert "no stand-in step" in section
+    assert "`set_variable`" in section
+
+
+# The rule once refused: "write no step for the absent product", "deliver no
+# playbook", "hold the line". Analysts asked for a playbook and got none
+# ("it always fights us"). It now builds the step on the real operation,
+# delivers the offer, and warns that the step will not run until setup.
+
+def test_absent_product_rule_builds_and_warns_instead_of_refusing():
+    section = _absent_product_section()
+    assert "still build what the analyst asked for" in section
+    assert "real connector operation" in section and "get_op_schema" in section
+    assert "deliver the offer" in section
+    assert "runs_after_setup" in section
+    assert "will not run until" in section
+    assert "not shared" in section or "shares a" in section
+
+
+def test_prompt_no_longer_refuses_an_unconfigured_connector():
+    for refusal in ("hold the line", "write no step for the absent product",
+                    "deliver no playbook", "only a configured connector can carry",
+                    "does not change this"):
+        assert refusal not in _FLAT, refusal
+
+
+def test_running_an_unconfigured_connector_still_refuses():
+    assert "never run or test an operation on a connector without a configuration" in _FLAT
+
+
+def test_every_card_type_the_prompt_or_the_loop_names_is_a_real_card():
+    # `capability_gap_card` was named in a redirect the model reads, but the
+    # emitter knows only `capability_gap`: the redirect failed with
+    # unknown_card_type. Every `card_type='...'` literal must be a real key.
+    from fsr_playbooks.mcp_server.tools_emit import CARD_TYPES
+    llm_dir = Path(__file__).resolve().parents[1] / "llm"
+    sources = [_PROMPT] + [p.read_text() for p in sorted(llm_dir.glob("*.py"))]
+    named = {m for text in sources for m in re.findall(r"card_type='([a-z_]+)'", text)}
+    assert named, "no card_type literals found: the scan is looking in the wrong place"
+    unknown = sorted(named - set(CARD_TYPES))
+    assert not unknown, f"card_type literals the emitter does not know: {unknown}"

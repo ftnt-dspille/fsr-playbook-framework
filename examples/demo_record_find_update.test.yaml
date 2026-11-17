@@ -1,0 +1,28 @@
+fixture: examples/demo_record_find_update.yaml
+playbook: FSRPB Find And Update Alert
+
+setup:
+  - kind: create_record
+    module: alerts
+    fields:
+      severity: Medium
+      description: original description
+    capture_as: alert
+
+input:
+  target_uuid: "{{ setup.alert.uuid }}"
+
+timeout_s: 180
+
+expects:
+  status: finished
+  steps:
+    Find_target_alert:
+      status: finished
+    Stamp_description:
+      status: finished
+  record:
+    capture: alert
+    contains:                         # substring match (use `fields:` for exact)
+      description: "fsrpb e2e -- stamped at"
+cleanup: true

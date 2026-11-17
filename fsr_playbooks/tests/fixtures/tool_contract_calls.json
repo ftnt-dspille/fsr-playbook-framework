@@ -1,0 +1,25 @@
+{
+  "_comment": "Call shapes that succeeded in real sessions, anonymised to placeholders. They must keep passing the argument gate when the advertised schema text changes.",
+  "get_record": [
+    {"iri": "/api/3/alerts/00000000-0000-0000-0000-000000000001", "relationships": true, "full": false},
+    {"module": "alerts", "uuid": "00000000-0000-0000-0000-000000000001"},
+    {"module": "incidents", "record_id": "560"}
+  ],
+  "search_module_records": [
+    {"module": "alerts", "q": "<indicator>", "limit": 10},
+    {"module": "alerts", "q": "<indicator>", "limit": 20, "fields": ["name", "severity"]},
+    {"module": "alerts", "filters": [{"field": "status", "op": "eq", "value": "Open"}], "sort": [{"field": "modifyDate", "direction": "DESC"}]},
+    {"module": "alerts", "filters": {"name": "<name>"}, "sort": "-modifyDate"}
+  ],
+  "verify_enhancement": [
+    {"after_yaml": "<yaml>"},
+    {"after_yaml": "<yaml>", "user_message": "<analyst request>"},
+    {"after_yaml": "<yaml>", "before_yaml": "<yaml>"}
+  ],
+  "edit_playbook": [
+    {"operations": [{"op": "add_step", "step": {"name": "Start", "type": "start", "module": "alerts", "run_mode": "per_record", "button_label": "<label>"}}], "user_message": "<analyst request>"},
+    {"operations": [{"op": "add_parameter", "name": "<param>"}]},
+    {"operations": [{"op": "update_step", "name": "<step>", "set": {"vars.status": "<value>"}}]},
+    {"operations": [{"op": "add_step", "step": {"name": "<step>", "type": "set_variable"}, "after": "<decision>", "option": "<branch>"}]}
+  ]
+}

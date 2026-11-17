@@ -1,0 +1,2225 @@
+"""Constrained-generation emitters for hot step shapes.
+
+These tools take strict structured input (enforced by Anthropic's
+`input_schema` on the wire -- the model cannot send a malformed call)
+and return the canonical YAML fragment for that step. The agent splices
+the returned YAML into its draft instead of hand-writing the shape.
+
+Why this exists: the validate→fix loop spends ~30% of its turns on
+shape errors (missing required keys, wrong nesting, malformed decision
+branches) that constrained generation makes literally impossible. See
+`docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md` §B.
+
+Schema overrides for these tools live in
+`web/backend/llm/tools.py::TOOL_SCHEMA_OVERRIDES`; the auto-from-signature
+builder is too weak for nested-object validation. Keep the override and
+the runtime check in this module in sync -- the override is the wire
+contract, the runtime check is the belt-and-suspenders for callers
+(eval harness, tests) that bypass the LLM.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from ._shared import (
+    _db,
+    _err,
+    _validate_op_params,
+    get_grounded_source,
+    get_grounded_yaml,
+    load_yaml_text,
+    mcp,
+)
+
+# Step-name charset rule from system_prompt.md §"Hard rules" #2.
+_NAME_RE = re.compile(r"^[A-Za-z0-9 _]+$")
+
+
+def _bad_name(name: str) -> str | None:
+    if not isinstance(name, str) or not name.strip():
+        return "must be a non-empty string"
+    if not _NAME_RE.match(name):
+        return ("must contain only letters, digits, spaces, and underscores "
+                "(no hyphens, colons, em-dashes, parens, or '?')")
+    return None
+
+
+@mcp.tool()
+def emit_decision_step(
+    name: str,
+    conditions: list[dict[str, Any]],
+    default_branch: dict[str, Any],
+) -> dict[str, Any]:
+    """Emit a canonical `decision` step. Prefer this over hand-writing
+    decision YAML -- the schema is enforced, so malformed shapes
+    (missing `default: true`, branches without `when`, etc.) cannot be
+    produced.
+
+    Args:
+      name: step display name. Letters/digits/spaces/underscores only.
+      conditions: ordered list of non-default branches. Each entry:
+        {display: str, when: str (Jinja expression), next: str (target step name)}.
+        Must have at least one entry.
+      default_branch: the else branch. Shape: {display: str, next: str}.
+        `default: true` is added by this tool -- do NOT pass it.
+
+    Returns: {ok: True, yaml: "<fenced YAML fragment>"} on success.
+    On a runtime-check failure: {ok: False, code, message, suggestions}.
+    """
+    err = _bad_name(name)
+    if err:
+        return _err("invalid_step_name", f"name {err}",
+                    suggestions=["pick a Title Case display string"])
+
+    if not isinstance(conditions, list) or not conditions:
+        return _err("empty_conditions",
+                    "conditions must be a non-empty list",
+                    suggestions=["add at least one {display, when, next} entry"])
+
+    for i, c in enumerate(conditions):
+        if not isinstance(c, dict):
+            return _err("malformed_condition",
+                        f"conditions[{i}] must be an object")
+        missing = [k for k in ("display", "when", "next") if not c.get(k)]
+        if missing:
+            return _err("missing_condition_field",
+                        f"conditions[{i}] missing: {missing}",
+                        suggestions=["every condition needs display, when, next"])
+        if "default" in c:
+            return _err("default_in_condition",
+                        (f"conditions[{i}] sets default -- only the "
+                         "default_branch carries `default: true`"))
+        ne = _bad_name(c["next"])
+        if ne:
+            return _err("invalid_branch_target",
+                        f"conditions[{i}].next: {ne}")
+
+    if not isinstance(default_branch, dict):
+        return _err("missing_default_branch",
+                    "default_branch must be an object {display, next}")
+    db_missing = [k for k in ("display", "next") if not default_branch.get(k)]
+    if db_missing:
+        return _err("missing_default_branch_field",
+                    f"default_branch missing: {db_missing}")
+    ne = _bad_name(default_branch["next"])
+    if ne:
+        return _err("invalid_branch_target", f"default_branch.next: {ne}")
+
+    # Render. YAML emit is hand-rolled (not yaml.dump) so the output
+    # exactly matches the canonical shape in system_prompt.md §3 --
+    # key ordering, double-quoted `when:`, no flow style.
+    lines: list[str] = []
+    lines.append("- type: decision")
+    lines.append(f"  name: {name}")
+    lines.append("  conditions:")
+    for c in conditions:
+        lines.append(f"    - display: {c['display']}")
+        # `when` is a Jinja expression; quote it so YAML doesn't try to
+        # interpret braces, colons, or pipes as structure.
+        when = c["when"].replace('"', '\\"')
+        lines.append(f'      when: "{when}"')
+        lines.append(f"      next: {c['next']}")
+    lines.append(f"    - display: {default_branch['display']}")
+    lines.append("      default: true")
+    lines.append(f"      next: {default_branch['next']}")
+    return {"ok": True, "yaml": "\n".join(lines) + "\n"}
+
+
+# --- Widget card emitters --------------------------------------------------
+#
+# These are not playbook step emitters; they're conversation-flow events
+# the agent emits to drive the widget UI (per
+# `FSR_PLAYBOOK_BUILDER_CONNECTOR_CONTRACT.md`). Each tool validates its
+# input and echoes it back; the connector's `_wire_transcript`
+# post-processes the tool_use into a dedicated transcript event so the
+# widget sees a `choice_card` / `action_card` / `manual_input` and the
+# envelope's stop_reason becomes the matching `awaiting_*`.
+#
+# Behavior contract: when the agent calls one of these tools, the turn
+# ends after the call. The connector truncates any further transcript
+# events past the card so the widget always sees the card as the last
+# event of the turn.
+
+
+@mcp.tool()
+def emit_choice_card(
+    id: str,
+    prompt: str,
+    options: list[dict[str, Any]],
+    multi: bool = False,
+    min_select: int = 1,
+    max_select: int | None = None,
+    allow_text: bool = False,
+) -> dict[str, Any]:
+    """Emit a `choice_card` so the widget renders pickable chips and
+    halts the turn until the user picks. Use this for branching
+    decisions ("immediate action vs build a playbook", "which
+    connector?", etc.) instead of asking in prose.
+
+    `options` is a list of `{label, value, hint?}`. `value` is what the
+    widget echoes back on resume -- pick stable, machine-readable values.
+
+    `allow_text=True` adds a text box under the chips so the analyst can
+    answer in their own words instead; the typed text comes back as the
+    value. Use it for open questions ("what should this playbook do?") where
+    the options are only starting points. Leave it off for a real fork."""
+    if not isinstance(id, str) or not id.strip():
+        return _err("missing_id", "id must be a non-empty string")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return _err("missing_prompt", "prompt must be a non-empty string")
+    min_options = 1 if allow_text else 2
+    if not isinstance(options, list) or len(options) < min_options:
+        return _err("too_few_options",
+                    f"options must be a list of at least {min_options} "
+                    "entries" + ("" if allow_text else
+                                 " (or set allow_text=True to ask an open "
+                                 "question with a single suggestion)"))
+    seen_values: set[str] = set()
+    for i, opt in enumerate(options):
+        if not isinstance(opt, dict):
+            return _err("bad_option", f"options[{i}] must be an object")
+        for k in ("label", "value"):
+            if not opt.get(k) or not isinstance(opt[k], str):
+                return _err("bad_option",
+                            f"options[{i}] missing string field {k!r}")
+        if opt["value"] in seen_values:
+            return _err("duplicate_value",
+                        f"options[{i}].value duplicates an earlier entry")
+        seen_values.add(opt["value"])
+    if not isinstance(multi, bool):
+        return _err("bad_multi", "multi must be boolean")
+    if not isinstance(allow_text, bool):
+        return _err("bad_allow_text", "allow_text must be boolean")
+    if not isinstance(min_select, int) or min_select < 0:
+        return _err("bad_min_select", "min_select must be a non-negative int")
+    if max_select is not None:
+        if not isinstance(max_select, int) or max_select < min_select:
+            return _err("bad_max_select",
+                        "max_select must be an int >= min_select")
+    return {
+        "ok": True,
+        "card": {
+            "type": "choice_card",
+            "id": id,
+            "prompt": prompt,
+            "multi": multi,
+            "min_select": min_select,
+            "max_select": max_select,
+            "options": options,
+            **({"allow_text": True} if allow_text else {}),
+        },
+    }
+
+
+def _card_config(client, connector: str, config: str | None
+                 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """(chosen config, all options) for an action card.
+
+    ``chosen`` is the named config (by name or id), else the default, else the
+    only one. An unknown name returns an error envelope as ``chosen`` naming
+    the real choices. No live box, or nothing listed: (None, []) -- fail open,
+    the action runs on the default exactly as before."""
+    if client is None:
+        return None, []
+    try:
+        from .tools_execution import connector_config_options
+        options = connector_config_options(client, connector)
+    except Exception:  # noqa: BLE001
+        return None, []
+    if not options:
+        return None, []
+    want = _config_name(config)
+    if want:
+        hit = next((o for o in options if want in (o["id"], o["name"])), None)
+        if hit is None:
+            hit = next((o for o in options
+                        if o["name"].lower() == want.lower()), None)
+        if hit is None:
+            return _err(
+                "unknown_config",
+                f"'{connector}' has no configuration named {want!r}. Its "
+                f"configurations: {[o['name'] for o in options]}. Pass one of "
+                f"those as `config`, or omit it to use the default."), options
+        return hit, options
+    hit = next((o for o in options if o["default"]), None)
+    if hit is None and len(options) == 1:
+        hit = options[0]
+    return hit, options
+
+
+def _config_name(config: Any) -> str:
+    """The configuration a card's ``config`` names, or "" for none.
+
+    Before `config` meant "the connector configuration to run on", the model
+    already sent a `config` key on action cards -- as free-form NOTES
+    (`{"notes": "self-contained containment path"}`), which the card used to
+    drop. Live, that dict reached the name lookup and the card emit raised, so
+    the containment turn ended with "the card emitter is failing" and no card.
+    A dict that names one (`{"id": ...}` / `{"name": ...}`) is honored; any
+    other non-string is not a choice and means the default."""
+    if isinstance(config, str):
+        return config.strip()
+    if isinstance(config, dict):
+        for k in ("id", "name", "config_id", "config"):
+            v = config.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
+#: The shortest summary that can say what an action card runs.
+_MIN_ACTION_SUMMARY = 8
+
+
+@mcp.tool()
+def emit_action_card(
+    id: str,
+    connector: str,
+    operation: str,
+    summary: str,
+    args: dict[str, Any],
+    editable_fields: list[str],
+    requested_by: str | None = None,
+    config: str | None = None,
+) -> dict[str, Any]:
+    """Emit an `action_card` so the widget renders an editable preview
+    of a connector operation and halts the turn until the user confirms
+    or cancels. On confirm, the widget calls chat_resume with the
+    (possibly-edited) args and the agent runs the operation in the
+    next turn.
+
+    `config` is the connector configuration the action runs on, by name or
+    id. Pass it when the analyst names one, or when `find` shows the action
+    `runs_on_agent` (a FortiSOAR agent reaches targets the master cannot).
+    Omit it to use the connector's default. The card shows where it runs and,
+    when the connector has several configurations, lets the analyst change it
+    before approving.
+
+    `requested_by` is declared intent consumed by the hunt-floor guard
+    upstream (`_loop_helpers.TriageDiscipline`), not by the card: an
+    analyst-ordered containment stages without first clearing the
+    investigation floor. Accepted-and-ignored here so the advertised
+    schema and the registered signature can't drift -- an arg the model
+    is told it may send must not TypeError at dispatch."""
+    for label, val in (("id", id), ("connector", connector),
+                       ("operation", operation), ("summary", summary)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+    if len(summary.strip()) < _MIN_ACTION_SUMMARY:
+        # Live: a card whose whole summary was "." rendered an empty body with
+        # a live Confirm button, an approval that says nothing about what runs.
+        # Only the connector's pydantic copy refused it, on a path the model
+        # does not use (emit_card calls this function directly).
+        return _err("missing_field",
+                    f"summary must say in a sentence what will run (got "
+                    f"{summary.strip()!r}), e.g. 'Block 203.0.113.9 on the "
+                    f"perimeter FortiGate'")
+    if not isinstance(args, dict):
+        return _err("bad_args", "args must be an object")
+    if not isinstance(editable_fields, list) or not all(
+            isinstance(f, str) for f in editable_fields):
+        return _err("bad_editable_fields",
+                    "editable_fields must be a list of strings")
+    bad = [f for f in editable_fields if f not in args]
+    if bad:
+        # Say what to DO, not just what is wrong. The model's intent when it
+        # lists a field it did not fill is "let the analyst supply this one",
+        # and the widget cannot render an editable field it has no value for.
+        # The terse form of this message cost a whole extra tool call on three
+        # of the five investigation fixtures in run 20260813T211826Z -- the
+        # agent re-emitted the identical card with the field dropped. Both
+        # remedies are legitimate; naming them makes the retry unnecessary.
+        # ...but "add it to args" is only legitimate for a name the operation
+        # ACCEPTS. Offering it unconditionally contradicts the param validator
+        # below, and the model oscillates between the two errors: measured on
+        # contain_block_ip_direct (run 20260815T152033Z) as up to FIVE
+        # emit_action_card attempts against a 10-call budget --
+        #   add vdom+ngfw_mode -> bad_params (ngfw_mode is not a param)
+        #   -> drop both       -> editable_fields_not_in_args -> ...
+        # So split the names by what the op actually takes.
+        #
+        # For a plain optional param there is only ONE sensible outcome and the
+        # model already expressed it by listing the field: render it blank and
+        # editable so the analyst can fill it. Making that a round trip is a
+        # toll on the approval gate itself -- deterministic, once per card,
+        # paid on every containment. So DO it instead of asking: prefill "".
+        # The error is reserved for the cases where the blank is genuinely
+        # wrong and only the model can choose (a select, a required param) or
+        # where honouring the field is impossible (not a param at all).
+        from ._shared import op_param_facts
+        known = op_param_facts(connector, operation)
+        healed, removable, selects, required = [], [], {}, []
+        for f in bad:
+            fact = (known or {}).get(f)
+            if known is None or (fact and not fact["options"]
+                                 and not fact["required"]):
+                healed.append(f)
+            elif fact is None:
+                removable.append(f)
+            elif fact["options"]:
+                selects[f] = fact["options"]
+            else:
+                required.append(f)
+        parts = []
+        for f, opts in selects.items():
+            parts.append(
+                f"'{f}' is a select and does not accept a blank value -- "
+                f"either add it to args as one of {opts}, or remove it from "
+                f"editable_fields")
+        if required:
+            parts.append(
+                f"{required} is required by '{operation}', so it cannot be "
+                f"left blank -- add it to args with a real value")
+        if removable:
+            parts.append(
+                f"remove {removable} from editable_fields -- "
+                f"'{operation}' on '{connector}' has no such parameter, so "
+                f"adding it to args will be rejected as an invalid argument")
+        if parts:
+            still_bad = list(selects) + required + removable
+            return _err("editable_fields_not_in_args",
+                        f"editable_fields not present in args: {still_bad}. "
+                        + "; ".join(parts) + ".")
+        # Only blanks left to fill: heal and carry on. `args` is the model's
+        # dict, so copy rather than mutate its caller-visible object.
+        args = {**args, **{f: "" for f in healed}}
+    # Don't render an approval card for a connector/op that doesn't exist --
+    # the analyst would approve a phantom action that then fails at execute.
+    # Use the SHARED grounding guarantee (offline store + live-definition
+    # fallback when the store is un-synced), the same check run_op runs -- so a
+    # phantom op can't slip through here just because the connector's ops aren't
+    # catalogued yet (the live-triage failure). Fails open on any
+    # live-lookup hiccup, so a transient network problem never blocks a real op.
+    # Pass `args` so the SHARED grounding guarantee validates the argument
+    # names too -- against the live connector definition when the store is
+    # un-synced -- so a card with guessed/typo'd params can't reach the analyst
+    # for a connector whose params aren't catalogued yet (the live half of the
+    # a live session / mail_egress param-flail gap).
+    from .tools_execution import validate_op_grounded
+    op_err = validate_op_grounded(connector, operation, params=args)
+    if op_err is not None:
+        return op_err
+    # Offline param validation (decisive when params ARE catalogued -- select
+    # options, types, required). The live fallback above covers the un-synced
+    # case; this covers the synced one. Don't render a card whose args are
+    # incomplete/invalid -- the analyst would approve it only for it to fail
+    # post-approval at execute.
+    param_err = _validate_op_params(connector, operation, args)
+    if param_err is not None:
+        return param_err
+    # Configured-ness check: emit_action_card is triage-only, so a live box is
+    # always available in production. An op that exists in the catalog but has
+    # no active configuration on this instance cannot run once approved -- the
+    # analyst would say yes and execution would fail. Catch it here (before the
+    # card renders) instead of after approval. Fails open on any preflight
+    # hiccup (transient network, no live target, box unreachable) so a real op
+    # is never false-rejected.
+    _client = None
+    try:
+        from .tools_execution import _live_client_for_grounding, _preflight_connector
+        _client = _live_client_for_grounding()
+        if _client is not None:
+            cfg_err = _preflight_connector(_client, connector)
+            if cfg_err is not None:
+                return cfg_err
+    except Exception:
+        pass  # fail open -- never block a real op on a preflight hiccup
+    # Where it runs. The card used to carry no config at all, so an approved
+    # action always ran on the connector's default -- an analyst who asked for
+    # the agent-bound config got the master's instead, and agent-only targets
+    # were unreachable from the chat.
+    chosen, options = _card_config(_client, connector, config)
+    if isinstance(chosen, dict) and chosen.get("ok") is False:
+        return chosen
+    # A `config` that names nothing (notes, a flag) is dropped, but said so: the
+    # model learns where the action will actually run.
+    _config_note = None
+    if config not in (None, "") and not _config_name(config):
+        _config_note = ("`config` names the connector configuration to run on "
+                        "(a name or id); the value sent names none, so the card "
+                        "runs on " + ((chosen or {}).get("name") or "the default")
+                        + ".")
+    # Record the staged action into the session trace so a later trace-built
+    # playbook AUTOMATES it -- the analyst was offered this containment but it
+    # was never executed, so `run_op` never recorded it and the trace compiler
+    # had nothing to replay (the `action_coverage` gap). No-op when no trace is
+    # active (studio/tests) or the same op is already on the trace. The compiler
+    # gates it behind a malicious-verdict decision (`insert_containment_guard`).
+    from ..agent.skill_trace import record_staged_action
+    record_staged_action(connector, operation, args)
+    card: dict[str, Any] = {
+        "type": "action_card",
+        "id": id,
+        "connector": connector,
+        "operation": operation,
+        "summary": summary,
+        "args": args,
+        "editable_fields": editable_fields,
+    }
+    if chosen:
+        card["config"] = chosen
+    if len(options) > 1:
+        card["config_options"] = options
+    # Autonomy policy, SHADOW only (plans/AUTONOMOUS_TIER1.md phase C): would
+    # an admin policy have run this without a click? Recorded on the card so
+    # the queue can compare it to what the human decides. Never changes the
+    # card's behavior -- it still waits for approval.
+    from ..llm.autonomy import shadow_decision
+    _policy = shadow_decision({"tool": "emit_action_card", "connector": connector,
+                               "op": operation, "args": args or {}})
+    if _policy is not None:
+        card["policy"] = _policy
+    # State the branch, don't just imply it. For a discriminated op (fortigate
+    # `block_ip_new` takes `ip_addresses` under `method: Quarantine Based` and
+    # `ip_block_policy` under `Policy Based`) the validator resolved the active
+    # branch and discarded it, so the analyst saw a set of fields with nothing
+    # saying WHICH branch made them the right fields -- and the wrong branch is
+    # a silent no-op reported as Success. Annotation only: never blocks a card.
+    from ._shared import op_branch_for
+    try:
+        branch = op_branch_for(connector, operation, args)
+    except Exception:  # noqa: BLE001
+        branch = []
+    if branch:
+        card["branch"] = branch
+    if _config_note:
+        return {"ok": True, "card": card, "note": _config_note}
+    return {"ok": True, "card": card}
+
+
+@mcp.tool()
+def emit_capability_gap_card(
+    id: str,
+    missing: str,
+    why: str,
+    fix_steps: list[str],
+    resume: dict[str, Any],
+    tips: list[dict[str, Any]] | None = None,
+    alternatives: list[dict[str, Any]] | None = None,
+    docs_url: str | None = None,
+) -> dict[str, Any]:
+    """Emit a `capability_gap` card when the instance CAN'T do what the
+    investigation needs (e.g. no IP-containment connector is configured) --
+    so the analyst is never left at a dead end. The card states what's
+    missing, why, the concrete steps to enable it, optional automation
+    tips, and a RESUME button that re-runs the blocked step after the
+    analyst fixes the gap. Prefer this over a bare `emit_choice_card` for
+    any missing-capability / not-configured situation.
+
+    Args:
+      id: stable card id; echoed on resume.
+      missing: the capability the investigation needs, in plain English
+        (e.g. "IP containment / block").
+      why: one line on why it's unavailable here (e.g. "no tier-3 block_ip
+        operation on any configured connector").
+      fix_steps: ordered, concrete steps the analyst can take to enable it
+        (e.g. ["Configure the fortigate-firewall connector under Settings →
+        Connectors", "Grant it firewall-policy write access"]). At least one.
+      resume: the re-check button -- {label, value}. On click the widget
+        resumes the turn echoing `value`; the agent re-runs the blocked
+        discovery (e.g. find_containment_actions) and continues. `value`
+        must be machine-readable and distinct from any alternative value.
+      tips: optional automation/UX recommendations -- list of {text, hint?}.
+        Use for "how to make this work better next time" guidance (e.g.
+        keeping a response connector configured, granting probe access).
+      alternatives: optional manual fallbacks the analyst can pick instead
+        of fixing the gap now -- list of {label, value, hint?} (e.g.
+        "Escalate to T2", "Document & close"). Same resume semantics as a
+        choice_card option. Values must be unique across resume+alternatives.
+      docs_url: optional link to setup/configuration docs.
+
+    Returns {ok: True, card:{type:"capability_gap", ...}} on success, else
+    {ok: False, code, message}."""
+    # Every problem in ONE refusal, like emit_verdict: reporting the first only
+    # cost 4-5 rounds per card live (bad_payload -> bad_resume -> bad_tips ->
+    # bad_alternatives), each a full LLM round.
+    problems: list[tuple[str, str]] = []
+
+    def bad(code: str, message: str) -> None:
+        problems.append((code, message))
+
+    for label, val in (("id", id), ("missing", missing), ("why", why)):
+        if not isinstance(val, str) or not val.strip():
+            bad("missing_field", f"{label} must be a non-empty string")
+    if not isinstance(fix_steps, list) or not fix_steps or not all(
+            isinstance(s, str) and s.strip() for s in fix_steps):
+        bad("bad_fix_steps",
+            "fix_steps must be a non-empty list of non-empty strings, e.g. "
+            "'Configure the <name> connector'")
+    seen_values: set[str] = set()
+    if not isinstance(resume, dict):
+        bad("bad_resume", "resume must be an object {label, value}")
+    else:
+        for k in ("label", "value"):
+            if not resume.get(k) or not isinstance(resume[k], str):
+                bad("bad_resume", f"resume missing string field {k!r}")
+        if isinstance(resume.get("value"), str):
+            seen_values.add(resume["value"])
+
+    if tips is not None:
+        if not isinstance(tips, list):
+            bad("bad_tips", "tips must be a list of {text, hint?}")
+        else:
+            for i, t in enumerate(tips):
+                if not isinstance(t, dict) or not t.get("text") or not isinstance(
+                        t["text"], str):
+                    bad("bad_tips", f"tips[{i}] needs a string 'text' field")
+
+    if alternatives is not None:
+        if not isinstance(alternatives, list):
+            bad("bad_alternatives",
+                "alternatives must be a list of {label, value, hint?}")
+        else:
+            for i, a in enumerate(alternatives):
+                if not isinstance(a, dict):
+                    bad("bad_alternatives", f"alternatives[{i}] must be an object")
+                    continue
+                ok = True
+                for k in ("label", "value"):
+                    if not a.get(k) or not isinstance(a[k], str):
+                        bad("bad_alternatives",
+                            f"alternatives[{i}] missing string field {k!r}")
+                        ok = False
+                if ok and a["value"] in seen_values:
+                    bad("duplicate_value",
+                        f"alternatives[{i}].value duplicates resume or an "
+                        f"earlier alternative")
+                if ok:
+                    seen_values.add(a["value"])
+
+    if problems:
+        code, message = problems[0]
+        if len(problems) > 1:
+            message = (f"{len(problems)} problems -- fix all of them in one retry: "
+                       + "; ".join(f"({n}) {m}" for n, (_, m)
+                                   in enumerate(problems, 1)))
+        return _err(code, message,
+                    problems=[{"code": c, "message": m} for c, m in problems])
+
+    card: dict[str, Any] = {
+        "type": "capability_gap",
+        "id": id,
+        "missing": missing,
+        "why": why,
+        "fix_steps": fix_steps,
+        "resume": {"label": resume["label"], "value": resume["value"]},
+    }
+    if tips:
+        card["tips"] = tips
+    if alternatives:
+        card["alternatives"] = alternatives
+    if docs_url:
+        card["docs_url"] = docs_url
+    return {"ok": True, "card": card}
+
+
+@mcp.tool()
+def emit_playbook_offer(
+    id: str,
+    summary: str,
+    title_suggestion: str | None = None,
+    editable_title: bool = True,
+    yaml: str | None = None,
+) -> dict[str, Any]:
+    """CREATE a NEW playbook -- the MANDATORY terminal action of a build turn.
+    Call this to deliver any playbook that does not exist yet, as soon as
+    `verify_playbook` returns `ready_to_push=True`. Nothing you build is real
+    until this runs: a build turn that ends in prose, or that prints YAML at
+    the analyst, has delivered nothing -- do not narrate the result instead,
+    and never tell the analyst to run `push_playbook` themselves. NOT for
+    editing a playbook the analyst already has open; that is
+    `emit_enhancement_offer`. The test is whether the playbook exists yet --
+    new one → this tool, changing an existing one → that one.
+
+    (Emits a `playbook_offer` card with a one-click "Save as Playbook" CTA;
+    contract §5, `awaiting_playbook_offer`.)
+
+    Two modes, one terminal affordance:
+
+    - **Triage close (no `yaml`).** Call at the CLOSE of a triage session,
+      after you have approved & executed at least one containment action.
+      The card's draft body is compiled from the recorded session trace.
+      Only call this when the triage is substantially complete; do NOT
+      offer after every single action.
+    - **Direct build (`yaml=<final YAML>`).** A hand-authored build turn has
+      no trace; once `verify_playbook` passes, calling this with the final
+      validated YAML is the MANDATORY terminal action -- the card carries the
+      YAML and accept compiles + pushes it deterministically. Never end a
+      successful build turn by telling the user to call `push_playbook`
+      themselves.
+
+    You supply only the conversational framing (`summary`, optional
+    `title_suggestion`). The card's reviewable-draft body -- the per-step
+    `ops_summary` with plain-English wiring labels, verify badges, and the
+    `draft_steps` tree -- is built HERE from the recorded session trace via
+    the deterministic skill compiler. You do NOT hand-write step wiring;
+    that is exactly the guess-the-jinja failure mode this flow removes.
+
+    Args:
+      id: stable card id; echoed back on accept/decline.
+      summary: the body text the analyst reads (e.g. "I've blocked the C2 IP
+        and quarantined the host. Save this as a re-runnable playbook?").
+      title_suggestion: optional pre-filled playbook name the analyst may
+        edit before accepting.
+      editable_title: whether the widget shows an editable title field
+        (default True).
+
+    Returns {ok: True, card:{type:"playbook_offer", ...}} on success, or
+    {ok: False, code, message} -- notably `empty_trace` when no action was
+    recorded (there is nothing to offer; do not call it then). The card always
+    carries `has_mutating_action` (bool); when the trace is purely read-only it
+    also carries an `advisory` note so the analyst can decide -- the offer is
+    never refused for lacking a containment step.
+
+    Before this call, the text you give the analyst names no tool, operation
+    or field key: say what the playbook does in plain words. The card shows
+    the plain block built from the YAML, so repeating tool names adds nothing.
+    """
+    for label, val in (("id", id), ("summary", summary)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+
+    from fsr_playbooks.agent import skill_trace as _skill_trace
+
+    if yaml is not None and not _is_the_trace_build(
+            yaml, _skill_trace.get_active_trace()):
+        return _offer_from_yaml(id, summary, yaml,
+                                title_suggestion=title_suggestion,
+                                editable_title=editable_title)
+    # Otherwise: no yaml, or yaml that IS this session's trace build -- same
+    # playbook, and the trace offer carries its per-step verified wiring.
+    from fsr_playbooks.agent.skill_trace import SkillTrace
+    from fsr_playbooks.compiler import skill_compiler as _sc
+    from fsr_playbooks.compiler import skill_verify as _sv
+
+    trace = _skill_trace.get_active_trace() or SkillTrace()
+    if len(trace) == 0:
+        return _err(
+            "empty_trace",
+            "no recorded actions to offer as a playbook",
+            suggestions=["offer only after >=1 action was approved & executed"],
+        )
+
+    compiled = _sv.compile_and_verify(trace)
+    draft = _sc.summarize_for_offer(trace, compiled)
+    if not draft["ops_summary"]:
+        return _err(
+            "empty_trace",
+            "the recorded actions did not map to any known skill -- nothing to "
+            "offer",
+        )
+
+    # A2 advisory (NOT a gate): the offer is never refused for a read-only
+    # trace. We classify each recorded op (method-aware -- a GET
+    # `execute_api_request` is read-only, a POST is not) and add an advisory
+    # that keeps a human in the loop:
+    #   • all ops provably safe → "only read-only lookups" note.
+    #   • some op `unknown` (can't prove read-only, not clearly destructive) →
+    #     name them so the analyst reviews before saving, rather than silently
+    #     baking a possible state-change into the playbook.
+    # A destructive op sets has_mutating_action (the load-bearing flag).
+    from .tools_discovery import _op_risk
+    risked = [
+        (str(c.resolved_inputs.get("operation") or ""),
+         _op_risk(str(c.resolved_inputs.get("operation") or ""), None,
+                  c.resolved_inputs))
+        for c in trace.calls
+    ]
+    risks = [r for _, r in risked]
+    has_mutating = any(r == "destructive" for r in risks)
+    all_read_only = bool(risks) and all(r == "safe" for r in risks)
+    # Dedupe unknown op names, preserve first-seen order.
+    unknown_ops: list[str] = []
+    for name, r in risked:
+        if r == "unknown" and name and name not in unknown_ops:
+            unknown_ops.append(name)
+
+    card: dict[str, Any] = {
+        "type": "playbook_offer",
+        "id": id,
+        "summary": summary,
+        "ops_summary": draft["ops_summary"],
+        "editable_title": bool(editable_title),
+        "has_mutating_action": has_mutating,
+    }
+    if all_read_only:
+        card["advisory"] = (
+            "This triage recorded only read-only lookups -- saving it produces "
+            "an enrichment playbook with no containment step. Save it if that "
+            "is what you want."
+        )
+    elif unknown_ops and not has_mutating:
+        names = ", ".join(unknown_ops)
+        card["advisory"] = (
+            "Before saving, confirm these step(s) are safe to re-run "
+            f"automatically: {names}. They aren't recognized as read-only "
+            "lookups, so they may change state -- review them in the draft below."
+        )
+        card["needs_review_ops"] = unknown_ops
+    if title_suggestion and title_suggestion.strip():
+        card["title_suggestion"] = title_suggestion.strip()
+    if draft.get("draft_steps"):
+        card["draft_steps"] = draft["draft_steps"]
+    return {"ok": True, "card": card}
+
+
+def _is_the_trace_build(yaml_text: str, trace: Any) -> bool:
+    """True when `yaml_text` is, byte for byte, what build_playbook_from_trace
+    last returned for this trace. Live (sweep row 5): the model re-verified the
+    trace build and offered the identical bytes as `yaml`; the card then lost
+    every step's verified-wiring flag, though nothing had been hand-written."""
+    last = getattr(trace, "last_build_yaml", None)
+    if not last:
+        return False
+    return bool(_unfence(yaml_text).strip() == last.strip())
+
+
+_FENCE_RE = re.compile(r"^\s*```[A-Za-z0-9_-]*[ \t]*\n(.*?)\n?\s*```\s*$", re.S)
+
+
+def _unfence(text: str) -> str:
+    """A snippet wrapped in a ```yaml fence is still the snippet."""
+    m = _FENCE_RE.match(text)
+    return m.group(1) if m else text
+
+
+_NON_ACTION_STEP_TYPES = frozenset({"end", "stop"})
+
+
+def _has_action_steps(yaml_text: str) -> bool:
+    """Whether any playbook in the YAML has a step other than its trigger and
+    end markers. Unparseable YAML counts as having actions -- verify already
+    judged it, and this check must not invent a second parse failure."""
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+    except Exception:  # noqa: BLE001
+        return True
+    if not isinstance(pbs, list) or not pbs:
+        return True
+    for pb in pbs:
+        for s in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
+            stype = str((s or {}).get("type") or "") if isinstance(s, dict) else ""
+            if stype and not stype.startswith("start") and stype not in _NON_ACTION_STEP_TYPES:
+                return True
+    return False
+
+
+def _yaml_connectors(yaml_text: str) -> list[str]:
+    """Connector names the YAML's connector steps call, first-seen order."""
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+    except Exception:  # noqa: BLE001 -- an unparseable offer fails elsewhere
+        return []
+    seen: list[str] = []
+    for pb in pbs if isinstance(pbs, list) else []:
+        for s in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
+            if not isinstance(s, dict):
+                continue
+            raw_args = s.get("arguments")
+            args = raw_args if isinstance(raw_args, dict) else {}
+            name = s.get("connector") or args.get("connector")
+            if isinstance(name, str) and name.strip() and name not in seen:
+                seen.append(name.strip())
+    return seen
+
+
+_LIVE_SCHEMA_CACHE: dict[str, dict | None] = {}
+
+
+def _box_config_schema(connector: str, version: str) -> dict | None:
+    """The connector's config schema read from THIS box's per-connector detail
+    endpoint (the only FortiSOAR endpoint that carries it: the listing and
+    connector_details return saved configurations, not the schema). None when
+    the box cannot be asked. Cached per process: a schema changes only on an
+    upgrade, which recycles the workers."""
+    key = f"{connector}@{version}"
+    if key in _LIVE_SCHEMA_CACHE:
+        return _LIVE_SCHEMA_CACHE[key]
+    out: dict | None = None
+    try:
+        from probes._env import get_client
+        client = get_client()
+        r = client.session.post(
+            client.base_url
+            + f"/api/integration/connectors/{connector}/{version}/?format=json",
+            json={}, verify=client.verify_ssl, timeout=20)
+        if getattr(r, "status_code", 200) == 200:
+            cs = (r.json() or {}).get("config_schema")
+            out = cs if isinstance(cs, dict) else {}
+    except Exception:  # noqa: BLE001 -- fail open: unknown, never a block
+        out = None
+    _LIVE_SCHEMA_CACHE[key] = out
+    return out
+
+
+def _needs_configuration(connector: str) -> bool:
+    """Whether the connector can only run with a saved configuration. One whose
+    config schema declares no fields (cyops_utilities) runs bare.
+    Unknown -> False: verify already rejects an unknown connector, and a slim
+    catalog missing a built-in must not block it here.
+
+    A box-warmed catalog row does NOT hold the schema: the box's listing puts
+    the saved configurations where the schema would be (a list), so for those
+    rows the schema is read from the box's detail endpoint instead. Without
+    this, every connector on a live box read as config-free and the offer's
+    `runs_after_setup` notice never fired."""
+    try:
+        row = _db().execute(
+            "SELECT config_schema_json, version FROM connectors WHERE name=?",
+            (connector,)).fetchone()
+    except Exception:  # noqa: BLE001
+        return False
+    if row is None:
+        return False
+    return _config_required_from(connector, row[0], row[1] or "")
+
+
+def _config_required_from(connector: str, raw: Any, version: str) -> bool:
+    """`_needs_configuration` for a catalog row already in hand (raw schema
+    column + version). A dict is the schema; anything else (empty, or the
+    saved-config list an older box warm stored) is asked of the box."""
+    import json
+    schema: Any = None
+    if raw:
+        try:
+            schema = json.loads(raw)
+        except (TypeError, ValueError):
+            return True
+    if isinstance(schema, dict):
+        return bool(schema.get("fields"))
+    if not version:
+        return False
+    live = _box_config_schema(connector, version)
+    return bool(isinstance(live, dict) and live.get("fields"))
+
+
+def _unconfigured_connectors(yaml_text: str) -> tuple[list[str], list[str], list[str]]:
+    """(connectors the YAML calls that THIS box has not configured for this
+    analyst, the ones it has, the subset of the missing ones that ARE
+    configured on the box but not shared with the analyst's teams).
+    ([], [], []) when the box cannot be asked.
+
+    Called through the module so an offline inventory patched onto
+    `tools_connector_discovery` answers here too."""
+    used = _yaml_connectors(yaml_text)
+    if not used:
+        return [], [], []
+    from . import tools_connector_discovery as _tcd
+    try:
+        listing = _tcd.list_configured_connectors()
+    except Exception:  # noqa: BLE001
+        return [], [], []
+    rows = listing.get("configured") if isinstance(listing, dict) else None
+    if not rows:
+        return [], [], []
+    names = {r.get("name") for r in rows if isinstance(r, dict) and r.get("name")}
+    have = sorted(n for n in names if isinstance(n, str))
+    missing = [c for c in used if c not in have and _needs_configuration(c)]
+    hidden = set(listing.get("not_shared_with_you") or [])
+    return missing, have, [c for c in missing if c in hidden]
+
+
+def _runs_after_setup(yaml_text: str) -> list[dict[str, Any]]:
+    """Steps that are written on a real connector operation but cannot run
+    until that connector is configured on this box, or shared with the
+    analyst's team. Authoring is allowed (the analyst asked for the step, and
+    a refusal leaves them with nothing); the card says plainly that these
+    steps will not run yet, and how to fix it. Fails open: [] when the box
+    cannot be asked."""
+    missing, _have, not_shared = _unconfigured_connectors(yaml_text)
+    out: list[dict[str, Any]] = []
+    for c in missing:
+        if c in not_shared:
+            out.append({
+                "connector": c, "reason": "not_shared",
+                "message": (f"Steps that use {c} will not run until an "
+                            "administrator shares one of its configurations "
+                            "with your team."),
+                "setup_steps": [
+                    f"Ask an administrator to open Content Hub, {c}, "
+                    "Configurations.",
+                    "Add your team to an existing configuration and save.",
+                    "Run the playbook again."],
+            })
+        else:
+            out.append({
+                "connector": c, "reason": "not_configured",
+                "message": (f"Steps that use {c} will not run until the "
+                            "connector is installed and configured on this "
+                            "FortiSOAR box."),
+                "setup_steps": [
+                    f"Open Content Hub and install the {c} connector.",
+                    "Add a configuration with the product's address and "
+                    "credentials, share it with your team, and save.",
+                    "Run the connector health check, then run the playbook."],
+            })
+    return out
+
+
+def _box_config_names() -> dict[str, list[str]] | None:
+    """{connector: [config names]} for the active configs on THIS box -- the
+    same rows run_op resolves a `config:` name against. None when the box
+    cannot be asked (the caller fails open)."""
+    try:
+        from probes._env import get_client
+
+        from .tools_execution import _configured_rows
+        rows = _configured_rows(get_client())
+    except Exception:  # noqa: BLE001
+        return None
+    if not rows:
+        return None
+    out: dict[str, list[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        names = out.setdefault(str(row["name"]), [])
+        for key in ("configs", "configurations", "config", "configuration"):
+            for c in row.get(key) or []:
+                n = c if isinstance(c, str) else (
+                    c.get("name") if isinstance(c, dict) else None)
+                if isinstance(n, str) and n and n not in names:
+                    names.append(n)
+    return out
+
+
+def _unknown_config_pins(yaml_text: str) -> list[dict[str, Any]]:
+    """Connector steps whose `config:` names a configuration THIS box does not
+    have. Live: a classroom box's config was named one way and the model
+    wrote it another ('student19 FortiAIGate'); verify only checks names
+    under live_probe, the offer gate did not check them at all, and the step
+    would fail on its first run. Templated values and IRIs are trusted; a
+    connector the box lists with no config names, or a box that cannot be
+    asked, is skipped (fail open)."""
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+    except Exception:  # noqa: BLE001
+        return []
+    pins: list[tuple[str, str, str]] = []
+    for pb in pbs if isinstance(pbs, list) else []:
+        for st in (pb or {}).get("steps") or [] if isinstance(pb, dict) else []:
+            if not isinstance(st, dict):
+                continue
+            args: dict = st["arguments"] if isinstance(st.get("arguments"), dict) else {}
+            conn = st.get("connector") or args.get("connector")
+            cfg = st.get("config", args.get("config"))
+            if not (isinstance(conn, str) and isinstance(cfg, str)):
+                continue
+            cfg = cfg.strip()
+            if not cfg or "{{" in cfg or "/api/" in cfg:
+                continue
+            pins.append((str(st.get("name") or ""), conn.strip(), cfg))
+    if not pins:
+        return []
+    box = _box_config_names()
+    if not box:
+        return []
+    bad: list[dict[str, Any]] = []
+    for step, conn, cfg in pins:
+        names = box.get(conn) or []
+        if not names or cfg in names:
+            continue
+        from ..compiler.record_op_checks import one_config_match
+        near = one_config_match(cfg, names)
+        bad.append({"step": step, "connector": conn, "config": cfg,
+                    "configured": names, "near": near})
+    return bad
+
+
+def _unknown_config_error(bad: list[dict[str, Any]]) -> dict[str, Any]:
+    parts = []
+    for b in bad:
+        hint = (f" -- the box's name for it is {b['near'][0]!r}" if b["near"]
+                else f" and none of its configs is clearly the one meant "
+                     f"(it has: {', '.join(repr(n) for n in b['configured'])}). "
+                     "Do not pick one: ask the analyst which configuration "
+                     "to use")
+        parts.append(f"step {b['step']!r} uses config {b['config']!r} on "
+                     f"{b['connector']!r}, which this box does not have{hint}")
+    return _err(
+        "offer_uses_unknown_config",
+        "; ".join(parts) + ". Config names must match exactly (case and "
+        "spacing). Fix the config name, verify again, then offer.",
+        suggestions=[f"set config: {b['near'][0]!r} on step {b['step']!r}"
+                     for b in bad if b["near"]],
+        unknown_configs=bad,
+    )
+
+
+def fenced_connector_errors(yaml_text: str) -> str | None:
+    """The connector check for a playbook delivered in the reply TEXT as a
+    ```yaml fence. A step on a connector this box has not configured (or not
+    shared with the analyst's team) is NOT a reason to send the model back:
+    the analyst asked for the step, and the build prompt has the model say
+    that it will not run until the connector is set up. Kept as the hook the
+    loop calls; returns None (deliver) for every connector state today."""
+    return None
+
+
+def _step_names(yaml_text: str) -> list[str]:
+    """Step `name:` values of the first playbook, in order. [] if unparseable."""
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+        return [str(s["name"]) for s in steps
+                if isinstance(s, dict) and s.get("name")]
+    except Exception:  # noqa: BLE001 -- an unparseable offer fails elsewhere
+        return []
+
+
+def _playbook_names(yaml_text: str) -> set[str]:
+    try:
+        doc, _ = load_yaml_text(yaml_text, allow_grounding=False)
+    except Exception:  # noqa: BLE001 -- unreadable names nothing
+        return set()
+    return {str(pb.get("name")) for pb in ((doc or {}).get("playbooks") or [])
+            if isinstance(pb, dict) and pb.get("name")}
+
+
+def _guard_against_open_playbook(yaml_text: str) -> dict[str, Any] | None:
+    """Refuse an offer that would overwrite the OPEN playbook, or lose its work.
+
+    Two rules this tool's own docstring already states and never enforced. Both
+    are checked against the grounded document -- the appliance's own copy of
+    what the analyst has open -- so neither depends on classifying the turn,
+    reading the analyst's words, or the model choosing to behave. That matters:
+    the read-only tool slice is keyed on a structured `quick_action`, which only
+    the widget's chips ever send. A free-typed ask, an MCP caller, or any other
+    client reaches this tool with the full authoring surface, so the tool has to
+    hold the line by itself.
+
+    Measured live (a live session): "Explain what this playbook
+    does, step by step, in plain language" ended at a tier-3 offer whose YAML
+    had replaced the phishme-intelligence and carbonblack hunt steps with
+    "Hunt Domains Placeholder" / "Hunt Files Placeholder", summarised as "ready
+    for deployment". Approving it would have gutted a working playbook. The
+    approval card was never the safeguard here -- it asks a human to confirm an
+    action, not to diff two documents.
+
+    Returns an error envelope to refuse, or None to allow.
+    """
+    open_yaml = get_grounded_yaml()
+    if not open_yaml:
+        return None                     # nothing open -- a genuine new build
+    from ._shared import SCOPE_CREATE_NEW, get_playbook_scope
+    if get_playbook_scope() == SCOPE_CREATE_NEW:
+        return None                     # the analyst chose "Create new playbook"
+
+    open_steps = _step_names(open_yaml)
+    if not open_steps:
+        return None                     # cannot read the open doc: do not block
+
+    # A playbook this conversation built (an unsaved draft, or one it saved)
+    # is not on the analyst's screen: a request for a DIFFERENT playbook is a
+    # new build, not an edit of it. Told apart by the playbook's name -- the
+    # one thing a re-typed copy of the same playbook keeps.
+    if get_grounded_source() and not (
+            _playbook_names(open_yaml) & _playbook_names(yaml_text)):
+        return None
+
+    # RULE 1 -- new vs existing. "NOT for editing a playbook the analyst
+    # already has open; that is emit_enhancement_offer. The test is whether the
+    # playbook exists yet." Something IS open, so this is an edit.
+    offered_steps = _step_names(yaml_text)
+    lost = [n for n in open_steps if n not in set(offered_steps)]
+
+    # RULE 2 -- loss. Named separately because it is the destructive half and
+    # deserves its own words: a step the analyst has is missing from the offer.
+    if lost:
+        return _err(
+            "offer_drops_open_steps",
+            "This offer is missing "
+            f"{len(lost)} step(s) that the OPEN playbook has: "
+            + ", ".join(repr(n) for n in lost[:6])
+            + ("..." if len(lost) > 6 else "")
+            + ". Accepting it would delete them. If you meant to change the "
+            "open playbook, use verify_enhancement + emit_card(card_type='enhancement_offer'), "
+            "which edits it in place and keeps a restore point. If a step "
+            "references a connector this box does not have, say so in prose -- "
+            "replacing it with a placeholder loses the analyst's real step.",
+            suggestions=[
+                "emit_card(card_type='enhancement_offer', payload={verified_id: ..., summary: ...}) to edit the open playbook",
+                "answer in prose if the analyst only asked you to explain",
+            ],
+        )
+    if get_grounded_source():
+        return _err(
+            "playbook_already_open",
+            "This is the playbook you built earlier in this conversation, so "
+            "this is an edit of it, not a new playbook. Change it with "
+            "edit_playbook(operations=[...]) -- it keeps every step and field "
+            "you do not name -- then emit_card(card_type='enhancement_offer', "
+            "payload={id, summary, verified_id}). To build a DIFFERENT "
+            "playbook, give it its own name.",
+            suggestions=["edit_playbook(operations=[...])",
+                         "emit_card(card_type='enhancement_offer', payload={id, summary, verified_id})"],
+        )
+    return _err(
+        "playbook_already_open",
+        "A playbook is already open, so this is an edit, not a new playbook. "
+        "emit_card(card_type='playbook_offer') CREATES; use verify_enhancement + "
+        "emit_card(card_type='enhancement_offer') to UPDATE the open one in place.",
+        suggestions=["emit_card(card_type='enhancement_offer', payload={id, summary, verified_id})"],
+    )
+
+
+def _yaml_ops_summary(yaml_text: str) -> list[dict[str, Any]]:
+    """The offer card's step list, read from verified YAML. A connector step
+    keeps its connector + operation: without them the card listed every step
+    of a saved investigation as "siem_search (.)". Display only -- a parse
+    failure yields an empty list, never a refusal."""
+    out: list[dict[str, Any]] = []
+    try:
+        doc, _ = load_yaml_text(yaml_text)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+        for s in steps:
+            if not (isinstance(s, dict) and s.get("name")):
+                continue
+            entry = {"label": str(s["name"]), "step_type": str(s.get("type") or "")}
+            for key in ("connector", "operation"):
+                if s.get(key):
+                    entry[key] = str(s[key])
+            out.append(entry)
+    except Exception:  # noqa: BLE001 -- display summary only, never block
+        return []
+    # Flow order, not declaration order: the model may write the trigger last,
+    # and the card should read top-down like the designer.
+    try:
+        from ..compiler import parse_yaml
+        from .tools_enhancement import _flow_order
+        coll, _errs = parse_yaml(yaml_text)
+        if coll is not None and coll.playbooks:
+            rank = {n: i for i, n in enumerate(_flow_order(coll.playbooks[0]))}
+            out.sort(key=lambda e: rank.get(e["label"], 1 << 30))
+    except Exception:  # noqa: BLE001 -- keep declaration order
+        pass
+    return out
+
+
+_TRIGGER_EVENTS = {"start_on_create": "created", "start_on_update": "updated",
+                   "start_on_delete": "deleted"}
+
+
+def _a_record(modules: list[str]) -> str:
+    """`alerts` -> "an alert"; `[alerts, incidents]` -> "an alert or incident"."""
+    names = [(m[:-1] if m.endswith("s") else m).replace("_", " ") for m in modules]
+    text = " or ".join(names)
+    return ("an " if text[:1].lower() in "aeiou" else "a ") + text
+
+
+def _trigger_summary(yaml_text: str) -> dict[str, Any] | None:
+    """What starts the playbook, in the analyst's words, read from its trigger
+    step -- shown on the offer card so the analyst confirms it.
+
+    Live (analyst sim): "runs when an alert is created" came back as a manual
+    Execute button twice; the card listed the steps, the trigger was invisible,
+    and the analyst said yes. Structure only: the trigger step's type, module
+    and conditions -- nothing is read from the request."""
+    try:
+        doc, _ = load_yaml_text(yaml_text)
+        pbs = (doc or {}).get("playbooks") or []
+        steps = (pbs[0] or {}).get("steps") or [] if pbs else []
+    except Exception:  # noqa: BLE001 -- display only
+        return None
+    trig = next((st for st in steps if isinstance(st, dict)
+                 and str(st.get("type") or "").startswith("start")), None)
+    if trig is None:
+        return None
+    kind = str(trig.get("type"))
+    raw = trig.get("module") or trig.get("modules") or trig.get("resources") \
+        or (trig.get("arguments") or {}).get("resource")
+    modules = [str(m) for m in (raw if isinstance(raw, list) else [raw]) if m]
+    out: dict[str, Any] = {"kind": kind, "modules": modules}
+    rec = _a_record(modules) if modules else "a record"
+    if kind in _TRIGGER_EVENTS:
+        out["label"] = f"Runs automatically when {rec} is {_TRIGGER_EVENTS[kind]}"
+        if trig.get("when") or trig.get("trigger_filter") or trig.get("conditions"):
+            out["label"] += " and matches its conditions"
+    elif kind == "start_on_api_call":
+        out["label"] = "Runs when its API endpoint is called"
+    else:
+        button = trig.get("button_label") or trig.get("title")
+        out["label"] = (f"Runs when an analyst clicks \"{button}\" on {rec}"
+                        if button else f"Runs when an analyst starts it on {rec}")
+        out["manual"] = True
+    return out
+
+
+_PLAIN_SKIP_TYPES = frozenset({"start", "end", "set_variable"})
+_PLAIN_WRITE_TYPES = frozenset({"create_record", "update_record", "delete_record"})
+_PLAIN_STEPS_MAX = 5
+_PLAIN_SUMMARY_MAX = 200
+_PLAIN_TOKEN = re.compile(r"\b[a-z0-9]+_[a-z0-9_]+\b|\b[a-z]+[A-Z][A-Za-z0-9]*\b|\{\{|\}\}")
+
+
+def _yaml_playbook_steps(yaml_text: str) -> list[dict[str, Any]]:
+    """The first playbook's step dicts, or [] when the YAML does not parse."""
+    try:
+        doc, _ = load_yaml_text(yaml_text)
+    except Exception:  # noqa: BLE001 -- the caller decides what a bad YAML means
+        return []
+    pbs = (doc or {}).get("playbooks") or []
+    steps = ((pbs[0] or {}).get("steps") or []) if pbs else []
+    return [s for s in steps if isinstance(s, dict)]
+
+
+def _yaml_has_destructive_op(yaml_text: str) -> bool:
+    """True when a connector step's operation is destructive by name or category
+    (`block_ip_new` -> `block_`). Hand-built YAML was flagged False regardless,
+    so a Block-IP playbook read as read-only on the card."""
+    from .tools_discovery import _op_risk
+    for s in _yaml_playbook_steps(yaml_text):
+        if str(s.get("type") or "") != "connector":
+            continue
+        op = str(s.get("operation") or "")
+        if op and _op_risk(op, None, None) == "destructive":
+            return True
+    return False
+
+
+def _plain_words(name: Any) -> str:
+    """A step name as plain words: template markup and snake_case underscores go."""
+    t = re.sub(r"\{\{.*?\}\}", "", str(name or ""))
+    return re.sub(r"[_\s]+", " ", t).strip()
+
+
+def _lower_keep_acronyms(words: str) -> str:
+    """'Containment Target Present' -> 'containment target present'; 'IP' and
+    'FortiGate' keep their capitals."""
+    out = []
+    for w in words.split():
+        keep = (w.isupper() and len(w) > 1) or any(c.isupper() for c in w[1:])
+        out.append(w if keep else w.lower())
+    return " ".join(out)
+
+
+def _plain_block(yaml_text: str, summary: str, has_mutating: bool) -> dict[str, Any] | None:
+    """The offer card's plain block, read from the verified YAML (no model text).
+
+    `steps`: 3 to 5 "what it does" sentences in step order (a decision reads as a
+    check, a confirm step as a question). `changes`: the playbook changes something.
+    `asks_confirm`: a confirm step waits for the analyst. `summary`: the first
+    sentence of the offer summary, capped, or a generic line when it carries a
+    field key or template markup."""
+    steps = _yaml_playbook_steps(yaml_text)
+    if not steps:
+        return None
+    sentences: list[str] = []
+    asks_confirm = False
+    writes = False
+    for s in steps:
+        kind = str(s.get("type") or "")
+        if kind in _PLAIN_SKIP_TYPES:
+            continue
+        words = _plain_words(s.get("name"))
+        if not words:
+            continue
+        if kind == "manual_input":
+            asks_confirm = True
+            confirm = re.search(r"confirm|approve", words + " " + str(s.get("message") or ""), re.I)
+            sentences.append("Asks you to confirm before it goes on." if confirm
+                             else "Asks you to choose before it goes on.")
+        elif kind == "decision":
+            sentences.append(f"Checks whether {_lower_keep_acronyms(words)}.")
+        else:
+            if kind in _PLAIN_WRITE_TYPES:
+                writes = True
+            sentences.append(words[0].upper() + words[1:] + ".")
+    if len(sentences) > _PLAIN_STEPS_MAX:
+        rest = len(sentences) - (_PLAIN_STEPS_MAX - 1)
+        sentences = sentences[:_PLAIN_STEPS_MAX - 1] + [f"Then {rest} more steps."]
+    first = re.split(r"(?<=[.!?])\s", str(summary or "").strip(), maxsplit=1)[0].strip()
+    if not first or _PLAIN_TOKEN.search(first):
+        first = "Saves this investigation as a playbook you can run again."
+    if len(first) > _PLAIN_SUMMARY_MAX:
+        first = first[:_PLAIN_SUMMARY_MAX - 3].rsplit(" ", 1)[0].rstrip(",;:") + "..."
+    return {
+        "steps": sentences,
+        "changes": bool(has_mutating or writes),
+        "asks_confirm": asks_confirm,
+        "summary": first,
+    }
+
+
+def _offer_from_yaml(id: str, summary: str, yaml_text: str, *,
+                     title_suggestion: str | None,
+                     editable_title: bool,
+                     edit_of_draft: bool = False) -> dict[str, Any]:
+    """Direct-build mode of `emit_playbook_offer` (§A): the card carries the
+    final validated YAML; accept compiles + pushes THAT text deterministically
+    (no trace involved). The steps list is a display summary parsed from the
+    YAML.
+
+    The card verifies the bytes it carries. It used to trust that the model
+    had verified them -- live, the model verified one playbook, re-typed it
+    into this call with two `next:` links missing, listed the warnings in
+    prose, and offered it anyway; the saved playbook ran only its first step.
+    The enhance path closes the same hole with `verified_id`; here the gate
+    runs on the offered text itself, so verified and delivered cannot differ.
+    """
+    if not isinstance(yaml_text, str) or not yaml_text.strip():
+        return _err("missing_field", "yaml must be a non-empty string")
+    # A ```yaml fence around the document is not part of it; verify would
+    # refuse the fenced text for a reason that has nothing to do with the YAML.
+    yaml_text = _unfence(yaml_text)
+
+    guard = None if edit_of_draft else _guard_against_open_playbook(yaml_text)
+    if guard is not None:
+        return guard
+
+    from .tools_verify import verify_playbook
+    verdict = verify_playbook(yaml_text)
+    if not verdict.get("ready_to_push"):
+        return _err(
+            "offer_not_verified",
+            "this YAML does not pass verify_playbook, so it cannot be offered. "
+            "Fix the required_fixes and offer again -- do not describe the "
+            "problems to the analyst and offer it anyway.",
+            suggestions=list(verdict.get("next_actions") or []),
+            required_fixes=verdict.get("required_fixes") or [],
+        )
+
+    if not _has_action_steps(yaml_text):
+        # Live: "I want to create a new playbook." ended on a Save card for a
+        # start -> end playbook. Saving it gives the analyst nothing; the turn
+        # should have asked what the playbook is for.
+        return _err(
+            "offer_has_no_actions",
+            "this playbook has only trigger/end steps -- there is nothing to "
+            "save yet. Ask the analyst what it should do (what starts it and "
+            "what it does), and end the turn.",
+            suggestions=["emit_card(card_type='choice', ...) or one plain "
+                         "question -- no playbook_offer until it does something"],
+        )
+
+    bad_configs = _unknown_config_pins(yaml_text)
+    if bad_configs:
+        return _unknown_config_error(bad_configs)
+
+    ops_summary = _yaml_ops_summary(yaml_text)
+
+    card: dict[str, Any] = {
+        "type": "playbook_offer",
+        "id": id,
+        "summary": summary,
+        "ops_summary": ops_summary,
+        "editable_title": bool(editable_title),
+        # Hand-authored YAML: the flag comes from its connector operations
+        # (the same name/category rule run_op's confirm gate uses).
+        "has_mutating_action": _yaml_has_destructive_op(yaml_text),
+        "advisory": ("Built from the YAML above (not a recorded triage trace) "
+                     "-- review the steps before saving."),
+        "final_yaml": yaml_text,
+    }
+    plain = _plain_block(yaml_text, summary, card["has_mutating_action"])
+    if plain is not None:
+        card["plain"] = plain
+    trigger = _trigger_summary(yaml_text)
+    if trigger:
+        card["trigger"] = trigger
+    # Non-blocking findings reach the analyst on the card, not only in the
+    # model's prose, which is where they were live -- and then ignored.
+    if verdict.get("warnings"):
+        card["warnings"] = verdict["warnings"]
+    if title_suggestion and title_suggestion.strip():
+        card["title_suggestion"] = title_suggestion.strip()
+    return _with_setup_warning(card, yaml_text)
+
+
+def _with_setup_warning(card: dict[str, Any], yaml_text: str) -> dict[str, Any]:
+    """Attach `runs_after_setup` to an offer card (create or edit alike) and
+    tell the model to say it in the reply. A step on an unconfigured or
+    not-shared connector is delivered, never refused: the analyst gets the
+    playbook plus a plain warning that those steps will not run yet."""
+    pending = _runs_after_setup(yaml_text)
+    if not pending:
+        return {"ok": True, "card": card}
+    card["runs_after_setup"] = pending
+    return {"ok": True, "card": card, "note": (
+        "Delivered. Tell the analyst in one or two plain sentences that "
+        + "; ".join(p["message"] for p in pending)
+        + " The card lists the setup steps.")}
+
+
+def _offer_connector_labels(changes: list[Any]) -> dict[str, str]:
+    """{connector id: catalog label} for the connectors a diff's rows name, in
+    their before/after step arguments or on the row itself."""
+    from ._citation_validator import connector_labels_for  # noqa: PLC0415
+    ids: set[str] = set()
+    for row in changes:
+        if not isinstance(row, dict):
+            continue
+        if isinstance(row.get("connector"), str):
+            ids.add(row["connector"])
+        for side in ("before", "after"):
+            proj = row.get(side)
+            args = proj.get("arguments") if isinstance(proj, dict) else None
+            if isinstance(args, dict) and isinstance(args.get("connector"), str):
+                ids.add(args["connector"])
+    return connector_labels_for(ids)
+
+
+@mcp.tool()
+def emit_enhancement_offer(
+    id: str,
+    summary: str,
+    verified_id: str,
+) -> dict[str, Any]:
+    """UPDATE a playbook the analyst ALREADY HAS OPEN -- the MANDATORY terminal
+    action of an enhance turn, and the only thing that makes an edit real.
+    Requires an existing open playbook to edit, and a `verified_id` from
+    `verify_enhancement`. If the analyst asked you to build, create, or write
+    a playbook that does not exist yet, this is the WRONG tool -- there is
+    nothing for it to update -- use `emit_playbook_offer` instead.
+
+    Enhance mode's counterpart to `emit_playbook_offer`. That one CREATES a new
+    playbook; this one UPDATES the open one in place (the connector routes
+    accept through the designer's own snapshot-then-PUT path, so the analyst
+    keeps a restore point in the Versions tab).
+
+    **You do not pass YAML.** You pass the `verified_id` that `edit_playbook`
+    (or `verify_enhancement`) handed back when it returned `ready_to_push: True`,
+    and the card carries those exact bytes. This is deliberate and it is the
+    whole point of the tool: a live session verified one document and then
+    re-typed a subtly different one into chat three times, the widget scraped
+    the last prose fence, and the analyst's playbook got YAML no gate had ever
+    seen -- while the transcript showed a green verify. Removing the parameter
+    removes the failure mode.
+
+    So the enhance turn is exactly:
+        edit_playbook(operations=[...])                  ->  verified_id
+        emit_enhancement_offer(id, summary, verified_id) ->  card, turn halts
+
+    Never end an enhance turn by printing the revised playbook and hoping the
+    analyst pastes or saves it. If the verify did not pass, do not call this --
+    fix the findings and re-verify.
+
+    Args:
+      id: stable card id; echoed back on accept/decline.
+      summary: what the analyst reads -- one or two plain-English lines on what
+        this edit changes and why (e.g. "Adds a manual-input approval gate
+        before the block, wired Confirm -> Block IP and Cancel -> Manual
+        Review."). Describe the change, not the YAML.
+      verified_id: the handle from the passing `verify_enhancement` call.
+
+    Returns {ok: True, card:{type:"enhancement_offer", ...}} -- the card carries
+    `final_yaml` (the verified bytes), `diff_summary`, and any non-blocking
+    `warnings` so the analyst reviews them before applying. On a bad handle
+    returns {ok: False, code: "unknown_verified_id"} -- re-run
+    verify_enhancement and use the fresh id; do NOT work around it by
+    presenting YAML in chat."""
+    for label, val in (("id", id), ("summary", summary),
+                       ("verified_id", verified_id)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+
+    from . import _verified_yaml
+    entry = _verified_yaml.lookup(verified_id.strip())
+    if entry is None:
+        return _err(
+            "unknown_verified_id",
+            f"no verified enhancement is registered under {verified_id!r}. A "
+            "verified_id is not a placeholder: it is returned by a SUCCESSFUL "
+            "edit_playbook or verify_enhancement call, and is only valid within "
+            "the turn that produced it.",
+            suggestions=[
+                "for a targeted edit call edit_playbook(operations=[...]); for a "
+                "whole rewrite call verify_enhancement(after_yaml=...). Pass the "
+                "verified_id its result returns",
+                "if that call was refused, fix what its required_fixes name and "
+                "call it again -- the offer cannot be emitted before it passes",
+                "do NOT fall back to pasting the YAML into your reply -- the "
+                "analyst's playbook is only updated through this card",
+            ],
+        )
+
+    yaml_text = entry["yaml"]
+    bad_configs = _unknown_config_pins(yaml_text)
+    if bad_configs:
+        return _unknown_config_error(bad_configs)
+
+    # An edit to the conversation's unsaved draft has nothing to apply to: it
+    # is delivered as the draft's next Create card, through the same gate every
+    # Create card passes (verify on these exact bytes, the same setup
+    # warning, ...). The open-playbook guard is skipped because the draft IS
+    # the grounded document -- that is what makes this an edit.
+    if get_grounded_source() == "draft":
+        return _offer_from_yaml(id, summary, yaml_text, title_suggestion=None,
+                                editable_title=True, edit_of_draft=True)
+
+    ops_summary = _yaml_ops_summary(yaml_text)
+
+    diff = entry.get("diff_summary") or {}
+    card: dict[str, Any] = {
+        "type": "enhancement_offer",
+        "id": id,
+        "summary": summary,
+        "verified_id": verified_id.strip(),
+        "final_yaml": yaml_text,
+        # Deletions `verify_enhancement` judged intentional. The accept path
+        # forwards these to `update_playbook` as `acknowledged_drops`, which is
+        # the only way a requested deletion can clear the fail-closed pre-write
+        # guard. Rides on the CARD rather than being recomputed at apply time so
+        # the acknowledgement is bound to the same verdict as the bytes -- the
+        # analyst approves one document with one set of consequences.
+        "acknowledged_drops": list(entry.get("acknowledged_drops") or []),
+        "ops_summary": ops_summary,
+        "diff_summary": diff,
+        "steps_added": list(diff.get("steps_added") or []),
+        "steps_removed": list(diff.get("steps_removed") or []),
+        "steps_modified": list(diff.get("steps_modified") or []),
+        # The per-step before/after payloads the card renders as the diff.
+        # The name lists above stay as the header index.
+        "changes": list(diff.get("changes") or []),
+        # Playbooks this edit ADDS beside the open one (a reusable child it
+        # calls). Apply saves them -- they cannot go on the designer canvas,
+        # which holds one playbook -- so the card has to say so up front.
+        "playbooks_added": [str(c.get("playbook")) for c in diff.get("changes") or []
+                            if isinstance(c, dict) and c.get("kind") == "playbook_added"],
+    }
+    trigger = _trigger_summary(yaml_text)
+    if trigger:
+        card["trigger"] = trigger
+    # U6: the catalog's display label for each connector the diff names, so the
+    # card reads "FortiGuard Threat Intelligence", not its id.
+    labels = _offer_connector_labels(card["changes"])
+    if labels:
+        card["connector_labels"] = labels
+    # Non-blocking findings still reach the human. verify_enhancement lets
+    # warnings through to ready_to_push, so this card is the last place an
+    # analyst can see "this will compile but the connector will reject it at
+    # runtime" before it becomes their saved playbook.
+    warnings = entry.get("warnings") or []
+    if warnings:
+        card["warnings"] = warnings
+    return _with_setup_warning(card, yaml_text)
+
+
+@mcp.tool()
+def emit_manual_input(
+    id: str,
+    workflow_run_iri: str,
+    question: str,
+    fields: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Emit a `manual_input` event so the widget renders a form for a
+    paused playbook gate. `workflow_run_iri` ties the response back to
+    the FortiSOAR workflow runtime; the widget submits via the
+    connector's `respond_manual_input` operation, not `chat_resume`."""
+    # A fill-in form is only valid while a playbook run is paused at a gate:
+    # workflow_run_iri ties the analyst's answer back to that run. In a plain
+    # triage/chat turn there is no paused run, yet this tool is advertised, so
+    # the model reaches for it to ask the analyst a question. Returning the raw
+    # "workflow_run_iri must be a non-empty string" both dead-ends the model and
+    # leaks an internal param name into analyst-facing text (live, the assistant
+    # printed exactly that). Answer with a self-correcting, analyst-safe redirect
+    # to the two paths that do work in a chat turn.
+    if not isinstance(workflow_run_iri, str) or not workflow_run_iri.strip():
+        return _err(
+            "no_paused_playbook",
+            "A fill-in form can only be shown while a playbook is paused "
+            "waiting for input, and none is paused here. Ask the analyst the "
+            "question directly in your reply, or offer the options with a "
+            "choice card.",
+        )
+    for label, val in (("id", id), ("question", question)):
+        if not isinstance(val, str) or not val.strip():
+            return _err("missing_field", f"{label} must be a non-empty string")
+    if not isinstance(fields, list) or not fields:
+        return _err("no_fields",
+                    "fields must be a non-empty list of {name, label, default?}")
+    for i, f in enumerate(fields):
+        if not isinstance(f, dict):
+            return _err("bad_field", f"fields[{i}] must be an object")
+        for k in ("name", "label"):
+            if not f.get(k) or not isinstance(f[k], str):
+                return _err("bad_field",
+                            f"fields[{i}] missing string field {k!r}")
+    return {
+        "ok": True,
+        "card": {
+            "type": "manual_input",
+            "id": id,
+            "workflow_run_iri": workflow_run_iri,
+            "question": question,
+            "fields": fields,
+        },
+    }
+
+
+
+#: The verdict vocabulary. The validator below and the forced-verdict directive
+#: (`_loop_helpers.verdict_directive`) both read these, so the model is told the
+#: exact set it will be checked against. `needs_more_info` is the "could not
+#: conclude" value -- a model left to guess writes `inconclusive` and is refused.
+# Refusal hints for the verdict card. Session health showed the same repairs
+# every time: a hedged disposition ('likely_malicious'), confidence as a word,
+# a finding's text under 'title'/'details', evidence as objects. Each hint says
+# the fix. None of them rewrites the value: which verdict to give, and how
+# sure to be, stay the model's call -- a coerced verdict is one the analyst
+# reads as the agent's and it was not.
+_HEDGES = ("likely_", "probably_", "probable_", "possible_", "possibly_")
+_DISPOSITION_NEAR = {
+    "malicious": "true_positive", "true_positive": "true_positive",
+    "tp": "true_positive", "fp": "false_positive",
+    "not_malicious": "benign", "clean": "benign",
+    "inconclusive": "needs_more_info", "unknown": "needs_more_info",
+    "undetermined": "needs_more_info", "unclear": "needs_more_info",
+}
+_CONFIDENCE_WORDS = {"very_low": 0.2, "low": 0.35, "medium": 0.6,
+                     "moderate": 0.6, "high": 0.85, "very_high": 0.95}
+_CLAIM_ALIASES = ("title", "details", "detail", "description", "text",
+                  "statement", "finding", "summary")
+
+
+def _norm_word(v: str) -> str:
+    return v.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _disposition_hint(v: Any) -> str:
+    if not isinstance(v, str) or not v.strip():
+        return ""
+    key = _norm_word(v)
+    hedged = key.startswith(_HEDGES)
+    if hedged:
+        key = key.split("_", 1)[1]
+    target = key if key in VERDICT_DISPOSITIONS else _DISPOSITION_NEAR.get(key)
+    if not target:
+        return ""
+    if hedged:
+        return (f": use {target!r} and put the doubt in confidence, or "
+                "'needs_more_info' if the evidence does not support a call")
+    return f": use {target!r}"
+
+
+def _confidence_hint(v: Any) -> str:
+    if isinstance(v, str):
+        word = _CONFIDENCE_WORDS.get(_norm_word(v))
+        if word is not None:
+            return f" between 0.0 and 1.0: for {v!r} send e.g. {word}"
+        t = v.strip().rstrip("%")
+        try:
+            n = float(t)
+        except ValueError:
+            return " between 0.0 and 1.0"
+        n = n / 100 if v.strip().endswith("%") or n > 1 else n
+        return f" between 0.0 and 1.0: send {round(n, 2)}, not a string"
+    return " between 0.0 and 1.0"
+
+
+def _claim_hint(f: dict) -> str:
+    sent = [k for k in _CLAIM_ALIASES if isinstance(f.get(k), str) and f[k].strip()]
+    if not sent:
+        return ""
+    return (f" (you sent {', '.join(repr(k) for k in sent)}: put the finding's "
+            "sentence in 'claim')")
+
+
+def _evidence_hint(eid: Any) -> str:
+    if isinstance(eid, dict):
+        for k in ("tool_use_id", "tool_call_id", "call_id", "id"):
+            if isinstance(eid.get(k), str) and eid[k].strip():
+                return f": cite the id itself, {eid[k].strip()!r}, not an object"
+        return ": cite the tool call's id string, not an object"
+    return ""
+
+
+#: What each disposition means. The labels had no definitions, and a model
+#: left to guess called a destination its own threat-intel lookup rated
+#: malicious "suspicious" at 0.96 confidence while calling a near-identical
+#: one "true_positive" -- and only true_positive gets containment proposed.
+#: Doubt belongs in confidence; the label says what the evidence showed.
+DISPOSITION_MEANINGS = {
+    "true_positive": ("the alert caught real malicious activity (for example "
+                      "traffic to an address your threat-intel lookup rates "
+                      "malicious); put any doubt in confidence, not in the label"),
+    "false_positive": "the detection itself was wrong",
+    "benign": "real activity that is not harmful",
+    "suspicious": ("the evidence leans malicious but is weak or conflicting, "
+                   "and no lookup rates it malicious"),
+    "needs_more_info": "you cannot conclude from what you could check",
+}
+VERDICT_DISPOSITIONS = tuple(DISPOSITION_MEANINGS)
+VERDICT_SEVERITIES = ("critical", "high", "medium", "low", "info")
+
+
+VERDICT_SUMMARY_MAX = 600
+
+
+def verdict_contract() -> str:
+    """The verdict payload contract in one sentence, from the validator's own
+    constants. Read by the refusal (so a repair is one retry) and by the
+    forced-verdict directive, so the two can't state different rules."""
+    return (
+        "payload = {disposition: one of "
+        + "; ".join(f"{k} = {v}" for k, v in DISPOSITION_MEANINGS.items())
+        + "; severity: one of "
+        + ", ".join(VERDICT_SEVERITIES) + "; confidence: a number 0.0-1.0; "
+        f"summary: plain English, at most {VERDICT_SUMMARY_MAX} characters; findings: a non-empty "
+        "list of {claim: string, evidence: [evidence ids -- the id shown as "
+        "[evidence id: ...] atop each tool result this turn, never a description]}; "
+        "unknowns: a list of open questions, required when confidence < 0.8; "
+        "recommended_actions (optional): a list of {label: string, tool?, args?}}"
+    )
+
+
+#: Rides the verdict's result back to the model. Live, a triage turn wrote a
+#: 3,300-character assessment, then the same verdict as a card, then a closing
+#: "bottom line": the conclusion three times, about 40 seconds of output the
+#: analyst had already been handed (the widget folds the prose away).
+VERDICT_SHOWN_NOTE = (
+    "The analyst now sees this card with its findings and unknowns. It is the "
+    "write-up: do not restate it in prose. If there is an action to stage, "
+    "stage it; otherwise end with at most one sentence on the next step.")
+
+
+def emit_verdict(
+    disposition: str,
+    severity: str,
+    confidence: float,
+    summary: str,
+    findings: list[dict[str, Any]],
+    unknowns: list[str] | None = None,
+    recommended_actions: list[dict[str, Any]] | None = None,
+    id: str | None = None,
+) -> dict[str, Any]:
+    """Emit a `verdict` card with a structured investigation conclusion.
+
+    NOTE: This is an internal implementation function. The public interface is
+    emit_card(card_type='verdict', payload={...}). Do not advertise this tool
+    separately; it is only callable through emit_card routing.
+
+    Args:
+      disposition: one of true_positive, false_positive, benign, suspicious, needs_more_info
+      severity: one of critical, high, medium, low, info
+      confidence: float 0.0-1.0, how sure the verdict is
+      summary: plain-English summary (≤600 chars)
+      findings: list of {claim: str, evidence: [tool_call_id, ...]}; each must have
+        ≥1 finding and ≥1 evidence id (a tool_use id from THIS session)
+      unknowns: open questions that could shift the verdict; empty only if confidence ≥ 0.8
+      recommended_actions: optional list of {label, tool?, args?} for next steps
+      id: optional card id; generated if absent
+    """
+    # Collect EVERY problem, not the first. Live, a verdict took nine
+    # emit_card calls: each refusal named one defect (shape, disposition,
+    # confidence type, claim, evidence type, action shape, action label, ids)
+    # and the model fixed exactly that one. One refusal listing all of them,
+    # plus the contract, is one repair.
+    problems: list[tuple[str, str]] = []
+
+    def bad(code: str, message: str) -> None:
+        problems.append((code, message))
+
+    if not isinstance(disposition, str) or disposition not in VERDICT_DISPOSITIONS:
+        bad("bad_disposition",
+            f"disposition must be one of: {', '.join(VERDICT_DISPOSITIONS)} "
+            f"(got {disposition!r}){_disposition_hint(disposition)}")
+    if not isinstance(severity, str) or severity not in VERDICT_SEVERITIES:
+        bad("bad_severity",
+            f"severity must be one of: {', '.join(VERDICT_SEVERITIES)} "
+            f"(got {severity!r})")
+    numeric = isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+    if not numeric:
+        bad("bad_confidence",
+            f"confidence must be a number{_confidence_hint(confidence)}")
+    elif not (0.0 <= confidence <= 1.0):
+        bad("bad_confidence", "confidence must be between 0.0 and 1.0")
+    if not isinstance(summary, str) or not summary.strip():
+        bad("missing_summary", "summary must be a non-empty string")
+    elif len(summary) > VERDICT_SUMMARY_MAX:
+        bad("summary_too_long", f"summary must be ≤{VERDICT_SUMMARY_MAX} chars")
+    if not isinstance(findings, list) or not findings:
+        bad("no_findings", "findings must be a non-empty list of {claim, evidence}")
+        findings = []
+    for i, f in enumerate(findings):
+        if not isinstance(f, dict):
+            bad("bad_finding", f"findings[{i}] must be an object")
+            continue
+        if not f.get("claim") or not isinstance(f["claim"], str):
+            bad("bad_finding",
+                f"findings[{i}] must have a non-empty string 'claim'"
+                f"{_claim_hint(f)}")
+        if not f.get("evidence"):
+            bad("bad_finding_evidence",
+                f"findings[{i}].evidence must be a non-empty list of "
+                f"tool_call_ids (strings)")
+        elif not isinstance(f["evidence"], list):
+            ev = f["evidence"]
+            hint = (f": wrap it, [{ev.strip()!r}]" if isinstance(ev, str)
+                    else _evidence_hint(ev).replace(", not an object",
+                                                    " inside a list"))
+            bad("bad_finding_evidence",
+                f"findings[{i}].evidence must be a list{hint}")
+        else:
+            for j, eid in enumerate(f["evidence"]):
+                if not isinstance(eid, str) or not eid.strip():
+                    bad("bad_evidence_id",
+                        f"findings[{i}].evidence[{j}] must be a non-empty "
+                        f"string (a tool_use_id){_evidence_hint(eid)}")
+    # Check unknowns and confidence consistency
+    unknowns_list: list[str] = []
+    if unknowns is not None:
+        if not isinstance(unknowns, list):
+            bad("bad_unknowns", "unknowns must be a list of strings or null")
+        else:
+            unknowns_list = [str(u).strip() for u in unknowns if u]
+    if numeric and not unknowns_list and confidence < 0.8:
+        bad("confidence_unknowns_conflict",
+            "unknowns list cannot be empty when confidence < 0.8; list "
+            "open questions or raise confidence to ≥0.8")
+    if recommended_actions is not None:
+        if not isinstance(recommended_actions, list):
+            bad("bad_actions", "recommended_actions must be a list")
+        else:
+            for i, a in enumerate(recommended_actions):
+                if not isinstance(a, dict):
+                    bad("bad_action", f"recommended_actions[{i}] must be an object")
+                elif not a.get("label") or not isinstance(a["label"], str):
+                    bad("bad_action",
+                        f"recommended_actions[{i}] must have a 'label' field")
+    # Evidence ids are checked in the same pass: the ninth live attempt was
+    # refused for citing prose instead of tool_use ids, AFTER eight structural
+    # repairs -- it could have been told the first time.
+    from ._citation_validator import rated_intel_ids, validate_evidence_ids
+    cited = [eid for f in findings if isinstance(f, dict)
+             and isinstance(f.get("evidence"), list)
+             for eid in f["evidence"] if isinstance(eid, str) and eid.strip()]
+    id_hints: list[str] = []
+    ids_valid = True
+    if cited:
+        id_err = validate_evidence_ids(cited)
+        if id_err is not None:
+            ids_valid = False
+            bad(id_err.get("code") or "invalid_evidence_ids",
+                id_err.get("message") or "unknown evidence ids")
+            id_hints = list(id_err.get("suggestions") or [])
+    # A true_positive must cite the threat-intel lookup it rests on. When the
+    # turn ran a rated intel lookup but the verdict cites none of them, the
+    # verdict reads as confident-but-ungrounded and the autonomy policy refuses
+    # the action AFTER the turn ends -- too late for the model to repair. Refuse
+    # here instead, naming the available lookup ids, so the fix is one retry.
+    # Only when the cited ids are otherwise valid (else that is the first fix).
+    if disposition == "true_positive" and ids_valid:
+        intel_ids = rated_intel_ids()
+        if intel_ids and not any(eid in intel_ids for eid in cited):
+            bad("verdict_omits_intel_citation",
+                "a true_positive verdict must cite the threat-intelligence "
+                "lookup it rests on. This turn ran rated lookups ["
+                + ", ".join(intel_ids[:6])
+                + "] but no finding cites one of them -- a traffic log or "
+                "record read shows a connection happened, not that the address "
+                "is malicious. Add the lookup's evidence id to the finding it "
+                "supports.")
+    if problems:
+        code, message = problems[0]
+        if len(problems) > 1:
+            message = (f"{len(problems)} problems -- fix all of them in one retry: "
+                       + "; ".join(f"({n}) {m}" for n, (_, m)
+                                   in enumerate(problems, 1)))
+        return _err(code, message, suggestions=[*id_hints, verdict_contract()],
+                    problems=[{"code": c, "message": m} for c, m in problems])
+    # Evidence-shape cap (I3). A committed verdict whose every cited source
+    # came back empty or thin is refused once, so the agent runs one coverage
+    # round. A second committed attempt on thin evidence is capped at
+    # needs_more_info, and the cap says which evidence was thin.
+    from ._citation_validator import get_turn_evidence  # noqa: PLC0415
+    evidence_ctx = get_turn_evidence()
+    if (evidence_ctx is not None and disposition != "needs_more_info"
+            and ids_valid and cited):
+        registry = evidence_ctx.valid_ids()
+        if all((registry.get(c) or {}).get("thin") is True for c in cited):
+            from ._citation_validator import unchecked_ready_sources  # noqa: PLC0415
+            unchecked = unchecked_ready_sources(registry)
+            if evidence_ctx.thin_refusals() == 0:
+                evidence_ctx.note_thin_refusal()
+                return _err(
+                    "evidence_all_thin",
+                    "every source you cited came back empty or thin (no rows, "
+                    "a zero count, or an empty result). A committed verdict "
+                    "needs evidence that shows something. Run one coverage "
+                    "round first: query the ready sources you have not checked "
+                    "this turn, then send the verdict again. If nothing turns "
+                    "up, the verdict is capped at needs_more_info."
+                    + (" Ready and not yet queried: " + ", ".join(unchecked) + "."
+                       if unchecked else ""),
+                    suggestions=[verdict_contract()])
+            disposition = "needs_more_info"
+            unknowns_list.append(
+                "every source cited for this verdict came back empty or thin, "
+                "so the disposition is capped at needs_more_info")
+            if unchecked:
+                unknowns_list.append(
+                    "not checked, though available: " + ", ".join(unchecked))
+    # Generate id if missing
+    if not id or not isinstance(id, str):
+        import uuid  # noqa: PLC0415
+        id = uuid.uuid4().hex[:16]
+    # I5 coverage ledger: every card says which ready sources this turn
+    # queried, capped or not (the analyst sees what the verdict rests on).
+    from ._citation_validator import (  # noqa: PLC0415
+        checked_ready_sources,
+        what_would_help,
+    )
+    checked = (checked_ready_sources(evidence_ctx.valid_ids())
+               if evidence_ctx is not None else [])
+    # X7: what would help an uncertain verdict, from the turn's facts.
+    helps = (what_would_help(disposition, unknowns_list, evidence_ctx.valid_ids())
+             if evidence_ctx is not None else [])
+    card: dict[str, Any] = {
+        "type": "verdict_card",
+        "id": id,
+        "disposition": disposition,
+        "severity": severity,
+        "confidence": float(confidence),
+        "summary": summary.strip(),
+        "findings": findings,
+        "sources_checked": checked,
+    }
+    if unknowns_list:
+        card["unknowns"] = unknowns_list
+    if helps:
+        card["what_would_help"] = helps
+    if recommended_actions:
+        card["recommended_actions"] = recommended_actions
+    from ._citation_validator import record_delivered_verdict
+    record_delivered_verdict(card)
+    return {"ok": True, "card": card, "shown": VERDICT_SHOWN_NOTE}
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 consolidation: one card emitter over the seven emit_* card tools.
+# The specialized names stay registered during the migration; each one's
+# runtime validation is the single source of truth, so emit_card only routes.
+# emit_decision_step is NOT a card (it renders a YAML step) and stays apart.
+# ---------------------------------------------------------------------------
+
+# The vocabulary the model reaches for vs the one the card functions declare.
+# Every card emission in the 2026-08-18 investigation sweep was REFUSED on its
+# first attempt and self-repaired on the second -- 4 fixtures out of 4, three
+# `bad_payload` and one `bad_option`. The model does not send garbage; it sends
+# the same card described with the words the tool docs use everywhere else
+# (`params` is what run_op takes, `title`/`description` is how every other
+# surface names a heading, `{id,label,detail}` is the shape of an option
+# elsewhere). Each refusal costs a full LLM round-trip and a tool call against
+# the turn budget, and the repaired call drops the extra keys anyway.
+#
+# So accept the shape the model emits -- the same convention `dispatch` already
+# applies to run_op's stringified `params` and emit_card's top-level fields.
+# Only ever fill a canonical key that is ABSENT: a payload that already speaks
+# the declared vocabulary is passed through untouched.
+_CARD_SYNONYMS: dict[str, dict[str, tuple[str, ...]]] = {
+    # canonical field -> the aliases seen in real traces, in priority order
+    "action": {
+        "args": ("params", "parameters", "arguments"),
+        "summary": ("title", "description", "summary_text"),
+        # the model reaches for its run_op vocabulary here (live, 2026-08-18)
+        "operation": ("op", "op_name", "operation_name"),
+    },
+    "choice": {
+        "prompt": ("question", "title", "text"),
+        "allow_text": ("free_text", "allow_free_text"),
+    },
+    "capability_gap": {
+        "missing": ("gap", "capability"),
+    },
+}
+
+# Per-option aliases for a choice card's `options` entries.
+_OPTION_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "value": ("id", "key"),
+    "label": ("text", "name", "title"),
+    "hint": ("detail", "description"),
+}
+
+
+def _normalize_card_payload(kt: str, payload: dict[str, Any]) -> tuple[
+        dict[str, Any], list[str]]:
+    """Rewrite a card payload into the declared vocabulary.
+
+    Returns `(payload, dropped)` where `dropped` names the keys the card
+    function has no parameter for. Dropping is not silent: the caller reports
+    them on the result, because the alternative today is a hard refusal whose
+    self-repair drops exactly the same keys one round-trip later.
+    """
+    out = dict(payload)
+    for canon, aliases in _CARD_SYNONYMS.get(kt, {}).items():
+        if out.get(canon) not in (None, "", {}, []):
+            continue
+        for alias in aliases:
+            if out.get(alias) not in (None, "", {}, []):
+                out[canon] = out.pop(alias)
+                break
+
+    if kt == "choice" and isinstance(out.get("options"), list):
+        opts = []
+        for opt in out["options"]:
+            if not isinstance(opt, dict):
+                opts.append(opt)
+                continue
+            o = dict(opt)
+            for canon, aliases in _OPTION_SYNONYMS.items():
+                if o.get(canon):
+                    continue
+                for alias in aliases:
+                    if o.get(alias):
+                        o[canon] = o[alias] if canon == "label" else o.pop(alias)
+                        break
+            opts.append(o)
+        out["options"] = opts
+
+    # An action card with no `editable_fields` is the commonest omission. The
+    # analyst must be able to correct the args they are approving (a wrong IP
+    # in a block is the whole reason the card exists), so default to the args
+    # that were sent rather than to nothing.
+    if kt == "action" and "editable_fields" not in out:
+        if isinstance(out.get("args"), dict):
+            out["editable_fields"] = list(out["args"])
+    # editable_fields name keys of `args`; a model that writes the path
+    # ("args.ip") means the same key. Live, an unattended containment was
+    # refused twice with "has no such parameter" for args.method/args.ip and
+    # the turn ended with nothing staged.
+    ef = out.get("editable_fields") if kt == "action" else None
+    if isinstance(ef, list):
+        out["editable_fields"] = [
+            f[len("args."):] if isinstance(f, str) and f.startswith("args.") else f
+            for f in ef]
+
+    return out, []
+
+
+CARD_TYPES: dict[str, str] = {
+    "choice": "emit_choice_card",
+    "action": "emit_action_card",
+    "manual_input": "emit_manual_input",
+    "capability_gap": "emit_capability_gap_card",
+    "playbook_offer": "emit_playbook_offer",
+    "enhancement_offer": "emit_enhancement_offer",
+    "verdict": "emit_verdict",
+}
+
+
+
+def _clip_summary(text: str) -> tuple[str, int | None]:
+    """`text` within VERDICT_SUMMARY_MAX, cut at the last sentence end that
+    keeps at least a third of it (else the last word), plus the original
+    length when it was cut."""
+    if len(text) <= VERDICT_SUMMARY_MAX:
+        return text, None
+    head = text[:VERDICT_SUMMARY_MAX]
+    ends = [head.rfind(p) for p in (". ", "! ", "? ")]
+    cut = max(ends)
+    if cut >= VERDICT_SUMMARY_MAX // 3:
+        return head[:cut + 1].rstrip(), len(text)
+    room = head[:VERDICT_SUMMARY_MAX - 3]
+    sp = room.rfind(" ")
+    return (room[:sp] if sp > 0 else room).rstrip(" ,;:") + "...", len(text)
+
+
+@mcp.tool()
+def emit_card(card_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """ONE card emitter -- pick `card_type`, pass that card's fields as
+    `payload`; the turn halts on the rendered card.
+
+    Which card_type to pick: `choice` = branching question as pickable chips
+    (never ask in prose). `action` = editable preview of a connector op the
+    analyst confirms before it runs. `manual_input` = form for a paused
+    playbook gate. `capability_gap` = the instance CANNOT do what is needed
+    (nothing configured for it) -- name the gap + fix steps, never dead-end
+    in prose. `playbook_offer` = deliver a NEW playbook (the mandatory
+    terminal action of a build turn). `enhancement_offer` = apply a verified
+    edit to the OPEN playbook (terminal action of an enhance turn; needs
+    `verified_id` from edit_playbook). `verdict` =
+    structured investigation conclusion with disposition, severity, confidence,
+    and cited findings (evidence tied to tool_call_ids). The verdict card IS
+    the written assessment: call it instead of writing the findings out in
+    prose first (never restate it in prose either).
+    """
+    kt = (card_type or "").strip().lower()
+    fn_name = CARD_TYPES.get(kt)
+    if fn_name is None:
+        return _err("unknown_card_type",
+                    f"card_type {card_type!r} not recognized",
+                    suggestions=[f"valid card_types: {sorted(CARD_TYPES)}"])
+    if not isinstance(payload, dict):
+        return _err("bad_payload", "payload must be an object holding the "
+                                   "card's fields")
+    import inspect  # noqa: PLC0415
+
+    import fsr_playbooks.mcp_server as _pkg  # noqa: PLC0415 - registration cycle
+    fn = getattr(_pkg, fn_name)
+
+    # Speak the model's dialect before validating (see _CARD_SYNONYMS).
+    payload, _ = _normalize_card_payload(kt, payload)
+    # A verdict summary a little over the cap is trimmed, not refused: the
+    # cap is not advertised up front (the payload is a bare object), and live
+    # a 612-character summary cost a whole re-emit round.
+    clipped_from = None
+    if kt == "verdict" and isinstance(payload.get("summary"), str):
+        payload["summary"], clipped_from = _clip_summary(payload["summary"])
+
+    # Keys the card function has no parameter for would TypeError below. The
+    # refusal is honest but expensive -- the model's repair drops these keys
+    # anyway -- so drop them here and SAY SO on the result rather than
+    # spending a round-trip to arrive at the same card.
+    params = list(inspect.signature(fn).parameters)
+    ignored = sorted(k for k in payload if k not in params)
+    if ignored:
+        payload = {k: v for k, v in payload.items() if k in params}
+    # A card id is bookkeeping, not content -- a payload that is otherwise
+    # complete must not bounce for lacking one (live: an action card with
+    # every real field right was refused twice before the model thought to
+    # invent an id).
+    if "id" in params and not payload.get("id"):
+        import uuid  # noqa: PLC0415
+        payload["id"] = uuid.uuid4().hex[:16]
+    # Name what is MISSING, not just what is accepted. Live (B3a sweep): the
+    # model passed a `find(kind="action")` row -- connector/op/title/
+    # required_params -- as an action card. `op`/`title` normalize, but it had
+    # no `args`; the refusal listed all seven params, and the model narrated
+    # the fix to the analyst instead of resending the card.
+    sig = inspect.signature(fn).parameters
+    missing = [k for k, p in sig.items()
+               if p.default is inspect.Parameter.empty and k not in payload]
+    if kt == "action" and "args" in missing:
+        # editable_fields defaults from args (_normalize_card_payload), so it
+        # is only "missing" because args is; naming both sends the model after
+        # a field it never needed to write.
+        missing = [k for k in missing if k != "editable_fields"]
+    if missing:
+        hints = [f"missing: {missing} -- resend emit_card(card_type={kt!r}) "
+                 f"with them in `payload`; it takes {params}"]
+        if kt == "action" and "args" in missing:
+            hints.append("`args` is the operation's parameter VALUES as an "
+                         "object, filled from the request (e.g. {\"ip\": "
+                         "\"<the IP>\"}) -- not the catalog's "
+                         "`required` list; get the names from "
+                         "get_op_schema(connector, operation)")
+        if kt == "verdict":
+            hints.append(verdict_contract())
+        return _err("bad_payload",
+                    f"payload for card_type {kt!r} is missing {missing}",
+                    suggestions=hints)
+    try:
+        out = fn(**payload)
+    except TypeError:
+        hints = [f"{fn_name} takes: {params}"]
+        if kt == "verdict":
+            hints.append(verdict_contract())
+        return _err("bad_payload",
+                    f"payload does not match card_type {kt!r}",
+                    suggestions=hints)
+    if isinstance(out, dict):
+        out.setdefault("card_type", kt)
+        if ignored and out.get("ok"):
+            out["ignored_fields"] = ignored
+        if clipped_from and out.get("ok"):
+            out["summary_clipped"] = (
+                f"The summary was {clipped_from} characters; the card shows the "
+                f"first {len(payload['summary'])} (cap {VERDICT_SUMMARY_MAX}).")
+    return out

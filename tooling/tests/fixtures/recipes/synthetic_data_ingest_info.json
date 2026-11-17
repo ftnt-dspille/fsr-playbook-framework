@@ -1,0 +1,45 @@
+{
+  "name": "synthetic_data_ingest",
+  "label": "Synthetic Data Ingest",
+  "version": "1.0.0",
+  "category": "SIEM",
+  "description": "Synthetic test connector locked into a fixture so the data-ingest recipe generator output is byte-stable across changes.",
+  "operations": [
+    {
+      "operation": "list_incidents",
+      "title": "List Incidents",
+      "annotation": "list_incidents",
+      "category": "investigation",
+      "description": "Retrieve incidents from the synthetic SIEM.",
+      "parameters": [
+        {
+          "name": "since",
+          "title": "Since",
+          "type": "datetime",
+          "required": false
+        },
+        {
+          "name": "limit",
+          "title": "Limit",
+          "type": "integer",
+          "required": false,
+          "value": 50
+        }
+      ],
+      "output_schema": {
+        "incidents": [
+          {
+            "eventId": "",
+            "name": "",
+            "description": "",
+            "severity": "",
+            "status": "",
+            "source": "",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      }
+    }
+  ]
+}

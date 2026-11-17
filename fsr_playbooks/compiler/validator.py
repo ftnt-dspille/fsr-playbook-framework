@@ -1,0 +1,1283 @@
+"""Cross-cutting validation that runs after resolve.
+
+The resolver already checks per-step references; this module covers
+graph-level invariants: every playbook has a Start, exactly one Start,
+linear paths terminate, etc.
+"""
+from __future__ import annotations
+
+import json
+import re
+
+from .errors import CompileError, ErrorCode
+from .ir import Collection, Playbook, Step
+from .jinja_checks import check_jinja, to_compile_errors
+from .resolver._constants import TRIGGER_TYPES
+
+# Find every Jinja expression. Non-greedy; tolerates whitespace.
+_JINJA_EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}", re.DOTALL)
+
+# A decision branch condition that evaluates to a boolean carries a Jinja
+# block or a comparison/logical operator. A bare literal (e.g. `else`) does
+# not, and FSR rejects it at runtime as "not boolean".
+_COND_BOOLEAN_RE = re.compile(
+    r"\{\{|==|!=|<=|>=|[<>|~]| and | or | not | in | is "
+)
+# vars.steps.<key>.<path...> -- capture the step jinja-key + the trailing
+# attribute chain. Stops at any non-attribute character (operators,
+# whitespace, brackets, pipes).
+_VARS_STEPS_RE = re.compile(
+    r"\bvars\.steps\.([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z_][A-Za-z0-9_]*"
+    r"|\[\s*(?:\d+|'[^']*'|\"[^\"]*\")\s*\])*)"
+)
+
+# The first access after a find_record step's key: `.name` or `['name']`
+# (a key lookup -- wrong on a list), as opposed to `[0]` (an index -- right).
+_FIND_RECORD_KEY_ACCESS_RE = re.compile(
+    r"\s*(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*(['\"])(.+?)\2\s*\])")
+
+# vars.steps['<key>'] / vars.steps["<key>"] -- the subscript spelling. It was
+# never checked: a repair turn "fixed" `vars.steps.analyst_ip_action` to
+# `vars.steps['Analyst IP Action']` (the display name, spaces and all), verify
+# passed it, and the step still read nothing -- the key is the name with
+# spaces replaced by underscores.
+_VARS_STEPS_SUBSCRIPT_RE = re.compile(
+    r"\bvars\.steps\[\s*(['\"])(.+?)\1\s*\]")
+
+
+# Top-level keys present on every workflow's `vars` context at runtime.
+# Setting one of these via SetVariable shadows the FSR-provided value
+# silently, breaking later steps that read it. Sourced from the corpus
+# + live runs (see data/JINJA_IDIOMS.md, /api/wf/api/workflows env dump).
+_RESERVED_VARS_KEYS = {
+    # Authoritative list per FSR docs ("Reserved Keywords"). Setting any
+    # of these via SetVariable either silently shadows the FSR-provided
+    # value OR makes the runtime crash.
+    #
+    # Live-verified on FSR 8.0.0-6034:
+    # - CRASHES ('str' object has no attribute 'get'): env, message
+    # - SILENTLY SHADOWED (set value lost): input
+    # - WORKS but shadows FSR built-ins: result, steps, globalVars, self,
+    #   parent_wf, workflow
+    "items",
+    "result",
+    "input",
+    "request",
+    "values",
+    "keys",
+    "files",
+    "env",
+    "message",
+    "resources",
+    "step_variables",
+    "do_until",
+    "ignore_errors",
+    "when",
+    "for_each",
+    "cyops_playbook_iri",
+    "cyops_playbook_name",
+    "collaborationNote",
+    "inputVariables",
+    "displayConditions",
+    "task_id",
+    "wf_id",
+    # Inferred-from-corpus additions (not in the public list, but
+    # observed to break or silently shadow):
+    "steps",          # per-step output namespace
+    "vars",           # self-reference (infinite loop)
+    "globalVars",     # collection-level globals
+    "globals",        # alias used by some step handlers
+    "parent_wf",      # set when invoked via workflow_reference
+    "self",           # reserved by FSR's playbook runtime
+}
+
+# NOTE: there used to be an `_INVALID_JINJA_KEY_TOKENS` set here, rejecting
+# step names like "Return" or "If" on the grounds that `vars.steps.<name>`
+# "won't parse". It does parse. Jinja2 reserves keywords in STATEMENT position
+# only; after a `.` the lexer emits a plain NAME and the parser takes it as an
+# attribute. Every token in that set -- including the Python-only ones that had
+# drifted in (`class`, `def`, `return`, `import`) -- parses fine:
+#
+#     >>> Environment().parse("{{ vars.steps.Return.data }}")   # fine
+#     >>> Environment().parse("{{ vars.steps.none }}")          # fine
+#
+# The only forms Jinja actually rejects are assignment targets bound to its
+# constants (`{% set none = 5 %}` -> "can't assign to 'const'"), and a step
+# name is never an assignment target -- it is only ever read as an attribute.
+# So the rule had no true positive available to it, while blocking compilation
+# of playbooks Fortinet ships and FSR runs (caught by probe_corpus_conformance
+# against a step legitimately named "Return").
+#
+# The adjacent first-character check below IS real and stays: `vars.steps.2foo`
+# genuinely fails to parse.
+
+
+def _step_outgoing(s) -> list[str]:
+    """Yield all outgoing step ids from a step (next + branches + unlabeled)."""
+    out: list[str] = []
+    if s.next:
+        out.append(s.next)
+    out.extend(s.branches.values())
+    out.extend(s.unlabeled_next)
+    return out
+
+
+def _walk_strings(value, *, prefix: str = ""):
+    """Yield (path, string_value) pairs from any nested args structure."""
+    if isinstance(value, str):
+        yield prefix, value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            sub = f"{prefix}.{k}" if prefix else k
+            yield from _walk_strings(v, prefix=sub)
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            yield from _walk_strings(v, prefix=f"{prefix}[{i}]")
+
+
+def _step_output_top_keys(s: Step) -> set[str] | None:
+    """Best-effort top-level output key set for a step.
+    Returns None if we don't know (don't lint that reference).
+    The keys are what would appear immediately after `vars.steps.<name>.`."""
+    if s.type == "set_variable" and isinstance(s.arguments, dict):
+        # SetVariable's output keys are the variable names themselves.
+        if isinstance(s.arguments.get("arg_list"), list):
+            keys = {item["name"] for item in s.arguments["arg_list"]
+                    if isinstance(item, dict) and "name" in item}
+        else:
+            keys = {k for k in s.arguments if k != "step_variables"}
+        return keys
+
+    if s.type == "connector" and isinstance(s.arguments, dict):
+        # A connector result is an ENVELOPE. The op's `output_schema` describes
+        # what sits UNDER `data` -- it is NOT the top-level shape. At runtime
+        # `vars.steps.<name>` is `{data: <op output>, status, message,
+        # operation}` (live-verified: convert_periodic_time_to_minutes ->
+        # `{"data": {"minutes": 180}, "status": "Success", ...}`). So the
+        # top-level keys are the envelope keys, and an op field like `minutes`
+        # is reached as `vars.steps.<name>.data.minutes`. Returning the
+        # output_schema keys here was the bug that flagged the *correct*
+        # `.data.<field>` path and blessed the broken `.<field>` one -- the
+        # exact miss S3 caught on the box (build model authored
+        # `vars.steps.Convert.minutes` -> empty record field). Mirrors the
+        # `.data` envelope the grounded typed_walker already models for
+        # code_snippet, and the corrected `get_step_type('connector')` grounding.
+        return {"data", "status", "message", "operation"}
+
+    # find_record is NOT keyed: its output is a plain LIST of records, checked
+    # separately in _check_jinja_paths (_FIND_RECORD_KEY_ACCESS_RE).
+
+    if s.type == "manual_input":
+        # Output is the resumed input + chosen option.
+        return {"input", "option", "user", "username", "datetime"}
+
+    # Unknown -- code_snippet, workflow_reference, decision, delay,
+    # create_record, update_record, start*, etc.
+    return None
+
+
+def _has_cycle(pb: Playbook) -> bool:
+    """Return True if the playbook's step graph contains a directed cycle.
+
+    Used to short-circuit _check_jinja_paths: predecessor analysis on a cyclic
+    graph produces unreliable reachability sets and may emit spurious errors.
+    _check_graph will report the actual cycle as an error independently.
+    """
+    by_id = {s.id: s for s in pb.steps}
+    WHITE, GREY, BLACK = 0, 1, 2
+    color: dict[str, int] = {sid: WHITE for sid in by_id}
+
+    def _dfs(sid: str) -> bool:
+        color[sid] = GREY
+        s = by_id.get(sid)
+        if s is not None:
+            for nxt in _step_outgoing(s):
+                if nxt not in by_id:
+                    continue
+                c = color.get(nxt, WHITE)
+                if c == GREY:
+                    return True
+                if c == WHITE and _dfs(nxt):
+                    return True
+        color[sid] = BLACK
+        return False
+
+    return any(_dfs(sid) for sid in list(by_id) if color[sid] == WHITE)
+
+
+def _compute_predecessors(pb: Playbook) -> dict[str, set[str]]:
+    """For each step id, return the set of step ids that *can* run before it.
+
+    Computed by forward BFS from each start step: when we visit a step
+    via an edge from S, S is added to the predecessor set. We propagate
+    transitively so cycles fold in correctly. Lenient by design: a step
+    on *any* path reaching S counts as a predecessor; we don't try to
+    enforce all-paths dominance (FSR runtime would reject the playbook
+    on any path where the reference doesn't bind anyway).
+
+    Run only on RESOLVED IR, same as `unreachable_step_ids`: a fresh
+    parse has not yet promoted decision / manual-input options into
+    `branches`, so on parsed-but-unresolved steps every branch target is
+    missing from the predecessor sets and downstream steps all look
+    unreachable. Instrumenting this function against `parse_yaml` output
+    directly produces all-empty predecessor sets -- that is the parse
+    stage, not a graph problem.
+    """
+    by_id: dict[str, Step] = {s.id: s for s in pb.steps}
+    preds: dict[str, set[str]] = {s.id: set() for s in pb.steps}
+    starts = [s.id for s in pb.steps
+              if s.type and (s.type in TRIGGER_TYPES or s.type.startswith("start"))]
+    if not starts and pb.steps:
+        starts = [pb.steps[0].id]
+    # Iterate to fixed point (handles cycles and multi-branch joins).
+    changed = True
+    seen_path: set[tuple[str, str]] = set()
+    while changed:
+        changed = False
+        for s in pb.steps:
+            for nxt in _step_outgoing(s):
+                if nxt not in by_id:
+                    continue
+                edge = (s.id, nxt)
+                # Add s itself as predecessor of nxt.
+                if s.id not in preds[nxt]:
+                    preds[nxt].add(s.id)
+                    changed = True
+                # Inherit s's predecessors.
+                inherited = preds[s.id] - preds[nxt]
+                if inherited:
+                    preds[nxt] |= inherited
+                    changed = True
+                seen_path.add(edge)
+    # Steps unreachable from a start get an empty predecessor set --
+    # references *into* them would fail; references *from* them won't
+    # be checked because those steps are dead code (a separate lint).
+    return preds
+
+
+def _check_jinja_paths(pb: Playbook, pi: int,
+                       errors: list[CompileError]) -> None:
+    """Catch `{{ vars.steps.<name>... }}` references that don't resolve.
+
+    Three failure modes:
+      1. The named step doesn't exist (typo) -- error.
+      2. The named step exists but cannot run *before* the referencing
+         step in the DAG -- error (the reference would be undefined at
+         runtime).
+      3. The first attribute after the step name isn't in the step's
+         declared/observed output schema -- warning (we may have the
+         wrong shape; observed schemas are more authoritative).
+    """
+    path = f"playbooks[{pi}]"
+    # Skip Jinja path analysis on cyclic graphs -- predecessor sets are
+    # unreliable for cycles and produce spurious reachability errors.
+    # _check_graph (always called before this) reports the cycle itself.
+    if _has_cycle(pb):
+        return
+    by_jinja_key: dict[str, Step] = {}
+    for s in pb.steps:
+        sname = s.name or s.id
+        by_jinja_key[sname.replace(" ", "_")] = s
+
+    # Reachability: which step ids could have run before each step?
+    preds = _compute_predecessors(pb)
+    id_by_jinja_key = {k: v.id for k, v in by_jinja_key.items()}
+    # Steps the trigger can reach at all. A referencing step outside this set
+    # is itself dead code -- the actionable problem is its wiring, not the
+    # reference (see the unreachable-referencer branch below).
+    _trigger = _trigger_id(pb)
+    reachable = _reachable_step_ids(pb, _trigger) if _trigger else set()
+
+    # `vars.steps.input` is also a valid alias on some FSR versions;
+    # treat the literal token 'input' as never-a-step.
+    for si, s in enumerate(pb.steps):
+        spath = f"{path}.steps[{si}]"
+        for sub, val in _walk_strings(s.arguments):
+            for jm in _JINJA_EXPR_RE.finditer(val):
+                expr = jm.group(1)
+                for m in _VARS_STEPS_SUBSCRIPT_RE.finditer(expr):
+                    key = m.group(2)
+                    if key in by_jinja_key:
+                        continue
+                    fixed = key.replace(" ", "_")
+                    if fixed in by_jinja_key:
+                        msg = (f"Jinja reference vars.steps[{key!r}] in step "
+                               f"{s.id!r}: step keys replace spaces with "
+                               f"underscores, so this resolves to nothing")
+                        suggestion = fixed
+                    else:
+                        suggestion = _closest_step(fixed, by_jinja_key.keys())
+                        msg = (f"Jinja reference vars.steps[{key!r}] in step "
+                               f"{s.id!r}: no step with jinja-key {key!r} in "
+                               f"this playbook")
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=msg,
+                        path=f"{spath}.arguments.{sub}",
+                        near=suggestion,
+                        suggestion=(f"use vars.steps.{suggestion}"
+                                    if suggestion else None),
+                        severity="error",
+                    ))
+                for m in _VARS_STEPS_RE.finditer(expr):
+                    key = m.group(1)
+                    rest = m.group(2) or ""
+                    target = by_jinja_key.get(key)
+                    if target is None:
+                        # Don't flag references to steps that exist with the
+                        # same name but different casing/spaces -- emitter
+                        # already collisions-checks. Just unknown ones.
+                        suggestion = _closest_step(key, by_jinja_key.keys())
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(f"Jinja reference vars.steps.{key}{rest} "
+                                     f"in step {s.id!r}: no step with "
+                                     f"jinja-key {key!r} in this playbook"),
+                            path=f"{spath}.arguments.{sub}",
+                            near=suggestion,
+                            suggestion=(f"did you mean vars.steps.{suggestion}?"
+                                        if suggestion else None),
+                            severity="error",
+                        ))
+                        continue
+                    # Reachability: target must be able to run *before* s.
+                    # Self-reference is always fine (e.g. delay step looking
+                    # at its own status).
+                    target_id = id_by_jinja_key.get(key)
+                    if target_id and target_id != s.id:
+                        if target_id not in preds.get(s.id, set()):
+                            if s.id not in reachable:
+                                # The referencing step itself is dead: nothing
+                                # routes to it. That is the actionable problem
+                                # -- say so, instead of describing the
+                                # reference (a wrong-wired NEW step otherwise
+                                # reads as a confusing claim about the step it
+                                # references, and sends the author debugging
+                                # the wrong end of the edge).
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=(
+                                        f"step {s.id!r} ({s.name or s.type}) is "
+                                        f"unreachable -- no step's next/branches "
+                                        f"point to it, so its reference to "
+                                        f"vars.steps.{key} can never bind. "
+                                        f"Point the preceding step's next: (or "
+                                        f"a branch target) at {s.id!r}, or "
+                                        f"remove the step."
+                                    ),
+                                    path=f"{spath}.arguments.{sub}",
+                                    severity="error",
+                                ))
+                                continue
+                            # Suggest steps that ARE reachable.
+                            reachable_keys = sorted(
+                                k for k, v in id_by_jinja_key.items()
+                                if v in preds.get(s.id, set())
+                            )[:5]
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"Jinja reference vars.steps.{key}{rest} "
+                                    f"in step {s.id!r}: step {key!r} cannot "
+                                    f"run before {s.id!r} in any execution "
+                                    "path; the reference would be undefined "
+                                    "at runtime"),
+                                path=f"{spath}.arguments.{sub}",
+                                suggestion=(
+                                    f"available predecessors: "
+                                    f"{', '.join(reachable_keys)}"
+                                    if reachable_keys else None),
+                                severity="error",
+                            ))
+                            continue
+                    # A find_record's output is a LIST of records (live-verified
+                    # on 8.0, with and without `partial: true`): `[0]`, `|
+                    # length` and for_each work; `.records` and
+                    # `['hydra:member']` -- both of which our own docs taught --
+                    # render empty, and the playbook runs on with nothing.
+                    if target.type == "find_record":
+                        km = _FIND_RECORD_KEY_ACCESS_RE.match(rest)
+                        if km:
+                            attr = km.group(1) or km.group(3)
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"Jinja reference vars.steps.{key}{rest} in "
+                                    f"step {s.id!r}: {key!r} is a find_record "
+                                    f"step, whose output is a LIST of records "
+                                    f"-- {attr!r} renders empty"),
+                                path=f"{spath}.arguments.{sub}",
+                                suggestion=(f"index or iterate it: "
+                                            f"vars.steps.{key}[0].<field>, "
+                                            f"vars.steps.{key} | length"),
+                                severity="error",
+                            ))
+                        continue
+                    # Validate first attribute against known top-level keys.
+                    if not rest.startswith("."):
+                        continue
+                    first_attr = rest.lstrip(".").split(".", 1)[0].split("[", 1)[0]
+                    if not first_attr:
+                        continue
+                    keys = _step_output_top_keys(target)
+                    if keys is None or first_attr in keys:
+                        continue
+                    # FSR exposes `status`/`result` on every step in addition
+                    # to the handler's payload -- never flag those.
+                    if first_attr in {"status", "result", "id", "name",
+                                      "uuid", "@id", "@type", "step_id"}:
+                        continue
+                    valid = sorted(keys)[:8]
+                    # A connector result's top level is the envelope, so a
+                    # field read off it directly renders empty -- certain, not
+                    # a guess. Live (analyst sim): `vars.steps.VT.attributes
+                    # .last_analysis_stats.malicious | default(0)` was always 0,
+                    # the block never ran, and ready_to_push said yes. Other
+                    # step types' keys are best-effort, so they stay warnings,
+                    # as does a mocked step whose mock_result has the key (2
+                    # shipped demo playbooks read mock output that way).
+                    mock = (target.arguments or {}).get("mock_result") \
+                        if isinstance(target.arguments, dict) else None
+                    if isinstance(mock, str):
+                        # A JSON string is the documented form, returned
+                        # verbatim under useMockOutput.
+                        try:
+                            mock = json.loads(mock)
+                        except ValueError:
+                            mock = None
+                    certain = (target.type == "connector"
+                               and not (isinstance(mock, dict) and first_attr in mock))
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"Jinja reference vars.steps.{key}.{first_attr} "
+                                 f"in step {s.id!r}: {first_attr!r} is not in "
+                                 f"step {target.id!r}'s output keys "
+                                 f"({', '.join(valid)})"
+                                 + (f" -- a connector's output sits under "
+                                    f"`vars.steps.{key}.data`; read the op's "
+                                    f"shape (get_op_schema, or a run_op "
+                                    f"sample) for the path beneath it"
+                                    if certain else "")),
+                        path=f"{spath}.arguments.{sub}",
+                        severity="error" if certain else "warning",
+                    ))
+
+
+def _check_jinja_templates(pb: Playbook, pi: int,
+                           errors: list[CompileError]) -> None:
+    """Parse every Jinja template in each step's arguments with the real
+    jinja2 engine -- the same parser FortiSOAR renders through at runtime --
+    and surface ``jinja_syntax_error`` (blocks) when a template won't parse,
+    plus an ``unknown_jinja_filter`` warning when a filter/test name isn't in
+    the known (built-in union FortiSOAR custom) catalog.
+
+    This replaces a naive ``{{``/``}}`` substring-balance scan, which
+    false-positived on code steps: a Python nested-dict close
+    (``{"text": "x"}}``) produces an adjacent ``}}`` the count mistook for a
+    Jinja delimiter. The parse has zero false positives -- jinja2 only treats
+    ``{{``/``{%``/``{#`` as block opens, so a standalone stray ``}}`` is plain
+    literal text -- and is a strict superset of the balance scan (an unclosed
+    ``{{`` or ``{%``/``%}`` mismatch both fail to parse). See
+    ``jinja_checks.check_jinja`` / ``to_compile_errors``.
+    """
+    for si, s in enumerate(pb.steps):
+        findings = check_jinja(
+            s.arguments, step_id=s.id,
+            path=f"playbooks[{pi}].steps[{si}]")
+        errors.extend(to_compile_errors(findings))
+
+
+# `vars.<name>` top-level reference. Captures the first segment only.
+_VARS_TOPLEVEL_RE = re.compile(r"\bvars\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _check_undefined_vars(pb: Playbook, pi: int,
+                          errors: list[CompileError]) -> None:
+    """Flag `{{ vars.<name> }}` references whose `<name>` is never defined --
+    not an FSR runtime key, not the loop binding, and not produced by any
+    SetVariable in the playbook. A typo'd local var silently evaluates empty
+    at runtime, so this is the only signal the author gets.
+
+    Emitted as a *warning* (not a hard block): vars are playbook-global and
+    can in principle be seeded by sources we don't fully model, so we surface
+    the suspicion without failing ready_to_push on a possible false positive.
+    """
+    path = f"playbooks[{pi}]"
+    # Runtime-provided + structural keys that are always legitimate to read.
+    defined: set[str] = set(_RESERVED_VARS_KEYS)
+    # `vars.item` (+ `vars.item.<field>`) is the per-iteration loop binding.
+    defined.add("item")
+    # Declared playbook parameters -- callers pass values via
+    # ``arguments={name: value}`` on a workflow_reference step, and on FSR
+    # 8.0+ the trigger API also flattens them to ``vars.<name>`` directly.
+    # Either way they are expected to be present at runtime.
+    defined |= set(pb.parameters)
+    # Every var name defined in the playbook, gathered across the whole
+    # playbook (vars are global; definition can lexically follow the read).
+    # Two definition mechanisms:
+    #   1. set_variable steps -- output keys are the var names themselves.
+    #   2. step_variables on ANY step -- a {var_name: jinja} dict that maps
+    #      the step's post-execution result into named vars. Connector steps
+    #      use this to expose computed values (e.g. ttl_config, module_exists)
+    #      that downstream steps read as vars.<name>.
+    for s in pb.steps:
+        if not isinstance(s.arguments, dict):
+            continue
+        if s.type == "set_variable":
+            keys = _step_output_top_keys(s)
+            if keys:
+                defined |= keys
+        sv = s.arguments.get("step_variables")
+        if isinstance(sv, dict):
+            defined |= {k for k in sv if isinstance(k, str)}
+    for si, s in enumerate(pb.steps):
+        for sub, val in _walk_strings(s.arguments):
+            for jm in _JINJA_EXPR_RE.finditer(val):
+                expr = jm.group(1)
+                for m in _VARS_TOPLEVEL_RE.finditer(expr):
+                    name = m.group(1)
+                    if name in defined:
+                        continue
+                    suggestion = _closest_step(name, defined)
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"Jinja reference vars.{name} in step "
+                                 f"{s.id!r}: {name!r} is never defined by a "
+                                 f"SetVariable, step_variables, or playbook "
+                                 f"parameters, and is not a runtime key; it "
+                                 f"will evaluate empty at runtime"),
+                        path=f"{path}.steps[{si}].arguments.{sub}",
+                        near=suggestion,
+                        suggestion=(f"did you mean vars.{suggestion}?"
+                                    if suggestion else
+                                    "define it with a set_variable step, "
+                                    "step_variables, or add it to "
+                                    "parameters: first"),
+                        severity="warning",
+                    ))
+
+
+def _closest_step(needle: str, hay) -> str | None:
+    import difflib
+    matches = difflib.get_close_matches(needle, list(hay), n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _check_reserved_names(pb: Playbook, pi: int,
+                          errors: list[CompileError]) -> None:
+    """Catch SetVariable/parameters/step names that collide with FSR's
+    runtime vars context. A SetVariable named `result` silently shadows
+    `vars.result` (the last step's auto-result). A step named `for` or
+    `class` produces a `vars.steps.for` key that breaks attribute-style
+    Jinja access.
+    """
+    path = f"playbooks[{pi}]"
+
+    # Playbook parameter names → vars.input.params.<name>; collisions with
+    # `records` (the other key under vars.input) are silently shadowed.
+    for j, p in enumerate(pb.parameters):
+        if p in {"records"}:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"playbook parameter {p!r} shadows "
+                         f"vars.input.records (the trigger record list)"),
+                path=f"{path}.parameters[{j}]",
+                severity="error",
+            ))
+
+    for si, s in enumerate(pb.steps):
+        spath = f"{path}.steps[{si}]"
+        # Step names → vars.steps.<name> Jinja keys. Spaces become
+        # underscores; case is preserved.
+        sname = s.name or s.id
+        jinja_key = sname.replace(" ", "_")
+        if jinja_key and not (jinja_key[0].isalpha() or jinja_key[0] == "_"):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"step name {sname!r} starts with {jinja_key[0]!r}; "
+                         f"Jinja attribute access `vars.steps.{jinja_key}` "
+                         f"requires identifier-style names (letter or _)"),
+                path=f"{spath}.name",
+                severity="error",
+            ))
+
+        # SetVariable arg names → vars.<name>. Collisions with reserved
+        # top-level keys silently overwrite the FSR-provided value.
+        if s.type == "set_variable" and isinstance(s.arguments, dict):
+            # Both shapes: flat dict {name: value} OR arg_list:[{name,value}]
+            names: list[tuple[str, str]] = []  # (var_name, sub-path)
+            if isinstance(s.arguments.get("arg_list"), list):
+                for k, item in enumerate(s.arguments["arg_list"]):
+                    if isinstance(item, dict) and "name" in item:
+                        names.append((item["name"], f"arg_list[{k}].name"))
+            else:
+                for var_name in s.arguments:
+                    if var_name in {"step_variables"}:  # framework key, not a var
+                        continue
+                    names.append((var_name, var_name))
+            # Reserved-name collisions are auto-renamed in resolver
+            # (_auto_rename_reserved_set_var_keys) which emits a warning.
+            # No re-check here -- the auto-renamer guarantees they're gone.
+
+
+def _trigger_id(pb: Playbook) -> str | None:
+    if pb.trigger_step_id:
+        return pb.trigger_step_id
+    # Canonical trigger types (shared with the parser's missing-trigger
+    # synthesis) first, then the prefix fallback for exotic spellings.
+    for s in pb.steps:
+        if s.type in TRIGGER_TYPES or s.type.startswith("start"):
+            return s.id
+    return None
+
+
+def _reachable_step_ids(pb: Playbook, trigger_id: str) -> set[str]:
+    by_id = {s.id: s for s in pb.steps}
+    reachable: set[str] = set()
+    frontier = [trigger_id]
+    while frontier:
+        sid = frontier.pop()
+        if sid in reachable:
+            continue
+        reachable.add(sid)
+        step = by_id.get(sid)
+        if step is None:
+            continue
+        for nxt in _step_outgoing(step):
+            if nxt not in reachable and nxt in by_id:
+                frontier.append(nxt)
+    return reachable
+
+
+def unreachable_step_ids(collection: Collection) -> set[tuple[str, str]]:
+    """(playbook name, step id) for every step no route from the trigger
+    reaches. Run it on a RESOLVED IR -- a fresh parse has not yet promoted
+    decision/manual-input options into `branches`, so their targets would all
+    look orphaned."""
+    out: set[tuple[str, str]] = set()
+    for pb in collection.playbooks:
+        trigger_id = _trigger_id(pb)
+        if not pb.steps or trigger_id is None:
+            continue
+        reachable = _reachable_step_ids(pb, trigger_id)
+        out.update((pb.name, s.id) for s in pb.steps if s.id not in reachable)
+    return out
+
+
+def _check_graph(pb: Playbook, pi: int, errors: list[CompileError]) -> None:
+    """Graph-level lint: cycles, unreachable steps, decision branch
+    coverage. Targeting non-existent step ids is already caught by
+    resolver._check_routing (UNKNOWN_NEXT_STEP)."""
+    path = f"playbooks[{pi}]"
+    if not pb.steps:
+        return
+    by_id: dict[str, object] = {s.id: s for s in pb.steps}
+    trigger_id = _trigger_id(pb)
+    if trigger_id is None or trigger_id not in by_id:
+        return  # NO_TRIGGER already reported
+
+    # 1. Reachability: BFS from trigger.
+    reachable = _reachable_step_ids(pb, trigger_id)
+    for si, s in enumerate(pb.steps):
+        if s.id not in reachable:
+            errors.append(CompileError(
+                code=ErrorCode.UNREACHABLE_STEP,
+                message=(f"step {s.id!r} ({s.name or s.type}) is unreachable "
+                         f"from the trigger -- no step's next/branches "
+                         f"point to it"),
+                path=f"{path}.steps[{si}]",
+                severity="warning",
+            ))
+
+    # 2. Cycles: directed-graph DFS with grey/black colouring.
+    WHITE, GREY, BLACK = 0, 1, 2
+    color = {sid: WHITE for sid in by_id}
+    cycle_reported: set[tuple[str, str]] = set()
+
+    def dfs(sid: str, stack: list[str]) -> None:
+        s = by_id.get(sid)
+        if s is None:
+            return
+        color[sid] = GREY
+        stack.append(sid)
+        for nxt in _step_outgoing(s):
+            if nxt not in by_id:
+                continue
+            if color.get(nxt) == GREY:
+                # Back-edge -- found a cycle. Report once per (src, dst) pair.
+                key = (sid, nxt)
+                if key in cycle_reported:
+                    continue
+                cycle_reported.add(key)
+                # Trim the stack to the cycle.
+                if nxt in stack:
+                    cycle = stack[stack.index(nxt):] + [nxt]
+                else:
+                    cycle = [nxt, sid, nxt]
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"cycle in playbook {pb.name!r}: "
+                             f"{' → '.join(cycle)}; FSR will not loop, "
+                             f"the run will stall or error"),
+                    path=f"{path}.steps",
+                    severity="error",
+                ))
+            elif color.get(nxt) == WHITE:
+                dfs(nxt, stack)
+        stack.pop()
+        color[sid] = BLACK
+
+    dfs(trigger_id, [])
+
+    # 3. Decision branch coverage + per-condition coherence. Rules mined
+    # from the live FSR corpus (see MI_DECISION_VALIDATION_AUDIT.md §8):
+    #   - every conditions[].option needs a branch target (s.branches or
+    #     a default `next:`),
+    #   - non-default entries MUST have both `option` and `condition`,
+    #   - default entries (default: true) MUST omit `condition` and may
+    #     omit `option`,
+    #   - at most one entry may be marked default (warn if zero).
+    for si, s in enumerate(pb.steps):
+        if s.type != "decision":
+            continue
+        args = s.arguments if isinstance(s.arguments, dict) else {}
+        conds = args.get("conditions") or []
+        if not isinstance(conds, list):
+            continue
+        option_labels: list[str] = []
+        n_default = 0
+        for ci, c in enumerate(conds):
+            if not isinstance(c, dict):
+                continue
+            cpath = f"{path}.steps[{si}].arguments.conditions[{ci}]"
+            is_default = bool(c.get("default"))
+            if is_default:
+                n_default += 1
+                if c.get("condition"):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"decision {s.id!r}: default branch must not "
+                            f"carry a `condition:` (defaults fire when "
+                            f"every other condition is false)"
+                        ),
+                        path=f"{cpath}.condition",
+                        severity="error",
+                    ))
+            else:
+                if not c.get("option"):
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message=(
+                            f"decision {s.id!r}: non-default branch is "
+                            f"missing `option:` (button label)"
+                        ),
+                        path=f"{cpath}.option",
+                        severity="error",
+                    ))
+                if not c.get("condition"):
+                    errors.append(CompileError(
+                        code=ErrorCode.MISSING_FIELD,
+                        message=(
+                            f"decision {s.id!r}: non-default branch is "
+                            f"missing `condition:` (jinja expression)"
+                        ),
+                        path=f"{cpath}.condition",
+                        severity="error",
+                    ))
+                elif isinstance(c.get("condition"), str):
+                    # The condition must evaluate to a boolean. A bare word
+                    # with no jinja and no comparison/logical operator is a
+                    # literal string; FSR raises "Condition: '<x>' is not
+                    # boolean" at RUNTIME, so it must be caught here. The
+                    # classic slip is writing the fall-through branch as
+                    # `condition: else` (or default/otherwise) instead of
+                    # `default: true`. A real expression (`x != 'block'`, a
+                    # `{{ ... }}` block) always carries an operator or braces.
+                    cond = c["condition"].strip()
+                    low = cond.lower()
+                    if (low not in ("true", "false")
+                            and not _COND_BOOLEAN_RE.search(cond)):
+                        if low in ("else", "otherwise", "default", "any",
+                                   "elif", "endif"):
+                            hint = ("use `default: true` on this branch and "
+                                    "omit `condition:` -- the default branch "
+                                    "fires when every other condition is false")
+                        else:
+                            hint = ("write a boolean expression, e.g. "
+                                    "{{ vars.steps.<Step>.finalDisposition "
+                                    "== 'block' }}")
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"decision {s.id!r}: branch condition {cond!r} "
+                                f"is not a boolean expression and fails at run "
+                                f"time (\"{cond!r} is not boolean\"); {hint}"
+                            ),
+                            path=f"{cpath}.condition",
+                            severity="error",
+                        ))
+            if "option" in c:
+                option_labels.append(c["option"])
+        if n_default > 1:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"decision {s.id!r}: {n_default} branches marked "
+                         f"`default: true`; FSR only fires the first one"),
+                path=f"{path}.steps[{si}].arguments.conditions",
+                severity="error",
+            ))
+        elif n_default == 0 and not s.next:
+            # No `default: true` AND no step-level `next:` fall-through
+            # means a false-condition run has no target. Either is fine
+            # (8 live Decisions use the bare `next:` idiom); only warn
+            # when neither is present.
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"decision {s.id!r}: no default/else branch and "
+                         f"no fall-through `next:`; if every condition "
+                         f"evaluates false the run will stall. Either "
+                         f"add a branch with `default: true` or set "
+                         f"`next:` on the decision step"),
+                path=f"{path}.steps[{si}].arguments.conditions",
+                severity="warning",
+            ))
+        for label in option_labels:
+            if label not in s.branches and not s.next:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"decision {s.id!r}: option {label!r} has no "
+                             f"branch target (add `branches: {{{label}: "
+                             f"<step_id>}}` or a default `next:`)"),
+                    path=f"{path}.steps[{si}].branches",
+                    severity="error",
+                ))
+        # Stale branch keys (point to nothing in conditions list).
+        for label in s.branches:
+            if option_labels and label not in option_labels:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"decision {s.id!r}: branch label {label!r} is "
+                             f"not in conditions[].option (typo? unused?)"),
+                    path=f"{path}.steps[{si}].branches.{label}",
+                    severity="warning",
+                ))
+
+    # 4. ManualInput branch coverage -- same idea as decision: every
+    # response_mapping option needs a branch target. Live data shows
+    # ~4% of options are intentionally terminal (button ends the run);
+    # warn-only for those if the prompt has multiple options.
+    for si, s in enumerate(pb.steps):
+        if s.type != "manual_input":
+            continue
+        args = s.arguments if isinstance(s.arguments, dict) else {}
+        rmap = args.get("response_mapping") or {}
+        if not isinstance(rmap, dict):
+            continue
+        opts = rmap.get("options") or []
+        if not isinstance(opts, list):
+            continue
+        labels: list[str] = []
+        n_primary = 0
+        for oi, o in enumerate(opts):
+            if not isinstance(o, dict):
+                continue
+            opath = f"{path}.steps[{si}].arguments.response_mapping.options[{oi}]"
+            opt_label = o.get("option")
+            if not opt_label:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(f"manual_input {s.id!r}: option is missing "
+                             f"`option:` (button label)"),
+                    path=f"{opath}.option",
+                    severity="error",
+                ))
+                continue
+            labels.append(opt_label)
+            if o.get("primary"):
+                n_primary += 1
+            has_target = bool(o.get("step_iri")) or opt_label in s.branches or bool(s.next)
+            if not has_target and len(opts) > 1:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"manual_input {s.id!r}: option {opt_label!r} "
+                             f"has no target -- multi-button prompts where "
+                             f"≥2 options end the run usually indicate "
+                             f"forgotten wiring"),
+                    path=f"{opath}.step_iri",
+                    severity="warning",
+                    suggestion=(f"add `next: <step_id>` on this option, "
+                                f"or branches: {{{opt_label}: <step_id>}} on the step"),
+                ))
+        if n_primary > 1:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"manual_input {s.id!r}: {n_primary} options "
+                         f"marked `primary: true`; only one button can "
+                         f"be the styled default"),
+                path=f"{path}.steps[{si}].arguments.response_mapping.options",
+                severity="error",
+            ))
+        # Soft check: branches keys that don't match any option label.
+        for label in s.branches:
+            if labels and label not in labels:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"manual_input {s.id!r}: branch label "
+                             f"{label!r} doesn't match any option "
+                             f"(typo? unused?)"),
+                    path=f"{path}.steps[{si}].branches.{label}",
+                    severity="warning",
+                ))
+
+
+
+def _check_step_footguns(pb: Playbook, pi: int,
+                         errors: list[CompileError]) -> None:
+    """Catch things FSR accepts on import but break at runtime.
+
+    These are structural mistakes the FSR importer doesn't gate -- the
+    playbook imports cleanly, then silently does nothing or errors when
+    a user clicks the button / the trigger fires.
+    """
+    path = f"playbooks[{pi}]"
+    for si, s in enumerate(pb.steps):
+        spath = f"{path}.steps[{si}]"
+
+        # 1. select_fields: [] -- empty list is a no-op (FSR returns all
+        #    fields), almost certainly a mistake. The author meant to list
+        #    field names but left it empty.
+        if s.select_fields is not None and len(s.select_fields) == 0:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(
+                    f"step {s.id!r}: `select_fields` is empty -- FSR will "
+                    f"return ALL fields (same as omitting it). Either list "
+                    f"the fields you want or remove the key."
+                ),
+                path=f"{spath}.select_fields",
+                severity="warning",
+            ))
+
+        # 2. find_record without `module` -- FSR accepts the import but
+        #    the step fails at runtime ("module is required"). The module
+        #    is the collection to query (e.g. `alerts`, `incidents`).
+        if s.type == "find_record":
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            mod = args.get("module") or args.get("collectionType") or args.get("collection")
+            if not mod:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(
+                        f"step {s.id!r}: find_record has no `module` -- "
+                        f"FSR will error at runtime. Set module to the "
+                        f"collection to query (e.g. `module: alerts`)."
+                    ),
+                    path=f"{spath}.module",
+                    severity="error",
+                ))
+
+        # 3. Manual trigger (type: start) with empty `resources` -- the
+        #    button won't appear on any module page. FSR accepts it but
+        #    the playbook is unreachable from the UI. `resources` is the
+        #    list of module names the button shows on (e.g.
+        #    `resources: [alerts, incidents]`).
+        if s.type == "start":
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            res = args.get("resources")
+            # OnUpdate/OnCreate/OnDelete triggers set `resources` to the
+            # module they watch -- empty is wrong there too. A plain
+            # manual start with `resources: []` means the button appears
+            # nowhere.
+            if isinstance(res, list) and len(res) == 0:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(
+                        f"step {s.id!r}: trigger has `resources: []` -- "
+                        f"the button/trigger will not appear on any module "
+                        f"page. Add the module(s) it should show on "
+                        f"(e.g. `resources: [alerts]`)."
+                    ),
+                    path=f"{spath}.resources",
+                    severity="error",
+                ))
+
+        # 4. create_record / update_record without `module` -- same class
+        #    as find_record; FSR accepts the import, runtime fails. The
+        #    resolver renames `module` → `collection` on the wire, so check
+        #    both field names.
+        if s.type in ("create_record", "update_record"):
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            mod = args.get("module") or args.get("collection") or args.get("collectionType")
+            if not mod:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message=(
+                        f"step {s.id!r}: {s.type} has no `module` -- "
+                        f"FSR will error at runtime. Set module to the "
+                        f"target collection (e.g. `module: incidents`)."
+                    ),
+                    path=f"{spath}.module",
+                    severity="error",
+                ))
+
+
+def validate(collection: Collection) -> list[CompileError]:
+    errors: list[CompileError] = []
+
+    # Workflow names must be unique within a collection (FSR Doctrine
+    # constraint: UniqueConstraint on (name, collection) -- see
+    # Entity/Workflow/Workflow.php). Catch this at compile time rather
+    # than letting FSR's import_jobs return an opaque error.
+    seen_names: dict[str, int] = {}
+    for pi, pb in enumerate(collection.playbooks):
+        if pb.name in seen_names:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=f"duplicate playbook name {pb.name!r} (FSR enforces unique workflow names per collection)",
+                path=f"playbooks[{pi}].name",
+            ))
+        seen_names[pb.name] = pi
+
+    for pi, pb in enumerate(collection.playbooks):
+        path = f"playbooks[{pi}]"
+        _check_graph(pb, pi, errors)
+        _check_reserved_names(pb, pi, errors)
+        _check_jinja_paths(pb, pi, errors)
+        _check_jinja_templates(pb, pi, errors)
+        _check_undefined_vars(pb, pi, errors)
+        _check_step_footguns(pb, pi, errors)
+
+        # Step names must be unique within a playbook. FSR's Jinja runtime
+        # exposes step output at `vars.steps.<Name_with_underscores>`, so
+        # two steps sharing a name (or sharing an underscored form, e.g.
+        # "Step One" and "Step_One") silently overwrite each other in the
+        # context. The compiler catches this since FSR's importer doesn't.
+        step_seen_names: dict[str, int] = {}
+        step_seen_keys: dict[str, int] = {}
+        for si, s in enumerate(pb.steps):
+            sname = s.name or s.id
+            sp = f"{path}.steps[{si}].name"
+            if sname in step_seen_names:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"duplicate step name {sname!r} in playbook "
+                             f"{pb.name!r} (already used by step #"
+                             f"{step_seen_names[sname]}); names must be "
+                             f"unique -- vars.steps.<name> would collide "
+                             f"silently at runtime"),
+                    path=sp,
+                ))
+            else:
+                step_seen_names[sname] = si
+            jinja_key = sname.replace(" ", "_")
+            if jinja_key in step_seen_keys and step_seen_keys[jinja_key] != si:
+                # Skip if it's already flagged as a literal duplicate above.
+                if sname not in step_seen_names or step_seen_names[sname] != step_seen_keys[jinja_key]:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"step name {sname!r} normalises to Jinja key "
+                                 f"{jinja_key!r}, which collides with step #"
+                                 f"{step_seen_keys[jinja_key]}'s name; rename one"),
+                        path=sp,
+                    ))
+            else:
+                step_seen_keys[jinja_key] = si
+
+        # A playbook's trigger can be `start` (manual / abstract_trigger),
+        # `record_action`, `start_on_create`, `start_on_update`,
+        # `start_on_delete`, or `api_endpoint` (the invokable
+        # `POST /api/triggers/1/<route>` trigger). Exactly one trigger step
+        # required, of any of those flavours.
+        TRIGGER_TYPES = {"start", "start_on_create", "start_on_update",
+                         "start_on_delete", "api_endpoint"}
+        starts = [s for s in pb.steps if s.type in TRIGGER_TYPES]
+        if not starts:
+            errors.append(CompileError(
+                code=ErrorCode.NO_TRIGGER,
+                message=f"playbook {pb.name!r} has no 'start' step",
+                path=path,
+                suggestion="add `- id: start\\n  type: start` as the first step",
+            ))
+        elif len(starts) > 1:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=f"playbook {pb.name!r} has {len(starts)} 'start' steps; exactly one is required",
+                path=path,
+            ))
+
+    _check_child_playbook_returns(collection, errors)
+    return errors
+
+
+def _child_terminal_steps(pb: Playbook) -> list[Step]:
+    """Steps with no outgoing edges (no next / branches / unlabeled_next)."""
+    terminals: list[Step] = []
+    for s in pb.steps:
+        has_next = bool(getattr(s, "next", None))
+        has_branches = bool(getattr(s, "branches", None))
+        has_unlabeled = bool(getattr(s, "unlabeled_next", None))
+        if not (has_next or has_branches or has_unlabeled):
+            terminals.append(s)
+    return terminals
+
+
+def _set_var_keys(s: Step) -> set[str]:
+    """Top-level var names a set_variable step defines.
+
+    Handles both the parser's ``arg_list`` form (pre-resolve) and the
+    resolver's flattened form (post-resolve, where each var becomes a
+    direct key in ``arguments``).
+    """
+    keys: set[str] = set()
+    args = s.arguments if isinstance(s.arguments, dict) else {}
+    arg_list = args.get("arg_list")
+    if isinstance(arg_list, list):
+        for item in arg_list:
+            if isinstance(item, dict) and item.get("name"):
+                keys.add(str(item["name"]))
+    else:
+        # Post-resolve: the resolver flattens arg_list into direct keys.
+        # Every non-IR key in arguments is a var name.
+        _ir_keys = {"step_variables", "mock_result", "condition",
+                    "do_until", "ignore_errors", "when", "message"}
+        for k in args:
+            if k not in _ir_keys:
+                keys.add(k)
+    return keys
+
+
+def _check_child_playbook_returns(
+    collection: Collection, errors: list[CompileError],
+) -> None:
+    """Validate child-playbook return values against what the parent reads.
+
+    Live evidence (2026-08-23, FSR 7.6.5 and 8.0.0): a synchronous child
+    returns ONLY the vars from the last executed step on the taken branch
+    path -- NOT the union of all set_variable vars in the child. Earlier
+    set_variable vars are NOT visible to the parent at ``vars.steps.<ref>.<var>``.
+
+    This check catches:
+    1. Parent reads ``vars.steps.<ref>.<var>`` but no terminal step of the
+       child produces that var (it was set in an earlier step, not the last).
+    2. Child's terminal steps produce different var sets on different branches
+       (ambiguous return -- the parent gets different vars depending on which
+       branch fires). Warning, not error.
+    3. Parent passes child_args the child doesn't declare as parameters.
+    4. Child declares parameters but a sync parent caller doesn't pass them.
+    """
+    pb_by_name = {pb.name: pb for pb in collection.playbooks}
+    for pi, pb in enumerate(collection.playbooks):
+        for si, s in enumerate(pb.steps):
+            if s.type != "workflow_reference":
+                continue
+            args = s.arguments if isinstance(s.arguments, dict) else {}
+            if args.get("apply_async") is True:
+                continue  # async -- no return value
+            target = args.get("target") or args.get("workflowReference")
+            if not isinstance(target, str):
+                continue
+            # Resolve target name -- the resolved IR carries workflowReference
+            # (an IRI like /api/3/workflows/<uuid>), the parsed IR carries target
+            # (the friendly name). Map IRI back to name via the emitter's uuid5.
+            child_name = target
+            if target.startswith("/api/3/workflows/"):
+                from .emitter import _u
+                for name in pb_by_name:
+                    iri = f"/api/3/workflows/{_u('workflow', collection.name, name)}"
+                    if iri == target:
+                        child_name = name
+                        break
+            if child_name not in pb_by_name:
+                continue  # external/cross-collection -- can't validate
+            child = pb_by_name[child_name]
+
+            # 1. Terminal steps produce different var sets → ambiguous return
+            terminals = _child_terminal_steps(child)
+            sv_terminals = [t for t in terminals if t.type == "set_variable"]
+            if len(sv_terminals) > 1:
+                var_sets = [_set_var_keys(t) for t in sv_terminals]
+                all_keys: set[str] = set()
+                for ks in var_sets:
+                    all_keys |= ks
+                # Check if any terminal produces a var the others don't
+                for i, t in enumerate(sv_terminals):
+                    unique = var_sets[i] - set().union(
+                        *(var_sets[:i] + var_sets[i+1:])
+                    )
+                    if unique:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"child playbook {child_name!r} has branch "
+                                f"terminal {(t.name or t.id)!r} that produces "
+                                f"var(s) {sorted(unique)} not produced by "
+                                f"other terminals -- the parent will only see "
+                                f"these if this branch fires (ambiguous return)"
+                            ),
+                            path=f"playbooks[{pb_by_name[child_name] and collection.playbooks.index(child)}.steps",
+                            severity="warning",
+                        ))
+                        break  # one warning per child is enough
+
+            # 2. Parent reads a var the child's terminal steps don't produce
+            terminal_vars: set[str] = set()
+            for t in sv_terminals:
+                terminal_vars |= _set_var_keys(t)
+
+            # The jinja-level check (parent reads vars.steps.<ref>.<var> the
+            # child doesn't produce) is already caught by the typed_walker's
+            # shape lookup + reference_lint. We don't duplicate it here --
+            # the checks below are structural, not jinja-level.
+
+            # 3. Parent passes child_args the child doesn't declare as parameters
+            child_params = set(child.parameters or [])
+            # The resolved IR stores child_args under `arguments` (a nested
+            # dict), the parsed IR stores them under `child_args`.
+            child_args = args.get("child_args") or args.get("arguments") or {}
+            if isinstance(child_args, dict):
+                # Envelope keys that are NOT child params
+                envelope_keys = {
+                    "target", "workflowReference", "apply_async",
+                    "pass_parent_env", "pass_input_record", "step_variables",
+                    "for_each", "when", "mock_result", "do_until", "child_args",
+                    "arguments",
+                }
+                for k in child_args:
+                    if k in envelope_keys:
+                        continue
+                    if k not in child_params:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"parent passes child_arg {k!r} to child "
+                                f"{child_name!r} but the child doesn't declare "
+                                f"it as a parameter -- it will be ignored at "
+                                f"runtime"
+                            ),
+                            path=f"playbooks[{pi}].steps[{si}].arguments.child_args.{k}",
+                            severity="warning",
+                        ))
+
+            # 4. Child declares parameters but sync parent doesn't pass them
+            if child_params:
+                passed = set(child_args.keys()) if isinstance(child_args, dict) else set()
+                # Also check hoisted step-level keys (the legacy surface)
+                passed |= {k for k in args if k not in {
+                    "target", "workflowReference", "apply_async",
+                    "pass_parent_env", "pass_input_record", "step_variables",
+                    "for_each", "when", "mock_result", "do_until", "child_args",
+                    "arguments", "connector", "operation", "config", "params",
+                }}
+                missing = child_params - passed
+                if missing:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"child {child_name!r} declares parameter(s) "
+                            f"{sorted(missing)} but parent doesn't pass them "
+                            f"-- they will be null/undefined at runtime"
+                        ),
+                        path=f"playbooks[{pi}].steps[{si}].arguments.child_args",
+                        severity="warning",
+                    ))

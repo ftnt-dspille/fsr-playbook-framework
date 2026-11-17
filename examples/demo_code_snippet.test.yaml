@@ -1,0 +1,16 @@
+fixture: examples/demo_code_snippet.yaml
+playbook: FSRPB Demo - Code Snippet
+
+input:
+  first_name: Dylan
+
+timeout_s: 60
+
+expects:
+  status: finished
+  steps:
+    Build_greeting:
+      status: finished
+    Stamp_greeting:
+      status: finished
+cleanup: true

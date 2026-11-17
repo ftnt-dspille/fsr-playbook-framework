@@ -1,0 +1,95 @@
+"""Structured compiler errors.
+
+Errors are data -- code, location, message, and an optional suggestion.
+Consumers (CLI, MCP, widget) format them their own way; the compiler
+itself never prints.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+
+class ErrorCode(str, Enum):
+    PARSE_ERROR = "parse_error"
+    MISSING_FIELD = "missing_field"
+    UNKNOWN_STEP_TYPE = "unknown_step_type"
+    UNKNOWN_CONNECTOR = "unknown_connector"
+    UNKNOWN_OPERATION = "unknown_operation"
+    UNKNOWN_PARAM = "unknown_param"
+    UNKNOWN_NEXT_STEP = "unknown_next_step"
+    # A workflow_reference `target:` that names no playbook in this YAML. Was
+    # reported as unknown_next_step, which named the wrong problem.
+    WORKFLOW_REFERENCE_UNRESOLVABLE = "workflow_reference_unresolvable"
+    DUPLICATE_STEP_ID = "duplicate_step_id"
+    NO_TRIGGER = "no_trigger"
+    BAD_VALUE = "bad_value"
+    # A step no route from the trigger reaches -- it can never run. A warning at
+    # compile (an appliance playbook may carry a parked step and must still
+    # round-trip); `verify_playbook` promotes it to a required fix, because an
+    # AUTHORED playbook with an orphan is a dropped link, not a parked step.
+    UNREACHABLE_STEP = "unreachable_step"
+    # Jinja diagnostics -- emitted by the compile-path jinja check (the real
+    # jinja2 parser, via jinja_checks.check_jinja). Syntax errors block. An
+    # unknown *filter* name stays a warning (the widget catalog is a curated
+    # subset, so a truly-custom-but-real filter shouldn't hard-block). An
+    # unknown *test* name is an ERROR when the packaged reference DB carries
+    # the backend-introspected jinja_tests registry -- absence there is
+    # appliance-authoritative and the template fails at render time
+    # (live-verified on 8.0.x: `is not empty`, where stock Jinja2 has no
+    # `empty` test either, until a live child run crashed on it).
+    JINJA_SYNTAX_ERROR = "jinja_syntax_error"
+    UNKNOWN_JINJA_FILTER = "unknown_jinja_filter"
+    # A decision-step route condition whose top-level Jinja expression
+    # provably cannot render a strict bool (bare reference / unguarded
+    # filter chain). FSR's decision engine checks the rendered value with
+    # isinstance(bool), so a string render fails the step at runtime.
+    # Emitted as a *warning*: the referenced slot may hold a runtime bool
+    # (a set_variable can export one), so hard-blocking would false-positive
+    # on legitimately-authored playbooks.
+    NON_BOOLEAN_CONDITION = "non_boolean_condition"
+    # A `vars.steps.X.foo` reference the static typed walk resolves to a
+    # non-existent step / unreachable producer / missing output key. Emitted as a
+    # *warning* by the compile-time reference lint (typed_walker) so a wrong
+    # cross-step reference is caught offline instead of only on a live run.
+    BAD_VAR_REFERENCE = "bad_var_reference"
+    # Bare Jinja name (not a vars.* reference) that isn't defined in the
+    # context -- e.g. ``{{ items | length }}`` where ``items`` is never
+    # defined. Emitted as a warning by the typed walker's AST-based check.
+    JINJA_UNDEFINED_VARIABLE = "jinja_undefined_variable"
+    INSTANCE_MISMATCH = "instance_mismatch"  # catalog warmed from a different SOAR
+    STALE_CATALOG = "stale_catalog"          # catalog is behind the live SOAR
+    # Connector-config existence (verify-path, live-probe only). Demotable via
+    # ``lax_codes={"connector_config_missing"}`` / ``skip=["connector_config_missing"]``
+    # (or the ``"connector"`` group) so a playbook authored for a different box
+    # still compiles/verifies.
+    CONNECTOR_CONFIG_MISSING = "connector_config_missing"
+    CONNECTOR_CONFIG_NO_DEFAULT = "connector_config_no_default"
+    UNKNOWN_CONNECTOR_CONFIG = "unknown_connector_config"
+    INTERNAL = "internal"                    # tooling/install fault, not the YAML
+
+
+@dataclass
+class CompileError:
+    code: ErrorCode
+    message: str
+    path: str = ""              # YAML-ish dotted path, e.g. "playbooks[0].steps[2]"
+    suggestion: str | None = None
+    near: str | None = None  # "did you mean X" candidate
+    severity: str = "error"     # "error" blocks compilation; "warning" does not
+    # Fine-grained sub-tag for codes shared across many sites (notably
+    # `bad_value`). Lets a caller toggle e.g. picklist-drift or param-type
+    # checks individually via `disable_checks` without renaming the coarse
+    # `code`. `None` for the vast majority of diagnostics.
+    check: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "code": self.code.value,
+            "message": self.message,
+            "path": self.path,
+            "suggestion": self.suggestion,
+            "near": self.near,
+            "severity": self.severity,
+            "check": self.check,
+        }

@@ -1,0 +1,49 @@
+# The correct answer to the `enhance_rename_step` fixture (scenario e5).
+#
+# The analyst asked for the rename BY NAME, so doing it is right. Two things
+# make this fixture worth having:
+#
+#   1. The rename has to actually happen -- an agent that refuses, or that
+#      "renames" by adding a title while leaving `name:` alone, must not
+#      score. That is what the assertions check.
+#   2. Every reference to the old name has to move with it. `Start`'s
+#      `next: Enrich IP` is not a step the analyst named, but leaving it
+#      pointing at a step that no longer exists is not "preserving" it.
+#
+# Until 2026-08-13 this gold FAILED `no_collateral_damage`: verify_enhancement
+# raised `step_renamed_silently` at error severity even here, where nothing
+# was silent. It now raises `step_renamed_as_requested` at warning severity --
+# the broken-consumer consequence still reaches the analyst, it just no longer
+# blocks their own request.
+collection: 00 - FSR Studio
+playbooks:
+- name: Suspicious IP Response
+  is_active: true
+  trigger_step_id: start
+  parameters:
+  - ip_to_investigate
+  steps:
+  - type: start
+    name: Start
+    module: alerts
+    button_label: Respond
+    next: Reputation Lookup
+  - type: connector
+    name: Reputation Lookup
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
+    next: Block IP
+  - type: connector
+    name: Block IP
+    connector: fortigate-firewall
+    operation: block_ip
+    params:
+    method: Quarantine Based
+    ip_addresses: '{{ vars.input.params.ip_to_investigate }}'
+    next: End
+  - type: connector
+    name: End
+    connector: cyops_utilities
+    operation: no_op
+    params: {}

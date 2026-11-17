@@ -1,0 +1,14 @@
+{
+  "name": "select_explain_playbook",
+  "mode": "tool_selection",
+  "prompt": "Here is the playbook I currently have open:\n\n```yaml\ncollection: FSRPB Demo Alert Action\ndescription: Right-click action on alerts -- read severity, decide, stamp.\nvisible: true\n\nplaybooks:\n  - name: FSRPB Demo - Triage Alert\n    description: Reads alert severity and tags the alert with a verdict.\n    is_active: true\n    steps:\n      - name: Triage Alert\n        type: start\n        next: Read severity\n        module: alerts\n        button_label: \"Triage Alert\"\n        requires_record: true\n        run_mode: per_record\n\n      - name: Read severity\n        type: set_variable\n        next: Stamp verdict\n        vars:\n          severity: \"{{ vars.input.records[0].severity.itemValue }}\"\n\n      - name: Stamp verdict\n        type: set_variable\n        vars:\n          verdict: \"escalate\"\n```\n\nExplain what this playbook does, step by step, in plain language.",
+  "terminal_tool": "analyze_playbook",
+  "prompt_variant": "build",
+  "tool_slice": "build",
+  "forbidden_facts": [
+    {"tool": "verify_playbook", "label": "tried to verify a playbook it was asked to EXPLAIN"},
+    {"tool": "validate_yaml", "label": "tried to validate a playbook it was asked to EXPLAIN"},
+    {"tool": "compile_yaml", "label": "tried to compile a playbook it was asked to EXPLAIN"}
+  ],
+  "notes": "The #107 bug: agent mis-routed a read-only explain ask into verify_playbook, hitting 3 errors on unconfigured connectors. An explain should call analyze_playbook (or step_through_playbook) and answer in prose. This task forbids verify_playbook/validate_yaml/compile_yaml -- calling any of them is a FAIL."
+}

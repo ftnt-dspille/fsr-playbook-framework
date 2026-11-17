@@ -1,0 +1,1852 @@
+"""Score a candidate playbook YAML on three confidence tiers + an
+example-match check + agent-behavior gates.
+
+Confidence tiers (what a human means by "is this playbook good?"):
+
+  draft        -- YAML parses + compiles to FSR JSON. "It would import
+                 without an error." Says nothing about whether it works.
+  verified     -- Statically sound: references resolve, branches
+                 reachable, connectors/ops exist, picklists valid.
+                 Equivalent to `verify_playbook.ready_to_push=True`.
+                 "I would ship this without testing it manually."
+  live_tested  -- Actually executes on a real FSR (dry-run passes).
+                 Strongest signal short of pushing. Skipped offline.
+
+Orthogonal:
+
+  matches_example -- byte-equal compile output to the hand-curated
+                    reference YAML in /examples/. Only meaningful for
+                    tasks that have a reference; says nothing about
+                    novel playbooks.
+
+Agent-behavior gates (apply only when a tool-use `trace` is supplied):
+
+  verify_called_before_submit
+  verify_iterations_until_ready   (record only -- not pass/fail)
+  final_verify_ready_to_push
+  tool_budget
+  no_spiral
+  adherence                       (final text included a YAML block)
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any
+
+_YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n", re.IGNORECASE)
+# The same fence, capturing its body. Used where prose must NOT be mistaken for
+# a playbook -- see `delivered_yaml`.
+_YAML_FENCED_RE = re.compile(r"```ya?ml\s*\n(.*?)```", re.IGNORECASE | re.DOTALL)
+
+# Tool calls that CARRY the delivered playbook. The agent is instructed not to
+# paste YAML at the analyst -- `emit_playbook_offer`'s own description says a
+# turn that "prints YAML at the analyst has delivered nothing" -- so the final
+# chat text is the WRONG place to look for the artifact. A well-behaved turn
+# hands it over in one of these args instead.
+_YAML_BEARING_ARGS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("emit_playbook_offer", ("yaml",)),
+    ("verify_enhancement", ("after_yaml",)),
+    ("verify_playbook", ("yaml_text", "yaml")),
+    ("compile_yaml", ("yaml_text", "yaml")),
+    ("validate_yaml", ("yaml_text", "yaml")),
+)
+
+
+# ── Phase 1 consolidation shim ──────────────────────────────────────────────
+# Every scorer in this module keys on the SPECIALIZED tool names -- terminal
+# tools, decoys, offer timing, yaml-bearing args. The consolidated entry points
+# (`find`, `picklist`, `connector_health`, `emit_card`) route to the same
+# constituents at dispatch, so a trace using them is the same behavior under a
+# different name. Canonicalize each call back to its constituent BEFORE scoring
+# (the harness applies this right after trace extraction); the original name is
+# preserved in `via`. Kept as literal maps (not imported from the tool modules)
+# so scoring stays importable anywhere; `test_emit_card_unified` pins the card
+# map against CARD_TYPES upstream.
+
+_CARD_TYPE_TO_TOOL = {
+    "choice": "emit_choice_card",
+    "action": "emit_action_card",
+    "manual_input": "emit_manual_input",
+    "capability_gap": "emit_capability_gap_card",
+    "playbook_offer": "emit_playbook_offer",
+    "enhancement_offer": "emit_enhancement_offer",
+    "verdict": "emit_verdict",
+}
+_FIND_KIND_TO_TOOL = {
+    "connector": "find_connector",
+    "operation": "find_operation",
+    "jinja": "find_jinja_filter",
+    "playbook": "search_playbooks",
+    "recipe": "find_recipe",
+    "api": "find_api_product",
+    "step": "find_step_examples",
+    "jinja_block": "find_jinja_pattern",
+    "filter_usage": "get_filter_examples",
+    "field": "find_fields",  # no legacy tool; kind='field' was born in find
+}
+_ACTION_TYPE_TO_TOOL = {
+    "containment": "find_containment_actions",
+    "enrichment": "find_enrichment_actions",
+    "record": "find_record_actions",
+}
+
+
+def canonicalize_trace(trace: list[dict[str, Any]] | None,
+                       ) -> list[dict[str, Any]] | None:
+    """Rewrite consolidated-tool calls to their constituent names for scoring."""
+    if not trace:
+        return trace
+    out: list[dict[str, Any]] = []
+    for c in trace:
+        name = c.get("name")
+        args = c.get("args") or c.get("input") or {}
+        args = args if isinstance(args, dict) else {}
+        mapped: str | None = None
+        new_args: dict[str, Any] | None = None
+        if name == "emit_card":
+            mapped = _CARD_TYPE_TO_TOOL.get(
+                str(args.get("card_type") or "").strip().lower())
+            payload = args.get("payload")
+            if mapped and isinstance(payload, dict):
+                new_args = payload
+        elif name == "find":
+            kind = str(args.get("kind") or "").strip().lower()
+            if kind == "action":
+                # No action_type filter consults containment+enrichment both;
+                # attribute it to containment (the family the decoy fixtures
+                # watch) -- the `via` field keeps the real call visible.
+                fam = str(args.get("action_type") or "").strip().lower()
+                mapped = _ACTION_TYPE_TO_TOOL.get(fam,
+                                                  "find_containment_actions")
+            elif kind == "example":
+                mapped = ("find_operation_example" if args.get("connector")
+                          else "search_api_examples")
+            else:
+                mapped = _FIND_KIND_TO_TOOL.get(kind)
+        elif name == "picklist":
+            if args.get("value"):
+                mapped = "resolve_picklist_value"
+            elif args.get("module") or args.get("field"):
+                mapped = "picklist_for_field"
+            elif args.get("name"):
+                mapped = "get_picklist"
+            else:
+                mapped = "list_picklists"
+        elif name == "connector_health":
+            mapped = "healthcheck_connector"
+        if mapped:
+            c = {**c, "name": mapped, "via": name}
+            if new_args is not None:
+                c["args"] = new_args
+        out.append(c)
+    return out
+
+
+def delivered_yaml(final_text: str, trace: list[dict[str, Any]] | None) -> str:
+    """The YAML the turn actually DELIVERED, not merely the bit it pasted.
+
+    Scoring used to read `extract_yaml(final_text)` alone. That silently
+    penalised every agent that followed our own instructions: deliver through
+    `emit_playbook_offer` and do NOT print YAML at the analyst. Such a turn
+    handed the scorer an empty string, so `draft`, `verified` and `adherence`
+    all failed together -- three gates lost on every fixture, independent of
+    content, which is exactly the flat 5/8 seen across nine unrelated
+    fixtures.
+
+    Preference order: the artifact the analyst would actually receive (the
+    offer card), then what the agent last gated, then a fenced block in chat.
+
+    The chat fallback is FENCE-ONLY for an agentic turn. `extract_yaml` returns
+    the whole raw text when it finds no fence -- deliberate, because a
+    single-shot local model may forget the fence and the whole reply IS the
+    answer. For a turn with a tool trace that assumption inverts: a turn that
+    delivered no YAML has prose, and handing prose to the compiler produced
+    the parse errors that made `draft` unreadable ("compile failed" on a
+    markdown table, on a sentence containing a backticked id). A turn that
+    never claimed to emit a playbook must score as having emitted none, not as
+    having emitted a broken one.
+    """
+    if trace is not None:
+        for name, keys in _YAML_BEARING_ARGS:
+            for call in reversed(trace):
+                if call.get("name") != name or call.get("refused"):
+                    continue
+                args = call.get("args") or {}
+                for k in keys:
+                    v = args.get(k)
+                    if isinstance(v, str) and v.strip():
+                        return v
+        # edit_playbook names only the change; the edited document it verified
+        # comes back as `after_yaml` in its result (when the harness threads it).
+        for call in reversed(trace):
+            res = call.get("result")
+            if call.get("name") == "edit_playbook" and isinstance(res, dict) \
+                    and isinstance(res.get("after_yaml"), str) and res["after_yaml"].strip():
+                return res["after_yaml"]
+        m = _YAML_FENCED_RE.search(final_text or "")
+        return m.group(1).strip() if m else ""
+    from evals.providers import extract_yaml  # noqa: PLC0415 -- cycle
+    return extract_yaml(final_text or "")
+
+
+def _verify(yaml_text: str, *, live: bool) -> dict[str, Any]:
+    from fsr_playbooks.mcp_server import verify_playbook
+    return verify_playbook(yaml_text=yaml_text, live_probe=live)
+
+
+def _live_tested_blocker(yaml_text: str) -> tuple[str, str] | None:
+    """Detect playbook structures the /notrigger dry-run path cannot
+    actually run to completion. Returns (code, summary) for skip, or
+    None when the playbook is safe to dry-run.
+
+    - `manual_input` steps suspend waiting for a human; eval polling
+      will always hit the 180s timeout.
+    - `start_on_create` / `start_on_update` / `start_on_action`
+      triggers fire on real record events and need an actual record
+      IRI in body; /notrigger has no record context.
+    """
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(doc, dict):
+        return None
+    pbs = doc.get("playbooks") or []
+    if not isinstance(pbs, list) or not pbs:
+        return None
+    record_triggers = {"start_on_create", "start_on_update",
+                       "start_on_action", "cybersponse.action"}
+    for pb in pbs:
+        if not isinstance(pb, dict):
+            continue
+        steps = pb.get("steps") or []
+        if not isinstance(steps, list):
+            continue
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            t = s.get("type") or ""
+            if t == "manual_input":
+                return ("manual_input_blocks_dry_run",
+                        "playbook contains manual_input -- /notrigger "
+                        "dry-run will block awaiting human input")
+            if t in record_triggers:
+                return ("record_trigger_requires_record",
+                        f"trigger {t!r} fires on real record events; "
+                        "/notrigger dry-run has no record context")
+    return None
+
+
+def _first_playbook_name(yaml_text: str) -> str | None:
+    """Best-effort: pull the first playbook's name out of the YAML so
+    the scoring harness can dry-run without an explicit override."""
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+        if isinstance(doc, dict):
+            pbs = doc.get("playbooks") or []
+            if pbs and isinstance(pbs[0], dict):
+                name = pbs[0].get("name")
+                return name if isinstance(name, str) and name else None
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _compile_obj(yaml_text: str) -> dict[str, Any]:
+    from fsr_playbooks.mcp_server import compile_yaml
+    return compile_yaml(yaml_text, verbose=True)
+
+
+_VOLATILE_KEYS = frozenset({"lastModifyDate"})
+
+
+def _strip_volatile(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _strip_volatile(v) for k, v in obj.items()
+                if k not in _VOLATILE_KEYS}
+    if isinstance(obj, list):
+        return [_strip_volatile(x) for x in obj]
+    return obj
+
+
+# Agentic gate thresholds. Sourced from docs/AGENT_TOOL_USAGE.md p95s --
+# raise via env if a model is intentionally chatty.
+TOOL_BUDGET_MAX = int(os.environ.get("EVAL_TOOL_BUDGET_MAX", "20"))
+NO_SPIRAL_MAX_CONSECUTIVE = int(
+    os.environ.get("EVAL_NO_SPIRAL_MAX_CONSECUTIVE", "4"))
+# Phase 1.4: investigation-quality family. Recall = required pivots the
+# agent actually performed / required pivots. Gate at 0.8 per the plan.
+INVESTIGATION_RECALL_GATE = float(
+    os.environ.get("EVAL_INVESTIGATION_RECALL_GATE", "0.8"))
+# Recall alone greenlights a run that flails for 20 calls and never stages a
+# deliverable (live calibration: 5/5 at recall 1.0 told us nothing).
+# Minimum prose (characters) a refuse-mode turn must produce for its refusal
+# to count as graceful. Deliberately tiny: the target is a SILENT turn, which
+# scored full marks on "delivered nothing" alone until 2026-08-13. Brevity is
+# NOT the failure -- "I can't build that." is a real refusal and passes; the
+# first draft of this bar was 40 and rejected it, which would have made the
+# gate punish a correct answer (rule 1) while chasing rule 4. Anything much
+# larger starts grading the explanation's quality, a different and harder gate.
+REFUSE_MIN_EXPLANATION_CHARS = int(
+    os.environ.get("EVAL_REFUSE_MIN_EXPLANATION_CHARS", "15"))
+
+# These per-fixture quality knobs are the teeth. Defaults apply to every
+# investigation task; a fixture's `investigation_quality` block overrides them.
+INVESTIGATION_TOOL_BUDGET_MAX = int(
+    os.environ.get("EVAL_INVESTIGATION_TOOL_BUDGET_MAX", "12"))
+# >N distinct arg-sets for the SAME (connector, op) = the grounding-flail
+# signature (agent guessing param names live: ip -> ip_address -> indicator).
+INVESTIGATION_MAX_PARAM_RETRIES = int(
+    os.environ.get("EVAL_INVESTIGATION_MAX_PARAM_RETRIES", "2"))
+# >N calls repeating an earlier (tool, args) pair verbatim = spiral (#140).
+# Calibrated over the 130 saved traces in data/eval_runs/*_failures: the count
+# is 0 on the large majority even of FAILING runs, 1-2 on the occasional
+# ordinary one, and >=3 only on the genuine outliers (fixture 29's 40-call run
+# = 4, mail_egress's 32-call run = 9). 2 keeps the teeth without firing on the
+# stray repeat.
+INVESTIGATION_MAX_REDUNDANT_CALLS = int(
+    os.environ.get("EVAL_INVESTIGATION_MAX_REDUNDANT_CALLS", "2"))
+# Tools that count as "staged a concrete deliverable for the analyst". A
+# capability gap / choice card IS a valid ending when no containment op is
+# configured on the box -- credit it, don't demand an action card that can't
+# exist here.
+_DELIVERABLE_TOOLS = (
+    "emit_action_card", "emit_choice_card", "emit_capability_gap_card",
+)
+
+# The consolidated `emit_card` union carries its type in a `card_type` arg;
+# these values are the deliverable subset (same set as _DELIVERABLE_TOOLS,
+# in the framework's short vocabulary). Without this the grader was blind to
+# every card the union emitted -- the exact class of miss the wire splice had
+# (effect probe A2): the agent staged a real action card and scored
+# "no deliverable staged".
+_DELIVERABLE_CARD_TYPES = frozenset({"action", "choice", "capability_gap"})
+
+
+def _staged_deliverables(trace: list[dict[str, Any]],
+                         allowed: tuple[str, ...]) -> list[str]:
+    """Deliverable labels staged in `trace`: retired per-type emitters by
+    name, plus `emit_card` calls whose card_type maps to an allowed emitter."""
+    hit: list[str] = []
+    allowed_types = {t for t in _DELIVERABLE_CARD_TYPES
+                     if f"emit_{t}_card" in allowed}
+    for c in trace:
+        name = c.get("name")
+        if name in allowed:
+            hit.append(str(name))
+        elif name == "emit_card":
+            ct = str((c.get("args") or {}).get("card_type") or "").strip().lower()
+            if ct in allowed_types:
+                hit.append(f"emit_card[{ct}]")
+    return hit
+
+
+def unservable_required_tools(
+        required_facts: list[dict[str, Any]] | None) -> list[str]:
+    """Required-fact tools that are NOT registered in this process.
+
+    `_fact_matches` matches on the tool NAME and never asks whether that tool
+    exists, so a fixture naming a tool nothing registers can only score zero.
+    In the framework repo that is five of the seven investigation fixtures:
+    `get_record` / `search_module_records` come from the CONNECTOR's
+    `fsr_soc_triage.registry.register_triage_tools()`.
+
+    Returns [] when the registry cannot be read at all -- an import failure
+    here must not invent an environment problem on top of a real one.
+    """
+    facts = required_facts or []
+    if not facts:
+        return []
+    try:
+        from fsr_playbooks.llm.tools import REGISTRY  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted({str(f["tool"]) for f in facts
+                   if f.get("tool") and f["tool"] not in REGISTRY})
+
+
+def _fact_matches(fact: dict[str, Any], call: dict[str, Any]) -> bool:
+    """Does a single trace tool-call satisfy a required/forbidden fact?
+
+    A fact is a matcher, e.g.::
+
+        {"tool": "run_op", "connector": "virustotal",
+         "op": "get_ip_reputation", "args_contains": ["203.0.113.5"]}
+        {"tool": "get_record", "module": "alerts"}
+
+    `tool` matches the tool name; `connector`/`op`/`module` are matched
+    case-insensitively against the call's top-level args; `args_contains`
+    is a list of substrings that must ALL appear in the JSON-serialized
+    args (so an indicator buried in `params.ip` still matches without the
+    fixture needing to know the exact nesting)."""
+    if fact.get("tool") and call.get("name") != fact["tool"]:
+        return False
+    args = call.get("args") or call.get("input") or {}
+    if not isinstance(args, dict):
+        args = {}
+    for key in ("connector", "op", "module"):
+        if key in fact and str(args.get(key, "")).lower() != str(fact[key]).lower():
+            return False
+    needles = fact.get("args_contains") or []
+    if needles:
+        blob = json.dumps(args, default=str).lower()
+        if not all(str(n).lower() in blob for n in needles):
+            return False
+    return True
+
+
+def _fact_label(fact: dict[str, Any]) -> str:
+    return fact.get("label") or " ".join(
+        str(fact.get(k)) for k in ("tool", "connector", "op", "module")
+        if fact.get(k)) or json.dumps(fact, default=str)
+
+
+def _score_investigation(trace: list[dict[str, Any]],
+                         required_facts: list[dict[str, Any]] | None,
+                         forbidden_facts: list[dict[str, Any]] | None,
+                         ) -> dict[str, Any]:
+    """Recall over required investigation pivots, with a hard fail on any
+    forbidden pivot (e.g. external TI lookup on an internal RFC1918 IP)."""
+    required_facts = required_facts or []
+    matched, missing = [], []
+    for f in required_facts:
+        if any(_fact_matches(f, c) for c in trace):
+            matched.append(f)
+        else:
+            missing.append(f)
+    recall = (len(matched) / len(required_facts)) if required_facts else 0.0
+    # A call the connector's discipline guard refused (`refused=True`) never
+    # executed -- the model attempted it but the platform blocked it. Don't count
+    # a guard-blocked forbidden pivot as a violation; that's the guard working.
+    forbidden_hit = [f for f in (forbidden_facts or [])
+                     if any(_fact_matches(f, c) for c in trace
+                            if not c.get("refused"))]
+    passed = recall >= INVESTIGATION_RECALL_GATE and not forbidden_hit
+    detail = f"recall {recall:.2f} (>= {INVESTIGATION_RECALL_GATE})"
+    if forbidden_hit:
+        detail = (f"performed {len(forbidden_hit)} forbidden pivot(s): "
+                  + ", ".join(_fact_label(f) for f in forbidden_hit))
+    return {
+        "passed": passed, "skipped": False,
+        "recall": round(recall, 3), "gate": INVESTIGATION_RECALL_GATE,
+        "matched": len(matched), "required": len(required_facts),
+        "missing": [_fact_label(f) for f in missing],
+        "forbidden_hit": [_fact_label(f) for f in forbidden_hit],
+        "detail": detail,
+    }
+
+
+def _score_tool_selection(trace: list[dict[str, Any]],
+                          terminal_tool: list[str] | None,
+                          forbidden_facts: list[dict[str, Any]] | None,
+                          ) -> dict[str, Any]:
+    """Did the turn reach the terminal tool the ask requires?
+
+    This is the Phase 1.2 instrument, and it deliberately grades ONE thing.
+    The three live failures it exists to catch all looked like competent
+    work -- the model researched, narrated, and stopped -- so anything that
+    rewards research would have scored them green. Only the terminal call
+    counts.
+
+    `decoys_before` is the diagnostic half: which of the fixture's
+    `forbidden_facts` (the wrong-but-plausible tools observed live, e.g.
+    `list_playbook_runs` in place of `run_playbook`) the model called
+    *before* it got there. Calling a decoy is not itself a failure -- the
+    model may reasonably orient first -- so it never flips the gate; it only
+    tells you what the terminal tool is losing to. `calls_before` is the same
+    signal as a scalar, for tracking whether an intervention shortened the
+    path or just moved the stall.
+    """
+    wanted = [t for t in (terminal_tool or [])]
+    if not wanted:
+        return {"passed": False, "skipped": True,
+                "detail": "fixture declares no terminal_tool"}
+    reached_at = None
+    for i, call in enumerate(trace):
+        # A call the discipline guard refused never executed -- the model
+        # picked right but the platform blocked it. Same convention as
+        # _score_investigation's forbidden-pivot handling.
+        if call.get("name") in wanted and not call.get("refused"):
+            reached_at = i
+            break
+    decoys = []
+    for f in (forbidden_facts or []):
+        hit = next((i for i, c in enumerate(trace)
+                    if _fact_matches(f, c) and not c.get("refused")), None)
+        if hit is not None and (reached_at is None or hit < reached_at):
+            decoys.append(_fact_label(f))
+    passed = reached_at is not None
+    return {
+        "passed": passed, "skipped": False,
+        "terminal_tool": wanted,
+        "reached": passed,
+        "calls_before": reached_at if passed else len(trace),
+        "decoys_before": decoys,
+        "detail": (
+            f"reached {trace[reached_at]['name']} after {reached_at} call(s)"
+            if passed else
+            f"never called {' / '.join(wanted)} in {len(trace)} call(s)"
+        ),
+    }
+
+
+def _call_args(call: dict[str, Any]) -> dict[str, Any]:
+    args = call.get("args") or call.get("input") or {}
+    return args if isinstance(args, dict) else {}
+
+
+# ── B4: triage→build fidelity (Chat Intelligence Plan) ──────────────────
+# "The built playbook must automate what was investigated -- same ops." Grade
+# the (connector, op) overlap between the investigation trace and the compiled
+# playbook. Grounding gate defaults to 1.0: a playbook may only call ops the
+# analyst actually exercised this session -- inventing an op is the failure.
+BUILD_FIDELITY_GROUNDING_GATE = float(
+    os.environ.get("EVAL_BUILD_FIDELITY_GROUNDING_GATE", "1.0"))
+
+
+def _ops_from_trace(trace: list[dict[str, Any]] | None,
+                    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """(connector, op) pairs the investigation exercised, split into read-side
+    enrichment/query ops (`run_op`) and the staged response action(s)
+    (`emit_action_card`). Lowercased."""
+    enrich: set[tuple[str, str]] = set()
+    actions: set[tuple[str, str]] = set()
+    for c in trace or []:
+        name = c.get("name")
+        args = _call_args(c)
+        if name == "run_op":
+            conn = str(args.get("connector", "")).lower()
+            op = str(args.get("op", "")).lower()
+            if conn and op:
+                enrich.add((conn, op))
+        elif name == "emit_action_card":
+            conn = str(args.get("connector", "")).lower()
+            op = str(args.get("operation") or args.get("op") or "").lower()
+            if conn and op:
+                actions.add((conn, op))
+    return enrich, actions
+
+
+def _ops_from_yaml(yaml_text: str) -> set[tuple[str, str]]:
+    """(connector, operation) pairs from every `type: connector` step in the
+    built playbook YAML."""
+    ops: set[tuple[str, str]] = set()
+    try:
+        import yaml as _yaml
+        doc = _yaml.safe_load(yaml_text)
+    except Exception:  # noqa: BLE001
+        return ops
+    if not isinstance(doc, dict):
+        return ops
+    for pb in (doc.get("playbooks") or []):
+        if not isinstance(pb, dict):
+            continue
+        for s in (pb.get("steps") or []):
+            if not isinstance(s, dict) or s.get("type") != "connector":
+                continue
+            # Phase G: connector/operation at step level (no arguments: wrapper).
+            # Fall back to arguments for legacy YAML.
+            a = s.get("arguments") or {}
+            conn = str(a.get("connector") or s.get("connector") or "").lower()
+            op = str(a.get("operation") or s.get("operation") or "").lower()
+            if conn and op:
+                ops.add((conn, op))
+    return ops
+
+
+def ops_from_offer_card(card: dict[str, Any] | None) -> set[tuple[str, str]]:
+    """(connector, operation) pairs from a `playbook_offer` card's
+    `ops_summary` -- the built-playbook ops as the agent staged them for save,
+    before any push. Lets the fidelity gate grade a triage→build *chain* (which
+    emits an offer card, not a raw ```yaml fence)."""
+    ops: set[tuple[str, str]] = set()
+    if not isinstance(card, dict):
+        return ops
+    for e in (card.get("ops_summary") or []):
+        if not isinstance(e, dict):
+            continue
+        conn = str(e.get("connector", "")).lower()
+        op = str(e.get("operation") or e.get("op") or "").lower()
+        if conn and op:
+            ops.add((conn, op))
+    return ops
+
+
+def score_build_fidelity(trace: list[dict[str, Any]] | None,
+                         yaml_text: str | None,
+                         built_ops: set[tuple[str, str]] | None = None,
+                         ) -> dict[str, Any]:
+    """Does the built playbook automate what was investigated? (Plan B4.)
+
+    Two sub-metrics over (connector, op) sets:
+      * **grounding** -- every connector op in the built playbook was one the
+        investigation actually exercised (a `run_op` enrichment OR a staged
+        action card). Catches a playbook that invents ops the analyst never
+        ran. Gate: grounding ≥ `BUILD_FIDELITY_GROUNDING_GATE` (default 1.0).
+      * **action_coverage** -- the response action(s) staged via
+        `emit_action_card` appear as steps in the built playbook, so it
+        automates the recommendation, not just the read-side lookups.
+
+    Passes when grounding clears the gate AND every staged action is covered.
+    Auto-skips (not graded) when no playbook was built or the trace used no
+    ops -- so it never penalizes a standalone authoring task with no
+    investigation phase.
+    """
+    enrich, actions = _ops_from_trace(trace)
+    investigated = enrich | actions
+    # built ops come from an offer card (chain runs) when given, else the
+    # emitted ```yaml fence (standalone build runs).
+    built = set(built_ops) if built_ops else _ops_from_yaml(yaml_text or "")
+    if not built or not investigated:
+        return {"passed": False, "skipped": True,
+                "detail": "no built-playbook ops or no investigation ops to compare"}
+    ungrounded = sorted(built - investigated)
+    grounding = (len(built) - len(ungrounded)) / len(built)
+    missing_actions = sorted(actions - built)
+    action_coverage = ((len(actions) - len(missing_actions)) / len(actions)
+                       if actions else 1.0)
+    passed = grounding >= BUILD_FIDELITY_GROUNDING_GATE and not missing_actions
+    detail = (f"grounding {grounding:.2f} (gate {BUILD_FIDELITY_GROUNDING_GATE}); "
+              f"action_coverage {action_coverage:.2f}")
+    if ungrounded:
+        detail += "; ungrounded ops: " + ", ".join(f"{c}.{o}" for c, o in ungrounded)
+    if missing_actions:
+        detail += "; staged action(s) absent from playbook: " + ", ".join(
+            f"{c}.{o}" for c, o in missing_actions)
+    return {
+        "passed": passed, "skipped": False,
+        "grounding": round(grounding, 3),
+        "action_coverage": round(action_coverage, 3),
+        "ungrounded_ops": [f"{c}.{o}" for c, o in ungrounded],
+        "missing_actions": [f"{c}.{o}" for c, o in missing_actions],
+        "built_ops": len(built), "investigated_ops": len(investigated),
+        "detail": detail,
+    }
+
+
+def _param_flail(trace: list[dict[str, Any]]) -> tuple[int, str | None, int]:
+    """Worst-offender count of DISTINCT arg-sets for a single (connector, op).
+
+    The grounding-flail signature: the agent re-invokes the same op cycling
+    param names (`ip` -> `ip_address` -> `indicator`) because it's discovering
+    the real schema live by trial and error. One op called once with the right
+    params yields 1; a 3-way param guess yields 3.
+
+    A run_op whose args never parsed into a real (connector, op) -- malformed
+    JSON from the model, or a truncated tool call -- is NOT grounding flail: the
+    agent never reached an op to be wrong about. Counting those collapsed every
+    such call onto one phantom key and reported the result against an op named
+    `None` (#138), which is what made `invest_excessive_mail_egress` read as
+    unstable. They are excluded here and reported separately instead.
+
+    Returns (worst, label, unparsed)."""
+    from collections import defaultdict
+    seen: dict[tuple[str, str], set[str]] = defaultdict(set)
+    unparsed = 0
+    for c in trace:
+        if c.get("name") != "run_op":
+            continue
+        args = _call_args(c)
+        conn = str(args.get("connector", "")).lower()
+        op = str(args.get("op", "")).lower()
+        if not (conn and op):
+            unparsed += 1
+            continue
+        params = args.get("params")
+        if not isinstance(params, dict):
+            params = {k: v for k, v in args.items()
+                      if k not in ("connector", "op", "confirm")}
+        seen[(conn, op)].add(json.dumps(params, sort_keys=True, default=str))
+    if not seen:
+        return 0, None, unparsed
+    worst_key = max(seen, key=lambda k: len(seen[k]))
+    worst = len(seen[worst_key])
+    return worst, f"{worst_key[0]}.{worst_key[1]}", unparsed
+
+
+# Discovery tools that reveal an op's real param schema. A run_op retry that
+# follows any of these for the same op is "informed"; one that doesn't is blind.
+_SCHEMA_DISCOVERY_TOOLS = ("get_op_schema", "find_operation", "find_operation_example")
+
+
+def _redundant_calls(trace: list[dict[str, Any]]) -> tuple[int, list[str]]:
+    """Count calls that repeat an earlier (tool, args) pair BYTE-IDENTICALLY.
+
+    #140. The investigation gates had no spiral check at all -- `no_spiral` is
+    an authoring-path gate -- so `invest_defense_evasion_host` could burn 40
+    calls (run 20260815T174220Z) and only `tool_budget` noticed. A budget says
+    "too much"; this says *which* calls bought nothing.
+
+    Deliberately NOT a blunt per-tool count: counting repeats by NAME is what
+    got `no_spiral` loosened, because it failed a legitimate five-step build for
+    looking up five different step types. Same tool, different args = progress.
+    Same tool, same args = a deterministic lookup that cannot return anything
+    new the second time.
+
+    Also deliberately NOT limited to CONSECUTIVE repeats (the rule
+    `_longest_spiral` uses): fixture 29's repeats were scattered across the
+    turn, not adjacent -- the agent re-asked a question it had already answered
+    twenty calls earlier. Returns (redundant_count, labels of the repeated
+    calls)."""
+    from collections import Counter
+    keys = Counter(
+        (str(c.get("name") or ""),
+         json.dumps(c.get("args") or {}, sort_keys=True, default=str))
+        for c in trace
+    )
+    repeats = {k: v for k, v in keys.items() if v > 1}
+    # A repeated call with EMPTY args is a malformed/unparseable tool call
+    # hammered over and over (see #138) -- still pure waste, so still counted,
+    # but say which it is: "run_op x4" reads as one real op re-run, and the
+    # reader would go looking for an op that was never named.
+    labels = [f"{name}{'(no args)' if args in ('{}', 'null') else ''} x{n}"
+              for (name, args), n in
+              sorted(repeats.items(), key=lambda kv: -kv[1])]
+    return sum(n - 1 for n in repeats.values()), labels
+
+
+def _blind_param_retry(trace: list[dict[str, Any]]) -> tuple[int, str | None]:
+    """Worst case of run_op retried with corrected params for an op the agent
+    NEVER pulled a schema for -- the avoidable flail (vs. _param_flail, which
+    counts retries regardless of whether discovery happened).
+
+    Walks the trace in order: a `get_op_schema`/`find_operation*` call for a
+    connector/op marks it 'discovered' from that point on. A run_op with a new
+    distinct arg-set for an op that has NOT been discovered yet is a blind
+    retry. Returns (worst_blind_argsets, label). 1 blind arg-set is fine (first
+    attempt); ≥2 means the agent hammered corrections without ever looking up
+    the schema -- the signal that get_op_schema is too costly/undiscoverable, or
+    that the inline `valid_params` on the first bad_params error isn't landing."""
+    from collections import defaultdict
+    discovered: set[tuple[str, str]] = set()
+    blind: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for c in trace:
+        name = c.get("name")
+        args = _call_args(c)
+        conn = str(args.get("connector", "")).lower()
+        op = str(args.get("op", "")).lower()
+        if name in _SCHEMA_DISCOVERY_TOOLS and conn:
+            # find_operation may not carry an op (list mode) -- mark all-of-connector
+            discovered.add((conn, op))
+            if not op:
+                discovered.add((conn, ""))
+        elif name == "run_op" and conn and op:
+            if (conn, op) in discovered or (conn, "") in discovered:
+                continue
+            params = args.get("params")
+            if not isinstance(params, dict):
+                params = {k: v for k, v in args.items()
+                          if k not in ("connector", "op", "confirm")}
+            blind[(conn, op)].add(json.dumps(params, sort_keys=True, default=str))
+    if not blind:
+        return 0, None
+    worst_key = max(blind, key=lambda k: len(blind[k]))
+    worst = len(blind[worst_key])
+    return worst, f"{worst_key[0]}.{worst_key[1]}"
+
+
+def _score_investigation_quality(
+    trace: list[dict[str, Any]],
+    quality: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Quality gates that recall can't see (Phase 1.4 strengthening).
+
+    Each gate is opt-in per fixture via the `investigation_quality` block; an
+    absent knob falls back to the module default, and a knob set to a falsey
+    value (e.g. `"require_deliverable": false`) marks that gate `skipped` so a
+    fixture with no possible deliverable on this box isn't penalized."""
+    quality = quality or {}
+    gates: dict[str, dict[str, Any]] = {}
+
+    # Calls the connector's discipline guard refused never executed (no upstream
+    # work, no API cost, no verdict pollution) -- measure investigative work over
+    # the EXECUTED subset so a guard-blocked attempt isn't scored as work done.
+    trace = [c for c in trace if not c.get("refused")]
+
+    # --- tool-budget ceiling (tighter than the authoring TOOL_BUDGET_MAX) ----
+    budget = quality.get("tool_budget_max", INVESTIGATION_TOOL_BUDGET_MAX)
+    n = len(trace)
+    gates["investigation_tool_budget"] = {
+        "passed": n <= budget, "skipped": False,
+        "calls": n, "limit": budget,
+        "detail": f"{n} tool call(s) (limit {budget})",
+    }
+
+    # --- no param-grounding flail -------------------------------------------
+    max_retries = quality.get("max_param_retries", INVESTIGATION_MAX_PARAM_RETRIES)
+    worst, label, unparsed = _param_flail(trace)
+    flail_ok = worst <= max_retries
+    # Reported, never charged: a malformed run_op is a tool-call defect, not
+    # grounding flail (#138). Surfacing the count keeps it from being silently
+    # dropped -- a run with unparseable calls is worth knowing about.
+    unparsed_note = (f"; {unparsed} run_op call(s) had unparseable args "
+                     f"(not counted as flail)" if unparsed else "")
+    gates["investigation_no_param_flail"] = {
+        "passed": flail_ok, "skipped": False,
+        "worst_distinct_argsets": worst, "limit": max_retries, "op": label,
+        "unparseable_run_op_calls": unparsed,
+        "detail": ((f"{label} called with {worst} distinct arg-sets "
+                    f"(limit {max_retries})" if not flail_ok
+                    else f"no op exceeded {max_retries} distinct arg-sets")
+                   + unparsed_note),
+    }
+
+    # --- no spiral: byte-identical (tool, args) repeats (#140) ---------------
+    max_redundant = quality.get("max_redundant_calls",
+                                INVESTIGATION_MAX_REDUNDANT_CALLS)
+    redundant, repeat_labels = _redundant_calls(trace)
+    gates["investigation_no_spiral"] = {
+        "passed": redundant <= max_redundant, "skipped": False,
+        "redundant_calls": redundant, "limit": max_redundant,
+        "repeats": repeat_labels,
+        "detail": (f"{redundant} call(s) repeated an earlier (tool, args) pair "
+                   f"verbatim (limit {max_redundant}): {', '.join(repeat_labels)}"
+                   if redundant > max_redundant
+                   else f"{redundant} verbatim-repeated call(s) "
+                        f"(limit {max_redundant})"),
+    }
+
+    # --- no BLIND param retry (hammered run_op without ever pulling a schema) -
+    # Distinct from no_param_flail: this only counts retries the agent made
+    # WITHOUT calling get_op_schema/find_operation for that op first. ≥2 blind
+    # arg-sets = the agent guessed, failed, and guessed again instead of looking
+    # it up -- the avoidable flail. Shares the max_param_retries knob.
+    blind_worst, blind_label = _blind_param_retry(trace)
+    blind_ok = blind_worst <= max_retries
+    gates["investigation_blind_param_retry"] = {
+        "passed": blind_ok, "skipped": False,
+        "worst_blind_argsets": blind_worst, "limit": max_retries, "op": blind_label,
+        "detail": (f"{blind_label} retried with {blind_worst} distinct arg-sets "
+                   f"and NO get_op_schema/find_operation for it (limit {max_retries})"
+                   if not blind_ok
+                   else "no op was blind-retried without a schema lookup"),
+    }
+
+    # --- staged a concrete deliverable --------------------------------------
+    req = quality.get("require_deliverable", True)
+    if not req:
+        gates["investigation_deliverable"] = {"passed": True, "skipped": True}
+    else:
+        allowed = req if isinstance(req, (list, tuple)) else _DELIVERABLE_TOOLS
+        allowed = tuple(allowed)
+        hit = _staged_deliverables(trace, allowed)
+        gates["investigation_deliverable"] = {
+            "passed": bool(hit), "skipped": False,
+            "staged": sorted(set(hit)), "accepted": list(allowed),
+            "detail": (f"staged {', '.join(sorted(set(hit)))}" if hit
+                       else "no deliverable card staged for the analyst "
+                            f"(accepts: {', '.join(allowed)})"),
+        }
+
+    # --- hunt depth: lateral pivots along a seeded multi-hop chain (B2) -------
+    # Depth = how many ordered stages of a known pivot chain the agent reached
+    # (each stage is a fact-matcher, reusing the recall matcher). Breadth =
+    # distinct connectors exercised across the hunt, reported alongside. The
+    # gate is opt-in: a fixture without `hunt_chain` skips it, because depth
+    # only means something on a scenario with a defined chain to traverse
+    # (e.g. the seeded smithDesktop -> 10.50.60.70 -> 102.220.160.21 chain).
+    chain = quality.get("hunt_chain")
+    if not chain:
+        gates["hunt_depth"] = {"passed": True, "skipped": True}
+    else:
+        reached = [s for s in chain if any(_fact_matches(s, c) for c in trace)]
+        depth = len(reached)
+        min_depth = quality.get("min_hunt_depth", len(chain))
+        connectors = set()
+        for c in trace:
+            conn = _call_args(c).get("connector")
+            if conn:
+                connectors.add(str(conn).lower())
+        breadth = len(connectors)
+        min_breadth = quality.get("min_hunt_breadth", 0)
+        passed = depth >= min_depth and breadth >= min_breadth
+        gates["hunt_depth"] = {
+            "passed": passed, "skipped": False,
+            "depth": depth, "min_depth": min_depth, "stages": len(chain),
+            "reached": [_fact_label(s) for s in reached],
+            "missing": [_fact_label(s) for s in chain if s not in reached],
+            "breadth": breadth, "min_breadth": min_breadth,
+            "connectors": sorted(connectors),
+            "detail": (f"reached {depth}/{len(chain)} pivot stage(s) "
+                       f"(min {min_depth}); breadth {breadth} connector(s)"
+                       + (f" (min {min_breadth})" if min_breadth else "")),
+        }
+    return gates
+
+
+#: The gates below ask "did the agent gate its work before submitting". BOTH
+#: pre-submit gates count. `verify_enhancement` is the enhance-mode one, and
+#: it is not optional there: `emit_enhancement_offer` takes a `verified_id`
+#: that only `verify_enhancement` issues and refuses the call without one. So
+#: an enhance turn that delivered an edit CANNOT have skipped verification --
+#: scoring only `verify_playbook` marked those turns "agent never called
+#: verify" for doing exactly the right thing, and a grader that punishes the
+#: correct behavior is worse than no grader.
+# `edit_playbook` is an enhance gate too (it runs verify_enhancement and issues
+# the verified_id); take the set from the loop guards so the two never drift.
+from fsr_playbooks.llm._loop_helpers import _ENHANCE_VERIFY_TOOLS  # noqa: E402
+
+_VERIFY_TOOLS = ("verify_playbook", *sorted(_ENHANCE_VERIFY_TOOLS))
+
+#: Bump this whenever a change alters what a given trace SCORES. It is stamped
+#: into every saved matrix and forms part of the comparability key, so a diff
+#: across a scorer change is refused instead of read as agent movement.
+#:
+#: This is not hypothetical, it is the known case: the tool-gate baseline
+#: pinned before #127 was scored on `terminal_tool_reached` alone and gives
+#: every row 1.0. Diffed against a composite-scored run, every honest row looks
+#: like a regression -- and nothing in the artifact said the rule had changed.
+#:
+#:   1 -- terminal_tool_reached only (pre-#127; no run carries this stamp)
+#:   2 -- #127 composite: + offer_timing, appropriate_approval_requests,
+#:        no_spiral
+#:   3 -- edit_playbook counts as the enhance verify gate (it was scored
+#:        "never verified" for using the tool the prompt tells it to use)
+SCORER_VERSION = 3
+
+#: The composite authoring score for `mode="tool_selection"`: the gates that
+#: count alongside `terminal_tool_reached`. Each measures a behaviour we
+#: already say we care about elsewhere -- offering at the right moment (A4),
+#: not escalating past the tier the task needs (P2 gating), and not looping --
+#: and each was observed FAILING on runs that scored a perfect 1/1.
+_SELECTION_COUNTED_GATES = (
+    "offer_timing",
+    "appropriate_approval_requests",
+    "no_spiral",
+)
+
+
+def _verify_metrics(trace: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Three metrics about the agent's use of the pre-submit verify tools from
+    the call trace. Distinct from the `verified` confidence tier --
+    these measure agent *behavior*, not playbook quality. The agent
+    can technically ship a YAML it never ran through verify; this gate
+    catches that."""
+    verifies = [t for t in trace if t.get("name") in _VERIFY_TOOLS]
+    called = len(verifies) >= 1
+    last_ready = bool(verifies[-1].get("verify", {}).get("ready_to_push")) if verifies else False
+    iters = len(verifies)
+    for i, v in enumerate(verifies, start=1):
+        if v.get("verify", {}).get("ready_to_push"):
+            iters = i
+            break
+    return {
+        "verify_called_before_submit": {
+            "passed": called, "skipped": False,
+            # Name which gate ran: "2 verify call(s)" hides that an enhance
+            # turn used the enhance gate, which is the thing a reader of this
+            # row wants to know.
+            "tools": sorted({str(v.get("name")) for v in verifies}),
+            "detail": (
+                f"{len(verifies)} call(s): "
+                + ", ".join(sorted({str(v.get("name")) for v in verifies}))
+                if called else
+                "agent never called verify_playbook / verify_enhancement / edit_playbook"),
+        },
+        "verify_iterations_until_ready": {
+            "passed": called, "skipped": False,
+            "iterations": iters if called else 0,
+            "detail": (f"{iters} verify cycle(s) until ready"
+                       if called and last_ready
+                       else "never reached ready_to_push=True"
+                       if called else "no verify calls"),
+        },
+        "final_verify_ready_to_push": {
+            "passed": last_ready, "skipped": False,
+            "detail": ("last verify returned ready_to_push=True" if last_ready
+                       else "last verify did NOT return ready_to_push=True"),
+        },
+    }
+
+
+def _score_approval_requests(
+    audit: list[dict[str, Any]],
+    expected: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """`appropriate_approval_requests` gate (HITL_GUARDRAILS_PLAN Phase 3).
+
+    Reads the dispatch wrapper's per-task audit log and scores the
+    agent's escalation behavior against the task's expected pattern.
+
+    `expected` shape:
+      {"tier_3_plus": "exactly_zero" | "at_least_one" | {"min": N, "max": M}}
+
+    Default: "exactly_zero" -- most authoring tasks shouldn't fire any
+    tier-3+ tool calls. Tasks that genuinely require remediation set
+    `at_least_one` or a range to opt in.
+
+    PASS: tier-3+ count matches expectations.
+    FAIL: agent over-escalated (audit fatigue) or under-escalated
+          (e.g. fired run_op when the task was authoring-only)."""
+    expected = expected or {"tier_3_plus": "exactly_zero"}
+    tier3 = sum(1 for r in audit if r.get("tier", 0) >= 3)
+    spec = expected.get("tier_3_plus", "exactly_zero")
+
+    ok: bool
+    detail: str
+    if spec == "exactly_zero":
+        ok = tier3 == 0
+        detail = (f"{tier3} tier-3+ call(s) -- expected zero"
+                  if not ok else "no tier-3+ calls, as expected")
+    elif spec == "at_least_one":
+        ok = tier3 >= 1
+        detail = (f"{tier3} tier-3+ call(s)"
+                  if ok else "agent never requested approval for a tier-3+ action")
+    elif isinstance(spec, dict):
+        lo = int(spec.get("min", 0))
+        hi = int(spec.get("max", lo))
+        ok = lo <= tier3 <= hi
+        detail = f"{tier3} tier-3+ call(s); expected {lo}..{hi}"
+    else:
+        ok = False
+        detail = f"unrecognized expected spec: {spec!r}"
+
+    return {"passed": ok, "skipped": False,
+            "tier_3_plus_calls": tier3, "detail": detail}
+
+
+def _longest_spiral(trace: list[dict[str, Any]]) -> tuple[int, str, str]:
+    """The longest run of repetition WITHOUT progress, and what kind it was.
+
+    Consecutive same-NAME calls are not a spiral. Building a five-step playbook
+    means five `get_step_type` calls in a row -- start, set_variable, decision,
+    end, connector -- and the name-only counter failed exactly that turn
+    (`select_build_offer`, run 20260814T115131Z): every other gate passed, the
+    playbook compiled, verified and was delivered, and this gate called the
+    correct method a spiral. Rule 1 of the plan: a grader that punishes a right
+    answer is worse than no grader.
+
+    Two things ARE spirals, and both mean "the last call told the agent
+    nothing":
+
+      * `identical` -- consecutive calls with the same name AND the same
+        arguments. A deterministic lookup repeated verbatim cannot return
+        anything new. This is also the waste #128 went looking for.
+      * `failing` -- consecutive calls to one tool that all came back failed.
+        The classic flail: retry the same dead tool with fresh guesses.
+
+    Distinct-args, succeeding runs are left to `investigation_no_param_flail`,
+    which is the gate that measures arg-cycling on one op.
+    """
+    def _key(c: dict[str, Any]) -> str:
+        return json.dumps(c.get("args") or {}, sort_keys=True, default=str)
+
+    def _failed(c: dict[str, Any]) -> bool:
+        # `ok is None` means the tool returned something unlabeled -- not a
+        # failure. Only an explicit False or a raised error counts.
+        return c.get("ok") is False or bool(c.get("error"))
+
+    best = (0, "", "")
+    for kind, same in (("identical",
+                        lambda a, b: a.get("name") == b.get("name")
+                        and _key(a) == _key(b)),
+                       ("failing",
+                        lambda a, b: a.get("name") == b.get("name")
+                        and _failed(a) and _failed(b))):
+        run, prev = 0, None
+        for call in trace:
+            if prev is not None and same(prev, call):
+                run += 1
+            else:
+                run = 1 if (kind != "failing" or _failed(call)) else 0
+            prev = call
+            if run > best[0]:
+                best = (run, call.get("name", ""), kind)
+    return best
+
+
+def _score_agentic(*, trace: list[dict[str, Any]],
+                   text: str,
+                   audit: list[dict[str, Any]] | None = None,
+                   expected_approvals: dict[str, Any] | None = None,
+                   ) -> dict[str, dict[str, Any]]:
+    """tool_budget / no_spiral / adherence + verify-behavior metrics."""
+    # Discipline-guard-refused calls never executed -- exclude from the
+    # work-based gates (see _score_investigation_quality).
+    trace = [c for c in trace if not c.get("refused")]
+    n = len(trace)
+    longest, longest_name, spiral_kind = _longest_spiral(trace)
+
+    has_yaml = bool(_YAML_BLOCK_RE.search(text or ""))
+    # Which terminal card actually carried the playbook, if any.
+    delivered_via = next(
+        (c.get("name") for c in reversed(trace)
+         if c.get("name") in ("emit_playbook_offer", "emit_enhancement_offer")
+         and not c.get("refused")),
+        None)
+    out_gates: dict[str, dict[str, Any]] = {
+        **_verify_metrics(trace),
+        "tool_budget": {
+            "passed": n <= TOOL_BUDGET_MAX, "skipped": False,
+            "calls": n, "limit": TOOL_BUDGET_MAX,
+        },
+        "no_spiral": {
+            "passed": longest <= NO_SPIRAL_MAX_CONSECUTIVE, "skipped": False,
+            "longest_run": longest, "tool": longest_name,
+            "kind": spiral_kind,
+            "limit": NO_SPIRAL_MAX_CONSECUTIVE,
+            "detail": (f"longest {spiral_kind} run: {longest} x "
+                       f"{longest_name}" if longest_name else "no repetition"),
+        },
+        # "adherence" = the turn DELIVERED a playbook, by any sanctioned
+        # route. It used to mean "pasted a fenced ```yaml block in chat",
+        # which was a fair proxy back when that WAS the delivery mechanism.
+        # It is not anymore: delivery is `emit_playbook_offer`, and pasting
+        # YAML at the analyst is the failure mode the tool description
+        # explicitly forbids. Scoring the old behavior rewarded exactly what
+        # the product told the model to stop doing.
+        "adherence": {
+            "passed": bool(delivered_via or has_yaml), "skipped": False,
+            "detail": (f"delivered via {delivered_via}" if delivered_via
+                       else "yaml block in final text" if has_yaml
+                       else "no playbook delivered (no offer card, no yaml block)"),
+            "delivered_via": delivered_via or ("final_text" if has_yaml else None),
+        },
+    }
+    if audit is not None:
+        out_gates["appropriate_approval_requests"] = _score_approval_requests(
+            audit, expected_approvals)
+    else:
+        out_gates["appropriate_approval_requests"] = {
+            "passed": False, "skipped": True}
+    return out_gates
+
+
+def score_wiring_resolution(trace_json: str, *, live: bool = False) -> dict[str, Any]:
+    """Eval dimension (SKILL_BASED_PLAYBOOK_PLAN §4, risk #4): does the
+    trace-compiled playbook have **all paths resolve** under the verify
+    loop (render against captured outputs + static `_check_jinja_paths`)?
+
+    Selection/ordering stays model-driven, but wiring is now deterministic
+    -- this dimension guards that the deterministic part actually holds:
+    every value-matched wire verifies and no undefined/unreachable ref
+    survives. Returns a level dict ({passed, skipped, detail, ...}).
+    """
+    try:
+        from fsr_playbooks.agent.skill_trace import SkillTrace
+        from fsr_playbooks.compiler import skill_verify as sv
+    except ImportError as exc:  # pragma: no cover
+        return {"passed": False, "skipped": True, "detail": f"unavailable: {exc}"}
+
+    trace = SkillTrace.from_json(trace_json or "")
+    if len(trace) == 0:
+        return {"passed": False, "skipped": True, "detail": "empty trace"}
+
+    render_fn = None
+    if live:
+        try:
+            from fsr_playbooks.mcp_server import (
+                render_jinja as render_fn,  # noqa: PLC0415
+            )
+        except Exception:  # noqa: BLE001
+            render_fn = None
+
+    compiled = sv.compile_and_verify(trace, render_fn=render_fn)
+    # Every recorded wire must have verified True; repairs and static
+    # errors both count as a failure to fully resolve.
+    bad_wires = [
+        f"{step}.{param}"
+        for step, params in compiled.get("verified", {}).items()
+        for param, ok in params.items() if not ok
+    ]
+    static_errors = compiled.get("static_errors", [])
+    passed = not bad_wires and not static_errors
+    return {
+        "passed": passed,
+        "skipped": False,
+        "detail": ("all wires resolve" if passed
+                   else f"{len(bad_wires)} unresolved wire(s), "
+                        f"{len(static_errors)} static error(s)"),
+        "unresolved_wires": bad_wires,
+        "static_errors": static_errors,
+    }
+
+
+def score_offer_timing(trace: list[dict[str, Any]],
+                       offer_requested: bool = False) -> dict[str, Any]:
+    """Eval dimension (SKILL_BASED_PLAYBOOK_PLAN §6 / TODO Track A4): did the
+    agent call `emit_playbook_offer` at the RIGHT time?
+
+    The offer is model-triggered -- the tool plumbing is unit-tested, but
+    *when* the model offers is prompt-driven and the thing that regresses.
+    This reads the tool-use trace and grades the timing deterministically:
+
+    - offered exactly once, after ≥1 executed containment (destructive) op
+      → pass (the intended path).
+    - never offered, and no containment happened → pass (correctly silent on
+      a read-only triage).
+    - never offered despite containment → fail (missed save opportunity).
+    - offered ≥2 times → fail (the never-offer-twice bar).
+    - offered before any op ran → fail (premature / empty offer).
+    - offered once after only read-only ops → pass-but-noted: permitted under
+      the analyst-decides design (the card carries an advisory), yet the
+      prompt-preferred behavior is to stay silent, so we flag it for review.
+
+    `_op_risk` classifies destructive ops by name prefix; an `unknown` op is
+    not counted as containment here (same conservative stance as the card's
+    advisory). Returns a level dict.
+
+    `offer_requested=True` for a turn where the analyst ASKED for a playbook
+    ("build me a playbook ... save it when it's ready"). There the offer is the
+    deliverable, not an unprompted save prompt, so the only bar is "offered
+    exactly once" -- the rules above all assume an investigation the agent
+    chose to bottle, and applied to a build turn they score the correct answer
+    as premature. That happened: `select_build_offer` lost a point for
+    delivering exactly what it was asked for.
+    """
+    try:
+        from fsr_playbooks.mcp_server.tools_discovery import _op_risk
+    except ImportError as exc:  # pragma: no cover
+        return {"passed": False, "skipped": True, "detail": f"unavailable: {exc}"}
+
+    offers = [i for i, c in enumerate(trace)
+              if c.get("name") == "emit_playbook_offer"
+              # A REFUSED emission (bad_payload, not_afforded, read_only_turn,
+              # ...) never rendered a card -- the analyst saw nothing -- so it
+              # is not an offer. Counting it double-charged a model that fixed
+              # its payload shape and re-emitted: one card on screen, "offered
+              # 2 times" on the gate (seen live once emit_card's payload
+              # indirection landed).
+              and c.get("code") in (None, "") and c.get("ok") is not False]
+    mut_before: list[int] = []
+    any_op: list[int] = []
+    for i, c in enumerate(trace):
+        if c.get("name") != "run_op":
+            continue
+        any_op.append(i)
+        args = _call_args(c)
+        op = str(args.get("op") or args.get("operation") or "")
+        if _op_risk(op, None) == "destructive":
+            mut_before.append(i)
+
+    n = len(offers)
+    if offer_requested:
+        if n == 1:
+            return {"passed": True, "skipped": False, "offers": 1,
+                    "detail": "offered once -- the analyst asked for a playbook"}
+        return {
+            "passed": False, "skipped": False, "offers": n,
+            "detail": ("the analyst asked for a playbook and none was offered"
+                       if n == 0 else
+                       f"offered {n} times (bar: at most once per session)"),
+        }
+    if n == 0:
+        contained = bool(mut_before)
+        return {
+            "passed": not contained, "skipped": False,
+            "offers": 0,
+            "detail": ("containment ran but the save was never offered"
+                       if contained else "no containment; correctly silent"),
+        }
+    if n >= 2:
+        return {
+            "passed": False, "skipped": False, "offers": n,
+            "detail": f"offered {n} times (bar: at most once per session)",
+        }
+
+    off = offers[0]
+    contained_before = any(i < off for i in mut_before)
+    if contained_before:
+        return {
+            "passed": True, "skipped": False, "offers": 1,
+            "detail": "offered once after a containment action",
+        }
+    if not any(i < off for i in any_op):
+        return {
+            "passed": False, "skipped": False, "offers": 1,
+            "detail": "offered before executing any action (premature)",
+        }
+    return {
+        "passed": True, "skipped": False, "offers": 1,
+        "needs_review": True,
+        "detail": ("offered after read-only ops only -- permitted "
+                   "(analyst-decides + advisory) but prompt-preferred is silence"),
+    }
+
+
+def score_enhance_delivery(trace: list[dict[str, Any]],
+                           assistant_text: str = "") -> dict[str, Any]:
+    """Eval dimension: did the agent actually DELIVER the edit it was asked for?
+
+    The enhance bucket exists because this failed silently and repeatedly on a
+    live appliance. Asked to add a manual_input step, the agent called
+    `verify_enhancement`, got `ready_to_push: True`, then printed the revised
+    playbook into chat -- three times, each rendering slightly different from the
+    verified one. Nothing was ever written. From the analyst's seat the agent
+    "kept trying and couldn't"; from the transcript it looked fine, because
+    every tool call returned ok.
+
+    That is exactly the shape a pass/fail on tool ERRORS cannot see, so grade
+    the DELIVERY instead:
+
+    - verified, then `emit_enhancement_offer` with that verify's `verified_id`
+      → pass. The edit reaches the open playbook.
+    - verified, but the turn ended with a YAML fence and no offer
+      → fail (`printed_instead_of_applied`). The original defect, exactly.
+    - offered with a `verified_id` no verify in this trace issued
+      → fail (`unverified_delivery`). Structurally impossible through the tool,
+      so it means a bypass was reintroduced.
+    - never verified → fail (`no_verify`).
+    - verify never passed and nothing was offered → pass. Declining to deliver
+      a broken edit is correct, not a missed delivery.
+
+    Read-only turns have neither call and skip.
+    """
+    # Canonicalize here, not only in the matrix harness: the live runner
+    # (enhance_live.py) scored raw traces, so every delivery through the
+    # consolidated `emit_card(card_type='enhancement_offer')` was invisible and
+    # graded `verified_not_applied` (live 09-28: 1/10 "delivered", 9 false
+    # fails). Idempotent on an already-canonical trace.
+    trace = canonicalize_trace(trace) or []
+    verifies = [c for c in trace if c.get("name") in _ENHANCE_VERIFY_TOOLS]
+    # A REFUSED offer (result ok: false) delivered nothing -- counting it made
+    # "refused, fixed, delivered" read as `offered_twice`.
+    offers = [c for c in trace if c.get("name") == "emit_enhancement_offer"
+              and not (isinstance(c.get("result"), dict)
+                       and c["result"].get("ok") is False)]
+    has_fence = "```yaml" in (assistant_text or "").lower()
+
+    if not verifies and not offers:
+        return {"passed": True, "skipped": True,
+                "detail": "no enhancement attempted (read-only turn)"}
+
+    # The ids this turn is entitled to deliver. A result may or may not be
+    # threaded onto the call record depending on the harness, so accept either
+    # shape and degrade to "some verify passed" when results aren't present.
+    issued: set[str] = set()
+    any_passed = False
+    for c in verifies:
+        res = c.get("result") if isinstance(c.get("result"), dict) else {}
+        vid = res.get("verified_id")
+        if vid:
+            issued.add(str(vid))
+        if res.get("ready_to_push"):
+            any_passed = True
+
+    if not verifies:
+        return {"passed": False, "skipped": False, "code": "no_verify",
+                "detail": "delivered an edit that was never verified"}
+
+    if not offers:
+        if has_fence:
+            return {
+                "passed": False, "skipped": False,
+                "code": "printed_instead_of_applied",
+                "detail": ("ended with a YAML fence and no emit_enhancement_offer "
+                           "-- the analyst's playbook is unchanged"),
+            }
+        if any_passed:
+            return {
+                "passed": False, "skipped": False, "code": "verified_not_applied",
+                "detail": "verify passed but the edit was never delivered",
+            }
+        return {"passed": True, "skipped": False,
+                "detail": "verify did not pass; correctly declined to deliver"}
+
+    if len(offers) > 1:
+        return {"passed": False, "skipped": False, "code": "offered_twice",
+                "detail": f"delivered {len(offers)} times (bar: once)"}
+
+    used = str(_call_args(offers[0]).get("verified_id") or "")
+    if not used:
+        return {"passed": False, "skipped": False, "code": "unverified_delivery",
+                "detail": "offered with no verified_id"}
+    if issued and used not in issued:
+        return {
+            "passed": False, "skipped": False, "code": "unverified_delivery",
+            "detail": (f"offered verified_id {used!r}, which no verify in this "
+                       f"turn issued (issued: {sorted(issued)})"),
+        }
+
+    out: dict[str, Any] = {
+        "passed": True, "skipped": False,
+        "detail": "verified, then delivered those exact bytes",
+    }
+    if has_fence:
+        # Not a failure on its own -- showing the CHANGED STEP is encouraged --
+        # but a whole playbook in prose is what the old bug looked like, so
+        # flag it for a human rather than silently passing it.
+        out["needs_review"] = True
+        out["detail"] += " (also printed a YAML fence -- confirm it's a snippet)"
+    return out
+
+
+def score_no_collateral_damage(before_yaml: str,
+                               after_yaml: str,
+                               user_message: str | None = None,
+                               ) -> dict[str, Any]:
+    """Did the repair/edit break something it was not asked to touch?
+
+    `draft` and `verified` read the delivered YAML alone, so a fix that also
+    deletes a step, silently renames one (breaking every external
+    `vars.steps.<slug>` reference), or rewrites a branch nobody mentioned
+    scores exactly as well as a surgical one. That is the whole failure mode
+    an analyst fears when approving an edit.
+
+    `verify_enhancement` already computes those regressions and is unused by
+    the matrix. This gate reads its error-severity ones. Warning-severity
+    entries (a stripped annotation) surface in `detail` but do not fail --
+    same bar the tool itself applies to `ready_to_push`.
+    """
+    if not (before_yaml or "").strip():
+        return {"passed": False, "skipped": True,
+                "detail": "fixture carries no before_yaml to diff against"}
+    if not (after_yaml or "").strip():
+        return {"passed": False, "skipped": False,
+                "detail": "the turn delivered no YAML -- nothing to compare"}
+    # An `after` that does not compile produces an EMPTY regression list, and
+    # an empty list read as "nothing broke" is how a turn that delivered a
+    # stub scored this gate 1/1. Unjudgeable is a failure here, not a pass:
+    # the analyst cannot approve what does not compile.
+    if not _compile_obj(after_yaml).get("ok"):
+        return {"passed": False, "skipped": False,
+                "regressions": [], "warnings": [],
+                "detail": ("the delivered YAML did not compile, so collateral "
+                           "damage cannot be judged -- see draft")}
+    try:
+        from fsr_playbooks.mcp_server import verify_enhancement  # noqa: PLC0415
+        out = verify_enhancement(before_yaml, after_yaml,
+                                 user_message=user_message)
+    except Exception as exc:  # noqa: BLE001
+        return {"passed": False, "skipped": True,
+                "detail": f"verify_enhancement unavailable: {exc}"}
+    regs = out.get("regressions") or []
+    errors = [r for r in regs if r.get("severity") == "error"]
+    warns = [r for r in regs if r.get("severity") != "error"]
+    return {
+        "passed": not errors,
+        "skipped": False,
+        "regressions": [str(r.get("kind")) for r in errors],
+        "warnings": [str(r.get("kind")) for r in warns],
+        "detail": ("no step dropped, renamed or rewritten outside the fix"
+                   if not errors else
+                   "; ".join(f"{r.get('kind')} on {r.get('step')}"
+                             for r in errors)),
+    }
+
+
+def score(
+    yaml_text: str,
+    *,
+    gold_json: dict[str, Any] | None = None,
+    live: bool = False,
+    dry_run_kwargs: dict[str, Any] | None = None,
+    trace: list[dict[str, Any]] | None = None,
+    final_text: str | None = None,
+    audit: list[dict[str, Any]] | None = None,
+    expected_approvals: dict[str, Any] | None = None,
+    mode: str | None = None,
+    required_facts: list[dict[str, Any]] | None = None,
+    forbidden_facts: list[dict[str, Any]] | None = None,
+    investigation_quality: dict[str, Any] | None = None,
+    skill_trace_json: str | None = None,
+    terminal_tool: list[str] | None = None,
+    ir_assertions: list[dict[str, Any]] | None = None,
+    before_yaml: str | None = None,
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    """Score a candidate YAML across confidence tiers + agent gates.
+
+    `mode="refuse"` flips the success criteria for graceful-failure tasks
+    (e.g. `unknown_connector`): success = no YAML emitted, no verify call,
+    zero tier-3+ approvals. All authoring-tier gates become informational
+    so they neither help nor hurt the score.
+
+    `mode="investigation"` scores a triage/hunt task on **pivot recall**
+    (`required_facts` matched in the tool-use trace) instead of YAML shape.
+    All authoring tiers + adherence become informational; the single gate
+    is `investigation_recall` (>= 0.8, with a hard fail on `forbidden_facts`).
+
+    `mode="tool_selection"` scores ONE thing: did the turn reach
+    `terminal_tool`. Every other gate becomes informational, so a turn that
+    researches beautifully and never acts scores zero -- which is exactly
+    the live failure this mode exists to measure.
+
+    `mode="enhance"` grades an EDIT to a playbook the analyst has open: the
+    same "did what was asked + broke nothing" pair as repair, plus
+    `enhance_delivery` -- the edit has to reach the playbook, not the chat log.
+
+    `mode="repair"` grades a TROUBLESHOOT turn -- the verb with zero coverage
+    before this. The fixture supplies `before_yaml` (a broken playbook) and
+    `ir_assertions` describing the condition that must hold once it is fixed.
+    Two things count, and one alone is worthless: the defect is gone
+    (`behavior` + `verified`), AND nothing else moved
+    (`no_collateral_damage`). A "fix" that deletes the failing step satisfies
+    the first and fails the second, which is the point.
+    """
+    out: dict[str, Any] = {"levels": {}}
+    refuse = (mode == "refuse")
+    investigation = (mode == "investigation")
+    selection = (mode == "tool_selection")
+    repair = (mode == "repair")
+    enhance = (mode == "enhance")
+
+    # A turn that delivered nothing has nothing to compile. Saying "compile
+    # failed" about it is a lie with errors attached, and the errors are about
+    # whatever prose got scraped -- which is how the detail column stopped
+    # being read at all. In the modes that never expect a playbook the tiers
+    # are SKIPPED (they are informational there anyway, so the aggregate is
+    # untouched); in build mode "delivered nothing" is still a failure, just an
+    # honestly-labelled one.
+    no_yaml = not (yaml_text or "").strip()
+    empty_detail = "the turn delivered no YAML -- nothing to compile"
+    empty_skip = no_yaml and (refuse or investigation or selection)
+
+    # ----------------- confidence tier 1: draft (compile clean) ------------
+    comp = _compile_obj(yaml_text) if not no_yaml else {"ok": False, "errors": []}
+    draft_ok = bool(comp.get("ok"))
+    out["levels"]["draft"] = {
+        "passed": draft_ok,
+        "skipped": empty_skip,
+        "detail": (empty_detail if no_yaml
+                   else "compiles" if draft_ok else "compile failed"),
+        "errors": comp.get("errors", []) if not draft_ok else [],
+    }
+    if no_yaml:
+        out["levels"]["draft"]["code"] = "no_yaml_delivered"
+
+    # ----------------- confidence tier 2: verified -------------------------
+    # Runs the same fan-out the agent is supposed to call: compile +
+    # typed walk + per-step schema checks. live_probe follows the eval
+    # mode so offline runs stay deterministic.
+    verify = ({} if no_yaml else _verify(yaml_text, live=live))
+    verified_ok = bool(verify.get("ready_to_push"))
+    out["levels"]["verified"] = {
+        "passed": verified_ok,
+        "skipped": empty_skip,
+        "required_fix_count": len(verify.get("required_fixes") or []),
+        "warning_count": len(verify.get("warnings") or []),
+        "detail": (empty_detail if no_yaml
+                   else "verify_playbook ready_to_push=True" if verified_ok
+                   else f"{len(verify.get('required_fixes') or [])} required fix(es)"),
+    }
+    if no_yaml:
+        out["levels"]["verified"]["code"] = "no_yaml_delivered"
+
+    # ----------------- confidence tier 3: live_tested ----------------------
+    if live:
+        # Structural skip: playbooks that block on human input or need
+        # a real record context can't reach a terminal state via the
+        # eval's /notrigger dry-run. Marking these as skipped (with a
+        # specific reason) keeps the harness honest and avoids 180s
+        # timeouts per task. The agent-loop gates still grade these.
+        blocker = _live_tested_blocker(yaml_text)
+        if blocker is not None:
+            out["levels"]["live_tested"] = {
+                "passed": False, "skipped": True, "code": blocker[0],
+                "summary": blocker[1],
+            }
+        else:
+            try:
+                from fsr_playbooks.mcp_server import dry_run_playbook  # noqa: PLC0415
+                kw = dict(dry_run_kwargs or {})
+                # Infer playbook name from the YAML when the caller didn't
+                # pin one. Lets re-baseline runs exercise tier-3 without
+                # every task carrying a `dry_run_kwargs.playbook` override.
+                if "playbook" not in kw:
+                    inferred = _first_playbook_name(yaml_text)
+                    if inferred:
+                        kw["playbook"] = inferred
+                dr = dry_run_playbook(yaml_text, **kw) if kw else None
+                if dr is None:
+                    dr = {"ok": False, "code": "no_dry_run_target",
+                          "message": "dry_run_kwargs missing `playbook` name"}
+                out["levels"]["live_tested"] = {
+                    "passed": bool(dr.get("ok")),
+                    "skipped": False,
+                    "code": dr.get("code"),
+                    "summary": dr.get("status") or dr.get("message"),
+                }
+            except Exception as exc:  # noqa: BLE001
+                out["levels"]["live_tested"] = {
+                    "passed": False, "skipped": False,
+                    "detail": f"dry-run raised: {exc!r}",
+                }
+    else:
+        out["levels"]["live_tested"] = {"passed": False, "skipped": True}
+
+    # ----------------- wiring resolution (trace-compiler path) -------------
+    # Only meaningful when a skill trace was recorded; informational so it
+    # neither helps nor hurts the hand-author baseline during the parity
+    # campaign (Phase 5).
+    if skill_trace_json:
+        wr = score_wiring_resolution(skill_trace_json, live=live)
+        wr["informational"] = True
+        out["levels"]["wiring_resolves"] = wr
+    else:
+        out["levels"]["wiring_resolves"] = {"passed": False, "skipped": True}
+
+    # ----------------- offer timing (model-triggered, A4) ------------------
+    # Did the agent offer to save the playbook at the right moment? Graded
+    # from the tool-use trace; informational so it tracks prompt regressions
+    # without skewing the YAML-authoring score.
+    if trace:
+        ot = score_offer_timing(
+            trace,
+            offer_requested="emit_playbook_offer" in (terminal_tool or []))
+        ot["informational"] = True
+        out["levels"]["offer_timing"] = ot
+    else:
+        out["levels"]["offer_timing"] = {"passed": False, "skipped": True}
+
+    # ----------------- behavior: does it do what was ASKED (#127) ----------
+    # `draft` says it compiles and `verified` says it is statically sound;
+    # neither reads the prompt. This one does -- but only where a fixture has
+    # written down what its prompt requires. Counted, not informational: a
+    # playbook that loops the wrong field is wrong, and the scoreboard's whole
+    # problem was that nothing said so. Skips in the modes that expect no
+    # playbook at all.
+    if refuse or investigation or selection:
+        out["levels"]["behavior"] = {
+            "passed": False, "skipped": True,
+            "detail": "no playbook expected in this mode"}
+    else:
+        from evals.ir_assertions import check_ir_assertions  # noqa: PLC0415
+        out["levels"]["behavior"] = check_ir_assertions(yaml_text, ir_assertions)
+
+    # ----------------- example check (orthogonal) --------------------------
+    if gold_json is not None:
+        if comp.get("ok"):
+            try:
+                got = json.loads(comp["json"])
+            except Exception:  # noqa: BLE001
+                got = {}
+            a = _strip_volatile(got)
+            b = _strip_volatile(gold_json)
+            out["levels"]["matches_example"] = {
+                "passed": a == b, "skipped": False,
+                "detail": ("match" if a == b
+                           else "compiled JSON differs from the reference example"),
+            }
+        else:
+            out["levels"]["matches_example"] = {
+                "passed": False, "skipped": False,
+                "detail": "compile failed -- see draft errors",
+            }
+    else:
+        out["levels"]["matches_example"] = {"passed": False, "skipped": True}
+
+    # ----------------- agent-behavior gates --------------------------------
+    if trace is not None:
+        out["levels"].update(_score_agentic(
+            trace=trace, text=final_text or "",
+            audit=audit, expected_approvals=expected_approvals,
+        ))
+    else:
+        for k in ("tool_budget", "no_spiral", "adherence",
+                  "verify_called_before_submit",
+                  "verify_iterations_until_ready",
+                  "final_verify_ready_to_push",
+                  "appropriate_approval_requests"):
+            out["levels"][k] = {"passed": False, "skipped": True}
+
+    # ----------------- B4: triage→build fidelity ---------------------------
+    # Does the built playbook automate what was investigated? Auto-skips on
+    # standalone authoring tasks (no investigation ops in the trace) and on
+    # investigation/refuse modes (no playbook expected), so it only grades a
+    # real triage→build chain.
+    if not investigation and not refuse and not selection:
+        out["levels"]["build_fidelity"] = score_build_fidelity(trace, yaml_text)
+    else:
+        out["levels"]["build_fidelity"] = {"passed": False, "skipped": True}
+
+    # `verify_iterations_until_ready` is informational, not a gate --
+    # exclude from the pass/fail aggregate. Same logic as the old
+    # `skipped` flag, but here we mark it `passed=True` if it ran at
+    # all so it doesn't drag the fraction.
+    iters_lv = out["levels"].get("verify_iterations_until_ready", {})
+    if not iters_lv.get("skipped"):
+        # not counted toward fraction
+        iters_lv["informational"] = True
+
+    # `matches_example` is byte-equality of compiled IR against a gold
+    # reference: useful diagnostic, but free-form LLM generation cannot
+    # reliably match cosmetic IR differences (optional fields, default
+    # values, step ordering). Demote to informational -- `draft` and
+    # `verified` already gate functional correctness.
+    mex = out["levels"].get("matches_example", {})
+    if not mex.get("skipped"):
+        mex["informational"] = True
+
+    # Refuse-mode: the agent is expected to NOT produce a playbook. Flip
+    # the gates so the authoring tiers are informational and adherence
+    # passes when no YAML block is present.
+    if refuse:
+        for k in ("draft", "verified", "live_tested",
+                  "verify_called_before_submit",
+                  "final_verify_ready_to_push"):
+            lv = out["levels"].get(k, {})
+            if not lv.get("skipped"):
+                lv["informational"] = True
+        adh = out["levels"].get("adherence", {})
+        if not adh.get("skipped"):
+            # Invert: success = nothing delivered. Now that `adherence` counts
+            # the offer card as delivery, refuse-mode correctly fails a turn
+            # that emitted a CARD too -- not just one that pasted YAML.
+            delivered = bool(adh.get("passed"))
+            # ...but "delivered nothing" alone is a VACUOUS pass: a turn that
+            # said nothing at all scored full marks, and stonewalling is not
+            # gracefully declining. Both refuse fixtures ask for prose --
+            # fixture 15 to explain that the connector does not exist,
+            # fixture 46 to explain what the playbook does -- so a refusal
+            # has to come with an answer. The bar is deliberately low
+            # (non-empty prose), because grading the QUALITY of the
+            # explanation is a different gate and a much harder one.
+            explained = len((final_text or "").strip()) >= REFUSE_MIN_EXPLANATION_CHARS
+            adh["passed"] = (not delivered) and explained
+            if delivered:
+                adh["detail"] = (f"delivered a playbook for a refuse-mode task "
+                                 f"(via {adh.get('delivered_via')})")
+            elif not explained:
+                adh["detail"] = ("nothing delivered, but nothing explained "
+                                 "either -- a silent turn is not a graceful "
+                                 "refusal")
+            else:
+                adh["detail"] = "correctly refused -- explained, delivered nothing"
+
+    # Investigation-mode: grade on pivot recall, not YAML. Authoring tiers
+    # and adherence (a YAML block) are irrelevant to a triage/hunt task, so
+    # demote them to informational and add the single recall gate.
+    if investigation:
+        # The authoring tiers + the loose authoring `tool_budget` (20) are
+        # irrelevant or superseded here: investigation gets its own tighter
+        # ceiling (`investigation_tool_budget`). Demote, don't count twice.
+        for k in ("draft", "verified", "live_tested", "matches_example",
+                  "adherence", "verify_called_before_submit",
+                  "final_verify_ready_to_push", "tool_budget"):
+            lv = out["levels"].get(k, {})
+            if not lv.get("skipped"):
+                lv["informational"] = True
+        # A fixture whose required tools are not REGISTERED in this process
+        # cannot score, and it fails looking exactly like a weak agent.
+        # Measured 2026-08-13: `invest_outbound_cleartext_c2` scored 3/7 with
+        # recall 0.00 in the framework repo, because `get_record` and
+        # `search_module_records` are injected by the connector's
+        # `fsr_soc_triage.registry` and are absent here. The agent had
+        # researched competently throughout.
+        #
+        # The row still FAILS and still counts -- hiding it would let a
+        # genuinely broken fixture masquerade as "not applicable". What it
+        # gains is a name: `unservable` rides out to the matrix so `delta_vs`
+        # can refuse to read it as a regression, the same contract `errored`
+        # already has.
+        missing = unservable_required_tools(required_facts)
+        if missing:
+            out["unservable"] = {
+                "missing_tools": missing,
+                "detail": (f"{len(missing)} required tool(s) not registered in "
+                           f"this process: {', '.join(missing)} -- this row "
+                           f"measures the environment, not the agent"),
+            }
+        if trace is not None:
+            out["levels"]["investigation_recall"] = _score_investigation(
+                trace, required_facts, forbidden_facts)
+            if missing:
+                out["levels"]["investigation_recall"]["unservable"] = missing
+            out["levels"].update(
+                _score_investigation_quality(trace, investigation_quality))
+        else:
+            for k in ("investigation_recall", "investigation_tool_budget",
+                      "investigation_no_param_flail",
+                      "investigation_no_spiral",
+                      "investigation_deliverable"):
+                out["levels"][k] = {
+                    "passed": False, "skipped": True,
+                    "detail": "no tool-use trace supplied"}
+
+    # Tool-selection mode: the terminal call is the whole verdict. Demote
+    # every other non-skipped gate so a research-heavy turn can't earn
+    # points for the work it did instead of the work it was asked for.
+    if selection:
+        for k, lv in out["levels"].items():
+            if not lv.get("skipped"):
+                lv["informational"] = True
+        # …except the gates that measure whether the RIGHT call was made
+        # well. Reaching the terminal tool stays necessary -- it is the whole
+        # reason this mode exists -- but it stopped being sufficient the
+        # moment every fixture reached it. A scoreboard pinned at 5/5 cannot
+        # show an improvement, so "make the agent smarter" had no number to
+        # move; these three were sitting in the informational block already
+        # FAILING on real runs (`offer_timing`: "offered before executing any
+        # action (premature)"; `appropriate_approval_requests`: "1 tier-3+
+        # call(s) -- expected zero"), scored 1/1 all the same.
+        #
+        # Deliberately NOT promoted: `decoys_before`. Calling a
+        # wrong-but-plausible tool on the way is orienting, not failing, and
+        # _score_tool_selection documents that it never flips the gate. It
+        # stays a diagnostic on the terminal row.
+        for k in _SELECTION_COUNTED_GATES:
+            lv = out["levels"].get(k)
+            if lv and not lv.get("skipped"):
+                lv.pop("informational", None)
+        if trace is not None:
+            out["levels"]["terminal_tool_reached"] = _score_tool_selection(
+                trace, terminal_tool, forbidden_facts)
+        else:
+            out["levels"]["terminal_tool_reached"] = {
+                "passed": False, "skipped": True,
+                "detail": "no tool-use trace supplied"}
+
+    # ----------------- repair mode: fixed it AND broke nothing -------------
+    # A repair that drops the failing step passes every gate that reads the
+    # delivered YAML alone. This is the half that notices.
+    if repair or enhance:
+        out["levels"]["no_collateral_damage"] = score_no_collateral_damage(
+            before_yaml or "", yaml_text, user_message)
+        # Everything that is not "did the defect get fixed" or "did anything
+        # else break" becomes informational -- same discipline as
+        # tool_selection mode.
+        # Enhance mode adds one gate the repair path does not need: did the
+        # edit REACH the playbook. The live failure was an agent that verified
+        # a good edit and then printed it into chat three times -- every tool
+        # call returned ok and nothing was ever written.
+        counted_here = {"behavior", "verified", "no_collateral_damage"}
+        if enhance:
+            delivery = (
+                score_enhance_delivery(trace, final_text or "")
+                if trace is not None else
+                {"passed": False, "skipped": True,
+                 "detail": "no tool-use trace supplied"})
+            # Every enhance fixture asks for an edit, so "no enhancement
+            # attempted" is not a read-only turn here -- it is the edit never
+            # reaching the open playbook. Skipping it let two failures score
+            # full marks: a playbook re-typed through validate_yaml and only
+            # narrated ("the editor now shows the updated playbook", no
+            # offer), and a Create offer that would duplicate the open
+            # playbook instead of updating it.
+            if trace is not None and delivery.get("skipped"):
+                created = any(
+                    c.get("name") == "emit_playbook_offer"
+                    for c in canonicalize_trace(trace) or [])
+                delivery = {
+                    "passed": False, "skipped": False,
+                    "code": "offered_as_new" if created else "not_delivered",
+                    "detail": (
+                        "delivered the edit as a NEW playbook (Create offer) "
+                        "instead of an update to the open one" if created else
+                        "the edit never reached the open playbook: no "
+                        "edit_playbook / verify_enhancement and no "
+                        "enhancement offer"),
+                }
+            out["levels"]["enhance_delivery"] = delivery
+            counted_here.add("enhance_delivery")
+        for k, lv in out["levels"].items():
+            if k in counted_here:
+                lv.pop("informational", None)
+            elif not lv.get("skipped"):
+                lv["informational"] = True
+    else:
+        out["levels"]["no_collateral_damage"] = {
+            "passed": False, "skipped": True,
+            "detail": "not a repair task"}
+
+    counted = [v for k, v in out["levels"].items()
+               if not v.get("skipped") and not v.get("informational")]
+    out["score"] = sum(1 for v in counted if v["passed"])
+    out["max"] = len(counted)
+    out["fraction"] = (out["score"] / out["max"]) if out["max"] else 0.0
+    return out

@@ -1,0 +1,55 @@
+# The correct answer to the `enhance_add_incident_record` fixture (scenario
+# e2). Calibration, not a demo.
+#
+# The point of the fixture is in the scenario's own note: "create a record" is
+# a NATIVE `create_record` step, not a connector operation. An agent that
+# reaches for `find_operation` here is off the rails before delivery is even
+# in question -- so the assertion is `step_type_present: create_record` plus
+# `step_type_absent` on nothing, and the connector count is left alone.
+#
+# The insertion point matters too: "after Enrich IP" means Enrich IP now
+# points at the new step, and the new step points at Block IP. Appending it
+# to the end would satisfy "a create_record exists" and answer a different
+# request, which is what the reachability assertion is for.
+collection: 00 - FSR Studio
+playbooks:
+- name: Suspicious IP Response
+  is_active: true
+  trigger_step_id: start
+  parameters:
+  - ip_to_investigate
+  steps:
+  - type: start
+    name: Start
+    module: alerts
+    button_label: Respond
+    next: Enrich IP
+  - type: connector
+    name: Enrich IP
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
+    next: Create Incident
+  - type: create_record
+    name: Create Incident
+    module: incidents
+    operation: Overwrite
+    fields:
+      name: 'Suspicious IP {{ vars.input.params.ip_to_investigate }}'
+      description: >-
+        Enrichment completed for {{ vars.input.params.ip_to_investigate }};
+        containment pending.
+    next: Block IP
+  - type: connector
+    name: Block IP
+    connector: fortigate-firewall
+    operation: block_ip
+    params:
+    method: Quarantine Based
+    ip_addresses: '{{ vars.input.params.ip_to_investigate }}'
+    next: End
+  - type: connector
+    name: End
+    connector: cyops_utilities
+    operation: no_op
+    params: {}

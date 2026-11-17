@@ -1,0 +1,655 @@
+"""Reusable agent-turn driver.
+
+`run_agent_turn` consumes the event stream from `provider.stream()` and
+performs the side effects that used to live inline in
+`web/backend/routes/chat.py`: assistant-text coalescing, tool_use /
+tool_result history rows, YAML sniffing for downstream consumers,
+mid-stream tag mutation when the assistant validates/compiles a YAML
+body, and first-UsageEvent retroactive user-message logging.
+
+Consumers -- the web SSE route, the FortiSOAR connector -- supply two
+optional adapters:
+
+- `on_event`: called for every emitted event before any side effects.
+  Web route uses it to push SSE frames; the connector ignores it and
+  reads `TurnResult.transcript` after the call.
+- `history_sink`: persistence target. Optional; without one, no rows
+  are written and the function just collects the transcript.
+
+The "loop" itself -- the tool_use → tool_result agentic round-trip --
+already lives inside `provider.stream()`. This module is the
+*consumer* of that stream.
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import inspect
+import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from . import approvals as _approvals
+from ._loop_helpers import (
+    MAX_TOOL_TURNS,
+    extract_yaml_block,
+    latest_user_text,
+)
+from ._loop_helpers import (
+    clear_guard_fires as _clear_guard_fires,
+)
+from ._loop_helpers import (
+    snapshot_guard_fires as _snapshot_guard_fires,
+)
+from .approvals import SuspendedSession
+from .provider import (
+    DoneEvent,
+    ErrorEvent,
+    Event,
+    LLMProvider,
+    Message,
+    TextEvent,
+    ToolResultEvent,
+    ToolUseEvent,
+    TurnRequest,
+    UsageEvent,
+)
+
+
+@contextlib.asynccontextmanager
+async def _total_timeout(delay: float):
+    """``asyncio.timeout(delay)`` backport for the 3.10 SOAR runtime floor.
+
+    ``asyncio.timeout()`` is 3.11+, so on 3.10 we arm a one-shot loop timer
+    that cancels the current task when ``delay`` elapses and re-raise that as
+    ``TimeoutError`` -- matching the contract the call site relies on. On 3.11+
+    we delegate to the stdlib implementation.
+    """
+    if hasattr(asyncio, "timeout"):
+        async with asyncio.timeout(delay):
+            yield
+        return
+    task = asyncio.current_task()
+    expired = False
+
+    def _fire() -> None:
+        nonlocal expired
+        expired = True
+        if task is not None:
+            task.cancel()
+
+    handle = asyncio.get_event_loop().call_later(delay, _fire)
+    try:
+        yield
+    except asyncio.CancelledError:
+        if expired:
+            raise asyncio.TimeoutError from None
+        raise
+    finally:
+        handle.cancel()
+
+
+# Tool names whose `yaml_text` argument should re-tag the turn with the
+# playbook collection name + sha. Kept here (not in the consumer) because
+# the tag mutation is what stamps subsequent UsageEvents -- moving it out
+# of the stream-consumer loop would break that invariant.
+_YAML_TAGGING_TOOLS = ("validate_yaml", "compile_yaml")
+
+
+# History-message kinds. Mirrors web/backend/history.py's enum so the
+# connector's sqlite rows are wire-compatible with the web app's.
+KIND_USER = "user"
+KIND_ASSISTANT_TEXT = "assistant_text"
+KIND_TOOL_USE = "tool_use"
+KIND_TOOL_RESULT = "tool_result"
+
+
+EventCallback = Callable[[Event], Awaitable[None] | None] | None
+
+
+@dataclass
+class TurnResult:
+    """Snapshot of one turn. Returned from both `run_agent_turn` and
+    `resume_agent_turn`.
+
+    `last_assistant_yaml` is the freshest fenced ```yaml block the
+    assistant emitted during this turn, surfaced so callers can use
+    it without re-parsing the transcript.
+
+    `tags` is the same dict the caller passed in (or a fresh one if
+    they passed None). Mutated mid-stream when the assistant uses
+    `validate_yaml` / `compile_yaml`, mirroring chat.py behavior.
+    """
+    transcript: list[Event] = field(default_factory=list)
+    stop_reason: str | None = None
+    session_id: str | None = None
+    last_assistant_yaml: str | None = None
+    tags: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    final_seq: int = 0
+    """Next available seq value in the current turn after the stream
+    completes. Consumers persisting post-stream rows use this to
+    avoid colliding with the transcript rows the function already
+    wrote."""
+    # Guards that had to force a terminal tool call this turn (by class
+    # name). Empty is the healthy case: the model chose the right tool on
+    # its own. A guard is a compensation, so this is how we find out
+    # whether each one still earns its keep -- one that never fires across
+    # a corpus is a deletion candidate, one that fires often is pointing at
+    # a tool description or prompt that still needs work.
+    guards_fired: list[str] = field(default_factory=list)
+
+
+class _TextCoalescer:
+    """Buffers consecutive TextEvents and flushes them as a single
+    history row at the next tool / turn / stream boundary.
+
+    Streaming providers (OpenAI-compat, LM Studio) emit one TextEvent
+    per token; persisting each as a row turns the history view into
+    hundreds of bordered fragments. This is the same heuristic the
+    old chat.py used.
+    """
+
+    def __init__(self) -> None:
+        self.buf: list[str] = []
+        self.turn: int | None = None
+        self.seq: int | None = None
+
+    def append(self, text: str, *, turn: int, seq: int) -> None:
+        if not self.buf:
+            self.turn = turn
+            self.seq = seq
+        self.buf.append(text)
+
+    def flush(
+        self, sink, session_id: str | None,
+    ) -> bool:
+        """Returns True if a row was written."""
+        if not self.buf or session_id is None or sink is None:
+            self.buf, self.turn, self.seq = [], None, None
+            return False
+        sink.record_chat_message(
+            session_id,
+            self.turn if self.turn is not None else 0,
+            self.seq if self.seq is not None else 0,
+            kind=KIND_ASSISTANT_TEXT,
+            content="".join(self.buf),
+        )
+        self.buf, self.turn, self.seq = [], None, None
+        return True
+
+    def joined(self) -> str:
+        return "".join(self.buf)
+
+
+async def _fire_event_callback(cb: EventCallback, ev: Event) -> None:
+    if cb is None:
+        return
+    out = cb(ev)
+    if inspect.isawaitable(out):
+        await out
+
+
+def _yaml_tags(yaml_text: str | None) -> dict[str, Any]:
+    """Pull the playbook collection name + content hash out of YAML.
+    Standalone duplicate of web/backend/routes/chat.py's helper so
+    fsr_playbooks has no dependency on the web app. Behavior must stay in
+    sync -- both compute a 12-char sha-256 prefix and pull
+    `^collection:` line by name."""
+    if not yaml_text:
+        return {}
+    import hashlib
+    import re
+    m = re.search(r'^\s*collection\s*:\s*(.+?)\s*$',
+                  yaml_text, flags=re.MULTILINE)
+    name = m.group(1).strip().strip('"\'') if m else None
+    sha = hashlib.sha256(yaml_text.encode("utf-8")).hexdigest()[:12]
+    out: dict[str, Any] = {"yaml_sha": sha}
+    if name:
+        out["playbook_collection"] = name
+    return out
+
+
+async def run_agent_turn(
+    *,
+    provider: LLMProvider,
+    system: str,
+    messages: list[Message],
+    tools: list[dict[str, Any]] | None = None,
+    tags: dict[str, Any] | None = None,
+    on_event: EventCallback = None,
+    history_sink: Any = None,            # HistorySink protocol; Any to keep this file's imports cheap
+    turn_for_history: int = 0,
+    session_id: str | None = None,
+    user_message_seq_base: int = -100,
+    coalesce_text: bool = True,
+    timeout_secs: float = 600,
+    case_state: Any = None,              # CaseState | None, kept as Any to keep this file's imports cheap
+    max_tool_turns: int | None = None,   # budget-ask resume (None → provider default)
+    reasoning: str | None = None,        # requested depth; None → provider default
+    defer_tools: bool = False,           # A1.4: let the model search the long tail
+    prune_history: bool | None = None,   # A2 row 10: None = host `shrink_history`
+    cancel_check: Callable[[], bool] | None = None,  # C6: True = analyst stopped
+) -> TurnResult:
+    """Drive one user turn through the provider and return the transcript.
+
+    Side effects per event mirror web/backend/routes/chat.py exactly so
+    the web app can swap to this function without behavior drift.
+
+    Args:
+      provider: anything implementing LLMProvider.
+      system: system prompt.
+      messages: wire-form prior + current user message.
+      tools: tool schemas; empty list → provider self-fills.
+      tags: free-form dict round-tripped on each UsageEvent. **Mutated
+        in-place** when the assistant uses validate_yaml/compile_yaml,
+        because the provider holds a reference to this dict and stamps
+        subsequent UsageEvents from it.
+      on_event: fired for each event before persistence; awaitable
+        return is supported. Web route uses this to push SSE frames.
+      history_sink: implements HistorySink. None → no rows written.
+      turn_for_history: the `turn` column value for chat_messages rows.
+        Web app derives from the request body's user-message count;
+        connector picks its own monotonic scheme.
+      session_id: optional pre-supplied session id. When provided,
+        text / tool_use / tool_result events are persisted from the
+        very first round-trip. When omitted, the function waits for
+        the first UsageEvent (provider-generated id) before persisting
+        anything -- this mirrors web/backend/routes/chat.py behavior
+        and means the first round's assistant text lives in the SSE
+        stream only, not in history.db. The connector pre-supplies
+        the widget's session id to avoid that gap.
+      user_message_seq_base: starting `seq` for the retroactive user-
+        message rows logged on the first UsageEvent. Default -100
+        matches the web app and ensures user rows sort before assistant
+        rows within the same `turn`.
+      coalesce_text: True buffers consecutive TextEvents and flushes
+        at tool / turn / end boundaries; False writes each as its own
+        row. The web app keeps True; tests may turn it off for
+        clarity.
+      timeout_secs: hard deadline on the provider stream. Default 600 s
+        (10 min). On expiry, emits an ErrorEvent and returns with
+        stop_reason="stream_error". Set lower in tests to keep them fast.
+      case_state: optional CaseState instance for guard seeding. When
+        provided, the provider's discipline seeds from case_state.investigation
+        (invest_attempts, hunt_floor_met, called_once_sigs) and mutates it
+        during the turn so the caller can persist it afterwards.
+
+    Returns: TurnResult with the full transcript, stop_reason, captured
+    session_id (from the first UsageEvent), and last_assistant_yaml
+    (freshest fenced yaml block, for caller use).
+    """
+    if tools is None:
+        tools = []
+    if tags is None:
+        tags = {}
+
+    # Guard fires are process-local telemetry; clear at turn start so the
+    # snapshot below belongs to this turn only.
+    _clear_guard_fires()
+    result = TurnResult(tags=tags, session_id=session_id)
+    coalescer = _TextCoalescer()
+    seq_in_turn = 0
+    # NOTE: seq does NOT reset between LLM round-trips inside a single
+    # turn. AnthropicProvider emits one UsageEvent per round-trip; if
+    # we reset seq on each, later rounds' rows collide with earlier
+    # rounds on (session_id, turn, seq) and INSERT OR REPLACE silently
+    # overwrites. See chat.py L379-388 for the original incident note.
+
+    # Bind the analyst's own words for the whole turn so intent-aware tools can
+    # DERIVE intent instead of depending on the model to declare it. Bound here
+    # rather than in each provider because all three funnel through this
+    # function -- three copies of the same seed is exactly how the guards it
+    # feeds drifted apart in the first place.
+    from fsr_playbooks.mcp_server._shared import (
+        reset_turn_user_message,
+        set_turn_user_message,
+    )
+
+    # A2: ASK the provider for this turn's capabilities before streaming. One
+    # ask for all providers -- whoever serves a primitive natively uses it,
+    # whoever does not gets the same host-side emulation as before, and the
+    # decision is not restated per provider. Handing the turn bound over is
+    # what makes a native task budget possible at all; a provider that cannot
+    # take one keeps `budget_note` switched on through the returned residue.
+    # The ask comes from the ACTIVE TURN PLAN unless this call overrode it.
+    # plan_turn is the single per-turn resolution point, and the capability
+    # ask is part of resolving a turn -- deriving it a second time here is how
+    # the prompt, the tool slice and the tier policy drifted apart before
+    # Phase 2. A caller with no plan installed (the framework's own MCP
+    # callers, tests) still gets the pre-seam defaults, because a default
+    # `TurnRequest` asks for nothing that changes a wire.
+    _plan_ask = None
+    try:
+        from .turn_plan import active_turn_plan
+        _active = active_turn_plan()
+        _plan_ask = getattr(_active, "ask", None) if _active else None
+    except Exception:  # pragma: no cover - a plan must never fail a turn
+        _plan_ask = None
+    _ask = TurnRequest(
+        reasoning=(reasoning if reasoning is not None
+                   else getattr(_plan_ask, "reasoning", None)),
+        # An explicit depth for this call replaces the plan's default too.
+        reasoning_default=(None if reasoning is not None
+                           else getattr(_plan_ask, "reasoning_default", None)),
+        max_tool_turns=(max_tool_turns
+                        or getattr(_plan_ask, "max_tool_turns", None)
+                        or MAX_TOOL_TURNS),
+        defer_tools=(defer_tools
+                     or bool(getattr(_plan_ask, "defer_tools", False))),
+        prune_history=(prune_history if prune_history is not None
+                       else getattr(_plan_ask, "prune_history", None)),
+        cancel_check=cancel_check,
+    )
+    try:
+        provider.request(_ask)
+    except AttributeError:
+        # A provider predating the seam (or a hand-rolled test double) has no
+        # `request`. That is the fail-open case by design: it emulates. Caught
+        # NARROWLY on purpose -- a blanket `except` here would swallow a broken
+        # seam and leave the gate silently absent, which is exactly how the
+        # TurnPlan dispatch gate once vanished.
+        import logging
+        logging.debug("provider %s has no capability seam; emulating",
+                      getattr(provider, "name", provider))
+
+    _user_msg_token = set_turn_user_message(latest_user_text(messages))
+    try:
+        async with _total_timeout(timeout_secs):
+            async for ev in provider.stream(
+                system=system, messages=messages, tools=tools, tags=tags,
+                case_state=case_state, max_tool_turns=max_tool_turns,
+            ):
+                await _fire_event_callback(on_event, ev)
+                result.transcript.append(ev)
+
+                if isinstance(ev, UsageEvent):
+                    if coalesce_text:
+                        # Flush buffered text before the new round-trip; increment
+                        # seq only when a row was actually written (2.7 fix: seq
+                        # increments at flush boundaries, not on first text append).
+                        if coalescer.flush(history_sink, result.session_id):
+                            seq_in_turn += 1
+                    if result.session_id is None:
+                        # First UsageEvent: capture the session_id and
+                        # retroactively log the user messages from the
+                        # request body. Negative seq base so they sort
+                        # before the assistant rows in this same turn.
+                        result.session_id = ev.session_id
+                        if history_sink is not None:
+                            for i, m in enumerate(messages):
+                                if m.role == "user" and isinstance(m.content, str):
+                                    history_sink.record_chat_message(
+                                        ev.session_id,
+                                        ev.turn,
+                                        user_message_seq_base + i,
+                                        kind=KIND_USER,
+                                        content=m.content,
+                                    )
+                    result.stop_reason = ev.stop_reason
+
+                elif isinstance(ev, TextEvent) and result.session_id:
+                    if coalesce_text:
+                        coalescer.append(ev.text, turn=turn_for_history, seq=seq_in_turn)
+                        # Sniff fenced yaml block from the running buffer
+                        # so a block split across deltas still scores.
+                        found = extract_yaml_block(coalescer.joined())
+                        if found:
+                            result.last_assistant_yaml = found
+                    else:
+                        if history_sink is not None:
+                            history_sink.record_chat_message(
+                                result.session_id, turn_for_history, seq_in_turn,
+                                kind=KIND_ASSISTANT_TEXT, content=ev.text,
+                            )
+                            seq_in_turn += 1
+                        found = extract_yaml_block(ev.text)
+                        if found:
+                            result.last_assistant_yaml = found
+
+                elif isinstance(ev, ToolUseEvent) and result.session_id:
+                    if coalesce_text:
+                        if coalescer.flush(history_sink, result.session_id):
+                            seq_in_turn += 1
+                    if history_sink is not None:
+                        history_sink.record_chat_message(
+                            result.session_id, turn_for_history, seq_in_turn,
+                            kind=KIND_TOOL_USE, name=ev.name,
+                            content=json.dumps(ev.arguments, default=str),
+                        )
+                    seq_in_turn += 1
+                    # Mid-stream tag mutation. The provider holds a reference
+                    # to `tags`; mutating in place propagates the
+                    # playbook_collection tag onto subsequent UsageEvents.
+                    if ev.name in _YAML_TAGGING_TOOLS:
+                        yaml_arg = ev.arguments.get("yaml_text") \
+                            if isinstance(ev.arguments, dict) else None
+                        derived = _yaml_tags(yaml_arg)
+                        if derived:
+                            tags.update(derived)
+
+                elif isinstance(ev, ToolResultEvent) and result.session_id:
+                    if coalesce_text:
+                        if coalescer.flush(history_sink, result.session_id):
+                            seq_in_turn += 1
+                    if history_sink is not None:
+                        payload = ev.result if isinstance(ev.result, str) \
+                            else json.dumps(ev.result, default=str)
+                        history_sink.record_chat_message(
+                            result.session_id, turn_for_history, seq_in_turn,
+                            kind=KIND_TOOL_RESULT, name=ev.call_id,
+                            content=payload,
+                        )
+                    seq_in_turn += 1
+
+                elif isinstance(ev, DoneEvent):
+                    result.stop_reason = ev.stop_reason
+
+                elif isinstance(ev, ErrorEvent):
+                    result.error = ev.message
+                    if result.stop_reason is None:
+                        result.stop_reason = "error"
+
+            # Final flush in case the stream ended without a terminal
+            # tool / Usage boundary (e.g. ErrorEvent or pure-text turn).
+            if coalesce_text:
+                if coalescer.flush(history_sink, result.session_id):
+                    seq_in_turn += 1
+
+    except asyncio.TimeoutError:
+        result.error = f"provider stream timed out after {timeout_secs:.0f} s"
+        result.stop_reason = "stream_error"
+        if coalesce_text:
+            coalescer.flush(history_sink, result.session_id)
+        err_ev = ErrorEvent(message=result.error)
+        await _fire_event_callback(on_event, err_ev)
+        result.transcript.append(err_ev)
+
+    except Exception as exc:  # noqa: BLE001
+        result.error = f"{type(exc).__name__}: {exc}"
+        # An exception terminates the stream -- that's the real terminal
+        # state regardless of whatever stop_reason the last UsageEvent
+        # carried.
+        result.stop_reason = "stream_error"
+        if coalesce_text:
+            coalescer.flush(history_sink, result.session_id)
+        # Surface a synthetic ErrorEvent so on_event callers (SSE
+        # route) can render the failure inline.
+        err_ev = ErrorEvent(message=result.error)
+        await _fire_event_callback(on_event, err_ev)
+        result.transcript.append(err_ev)
+    finally:
+        # Turn-scoped: the next turn's intent must never be read off this one.
+        reset_turn_user_message(_user_msg_token)
+
+    result.final_seq = seq_in_turn
+    result.guards_fired = _snapshot_guard_fires()
+    return result
+
+
+async def resume_agent_turn(
+    *,
+    provider: LLMProvider,
+    suspended: SuspendedSession,
+    decision: str,
+    on_event: EventCallback = None,
+    history_sink: Any = None,
+    turn_for_history: int = 0,
+    coalesce_text: bool = True,
+    session_id: str | None = None,
+) -> TurnResult:
+    """Resume a HITL-suspended turn after the user approves or denies.
+
+    The caller is responsible for having `pop`'d the SuspendedSession
+    from its ApprovalGateway before invoking. This function calls
+    `provider.resume(suspended=suspended, decision=decision)` and
+    consumes the resulting event stream with the same side-effect
+    rules as `run_agent_turn`.
+
+    `session_id` is the caller's real session id for history keying. A
+    provider's `stream()` mints a fresh synthetic session id per call and
+    stamps it into `SuspendedSession.session_id`, so keying the resume turn's
+    recorded messages on `suspended.session_id` would file them under an id
+    that threads onto nothing. When the caller supplies `session_id`, every
+    `record_chat_message` below keys on it so the resume turn joins the real
+    session's history; falls back to `suspended.session_id` when unset.
+
+    Returns a TurnResult. If the provider doesn't implement `resume`,
+    returns a result with `error` set and a synthetic ErrorEvent in
+    `transcript`.
+    """
+    result = TurnResult(session_id=session_id or suspended.session_id)
+    coalescer = _TextCoalescer()
+    seq_in_turn = 0
+
+    # Restore the turn evidence from the suspended session so citations survive.
+    from fsr_playbooks.mcp_server._citation_validator import (
+        TurnEvidence,
+        set_turn_evidence,
+    )
+    if getattr(suspended, "turn_evidence_state", None):
+        evidence = TurnEvidence.from_dict(suspended.turn_evidence_state)
+        set_turn_evidence(evidence)
+
+    resume_fn = getattr(provider, "resume", None)
+    if resume_fn is None:
+        err_ev = ErrorEvent(message="provider does not support approval resume")
+        result.error = err_ev.message
+        result.stop_reason = "config_error"
+        result.transcript.append(err_ev)
+        await _fire_event_callback(on_event, err_ev)
+        return result
+
+    # §2.3 -- Surface skipped tools. Tool calls that were in the same assistant
+    # turn as the approval-gated call but never ran are recorded in
+    # suspended.remaining_tool_calls. Emit synthetic ToolUseEvent +
+    # ToolResultEvent pairs now so the SSE stream, history_sink, and transcript
+    # all reflect the interrupted intent, letting the UI render "skipped" chips
+    # and the history DB record a complete turn picture.
+    for skipped in suspended.remaining_tool_calls:
+        use_ev = ToolUseEvent(
+            name=skipped.name,
+            arguments=skipped.args,
+            call_id=skipped.call_id,
+            synthetic=True,
+        )
+        res_ev = ToolResultEvent(
+            call_id=skipped.call_id,
+            result=dict(_approvals.SUPERSEDED_RESULT),
+            synthetic=True,
+        )
+        for ev in (use_ev, res_ev):
+            result.transcript.append(ev)
+            await _fire_event_callback(on_event, ev)
+        if history_sink is not None:
+            history_sink.record_chat_message(
+                result.session_id, turn_for_history, seq_in_turn,
+                kind=KIND_TOOL_USE, name=skipped.name,
+                content=json.dumps(skipped.args, default=str),
+            )
+            seq_in_turn += 1
+            history_sink.record_chat_message(
+                result.session_id, turn_for_history, seq_in_turn,
+                kind=KIND_TOOL_RESULT, name=skipped.call_id,
+                content=json.dumps(_approvals.SUPERSEDED_RESULT, default=str),
+            )
+            seq_in_turn += 1
+
+    try:
+        async for ev in resume_fn(suspended=suspended, decision=decision):
+            await _fire_event_callback(on_event, ev)
+            result.transcript.append(ev)
+
+            if isinstance(ev, UsageEvent):
+                if coalesce_text:
+                    coalescer.flush(history_sink, result.session_id)
+                result.stop_reason = ev.stop_reason
+
+            elif isinstance(ev, TextEvent):
+                if coalesce_text:
+                    coalescer.append(ev.text, turn=turn_for_history, seq=seq_in_turn)
+                    if not coalescer.buf[:-1]:
+                        seq_in_turn += 1
+                else:
+                    if history_sink is not None:
+                        history_sink.record_chat_message(
+                            result.session_id, turn_for_history, seq_in_turn,
+                            kind=KIND_ASSISTANT_TEXT, content=ev.text,
+                        )
+                        seq_in_turn += 1
+
+            elif isinstance(ev, ToolUseEvent):
+                if coalesce_text:
+                    coalescer.flush(history_sink, result.session_id)
+                if history_sink is not None:
+                    history_sink.record_chat_message(
+                        result.session_id, turn_for_history, seq_in_turn,
+                        kind=KIND_TOOL_USE, name=ev.name,
+                        content=json.dumps(ev.arguments, default=str),
+                    )
+                seq_in_turn += 1
+
+            elif isinstance(ev, ToolResultEvent):
+                if coalesce_text:
+                    coalescer.flush(history_sink, result.session_id)
+                if history_sink is not None:
+                    payload = ev.result if isinstance(ev.result, str) \
+                        else json.dumps(ev.result, default=str)
+                    history_sink.record_chat_message(
+                        result.session_id, turn_for_history, seq_in_turn,
+                        kind=KIND_TOOL_RESULT, name=ev.call_id,
+                        content=payload,
+                    )
+                seq_in_turn += 1
+
+            elif isinstance(ev, DoneEvent):
+                result.stop_reason = ev.stop_reason
+
+            elif isinstance(ev, ErrorEvent):
+                result.error = ev.message
+                if result.stop_reason is None:
+                    result.stop_reason = "error"
+
+        if coalesce_text:
+            coalescer.flush(history_sink, result.session_id)
+
+    except Exception as exc:  # noqa: BLE001
+        result.error = f"{type(exc).__name__}: {exc}"
+        if result.stop_reason is None:
+            result.stop_reason = "stream_error"
+        if coalesce_text:
+            coalescer.flush(history_sink, result.session_id)
+        err_ev = ErrorEvent(message=result.error)
+        await _fire_event_callback(on_event, err_ev)
+        result.transcript.append(err_ev)
+
+    return result
+
+
+__all__ = [
+    "TurnResult",
+    "run_agent_turn",
+    "resume_agent_turn",
+    "KIND_USER", "KIND_ASSISTANT_TEXT", "KIND_TOOL_USE", "KIND_TOOL_RESULT",
+]

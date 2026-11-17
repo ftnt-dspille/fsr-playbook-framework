@@ -1,0 +1,407 @@
+# FSR Playbook Studio -- dev runner
+#
+# Common targets:
+#   make backend     -- start FastAPI on :47821 with autoreload
+#   make frontend    -- start Vite (Svelte) on :47822
+#   make dev         -- both, in parallel; Ctrl-C kills the group
+#   make e2e         -- run every examples/*.test.yaml against the live FSR
+#   make tests       -- fast pytest (excludes live + slow)
+#   make tests-random -- every offline suite under 3 randomized orders
+#
+# Notes:
+#   - Backend reads .env at the repo root (FSR_BASE_URL, ANTHROPIC_API_KEY, …).
+#   - Frontend dev server proxies to the backend; keep both running.
+#   - Python deps are managed by uv. `make sync` to install/update everything.
+#     The Makefile uses `uv run` so it always picks the project venv at .venv/.
+
+.PHONY: jinja-export jinja-probe jinja-docs jinja-verify backend frontend dev e2e tests tests-random playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate enhance-live release ci-watch corpus-gate corpus-gen corpus-triage matrix tool-gate agreement mypy mypy-gate doctor db-restore wire-audit wire-census test-effect-probes
+
+PY        := uv run python
+FRONTEND_DIR := web/frontend
+PORT_BACKEND  := 47821
+PORT_FRONTEND := 47822
+
+help:
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+bootstrap: ## one-command setup: fresh clone -> green, testable state (prompts as needed)
+	@bash scripts/bootstrap.sh
+
+sync: ## create .venv (if missing) and install all editable deps via uv
+	@command -v uv >/dev/null || { echo "uv not on PATH; install via: brew install uv"; exit 1; }
+	@[ -d .venv ] || env -u VIRTUAL_ENV uv venv --python 3.13
+	@# Clear a stray VIRTUAL_ENV/conda env so deps land in THIS repo's .venv,
+	@# not whatever venv the caller happened to have active.
+	@# pytest-randomly powers `make tests-random` (the order-dependence gate).
+	# mypy is the `typing` extra. `make verify` and `make mypy-gate` need it, pinned to
+	# the uv.lock version: the ratchet baseline was measured on that mypy, not on a newer one.
+	env -u VIRTUAL_ENV -u CONDA_PREFIX uv pip install -e ../pyfsr -e . -e ./web pytest pytest-randomly requests-mock anyio httpx ruff mypy==2.1.0
+
+preflight: ## check dev ports are free; print holders if not
+	@for p in $(PORT_BACKEND) $(PORT_FRONTEND); do \
+	  pids=$$(lsof -ti tcp:$$p -sTCP:LISTEN 2>/dev/null); \
+	  if [ -n "$$pids" ]; then \
+	    echo "✗ port $$p is in use by:"; ps -o pid,command -p $$pids; \
+	    echo "  → run 'make kill-ports' to free them, or stop the process manually"; \
+	    exit 1; \
+	  fi; \
+	done; \
+	echo "✓ ports $(PORT_BACKEND) and $(PORT_FRONTEND) are free"
+
+kill-ports: ## kill anything holding the dev ports
+	@for p in $(PORT_BACKEND) $(PORT_FRONTEND); do \
+	  pids=$$(lsof -ti tcp:$$p -sTCP:LISTEN 2>/dev/null); \
+	  [ -n "$$pids" ] && { echo "killing $$pids on :$$p"; kill $$pids; sleep 0.3; kill -9 $$pids 2>/dev/null; } || echo ":$$p already free"; \
+	done
+
+backend: ## start FastAPI dev server (autoreload, :47821)
+	$(PY) -m uvicorn --app-dir web backend.app:app --reload --port $(PORT_BACKEND)
+
+frontend: ## start Vite dev server (Svelte, :47822)
+	cd $(FRONTEND_DIR) && pnpm install --silent && pnpm dev
+
+dev: preflight ## run backend + frontend together; if either dies, both stop (scripts/dev.sh)
+	@scripts/dev.sh
+
+e2e: ## run every examples/*.test.yaml against the live FSR (10/11 expected)
+	cd tooling && uv run --project .. python -m cli e2e all
+
+tests: ## fast pytest (excludes live + slow); incl. the offline golden-trace pin
+	$(PY) -m pytest tooling/tests/ -q -m "not live and not slow"
+
+playbook-tests: ## fsr_playbooks offline suite (the shipped package: harness readers, compiler, llm) -- also run by `make verify`
+	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q -p no:randomly
+
+# Order-dependence gate (PLAN_testing_that_can_fail 0.3). A suite whose tests
+# leak state into one another can go green for reasons unrelated to the code --
+# the same "passes for the wrong reason" family as everything else in that plan,
+# one level up. pytest-randomly shuffles collection; three FIXED seeds keep this
+# target reproducible while still varying the order (a random seed per run turns
+# a real leak into an intermittent red nobody can reproduce).
+#
+# It found two real leaks on the day it was added: the FSR live-client seam that
+# `local_turn` rebinds and never restores, and the global approval-grant table.
+RANDOM_SEEDS ?= 1 7 42
+tests-random: ## run every offline suite under 3 randomized collection orders
+	@# The connector leg goes through the connector's own gate, as verify does:
+	@# a bare pytest lacked the widget-checkout env, so its parity tests skipped.
+	@for s in $(RANDOM_SEEDS); do \
+	  echo "→ seed $$s"; \
+	  $(VENV_PY) -m pytest fsr_playbooks/tests/ -q --randomly-seed=$$s || exit 1; \
+	  $(VENV_PY) -m pytest tooling/tests/ -q -m "not live and not slow" --randomly-seed=$$s || exit 1; \
+	  $(MAKE) --no-print-directory -C $(CONNECTOR_DIR) test PY=$(VENV_PY) \
+	    PYTEST_ARGS="-p randomly --randomly-seed=$$s" || exit 1; \
+	done
+	@echo "✓ no order-dependent tests under seeds: $(RANDOM_SEEDS)"
+
+release: ## cut a PyPI release: make release VERSION=0.4.23 [NOTES="..."] (see RELEASING.md)
+	@[ -n "$(VERSION)" ] || { echo "usage: make release VERSION=X.Y.Z [NOTES=\"...\"]"; exit 2; }
+	@bash scripts/release.sh "$(VERSION)" "$(NOTES)"
+
+ci-watch: ## Watch CI on the current commit and fail if it is red (WORKFLOW=ci.yml REF=<sha>)
+	@bash scripts/ci_watch.sh --workflow "$(or $(WORKFLOW),ci.yml)" \
+	    --ref "$(or $(REF),$(shell git rev-parse HEAD))" --label "$(or $(WORKFLOW),CI)"
+
+# ── Chat Intelligence tuning loop (docs/plans/CHAT_INTELLIGENCE_PLAN.md) ──
+# chat-fast   = A4 cheap loop: offline STRUCTURE/contract guards (no API, secs).
+#               Reach for this by default while tuning prompts/tools/intents;
+#               it pins prompt assembly, intent routing, tool registry, the
+#               gate→lever map (A3) and the golden-trace contract (A6).
+# chat-drive  = live A1/A2: drive ONE scenario, score+render-validate, verdict.
+# chat-calibrate = live capability gate over the whole investigation fixture set.
+# chat-drive/chat-calibrate need .env FSR creds + ANTHROPIC_API_KEY + a reachable
+# deployed connector; chat-fast needs neither.
+SCENARIO ?=
+MSG ?=
+
+# The structure/contract suite -- deterministic order (no:randomly) so a prompt
+# edit that breaks assembly/routing reddens here in ~2s before any live spend.
+CHAT_FAST_LIB_TESTS := \
+	fsr_playbooks/tests/test_triage_discipline.py \
+	fsr_playbooks/tests/test_build_prompt_skeleton.py \
+	fsr_playbooks/tests/test_playbook_offer.py \
+	fsr_playbooks/tests/test_enhancement_offer.py \
+
+CHAT_FAST_TOOLING_TESTS := \
+	tooling/tests/test_evals_enhance_delivery.py \
+	tooling/tests/test_run_turn.py \
+	tooling/tests/test_catalog_tools.py \
+	tooling/tests/test_emitter.py \
+	tooling/tests/test_chat_review.py \
+	tooling/tests/test_golden_traces_pin.py \
+	tooling/tests/test_lever_coverage.py \
+	tooling/tests/test_build_fidelity.py \
+	tooling/tests/test_build_fidelity_golden.py \
+	tooling/tests/test_hunt_depth.py
+
+# conftest refuses one pytest process over both trees (separate reference DBs).
+chat-fast: ## fast OFFLINE chat structure/contract guards (no API; ~2s)
+	$(PY) -m pytest $(CHAT_FAST_LIB_TESTS) -q -p no:randomly
+	$(PY) -m pytest $(CHAT_FAST_TOOLING_TESTS) -q -p no:randomly
+chat-drive: ## live: drive+score one scenario (SCENARIO=<fixture> or MSG="...")
+	@if [ -n "$(SCENARIO)" ]; then \
+		$(PY) tooling/cli.py chat-drive --task "$(SCENARIO)"; \
+	elif [ -n "$(MSG)" ]; then \
+		$(PY) tooling/cli.py chat-drive --message "$(MSG)"; \
+	else \
+		echo "usage: make chat-drive SCENARIO=<fixture-name>  |  MSG=\"...\""; exit 2; \
+	fi
+
+# NOT a lane run, and its numbers are not comparable to one: it drives the
+# triage agent loop directly on a hardcoded model against a live box, so it
+# records no lane/substrate stamp. `make matrix MODE=invest` scores the SAME
+# seven fixtures on the screen lane, free and box-free -- reach for that first
+# and keep this for the question it alone answers (does the live triage path
+# still clear the recall gate on a real appliance?).
+chat-calibrate: ## live: capability gate over every investigation fixture (costs credits). SCENARIO=<fixture> PROVIDER=frank|anthropic REPEAT=n RETRIES=n
+	$(PY) tooling/evals/calibrate_investigation.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(PROVIDER),--provider $(PROVIDER),) $(if $(REPEAT),--repeat $(REPEAT),) $(if $(RETRIES),--retries $(RETRIES),)
+
+# Also not a lane run: it drives the DEPLOYED connector's chat_turn over its
+# own `enhance_scenarios/` set, which is a different corpus from the five
+# `mode=enhance` fixtures `make matrix MODE=enhance` scores. Both are worth
+# having; do not diff one against the other.
+enhance-live: ## live: enhance-DELIVERY gate -- drive every enhance_scenario, grade emit_enhancement_offer vs prose (SCENARIO=<name> RUNS=n CONFIG=name). Needs .env + deployed connector.
+	$(PY) tooling/evals/enhance_live.py $(if $(SCENARIO),--only $(SCENARIO),) $(if $(RUNS),--runs $(RUNS),) $(if $(CONFIG),--config $(CONFIG),)
+
+lint: ## ruff lint (pyflakes F-rules) over fsr_playbooks + tooling
+	uv run ruff check fsr_playbooks/ tooling/
+
+# The connector + Angular widget both consume fsr_playbooks, so the green-check that
+# matters is fsr_playbooks + the connector's offline suite -- both run on THIS repo's
+# .venv, which carries the editable fsr_playbooks install and its deps (yaml, anthropic).
+# (Do NOT use `uv run --extra test` in the connector: it builds an isolated env
+#  without fsr_playbooks, so its whole suite errors on ModuleNotFound.)
+VENV_PY  := $(CURDIR)/.venv/bin/python
+# conn_main is THE connector checkout (release-ship, make loop and the box all run it).
+CONNECTOR_DIR ?= ../ConnectorsV2/conn_main
+
+# The eval harness registers the connector's triage tools (get_record,
+# search_module_records) only when it can find the checkout, and without them
+# every invest_* fixture is unservable -- calibrate refuses to run rather than
+# report a corpus of 0.0s. This Makefile already knows where the connector is,
+# so default the var it looks for instead of making each caller export it.
+# `?=` still yields to an explicitly-set environment value.
+export FSR_CONNECTOR_REPO ?= $(abspath $(CONNECTOR_DIR))
+
+corpus-gate: ## round-trip fidelity gate over the committed corpus (box-free). CORPUS_DIR=… MIN_PASS=… to measure a real box pull
+	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_gate.py \
+	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
+	  $(if $(MIN_PASS),--min-pass $(MIN_PASS),)
+
+# The 5 `mode=tool_selection` fixtures. Deliberately NOT the whole 36-task
+# corpus: the other 31 are either saturated YAML authoring that corpus-gate
+# already covers, or investigation tasks whose tool loop leans hard on a live
+# appliance -- when that box degrades, their scores slide and read as "the
+# agent regressed" when nothing about the agent changed. These 5 terminate on
+# the first correct tool call, so they barely touch the box and stay honest.
+TOOL_GATE_TASKS := select_run_playbook,select_build_offer,select_enhance_offer,select_diagnose_failure,select_run_playbook_neutral
+# 20260814T115728Z: agentic_frank 20/20, and the first baseline that SAYS WHAT
+# IT WAS TAKEN ON -- offline=True, tool_substrate=framework+connector,
+# record_substrate=empty. Its predecessor (20260813T153315Z) predates those
+# fields entirely, so every diff against it compared against an unknown world;
+# `delta_vs` now prints a SUBSTRATE MISMATCH banner instead of letting that
+# pass. Run this gate with FSR_CONNECTOR_REPO set to match the pin, or expect
+# (and read) the banner.
+# Captured after two corrections that the diff itself surfaced: a corrupt
+# reference DB that made `find_operation` raise intermittently, and a
+# `no_spiral` gate that counted five lookups of five DIFFERENT step types as a
+# spiral.
+# data/eval_runs/ is gitignored, so a fresh checkout has no baseline to diff
+# against and must capture its own before a delta means anything.
+# Re-baselined 2026-08-23: the prior pin (20260817T153958Z) predates
+# scoring.SCORER_VERSION, so it carries no stamp and is now correctly REFUSED
+# as incomparable -- see tooling/tests/test_eval_comparability.py. That run
+# (20260823T112659Z) was offline with records EMPTY and carried no lane.
+#
+# Re-baselined AGAIN the same day when the gate moved onto the screen lane:
+# the lane serves the soc_invest_surface bundle, so `record_substrate` went
+# empty -> soc_invest_surface and `lane` went unknown -> screen. The differ
+# refused the old pin on both counts, which is the intended behaviour and not
+# a regression -- the run itself scored 20/20, cell for cell identical to its
+# predecessor. Current pin: offline, framework+connector tools,
+# soc_invest_surface records, lane=screen, scorer_version=2, 20/20.
+# Re-pinned after the fence-cap and edit_playbook fixes: a fresh screen-lane
+# run of the merged framework, 20/20, offline Frank, same scorer and substrate.
+# The 20260823T143020Z pin predated the current substrate and scorer and could
+# no longer be compared.
+TOOL_GATE_BASELINE ?= 20261012T020225Z
+
+# ── One testing story (docs/plans/AGENT_DESIGN_AND_TEST_UNIFICATION.md, B1) ──
+# Named lanes over ONE corpus and ONE scorer, instead of three scripts with
+# three provider defaults and three ideas of the substrate:
+#
+#   screen  (default)  agentic_frank / GLM-5.2, --offline --bundle
+#                      soc_invest_surface. Free, box-free, run on every change.
+#   confirm            agentic_openai_api against a LIVE appliance. Costs
+#                      credits. Milestones only, in the background, never in an
+#                      iteration loop -- it answers one question: does the free
+#                      lane still predict the paid one?
+#   attribute          the CONFIRM model on the SCREEN substrate. Costs credits
+#                      but touches no box. screen-vs-confirm moves the model
+#                      and the substrate at once, so a disagreement between
+#                      them is attributable to neither; this lane splits them:
+#                      screen vs attribute = MODEL, attribute vs confirm =
+#                      SUBSTRATE. `agreement` prints which one it is.
+#
+# The lane is stamped into the archived matrix and joins the comparability key,
+# so the differ REFUSES a screen-vs-confirm diff instead of printing cells that
+# moved because the world did.
+#
+#   make matrix                            # screen lane, whole corpus
+#   make matrix MODE=gate BASELINE=<id>    # the tool-gate 5, diffed
+#   make matrix MODE=invest                # the investigation slice
+#   make matrix LANE=confirm LIVE_OK=1     # paid + live; say you meant it
+#   make matrix LANE=attribute LIVE_OK=1   # paid, box-free; splits the blame
+#
+# MODE slices come from each fixture's own `mode` field (all | routing |
+# invest | enhance | repair | refuse | authoring), plus `gate` -- the five
+# name-pinned routing fixtures tool-gate diffs. TASKS=a,b overrides MODE.
+# Does the cheap lane still predict the expensive one? Both sides must be
+# archived `--repeat` runs naming DIFFERENT lanes; the report says what varies
+# between them, and refuses rather than printing a number nobody can read.
+#
+#   make agreement A=<screen_run> B=<confirm_run>
+#   fsrpb agreement --list-screens
+agreement: ## Per-task lane agreement. A=<run_id> B=<run_id> (different lanes)
+	$(VENV_PY) tooling/cli.py agreement \
+	  $(if $(A),--screen $(A),) $(if $(B),--confirm $(B),) \
+	  $(if $(LIST),--list-screens,)
+
+matrix: ## ONE eval entry point. LANE=screen|confirm|attribute MODE=all|gate|routing|invest|enhance|repair|refuse|authoring TASKS=… REPEAT=n BASELINE=<run_id> LIVE_OK=1
+	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py matrix \
+	  --lane $(if $(LANE),$(LANE),screen) \
+	  $(if $(MODE),--mode $(MODE),) $(if $(TASKS),--tasks $(TASKS),) \
+	  $(if $(REPEAT),--repeat $(REPEAT),) \
+	  $(if $(BASELINE),--baseline $(BASELINE),) \
+	  $(if $(LIVE_OK),--live-ok,)
+
+# `tool-gate` survives as the FAST routing-only subset with its own pin --
+# `make matrix MODE=gate` runs the same five fixtures through the lane
+# resolver. Keep the pin here; lanes.py:GATE_TASKS mirrors the list and a test
+# asserts the two have not drifted.
+tool-gate: ## which tool does the agent reach for? Run after ANY tool-description / system-prompt / tool-set change -- nothing else covers routing. BASELINE=<run_id> REPEAT=3 OFFLINE=1
+	@echo "note: the score is composite (#127), so a row can CLIMB, not just"
+	@echo "      drop: terminal_tool_reached + offer_timing +"
+	@echo "      appropriate_approval_requests + no_spiral. Every run is saved;"
+	@echo "      re-baseline with 'make tool-gate BASELINE=' and pin the new id."
+	@echo "      It now runs on the SCREEN lane (offline Frank + the"
+	@echo "      soc_invest_surface bundle), so OFFLINE=1 is no longer a"
+	@echo "      choice -- this gate is box-free by construction."
+	@echo "      2026-08-13: offline reproduced the live baseline exactly, 20/20."
+	@echo "      A NOT COMPARABLE refusal means the two runs saw different"
+	@echo "      worlds; the table is WITHHELD, not captioned. Fix the world"
+	@echo "      or re-baseline -- there is no cell worth reading first."
+	FSR_TIMEOUT=$${FSR_TIMEOUT:-60} PYTHONUNBUFFERED=1 $(VENV_PY) tooling/cli.py matrix \
+	  --lane screen --mode gate \
+	  $(if $(REPEAT),--repeat $(REPEAT),) \
+	  $(if $(BASELINE)$(TOOL_GATE_BASELINE),--baseline $(if $(BASELINE),$(BASELINE),$(TOOL_GATE_BASELINE)),)
+
+test-effect-probes: ## LIVE: does the affordance actually WRITE? Seeds a scratch playbook, drives the widget's exact payload, re-reads the box. ONLY=A2,A3,A6 RUNS=2 DUMP=dir
+	@echo "▶ effect probes -- every verdict is a box read, never a card or an ok flag."
+	@echo "  BLOCKED = the card under test never appeared, so the write path was"
+	@echo "  not exercised. That exits non-zero on purpose."
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/effect/runner.py \
+	  $(if $(ONLY),--only $(ONLY),) $(if $(RUNS),--runs $(RUNS),) \
+	  $(if $(DUMP),--dump $(DUMP),)
+
+wire-audit: ## LIVE: validate every playbook on the box against the wire models + measure semantic round-trip fidelity. Read-only. Run after any wire/decompiler/emitter change. LIMIT=… FILTER=…
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_wire_shapes.py \
+	  $(if $(LIMIT),--limit $(LIMIT),)
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_mapping_fidelity.py \
+	  $(if $(LIMIT),--limit $(LIMIT),) $(if $(FILTER),--filter $(FILTER),)
+
+wire-census: ## LIVE: regenerate the committed shape census the box-free conformance test reads
+	PYTHONPATH=. $(VENV_PY) -W ignore tooling/probes/probe_wire_shapes.py \
+	  --census fsr_playbooks/tests/fixtures/wire_shape_census.json
+
+corpus-triage: ## COMPILABILITY triage over a corpus (box-free): which real playbooks fail to compile, grouped by cause. corpus-gate measures fidelity; this measures acceptance. CORPUS_DIR=… TOP=… MIN_PASS=… ARGS='--markdown'
+	FSRPB_DEV=1 $(VENV_PY) scripts/corpus_compile_triage.py \
+	  $(if $(CORPUS_DIR),--corpus-dir $(CORPUS_DIR),) \
+	  $(if $(TOP),--top $(TOP),) \
+	  $(if $(MIN_PASS),--min-pass $(MIN_PASS),) $(ARGS)
+
+corpus-gen: ## regenerate the committed round-trip corpus fixtures
+	FSRPB_DEV=1 $(VENV_PY) scripts/gen_roundtrip_corpus.py
+
+mypy: ## mypy type-check over fsr_playbooks/compiler (default config; not --strict)
+	$(VENV_PY) -m mypy
+
+mypy-gate: ## ratchet gate: fail on NEW mypy errors in llm/ + mcp_server/ (baseline docs/typing/mypy_ratchet.json)
+	$(VENV_PY) scripts/mypy_gate.py
+
+doctor: ## environment preflight: version resolution, pyfsr floor, reference DB
+	$(VENV_PY) -m fsr_playbooks.doctor
+
+# The reference store is in WAL mode, so it is a THREE-file database. Restoring
+# it with a plain `cp` leaves the previous `-wal`/`-shm` beside the fresh file
+# and SQLite replays that stale journal into it on the next open -- the restore
+# reads clean, then the very first process to touch it corrupts it. That is how
+# this store got corrupted three times in three days; each "recurrence" was the
+# repair. Always restore through this target.
+#
+# `.recover` is deliberately NOT offered as the fix: it produces a file that
+# passes integrity_check while stranding unattributable rows in lost_and_found
+# (it silently dropped 9 fortisiem operations once), and merging the old tables
+# back with INSERT OR IGNORE doubles every table lacking a unique constraint.
+# A known-good .bak is the answer whenever one exists.
+db-restore: ## restore data/fsr_reference.db from FROM=<backup> (default .db.bak), WAL-safely
+	@set -eu; \
+	src="$(if $(FROM),$(FROM),data/fsr_reference.db.bak)"; \
+	dst=data/fsr_reference.db; \
+	test -f "$$src" || { echo "no such backup: $$src"; exit 2; }; \
+	sqlite3 "$$src" "pragma quick_check;" | grep -qx ok \
+	  || { echo "REFUSING: backup is itself corrupt: $$src"; exit 2; }; \
+	if [ -f "$$dst" ]; then \
+	  if sqlite3 "$$dst" "pragma quick_check;" 2>/dev/null | grep -qx ok; then \
+	    kind=prev; else kind=corrupt; fi; \
+	  stamp=data/fsr_reference.$$kind-$$(date +%Y%m%dT%H%M%S).db.bak; \
+	  echo "→ setting aside current store ($$kind) as $$stamp"; mv "$$dst" "$$stamp"; \
+	fi; \
+	rm -f "$$dst-wal" "$$dst-shm"; \
+	cp "$$src" "$$dst"; \
+	sqlite3 "$$dst" "pragma quick_check;" | grep -qx ok \
+	  || { echo "restore FAILED integrity check"; exit 1; }; \
+	echo "✓ restored $$dst from $$src"; \
+	$(VENV_PY) -m fsr_playbooks.doctor --offline
+
+jinja-export: ## LIVE (SSH): dump every Jinja filter/global/test + signature from a box: make jinja-export INSTANCE=<alias>
+	@[ -n "$(INSTANCE)" ] || { echo "usage: make jinja-export INSTANCE=<pyfsr instance alias>"; exit 2; }
+	PYTHONPATH=. $(VENV_PY) -W ignore -m tooling.jinja_export --instance $(INSTANCE)
+	PYTHONPATH=. $(VENV_PY) -W ignore -m tooling.probes.probe_jinja_backend
+
+jinja-probe: ## LIVE: render every filter case on a box and store the evidence: make jinja-probe INSTANCE=<alias> [ONLY=a,b]
+	@[ -n "$(INSTANCE)" ] || { echo "usage: make jinja-probe INSTANCE=<pyfsr instance alias>"; exit 2; }
+	PYTHONPATH=. $(VENV_PY) -W ignore -m tooling.probes.probe_jinja_filter_io --instance $(INSTANCE) $(if $(ONLY),--only $(ONLY))
+
+jinja-docs: ## regenerate docs/JINJA_FILTERS.md from the reference DB (offline)
+	PYTHONPATH=. $(VENV_PY) -m tooling.store.export_jinja_reference
+
+jinja-verify: ## LIVE: replay every filter case on a box; fails if a filter breaks or changes type: make jinja-verify INSTANCE=<alias>
+	@[ -n "$(INSTANCE)" ] || { echo "usage: make jinja-verify INSTANCE=<pyfsr instance alias>"; exit 2; }
+	FSRPB_JINJA_INSTANCE=$(INSTANCE) PYTHONPATH=. $(VENV_PY) -m pytest tooling/tests/test_jinja_filters_live.py -q -m live -p no:randomly
+
+verify: ## green-check for the fsr_playbooks + connector axis (offline)
+	@echo "→ [0/5] environment doctor"
+	@# FIRST, and fail-fast. Every check here once presented as a product bug:
+	@# a cwd-dependent version tripped the connector's guard across ~68 tests,
+	@# an ancient pyfsr broke suite collection, and an empty reference DB makes
+	@# broken YAML validate clean. Diagnosing those from the test output costs
+	@# hours; diagnosing them from here costs one line.
+	$(VENV_PY) -m fsr_playbooks.doctor --offline
+	@echo "→ [1/5] mypy (fsr_playbooks/compiler)"
+	$(VENV_PY) -m mypy
+	@echo "→ [2/5] mypy ratchet (fsr_playbooks/llm + mcp_server)"
+	$(VENV_PY) scripts/mypy_gate.py
+	@echo "→ [3/5] fsr_playbooks tests"
+	$(VENV_PY) -m pytest fsr_playbooks/tests/ -q
+	@echo "→ [4/5] connector suite (offline; live tests self-skip)"
+	@# The connector's own gate, run on THIS framework's interpreter. A bare
+	@# pytest here lacked the widget-checkout env the parity tests need, so
+	@# they skipped and the skip policy failed verify while `make test` in the
+	@# connector was green.
+	$(MAKE) --no-print-directory -C $(CONNECTOR_DIR) test PY=$(VENV_PY)
+	@echo "✓ verify passed"
+
+clean: ## remove pycache + node_modules build leftovers (NOT node_modules itself)
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+	rm -rf $(FRONTEND_DIR)/.svelte-kit $(FRONTEND_DIR)/dist

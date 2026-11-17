@@ -1,0 +1,1411 @@
+"""Shared MCP infrastructure and helpers."""
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .._db import default_db_path
+from .._yaml_hygiene import sanitize_yaml_text  # re-exported: see below
+
+
+class _FallbackFastMCP:
+    """No-op MCP-server shim for connector runtimes.
+
+    FortiSOAR's connector sandbox only calls these functions directly; it
+    doesn't run the stdio MCP server. Some sandbox builds expose import stubs
+    that satisfy the server import but are not callable, so we validate the
+    imported object before using it. The class name is kept for continuity with
+    callers/tests that probe for it.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._args, self._kwargs = args, kwargs
+
+    def tool(self, *args, **kwargs):
+        def _deco(fn):
+            return fn
+        return _deco
+
+    def run(self, *args, **kwargs):
+        raise RuntimeError(
+            "MCP stdio server is unavailable: the real 'mcp' package is not "
+            "installed. The tool functions are still usable directly; only "
+            "`python -m mcp_server` / `fsrpb mcp` need the real SDK.")
+
+
+# The MCP server class. mcp 2.x renamed `mcp.server.fastmcp.FastMCP` to
+# `mcp.server.mcpserver.MCPServer` (same `.tool()` decorator, `_tool_manager`
+# and `run(transport=...)` surface). We require mcp>=2 (see pyproject), so we
+# import MCPServer directly and fall back only to the no-op shim for the
+# connector sandbox, where the real `mcp` package is not importable at all. The
+# two are unrelated types, so the name is declared as `type[Any]` first.
+FastMCP: type[Any]
+try:
+    from mcp.server.mcpserver import MCPServer as _ImportedServer  # mcp 2.x
+except Exception:  # noqa: BLE001
+    FastMCP = _FallbackFastMCP
+else:
+    FastMCP = _ImportedServer if callable(_ImportedServer) else _FallbackFastMCP
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = default_db_path()
+
+# ---------------------------------------------------------------------------
+# MCP server instance (shared across all tools)
+# ---------------------------------------------------------------------------
+def _make_mcp():
+    server = FastMCP(
+        "fsrpb",
+        instructions=(
+            "FortiSOAR playbook authoring tools. "
+            "Use find_connector → find_operation → get_op_schema to build connector steps. "
+            "Use get_step_type for non-connector step schemas. "
+            "Use validate_yaml before compile_yaml to catch errors early. "
+            "All YAML must conform to the simplified IR documented in AUTHORING.md."
+        ),
+    )
+    if not callable(getattr(server, "tool", None)):
+        raise TypeError("MCP server .tool is not callable")
+    if not callable(server.tool()):
+        raise TypeError("MCP server .tool() did not return a decorator")
+    return server
+
+
+try:
+    mcp = _make_mcp()
+except Exception:  # noqa: BLE001
+    mcp = _FallbackFastMCP("fsrpb")
+
+# ---------------------------------------------------------------------------
+# Structured error envelope (uniform tool I/O contract)
+# ---------------------------------------------------------------------------
+
+
+def _err(code: str, message: str,
+         suggestions: list[str] | None = None,
+         **extra: Any) -> dict[str, Any]:
+    """Return the canonical `{ok: false, code, message, suggestions, ...}`
+    failure envelope.
+
+    Every MCP tool that exposes a recoverable failure mode (compiler
+    rejects, missing connector, FSR not configured, op risk gate, …)
+    should return through this helper so the LLM caller can branch on
+    `code` + iterate against `suggestions` instead of regex-parsing
+    prose.
+    """
+    out: dict[str, Any] = {
+        "ok": False,
+        "code": code,
+        "message": message,
+        "suggestions": list(suggestions or []),
+    }
+    out.update(extra)
+    return out
+
+
+def _capability_gap_suggestion(
+    *,
+    id: str,
+    missing: str,
+    why: str,
+    fix_steps: list[str],
+    resume_value: str,
+    resume_label: str = "Re-check & continue",
+    tips: list[dict[str, Any]] | None = None,
+    alternatives: list[dict[str, Any]] | None = None,
+    docs_url: str | None = None,
+) -> dict[str, Any]:
+    """Build a `suggested_card` payload (the kwargs for
+    `emit_capability_gap_card`) for a missing-capability dead end, so every
+    tool that hits one offers the analyst the SAME never-dead-end shape:
+    what's missing, why, concrete fix steps, a resume button, and optional
+    tips / manual fallbacks. The agent forwards this straight into
+    `emit_capability_gap_card` (see system_prompt_triage.md). Returns the
+    kwargs dict only -- the emitter adds `type` and validates."""
+    card: dict[str, Any] = {
+        "id": id,
+        "missing": missing,
+        "why": why,
+        "fix_steps": list(fix_steps),
+        "resume": {"label": resume_label, "value": resume_value},
+    }
+    if tips:
+        card["tips"] = tips
+    if alternatives:
+        card["alternatives"] = alternatives
+    if docs_url:
+        card["docs_url"] = docs_url
+    return card
+
+
+def _serialize_compiler_error(e: Any) -> dict[str, Any]:
+    """Compiler error → tool-result item with `suggestions: [...]` array.
+
+    Keeps the legacy singular `suggestion` key populated so existing
+    consumers (frontend Monaco markers, CLI pretty-printer) keep working
+    untouched while LLMs see the array form documented in the system
+    prompt's "Tool error contract" section.
+    """
+    sug = e.suggestion or ""
+    return {
+        "code": e.code.value,
+        "path": e.path,
+        "message": e.message,
+        "suggestion": sug,
+        "suggestions": [sug] if sug else [],
+        # Readers (session health, the agent) need to tell an advisory from a
+        # blocker; dropping this made every advisory read as an error.
+        "severity": getattr(e, "severity", "error") or "error",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Model-supplied YAML hygiene
+# ---------------------------------------------------------------------------
+
+# The control-char primitive lives one layer down (`fsr_playbooks._yaml_hygiene`)
+# so the COMPILER can share it -- compile_yaml/validate_yaml/push_playbook parse
+# model-supplied YAML too, and `compiler/` must not import from `mcp_server/`.
+# Re-exported here because this module is the documented home for tool-layer
+# YAML handling.
+
+
+@dataclass(frozen=True)
+class YamlLoad:
+    """What it took to parse a model-supplied ``yaml_text``.
+
+    Reported rather than hidden: a turn that only worked because we repaired
+    or replaced the model's copy must say so, or a systematic corruption looks
+    like clean input forever.
+    """
+
+    control_chars_removed: int = 0
+    used_grounding: bool = False
+    #: The parse error that forced the grounding fallback, for the tool note.
+    grounding_reason: str = ""
+
+
+def _ss() -> Any:
+    from ..llm import session_state
+    return session_state
+
+
+# The open playbook for the current turn, as read from the appliance. Set by
+# the chat loop (which owns `entity.playbook_yaml`) and read here at tool
+# dispatch. A ContextVar because the turn runs on its own thread/task -- the
+# same reason the active profile and record IRI are bound this way.
+# Held on SessionState (llm.session_state) as `grounded_yaml`.
+
+
+def set_grounded_yaml(yaml_text: str | None) -> Any:
+    """Bind the turn's authoritative open-playbook YAML. Returns a reset token."""
+    return _ss().update(grounded_yaml=yaml_text or None)
+
+
+def reset_grounded_yaml(token: Any) -> None:
+    _ss().reset(token)
+
+
+def get_grounded_yaml() -> str | None:
+    return _ss().current().grounded_yaml
+
+
+# Where the grounded playbook came from. None: the analyst has it open (the
+# designer sent it). "draft": the playbook this conversation OFFERED and nobody
+# has saved. "saved": the playbook this conversation saved. A host binds the
+# last two when no playbook is open, so refining what the chat just built edits
+# it (edit_playbook) instead of re-typing it -- re-typed refinements dropped a
+# link field and rewrote a condition nobody asked about, live on the build
+# sweep. Neither is on screen, so neither blocks a request for a DIFFERENT
+# playbook, and an edit to a draft is delivered as a new Create card (there is
+# nothing saved to apply it to).
+GROUNDED_SOURCES = ("draft", "saved")
+# Held on SessionState (llm.session_state) as `grounded_source`.
+
+
+def set_grounded_source(source: str | None) -> Any:
+    """Bind where the grounded playbook came from. Returns a reset token."""
+    return _ss().update(grounded_source=source if source in GROUNDED_SOURCES else None)
+
+
+def reset_grounded_source(token: Any) -> None:
+    _ss().reset(token)
+
+
+def get_grounded_source() -> str | None:
+    return _ss().current().grounded_source
+
+
+# The analyst's own words for the current turn. Bound by the chat loop and read
+# at tool dispatch, exactly like `_GROUNDED_YAML` above and for the same reason.
+#
+# Tools that need INTENT ask for it as an optional argument, and the model does
+# not reliably pass it: live on 8.0 the box model called
+# `verify_enhancement(before_yaml, after_yaml)` with no `user_message` at all,
+# so every intent-aware exemption in that tool was dead code. This is the same
+# finding as tracker #60, where `requested_by` was set on 0 of 4 live calls; the
+# lesson recorded there is DERIVE the intent, never ask the model to declare it.
+# Held on SessionState (llm.session_state) as `user_message`.
+
+
+def set_turn_user_message(text: str | None) -> Any:
+    """Bind the turn's user message. Returns a reset token."""
+    return _ss().update(user_message=(text or "").strip() or None)
+
+
+def reset_turn_user_message(token: Any) -> None:
+    _ss().reset(token)
+
+
+def get_turn_user_message() -> str | None:
+    return _ss().current().user_message
+
+
+# The analyst's answer to the "Modify this playbook / Create new playbook"
+# choice (card id SCOPE_CARD_ID), bound by the host for every turn of the
+# session. A STRUCTURAL authorization, not a parse of anyone's wording:
+#   modify     -- removing steps of the open playbook is what they asked for
+#                 (the edit is still diffed, snapshotted and versioned);
+#   create_new -- a separate new playbook (playbook_offer) is afforded even
+#                 with one open in the designer.
+SCOPE_CARD_ID = "playbook_scope"
+SCOPE_MODIFY = "modify"
+SCOPE_CREATE_NEW = "create_new"
+SCOPE_CHOICE_PAYLOAD = {
+    "id": SCOPE_CARD_ID,
+    "prompt": "Should I change the open playbook, or build this as a new one?",
+    "options": [
+        {"label": "Modify this playbook", "value": SCOPE_MODIFY},
+        {"label": "Create new playbook", "value": SCOPE_CREATE_NEW},
+    ],
+}
+# Held on SessionState (llm.session_state) as `playbook_scope`.
+
+
+def set_playbook_scope(scope: str | None) -> Any:
+    """Bind the session's scope answer. Returns a reset token."""
+    return _ss().update(
+        playbook_scope=scope if scope in (SCOPE_MODIFY, SCOPE_CREATE_NEW) else None)
+
+
+def reset_playbook_scope(token: Any) -> None:
+    _ss().reset(token)
+
+
+def get_playbook_scope() -> str | None:
+    return _ss().current().playbook_scope
+
+
+def load_yaml_text(yaml_text: Any, *, allow_grounding: bool = True,
+                   ground_when_empty: bool = False) -> tuple[Any, YamlLoad]:
+    """Parse a model-supplied ``yaml_text``, repairing what can be repaired.
+
+    Returns ``(doc, YamlLoad)``; ``doc`` is ``{}`` for empty/None input so
+    callers keep their ``doc.get(...)`` shape.
+
+    Two layers, because a model re-emitting a 20 kB playbook verbatim gets it
+    wrong in more than one way (observed live on one payload: a NUL byte AND a
+    stray ``\\,`` escape):
+
+    1. **Strip** control characters YAML forbids. They can never be authored
+       deliberately, so removing them is always correct.
+    2. **Ground** -- if it still will not parse and the chat loop bound the
+       real open playbook via :func:`set_grounded_yaml`, parse THAT instead.
+       The appliance's own copy is authoritative; the model's is a lossy
+       transcription of it. This is the same instinct as ``apply_patch``
+       falling back to ``decompile_playbook`` when the model's snippet is not
+       a compilable document.
+
+    If both fail, the original parse error propagates -- every call site wraps
+    this in its own ``except`` with its own error contract, and swallowing here
+    would flatten those. Pass ``allow_grounding=False`` where the caller means
+    "parse exactly this text" (e.g. validating a candidate before saving it).
+
+    ``ground_when_empty`` is the *durable* half of the same idea. Repairing a
+    corrupt 20 kB echo is treating a symptom; the cure is not making the model
+    echo the document at all. A READ-path tool operating on the playbook that
+    is already open passes ``ground_when_empty=True``, so omitting ``yaml_text``
+    means "the open playbook" instead of "an empty document". The model then
+    has no opportunity to corrupt or silently drop anything, because it never
+    transcribes it.
+
+    It is opt-in per caller, deliberately. For an AUTHORING tool -- validate,
+    compile, push -- empty input must stay empty: silently substituting the
+    OLD document would report success for a document the model never wrote,
+    which is a worse failure than the one this fixes.
+    """
+    import yaml as _yaml  # noqa: PLC0415
+
+    if ground_when_empty and allow_grounding and not str(yaml_text or "").strip():
+        grounded = get_grounded_yaml()
+        if grounded:
+            g_clean, g_removed = sanitize_yaml_text(grounded)
+            return (_yaml.safe_load(g_clean) or {}), YamlLoad(
+                g_removed, used_grounding=True,
+                grounding_reason="no yaml_text supplied; used the open playbook")
+
+    clean, removed = sanitize_yaml_text(yaml_text)
+    try:
+        return (_yaml.safe_load(clean) or {}), YamlLoad(removed)
+    except _yaml.YAMLError as exc:
+        grounded = get_grounded_yaml() if allow_grounding else None
+        if not grounded:
+            raise
+        g_clean, _ = sanitize_yaml_text(grounded)
+        if g_clean.strip() == clean.strip():
+            raise                      # same text, same failure -- no gain
+        doc = _yaml.safe_load(g_clean) or {}   # a bad grounding is a real error
+        first_line = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+        return doc, YamlLoad(removed, used_grounding=True,
+                             grounding_reason=first_line)
+
+
+# ---------------------------------------------------------------------------
+# DB helper
+# ---------------------------------------------------------------------------
+
+
+def _db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        from probes.common import CATALOG_DB_PATH
+        if CATALOG_DB_PATH.exists():
+            conn.execute(f"ATTACH DATABASE '{CATALOG_DB_PATH}' AS catalog")
+    except Exception:
+        pass
+    return conn
+
+
+def catalog_missing_tables(conn: sqlite3.Connection,
+                           tables: tuple[str, ...] = ("entries", "entries_fts")
+                           ) -> list[str]:
+    """The vendor API catalog tables `conn` cannot see. All of them when the
+    catalog never attached (it is optional: `_db()` attaches it only when the
+    file exists, and an appliance install ships none). Callers report this as
+    `catalog_unavailable` instead of surfacing SQLite's "no such table"."""
+    try:
+        have = {r[0] for r in conn.execute(
+            "SELECT name FROM catalog.sqlite_master WHERE type='table'")}
+    except sqlite3.Error:
+        return list(tables)
+    return [t for t in tables if t not in have]
+
+
+#: Where to look when the vendor API catalog is not installed: the playbook
+#: side has its own corpora, and an analyst-facing build never needs the
+#: catalog to find a worked step.
+CATALOG_UNAVAILABLE_HINT = (
+    "The vendor API example catalog is not installed here. For playbook "
+    "patterns use find(kind='recipe') or find(kind='step', query=<step type>); "
+    "for a connector's worked calls use find(kind='example', connector=<name>).")
+
+
+def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def catalog_override(db_path: str | None):
+    """Temporarily point the catalog DB at `db_path` for the enclosed call.
+
+    `_db()` reads the module-global `DB_PATH` at call time, so swapping it here
+    redirects every `_db()`-backed tool (verify, discovery, …) at a different
+    catalog without threading a path through each helper. An SDK (pyfsr) uses
+    this to run against a warmed per-install cache. Restored on exit; a no-op
+    when `db_path` is falsy."""
+    global DB_PATH
+    if not db_path:
+        yield
+        return
+    prev = DB_PATH
+    DB_PATH = Path(db_path)
+    try:
+        yield
+    finally:
+        DB_PATH = prev
+
+
+def _validate_op_exists(connector: str, op: str) -> dict[str, Any] | None:
+    """Confirm `op` is a real operation on `connector` per the reference store.
+
+    Returns an `unknown_operation` error envelope (with near-match
+    suggestions) when the connector HAS operations catalogued but `op`
+    isn't among them -- so a hallucinated/typo'd op name becomes an
+    actionable error the agent can self-correct against, instead of an
+    opaque `execution_failed` after the user has already approved it.
+
+    Returns None (caller proceeds) when:
+    - the op exists, OR
+    - the connector has zero operations in the store. We can't prove
+      non-existence against an empty/un-synced catalogue, so we don't
+      false-reject; the connector existence check + live execution still
+      guard that path.
+
+    Caller is responsible for validating the connector itself first
+    (`run_op` returns `unknown_connector`); this only covers the op.
+    """
+    import difflib
+
+    if not connector or not op:
+        return None
+    try:
+        with _db() as conn:
+            all_ops = [
+                r["op_name"] for r in _rows(
+                    conn,
+                    "SELECT op_name FROM operations WHERE connector_name = ?",
+                    (connector,),
+                )
+            ]
+    except sqlite3.Error:
+        return None  # store unreadable → don't block; live exec will guard
+    if not all_ops or op in all_ops:
+        return None
+    close = difflib.get_close_matches(op, all_ops, n=5, cutoff=0.4)
+    suggestions = [
+        f"Use find_operation(connector={connector!r}) to list the real ops",
+        "Then get_op_schema(connector, op) before run_op/emit_card(card_type='action')",
+    ]
+    if close:
+        suggestions.insert(0, f"Did you mean one of: {close}?")
+    return _err(
+        "unknown_operation",
+        f"operation '{op}' not found on connector '{connector}' "
+        f"({len(all_ops)} ops catalogued)",
+        suggestions=suggestions,
+        connector=connector,
+        op=op,
+        near=close,
+    )
+
+
+# Param types whose value is constrained to an options_json picklist.
+_SELECT_TYPES = {"select", "multiselect", "picklist", "radio"}
+# Param types we type-check (loosely -- FSR coerces strings → ints/bools at
+# execute, so we only reject values that can't possibly coerce).
+_INT_TYPES = {"integer", "number"}
+_BOOL_TYPES = {"checkbox", "boolean", "bool"}
+
+
+def _is_jinja(val: Any) -> bool:
+    """A value the agent left as a template (`{{vars.x}}`) -- we can't
+    validate its concrete content, so membership/type checks must skip it."""
+    return isinstance(val, str) and "{{" in val and "}}" in val
+
+
+def _auto_remap_params(params: dict[str, Any] | None,
+                       issues: Any) -> dict[str, Any] | None:
+    """Recover from a single semantic-alias param miss without a round-trip.
+
+    When a call had EXACTLY ONE unknown param and the op has EXACTLY ONE
+    missing-required param, the unknown was almost certainly meant for that
+    required slot -- a semantic alias `difflib` can't catch by spelling
+    (`ip`→`value`, `host`→`hostName`, `srcIP`→`source_ip_value`). These are the
+    misses that wasted ~8 run_op calls in a live export. Return
+    `{params, from, to}` with the corrected params, or None when it's not the
+    unambiguous 1↔1 case.
+
+    Conservative on purpose: only 1-unknown ↔ 1-missing, and only when the
+    unknown's value is a scalar (never shove a nested object into a scalar slot).
+    The caller MUST re-validate the returned params before trusting the remap."""
+    if not isinstance(issues, list):
+        return None
+    unknown = [i for i in issues
+               if isinstance(i, dict) and i.get("problem") == "unknown"]
+    missing = [i for i in issues
+               if isinstance(i, dict) and i.get("problem") == "missing_required"]
+    if len(unknown) != 1 or len(missing) != 1:
+        return None
+    uk, req = unknown[0].get("param"), missing[0].get("param")
+    if not uk or not req:
+        return None
+    val = (params or {}).get(uk)
+    if not isinstance(val, (str, int, float)) or isinstance(val, bool):
+        return None
+    fixed = {k: v for k, v in (params or {}).items() if k != uk}
+    fixed[req] = val
+    return {"params": fixed, "from": uk, "to": req}
+
+
+def op_param_facts(connector: str, op: str) -> dict[str, dict[str, Any]] | None:
+    """Map param_name -> {"options": [...], "required": bool}, or None if the
+    operation has nothing catalogued.
+
+    `_validate_op_params` derives this internally to reject unknown names and
+    out-of-set select values. It is exposed because a caller deciding what to
+    DO about a missing param needs all three facts: whether the op takes the
+    name at all, whether it is a select (which refuses a blank), and whether
+    it is required (which also refuses a blank, but for a different reason and
+    with a different remedy). `emit_action_card` prescribed `""` for every
+    missing field, which is exactly what the other two cases reject.
+
+    None means "cannot prove anything" (un-synced store or unreadable DB) and
+    must be treated as unknown, never as an empty mapping.
+    """
+    import json as _json
+    if not connector or not op:
+        return None
+    try:
+        with _db() as conn:
+            rows = _rows(conn,
+                         "SELECT param_name, options_json, required "
+                         "FROM operation_params "
+                         "WHERE connector_name=? AND op_name=?",
+                         (connector, op))
+    except sqlite3.Error:
+        return None
+    if not rows:
+        return None
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        try:
+            opts = _json.loads(r["options_json"] or "[]")
+        except (ValueError, TypeError):
+            opts = []
+        out[r["param_name"]] = {
+            "options": [str(o) for o in opts] if isinstance(opts, list) else [],
+            "required": bool(r["required"]),
+        }
+    return out
+
+
+def _validate_op_params(connector: str, op: str,
+                        params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate `params` against the operation's parameter schema.
+
+    Mirrors `_validate_op_exists`: catches typo'd/unknown params, missing
+    required params, and select values outside the option set BEFORE the op
+    runs -- so a malformed call surfaces as an actionable `bad_params` error
+    the agent self-corrects against, instead of an opaque post-approval
+    `execution_failed` (or, worse, an approval card the analyst signs off on
+    that then fails).
+
+    Returns an error envelope with an `issues` list, or None when the call
+    is well-formed. Returns None (don't block) when:
+    - the op has no params catalogued (un-synced store → can't prove a param
+      is unknown; live execute will guard), OR
+    - the store is unreadable.
+
+    Conditional sub-params are resolved from submitted parent values, so
+    required checks only apply to the active branch. Values left as Jinja
+    templates are skipped for membership/type (we can't see their runtime
+    content). Type checks are deliberately loose -- FSR coerces `"5"`→5 and
+    `"true"`→bool at execute, so we only reject values that cannot coerce at
+    all.
+    """
+    import difflib
+    import json as _json
+
+    if not connector or not op:
+        return None
+    params = params or {}
+    try:
+        with _db() as conn:
+            rows = _rows(
+                conn,
+                "SELECT param_name, title, type, required, options_json, "
+                "parent_param_name, condition_value "
+                "FROM operation_params WHERE connector_name=? AND op_name=?",
+                (connector, op),
+            )
+    except sqlite3.Error:
+        return None  # store unreadable → don't block; live exec will guard
+    if not rows:
+        return None  # no schema catalogued → can't validate
+
+    def _clean(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        return text if text != "" else None
+
+    def _matches(value: Any, expected: str | None) -> bool:
+        if expected is None:
+            return False
+        if isinstance(value, list):
+            return any(str(item) == expected for item in value)
+        return str(value) == expected
+
+    rows_by_name: dict[str, list[dict[str, Any]]] = {}
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    top_level: list[dict[str, Any]] = []
+    for r in rows:
+        rows_by_name.setdefault(r["param_name"], []).append(r)
+        parent = _clean(r["parent_param_name"])
+        if parent is None:
+            top_level.append(r)
+        else:
+            children_by_parent.setdefault(parent, []).append(r)
+
+    known_names = set(rows_by_name)
+    active: dict[str, dict[str, Any]] = {}
+    stack = list(top_level)
+    while stack:
+        r = stack.pop(0)
+        name = r["param_name"]
+        active.setdefault(name, r)
+        if name not in params:
+            continue
+        for child in children_by_parent.get(name, []):
+            if _matches(params.get(name), _clean(child["condition_value"])):
+                stack.append(child)
+
+    issues: list[dict[str, Any]] = []
+
+    # 1. Unknown params (typo detector).
+    for key in params:
+        if key not in known_names:
+            close = difflib.get_close_matches(key, list(known_names), n=3, cutoff=0.5)
+            issues.append({
+                "param": key,
+                "problem": "unknown",
+                "near": close,
+                "detail": (f"'{key}' is not a parameter of {connector}/{op}"
+                           + (f"; did you mean {close}?" if close else "")),
+            })
+
+    # 1b. Known params on a branch the call did NOT select. Live: 16 sessions
+    # sent FortiGate block_ip_new `ip` with method="Quarantine Based", whose
+    # branch takes `ip_addresses`. `ip` is a real parameter -- of the OTHER
+    # branch -- so step 1 passed it, it was silently ignored, and the refusal
+    # named only the missing param, never the one the model thought it sent.
+    branch_of = {
+        name: [f"{r['parent_param_name']}={r['condition_value']!r}"
+               for r in rs if _clean(r["parent_param_name"])]
+        for name, rs in rows_by_name.items()
+    }
+    for key in params:
+        if key in known_names and key not in active and branch_of.get(key):
+            issues.append({
+                "param": key,
+                "problem": "inactive_branch",
+                "detail": (f"'{key}' only applies when "
+                           f"{' or '.join(branch_of[key])}; this call's "
+                           f"choices ignore it"),
+            })
+
+    # 2. Missing required params on the active conditional branch only.
+    for name, r in active.items():
+        if not r["required"]:
+            continue
+        val = params.get(name)
+        if name not in params or val is None or val == "":
+            issues.append({
+                "param": name,
+                "problem": "missing_required",
+                "detail": f"required parameter '{name}' "
+                          f"({r['title'] or name}) is missing",
+            })
+
+    # One misplaced key + one missing required param is a rename, whatever
+    # the spelling (`ip` → `ip_addresses`): say it outright.
+    # With several strays, the one whose name the missing param starts with
+    # (`ip` / `ip_addresses`).
+    stray = [i["param"] for i in issues if i["problem"] in ("unknown", "inactive_branch")]
+    missing = [i for i in issues if i["problem"] == "missing_required"]
+    if not missing:
+        # An off-branch param only EXPLAINS a missing one. On a complete call
+        # it is harmless -- real payloads carry every branch's fields, blank
+        # (`ip_type`, `ip_group_name`, ...) -- and must not block it.
+        issues = [i for i in issues if i["problem"] != "inactive_branch"]
+    if len(missing) == 1 and stray:
+        from ..compiler.resolver.connector_args import renamed_param
+        want = missing[0]["param"]
+        renamed = renamed_param(stray, want)
+        if renamed:
+            missing[0]["detail"] += (f" -- send your '{renamed}' value as "
+                                     f"'{want}'")
+            missing[0]["rename_from"] = renamed
+
+    # 3. Select-option membership + loose type checks.
+    for name, candidates in rows_by_name.items():
+        if name not in params:
+            continue
+        r = active.get(name) or candidates[0]
+        val = params[name]
+        if val is None or _is_jinja(val):
+            continue
+        ptype = (r["type"] or "").lower()
+        opts = None
+        if r["options_json"]:
+            try:
+                parsed = _json.loads(r["options_json"])
+                if isinstance(parsed, list) and parsed:
+                    opts = [str(o) for o in parsed]
+            except (ValueError, TypeError):
+                opts = None
+        if opts is not None and ptype in _SELECT_TYPES:
+            vals = val if isinstance(val, list) else [val]
+            bad = [v for v in vals
+                   if not _is_jinja(v) and str(v) not in opts]
+            if bad:
+                issues.append({
+                    "param": name,
+                    "problem": "bad_select_value",
+                    "options": opts,
+                    "detail": f"{name}={bad!r} not in allowed options {opts}",
+                })
+            continue
+        if ptype in _INT_TYPES and not _coerces_to_int(val):
+            issues.append({
+                "param": name, "problem": "bad_type",
+                "detail": f"{name} expects an integer; got {val!r}",
+            })
+        elif ptype in _BOOL_TYPES and not _coerces_to_bool(val):
+            issues.append({
+                "param": name, "problem": "bad_type",
+                "detail": f"{name} expects a boolean; got {val!r}",
+            })
+
+    if not issues:
+        return None
+    return _err(
+        "bad_params",
+        f"operation '{op}' on '{connector}' called with {len(issues)} "
+        f"invalid argument(s)",
+        suggestions=[
+            f"Call get_op_schema({connector!r}, {op!r}) to see the exact "
+            "parameter names, types, required flags, and select options",
+            "Re-issue the call with corrected args (fix the issues below)",
+        ],
+        connector=connector,
+        op=op,
+        issues=issues,
+    )
+
+
+def op_branch_for(connector: str, op: str,
+                  params: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Describe which conditional BRANCH of an operation's schema `params`
+    selected, one entry per discriminator param that is actually set.
+
+    Several response ops are discriminated unions: `fortigate-firewall`'s
+    `block_ip_new` takes `ip_addresses` only under `method: Quarantine Based`,
+    and `ip_block_policy` only under `Policy Based`. Set the wrong branch's
+    field and the op reports Success having acted on nothing.
+
+    `_validate_op_params` already resolves the active branch to decide which
+    `required` checks apply -- but it resolves it PRIVATELY and throws it away,
+    so an approval card renders a set of fields with no statement of the branch
+    that made them the right fields. Nothing carried the choice. This returns
+    it, so the card can.
+
+    Each entry: `{param, value, title, activates: [...], inactive: [...]}` --
+    the discriminator, the value chosen, and the child params that value does
+    and does not switch on. Empty list when the op has no conditional params,
+    none is set, or the store can't answer (never raises; a missing branch
+    annotation must not be able to block a card)."""
+    if not connector or not op:
+        return []
+    params = params or {}
+    try:
+        with _db() as conn:
+            rows = _rows(
+                conn,
+                "SELECT param_name, title, parent_param_name, condition_value "
+                "FROM operation_params WHERE connector_name=? AND op_name=?",
+                (connector, op),
+            )
+    except sqlite3.Error:
+        return []
+    if not rows:
+        return []
+
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    title_of: dict[str, Any] = {}
+    for r in rows:
+        title_of.setdefault(r["param_name"], r["title"])
+        parent = r["parent_param_name"]
+        parent = str(parent) if parent not in (None, "") else None
+        if parent is not None:
+            children_by_parent.setdefault(parent, []).append(r)
+
+    out: list[dict[str, Any]] = []
+    for parent, kids in children_by_parent.items():
+        if parent not in params:
+            continue
+        chosen = params.get(parent)
+        def _hit(child: dict[str, Any]) -> bool:
+            expected = child["condition_value"]
+            if expected in (None, ""):
+                return False
+            if isinstance(chosen, list):
+                return any(str(i) == str(expected) for i in chosen)
+            return str(chosen) == str(expected)
+        on = {k["param_name"] for k in kids if _hit(k)}
+        # A param can be catalogued under SEVERAL branches (fortigate's `vdom`
+        # hangs off both block methods). Active anywhere wins -- listing it as
+        # inactive too would read as "this field is ignored", which is the exact
+        # misread the annotation exists to prevent.
+        activates = sorted(on)
+        inactive = sorted({k["param_name"] for k in kids if not _hit(k)} - on)
+        if not activates and not inactive:
+            continue
+        out.append({
+            "param": parent,
+            "value": chosen,
+            "title": title_of.get(parent) or parent,
+            "activates": activates,
+            "inactive": inactive,
+        })
+    out.sort(key=lambda e: e["param"])
+    return out
+
+
+def _coerces_to_int(val: Any) -> bool:
+    if isinstance(val, bool):
+        return False
+    if isinstance(val, int):
+        return True
+    if isinstance(val, str):
+        try:
+            int(val.strip())
+            return True
+        except ValueError:
+            return False
+    return False
+
+
+def _coerces_to_bool(val: Any) -> bool:
+    if isinstance(val, bool):
+        return True
+    if isinstance(val, str):
+        return val.strip().lower() in {"true", "false", "0", "1", "yes", "no"}
+    if isinstance(val, int):
+        return val in (0, 1)
+    return False
+
+
+# Status precedence: tested_pass and tested_fail beat 'seen'; among those,
+# the most recent ts wins. 'seen' is a weak signal (we catalogued the
+# row, never exercised it).
+_VERIF_RANK = {"tested_pass": 3, "tested_fail": 3, "seen": 1}
+
+
+def _verifications_for(conn: sqlite3.Connection, kind: str,
+                        keys: list[str]) -> dict[str, dict]:
+    """Batch-load the strongest verification per key for one kind.
+
+    Returns `{key: {status, method, ts, notes_excerpt}}`. Missing keys
+    are absent. Picks tested_* over seen, then newest ts wins.
+    """
+    if not keys:
+        return {}
+    placeholders = ",".join("?" * len(keys))
+    rows = conn.execute(
+        f"""SELECT key, status, method, ts, notes
+            FROM verifications
+            WHERE kind=? AND key IN ({placeholders})""",
+        (kind, *keys),
+    ).fetchall()
+    best: dict[str, dict] = {}
+    for r in rows:
+        cur = best.get(r["key"])
+        rank = _VERIF_RANK.get(r["status"], 0)
+        if cur is None or rank > cur["_rank"] or (
+            rank == cur["_rank"] and (r["ts"] or "") > (cur["ts"] or "")
+        ):
+            notes = r["notes"] or ""
+            best[r["key"]] = {
+                "status": r["status"],
+                "method": r["method"],
+                "ts": r["ts"],
+                "notes_excerpt": (notes[:160] + "…") if len(notes) > 160 else notes,
+                "_rank": rank,
+            }
+    for v in best.values():
+        v.pop("_rank", None)
+    return best
+
+
+def _infer_shape(value: Any, _depth: int = 0) -> Any:
+    """Recursively replace leaf values with their type names.
+
+    Keeps dict structure intact so agents can see key names.
+    Lists become [<shape of first element>] to stay concise.
+    Caps recursion at depth 10 to guard against deeply nested blobs.
+    """
+    if _depth > 10:
+        return "..."
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, list):
+        if not value:
+            return []
+        return [_infer_shape(value[0], _depth + 1)]
+    if isinstance(value, dict):
+        shaped = {k: _infer_shape(v, _depth + 1) for k, v in value.items()}
+        # Collapse a large homogeneous map (e.g. VirusTotal query_ip's
+        # last_analysis_results: ~90 AV engines, EVERY value shaped
+        # {method,engine_name,category,result}). Echoing all 90 keys bloated the
+        # run_op tool result by tens of KB with zero added signal -- the agent
+        # only needs the per-entry shape and the count, not the vendor roster.
+        # Keep one representative entry + a count sentinel.
+        if len(shaped) > 12:
+            vals = list(shaped.values())
+            first = json.dumps(vals[0], sort_keys=True)
+            if all(json.dumps(v, sort_keys=True) == first for v in vals[1:]):
+                sample_key = next(iter(shaped))
+                return {sample_key: shaped[sample_key],
+                        "__repeated__": {"keys": len(shaped),
+                                         "all_same_shape": True}}
+        return shaped
+    return type(value).__name__
+
+
+def _store_observed_schema(connector: str, op: str, data: Any) -> None:
+    """Infer shape from live result and persist to operations + verifications."""
+    from .._db import writable_reference_db
+    target = writable_reference_db()
+    if target is None:
+        return  # packaged catalog: enrichment is skipped, never written to
+    shape = _infer_shape(data)
+    shape_json = json.dumps(shape)
+    import datetime
+    ts = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
+    with sqlite3.connect(str(target)) as conn:
+        conn.execute(
+            "UPDATE operations SET output_schema_observed=? WHERE connector_name=? AND op_name=?",
+            (shape_json, connector, op),
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO verifications (kind, key, method, status, ts, notes)
+               VALUES ('operation', ?, 'live_op_exec', 'tested_pass', ?, ?)""",
+            (f"{connector}:{op}", ts, shape_json[:2000]),
+        )
+
+
+_LIVE_CLIENT_CACHE: dict[str, Any] = {}
+
+
+def _live_client():
+    """Return a live FSR client or None if env not configured.
+
+    Memoised per-process so we reuse one TLS-pooled session instead of
+    paying a fresh handshake on every tool call. Saves ~1.3 s per
+    icon/picklist fetch in practice.
+    """
+    if "client" in _LIVE_CLIENT_CACHE:
+        return _LIVE_CLIENT_CACHE["client"]
+    try:
+        from probes._env import get_client, get_config
+    except Exception:  # noqa: BLE001
+        return None
+    if not get_config().is_live():
+        return None
+    try:
+        c = get_client()
+    except Exception as exc:  # noqa: BLE001
+        # "Not configured" and "configured but unreachable" are different, and
+        # only the first was handled: get_client() AUTHENTICATES, so a box that
+        # is down raised ConnectionError straight through a function documented
+        # to return None. Callers that say they degrade without a live FSR --
+        # step_through_playbook renders raw values instead of live Jinja --
+        # exploded instead during an outage.
+        #
+        # Deliberately NOT memoised: a box that comes back should reconnect on
+        # the next call rather than stay dead for the life of the process.
+        logging.getLogger(__name__).warning(
+            "live FSR client unavailable (%s: %s); continuing without it",
+            type(exc).__name__, exc)
+        return None
+    if c is not None:
+        _LIVE_CLIENT_CACHE["client"] = c
+    return c
+
+
+def _invalidate_live_client() -> None:
+    """Drop the memoised client so the next `_live_client()` call re-authenticates.
+
+    A long-running process (the local-dev sidecar, or a box worker that
+    doesn't recycle for days) holds the cached session past the FSR token's
+    TTL -- every live call then fails `http_401` forever with no recovery,
+    which reads to the agent as "this record doesn't exist" and burns a
+    tool-call budget retrying every arg permutation before giving up
+    (see LOCAL_DEV P3 triage-quality investigation, 2026-07-05). Callers
+    that see a 401/403 from a live request should call this then retry
+    once via a fresh `_live_client()`.
+    """
+    _LIVE_CLIENT_CACHE.pop("client", None)
+
+
+def live_request_with_reauth(method: str, client: Any, url: str, **kwargs):
+    """`client.session.<method>(url, **kwargs)`, transparently
+    re-authenticating once on a 401/403.
+
+    Centralizes the fix for the staleness class described in
+    `_invalidate_live_client`'s docstring: any live tool that makes its own
+    request (rather than going through `run_op`) should route it through
+    here instead of calling `client.session.get/post` directly, so a
+    process that's been up long enough for the FSR session to expire
+    self-heals on the next call instead of failing every subsequent call
+    `http_401` forever.
+
+    `kwargs` is whatever the caller would pass to `client.session.<method>`
+    besides `verify` (e.g. `json=body` for a POST) -- `verify` is resolved
+    against whichever client actually makes the call, since a refreshed
+    client could in principle carry a different `verify_ssl`.
+
+    Returns the `requests.Response`. On a non-auth error, returns it
+    unchanged for the caller to inspect (404/500/etc. are real answers,
+    not staleness).
+    """
+    fn = getattr(client.session, method)
+    r = fn(url, verify=client.verify_ssl, **kwargs)
+    if r.status_code in (401, 403):
+        _invalidate_live_client()
+        fresh = _live_client()
+        if fresh is not None:
+            r = getattr(fresh.session, method)(url, verify=fresh.verify_ssl, **kwargs)
+    return r
+
+
+def live_get_with_reauth(client: Any, url: str):
+    """GET variant of `live_request_with_reauth` -- see its docstring."""
+    return live_request_with_reauth("get", client, url)
+
+
+def live_post_with_reauth(client: Any, url: str, **kwargs):
+    """POST variant of `live_request_with_reauth` -- see its docstring."""
+    return live_request_with_reauth("post", client, url, **kwargs)
+
+
+def _safe_op_category(connector: str, op: str) -> str:
+    """Look up operation category to determine risk level for execution."""
+    conn = _db()
+    try:
+        row = conn.execute(
+            "SELECT category FROM operations "
+            "WHERE connector_name=? AND op_name=?",
+            (connector, op),
+        ).fetchone()
+        return (row["category"] if row else "") or ""
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Catalog freshness: is the reference store lying about what the box has?
+# ---------------------------------------------------------------------------
+#
+# The reference catalog is a SNAPSHOT, refreshed only by an explicit warmup.
+# Its staleness check is emptiness-only, so a connector installed AFTER the last
+# warm is invisible until someone re-ships -- and every tool that resolves
+# through the store then tells the agent, with total confidence, that a
+# connector the box actually has "does not exist".
+#
+# LIVE REPRO (box 159): FortiAnalyzer was installed at 09:18; the last warmup
+# had run at 07:08. For the rest of the day every `faz_*` call returned
+# "connector 'fortinet-fortianalyzer' not found in store" and find_connector
+# answered "did you mean fortinet-fortiedr?". The agent looked incompetent
+# while behaving correctly on the information it was given.
+#
+# The fix is to verify ON MISS rather than poll: only when we are about to
+# report "no such connector" do we ask the box. Zero cost on the happy path,
+# and it converts a confident falsehood into an accurate, actionable one.
+#
+# The probe itself is connector-supplied (Option-A, same posture as
+# set_failed_run_provider): on-platform the box is reached through crudhub,
+# which the bare library cannot import. Absent a probe, behavior is exactly as
+# before.
+
+_LIVE_CATALOG_PROBE: Any = None
+_AUTO_REWARM: Any = None
+
+
+def set_live_catalog_probe(fn: Any) -> None:
+    """Register the connector callable that lists connector names live on the box.
+
+    Signature: ``fn() -> set[str] | list[str] | None``. Return ``None`` (or
+    raise) when the box can't be reached -- callers then fall back to the
+    catalog's own answer rather than inventing one. Implementations are
+    expected to cache; this is called on the miss path of user-facing tools.
+    """
+    global _LIVE_CATALOG_PROBE
+    _LIVE_CATALOG_PROBE = fn
+
+
+def set_auto_rewarm(fn: Any) -> None:
+    """Register a connector callback that force-warms the reference catalog.
+
+    Called when the on-miss probe confirms the catalog is stale (the box has
+    a connector the catalog doesn't).  The callback should perform a
+    ``warmup(force=True)`` and invalidate the probe cache.  Signature:
+    ``fn() -> bool`` -- returns True if the warm succeeded.  Absent a
+    callback, the probe returns a hint but does not self-heal (#17).
+    """
+    global _AUTO_REWARM
+    _AUTO_REWARM = fn
+
+
+def box_has_connector(connector: str) -> bool | None:
+    """Does the BOX have ``connector``, regardless of the catalog?
+
+    ``True``/``False`` when the box answered; ``None`` when we could not ask
+    (no probe registered, or the probe failed). ``None`` is not ``False`` -- the
+    caller must not upgrade "couldn't check" into "isn't there".
+    """
+    if _LIVE_CATALOG_PROBE is None or not connector:
+        return None
+    try:
+        names = _LIVE_CATALOG_PROBE()
+    except Exception:  # noqa: BLE001 -- a diagnostic must never raise
+        return None
+    if names is None:
+        return None
+    try:
+        return connector in set(names)
+    except TypeError:
+        return None
+
+
+def stale_catalog_hint(connector: str) -> dict[str, Any] | None:
+    """An error-envelope fragment when ``connector`` is on the box but NOT in
+    the catalog; ``None`` otherwise (including "couldn't check").
+
+    Callers merge this into their ``unknown_connector`` envelope so the agent --
+    and the analyst reading the transcript -- see the real cause instead of a
+    phantom "doesn't exist".
+
+    When an auto-rewarm callback is registered (``set_auto_rewarm``), a
+    confirmed staleness detection triggers an immediate force-warm so the
+    catalog self-heals on the next retry instead of staying stale until the
+    next re-ship (#17).
+    """
+    if box_has_connector(connector) is not True:
+        return None
+    # Self-heal: the box has a connector the catalog doesn't.  Trigger a
+    # force-warm so the next call finds it.  Best-effort -- the hint is
+    # still returned so the caller can surface the cause even if the warm
+    # fails or no callback is registered.
+    if _AUTO_REWARM is not None:
+        try:
+            _AUTO_REWARM()
+        except Exception:  # noqa: BLE001 -- a diagnostic must never raise
+            pass
+    return {
+        "code": "stale_catalog",
+        "message": (
+            f"connector {connector!r} IS installed on this FortiSOAR instance "
+            f"but is missing from the reference catalog -- the catalog was "
+            f"warmed before it was installed. This is a catalog staleness "
+            f"problem, NOT a missing connector. The catalog is being "
+            f"re-warmed automatically; retry in a moment."
+        ),
+        "suggestions": [
+            "Re-warm the catalog (warmup with force=True), then retry.",
+            f"Do NOT substitute a different connector for {connector!r}; the "
+            "one you asked for exists.",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Host-supplied context for the record and hunt tools
+# ---------------------------------------------------------------------------
+#
+# The record/hunt tools (tools_triage, tools_noc, tools_edr) are mechanism and
+# live here; two answers they need belong to whoever hosts them. The SOC
+# assistant connector registers both at import (fsr_soc_triage.registry).
+# Each default is what an agent with no host context should get, so the tools
+# work standalone (fsrpb MCP, an outside agent) as well as in the connector.
+
+_SOURCE_CONNECTOR_RESOLVER: Any = None
+_HOST_CONNECTOR_NAME: Any = None
+
+# Every connector that can back a hunt family, preferred first. FortiSIEM v2
+# carries every v1 operation under v1's name (6.1.0+), so the helpers run on
+# either; boxes have one or the other.
+SOURCE_CONNECTORS: dict[str, tuple[str, ...]] = {
+    "fortisiem": ("fortinet-fortisiemv2", "fortinet-fortisiem"),
+    "fortianalyzer": ("fortinet-fortianalyzer",),
+    "fortimanager": ("fortinet-fortimanager",),
+    "fortiedr": ("fortinet-fortiedr",),
+}
+
+
+def active_record_iri() -> str | None:
+    """The IRI of the record this turn is mounted on (``SessionState.record_iri``),
+    or ``None``. Used to offer real candidates when a model names a record that
+    does not exist."""
+    try:
+        from fsr_playbooks.llm import session_state
+        return session_state.current().record_iri or None
+    except Exception:  # noqa: BLE001 -- context, never a reason to fail a tool
+        return None
+
+
+def set_source_connector_resolver(fn: Any) -> None:
+    """Register ``fn(key) -> str``: the connector a hunt family should call right
+    now (``key`` is a ``SOURCE_CONNECTORS`` key). The connector supplies one
+    that knows which candidate passed this turn's health check."""
+    global _SOURCE_CONNECTOR_RESOLVER
+    _SOURCE_CONNECTOR_RESOLVER = fn
+
+
+def resolve_source_connector(key: str) -> str:
+    """The connector backing ``key``'s hunt tools. Without a host resolver: the
+    first candidate the box reports installed; when the box can't be asked, the
+    first the reference catalog knows (``run_op`` refuses a connector the
+    catalog lacks); else the preferred one, and ``run_op``'s own preflight
+    reports what is wrong."""
+    if _SOURCE_CONNECTOR_RESOLVER is not None:
+        try:
+            name = _SOURCE_CONNECTOR_RESOLVER(key)
+            if name:
+                return name
+        except Exception:  # noqa: BLE001 -- fall through to the default
+            pass
+    candidates = SOURCE_CONNECTORS.get(key) or (key,)
+    for c in candidates:
+        if box_has_connector(c) is True:
+            return c
+    try:
+        with _db() as conn:
+            for c in candidates:
+                if conn.execute("SELECT 1 FROM connectors WHERE name=? LIMIT 1",
+                                (c,)).fetchone():
+                    return c
+    except sqlite3.Error:
+        pass
+    return candidates[0]
+
+
+def set_host_connector_name(fn: Any) -> None:
+    """Register ``fn() -> str``: the name of the connector hosting these tools.
+    A hunt tool records itself onto the build trace as a ``call_mcp_tool`` step
+    on that connector; with no host there is no such step to record."""
+    global _HOST_CONNECTOR_NAME
+    _HOST_CONNECTOR_NAME = fn
+
+
+def host_connector_name() -> str | None:
+    if _HOST_CONNECTOR_NAME is None:
+        return None
+    try:
+        return _HOST_CONNECTOR_NAME() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Host-supplied write policy for create_record / update_record
+# ---------------------------------------------------------------------------
+#
+# The record writes (tools_records) are mechanism; who may write to which
+# module is the host's policy (the Agentic assistant connector answers it from the
+# active persona's may_write scope). Unlike the read hooks above, the default
+# is the safe answer for a write: with no host policy, every write is refused.
+
+_RECORD_WRITE_GATE: Any = None
+
+
+def set_record_write_gate(fn: Any) -> None:
+    """Register ``fn(module) -> dict | None``: ``None`` permits a write to
+    ``module``, a ``tool_err`` envelope refuses it (and names the scope the
+    analyst or model can act on). The connector registers its persona gate."""
+    global _RECORD_WRITE_GATE
+    _RECORD_WRITE_GATE = fn
+
+
+def record_write_gate(module: str) -> dict[str, Any] | None:
+    """The host's verdict on a write to ``module``. Fails closed: no host gate,
+    or a gate that raises, refuses."""
+    from fsr_playbooks.llm.tool_result import tool_err
+
+    if _RECORD_WRITE_GATE is None:
+        return tool_err(
+            "write_not_permitted",
+            "record writes need a write policy and none is configured here; "
+            "the host registers one with _shared.set_record_write_gate")
+    try:
+        return _RECORD_WRITE_GATE(module)
+    except Exception as exc:  # noqa: BLE001 -- an unreadable policy is a refusal
+        return tool_err("write_not_permitted",
+                        f"the write policy could not be read ({exc}); refusing")
+
+
+# ---------------------------------------------------------------------------
+# Host-supplied policy for run_playbook / resume_playbook
+# ---------------------------------------------------------------------------
+#
+# The playbook runs (tools_playbook_run) are mechanism. Whether a run may
+# proceed at all is the host's policy (the Agentic assistant refuses an unattended
+# run when no persona is bound). Unlike the record writes, the default here is
+# to PERMIT: standalone (fsrpb MCP, a developer's agent) has always been able
+# to run a playbook, and on the LLM path every run is still tier 3, so an
+# analyst approves it on a card unless the host's auto-run resolver says
+# otherwise. The gate is told whether a human approved this call, because an
+# approval is authorization.
+
+_PLAYBOOK_RUN_GATE: Any = None
+_PLAYBOOK_RUN_ANNOTATOR: Any = None
+
+
+def set_playbook_run_gate(fn: Any) -> None:
+    """Register ``fn(playbook, approved, action) -> dict | None``. ``action`` is
+    ``"run"`` or ``"resume"``; ``None`` permits, a ``{ok: False, code, message}``
+    envelope refuses."""
+    global _PLAYBOOK_RUN_GATE
+    _PLAYBOOK_RUN_GATE = fn
+
+
+def playbook_run_gate(playbook: str, approved: bool, *,
+                      action: str = "run") -> dict[str, Any] | None:
+    """The host's verdict on running (or resuming) ``playbook``. No host gate
+    permits; a gate that raises refuses (an unreadable policy is not consent)."""
+    if _PLAYBOOK_RUN_GATE is None:
+        return None
+    try:
+        return _PLAYBOOK_RUN_GATE(playbook, approved, action)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "code": f"{action}_not_permitted",
+                "message": f"the playbook-run policy could not be read ({exc}); refusing"}
+
+
+def set_playbook_run_annotator(fn: Any) -> None:
+    """Register ``fn(playbook) -> dict``: extra fields for a finished run's
+    result (e.g. ``{"unlisted": True}`` for a playbook outside an allowlist)."""
+    global _PLAYBOOK_RUN_ANNOTATOR
+    _PLAYBOOK_RUN_ANNOTATOR = fn
+
+
+def playbook_run_annotations(playbook: str) -> dict[str, Any]:
+    """The host's annotations for a run of ``playbook``; ``{}`` on none or error."""
+    if _PLAYBOOK_RUN_ANNOTATOR is None:
+        return {}
+    try:
+        out = _PLAYBOOK_RUN_ANNOTATOR(playbook)
+    except Exception:  # noqa: BLE001 -- an annotation never fails a run
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def set_live_client(client: Any) -> None:
+    """Use ``client`` (a pyfsr client) as the live FortiSOAR client for every
+    tool in this process. A host that already holds an authenticated client
+    (the agentic toolkit's MCP server and CLI) registers it here instead of the
+    dev ``.env`` lookup; ``None`` clears it."""
+    if client is None:
+        _LIVE_CLIENT_CACHE.pop("client", None)
+    else:
+        _LIVE_CLIENT_CACHE["client"] = client

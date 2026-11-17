@@ -1,0 +1,37 @@
+# Gold answer for the `jinja_chain_ip_extract` eval fixture.
+#
+# List -> scalar extraction. `| first` (or `[0]`) yields the IPv4 string the
+# param wants; `| length` gives an int and `| string` gives the printed list,
+# which is the shape that slips past a static type check and dies at the
+# resolver.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: First Source IP To VirusTotal
+    description: Pull the first source IP off the alert and score it.
+    steps:
+      - name: On Alert Create
+        type: start_on_create
+        next: Extract Target IP
+        module: alerts
+
+      - name: Extract Target IP
+        type: set_variable
+        next: Score Target IP
+        vars:
+          target_ip: "{{ vars.input.records[0].sourceIps | first }}"
+
+      - name: Score Target IP
+        type: connector
+        next: Done
+        connector: virustotal
+        operation: query_ip
+        config: ""
+        params:
+          ip: "{{ vars.target_ip }}"
+
+      - name: Done
+        type: end

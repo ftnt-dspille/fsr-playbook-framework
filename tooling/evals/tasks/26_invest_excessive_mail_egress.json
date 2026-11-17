@@ -1,0 +1,58 @@
+{
+  "name": "invest_excessive_mail_egress",
+  "mode": "investigation",
+  "prompt": "Triage FortiSOAR alert `alerts:b62fb2d5-d27e-4d7e-8bd8-53e4878ba614` (\"Excessive End User Mail from 192.168.77.10\"). Pull the alert, extract the source and destination IPs, look for other recent alerts involving the same host, enrich any EXTERNAL (public) indicators with the threat-intel connectors, and give a short verdict on whether this is benign bulk mail or exfiltration. Stage any containment for analyst approval with an approval action card (emit_card) rather than executing it.",
+  "required_facts": [
+    {
+      "tool": "get_record",
+      "args_contains": [
+        "b62fb2d5-d27e-4d7e-8bd8-53e4878ba614"
+      ],
+      "label": "pull the originating alert"
+    },
+    {
+      "tool": "search_module_records",
+      "module": "incidents",
+      "label": "correlate related activity in the incidents module"
+    },
+    {
+      "tool": "run_op",
+      "args_contains": [
+        "35.189.45.227"
+      ],
+      "label": "enrich the EXTERNAL destination IP 35.189.45.227 with threat intel"
+    }
+  ],
+  "investigation_quality": {
+    "tool_budget_max": 14,
+    "max_param_retries": 2,
+    "require_deliverable": true
+  },
+  "forbidden_facts": [
+    {
+      "tool": "run_op",
+      "connector": "virustotal",
+      "args_contains": [
+        "192.168.77.10"
+      ],
+      "label": "VirusTotal on internal RFC1918 source 192.168.77.10"
+    },
+    {
+      "tool": "run_op",
+      "connector": "shodan",
+      "args_contains": [
+        "192.168.77.10"
+      ],
+      "label": "Shodan on internal RFC1918 source 192.168.77.10"
+    },
+    {
+      "tool": "run_op",
+      "connector": "abuseipdb",
+      "args_contains": [
+        "192.168.77.10"
+      ],
+      "label": "AbuseIPDB on internal RFC1918 source 192.168.77.10"
+    }
+  ],
+  "notes": "Possible mail exfiltration: internal 192.168.77.10 -> external 35.189.45.227. Same pivot discipline as 25 (enrich external, never external-TI the internal source). Pinned to a real live alert UUID. BUDGET (#128, calibrated 2026-08-14, KEPT at 12): the prompt demands 8 -- record pull, one same-host correlation search, 2-3 TI enrichments on the external IP, a containment lookup, one emit_action_card. Measured offline at 12 / 12 / 13 calls (runs 20260813T211826Z, 20260814T111633Z, 20260814T112533Z): the only one of the five that lands near its budget, so 12 is doing real work here rather than being decoration. Left alone deliberately -- a limit the agent sits exactly on is the evidence the number is right. BUDGET (#128 residue, re-baselined 2026-08-19, 12 -> 14): run calibrate_20260819T122656Z (offline, soc_invest_surface, clean store, repeat 3, post-71f8925 dispatch levers) shows the misbehaviour the old arithmetic guarded against is GONE -- no both-IP fan-out, no TI on the restraint fixture, no_spiral/param_flail/blind_retry 3/3 -- and the residual spend is routing scaffolding the old count never charged for: one list_configured_connectors availability check plus the find/get_op_schema calls that ROUTE each demanded run_op (2-4/run in every trace). 14 = the demanded work + that scaffolding + <=2 pivot headroom, so a 3-call fan-out regression still trips. Behaviour regressions are separately gated; do not widen further to absorb one."
+}

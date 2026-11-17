@@ -1,0 +1,198 @@
+"""Staged-action coverage -- an `emit_action_card` containment the analyst was
+offered but never executed must still be replayed into a trace-built playbook
+(the `action_coverage` gap, CHAT_INTELLIGENCE §B4)."""
+from __future__ import annotations
+
+import pytest
+import yaml
+
+from fsr_playbooks.agent import skill_trace as st
+from fsr_playbooks.agent.skill_trace import SkillTrace
+from fsr_playbooks.mcp_server import build_playbook_from_trace, emit_action_card
+
+
+@pytest.fixture(autouse=True)
+def _stub_live_grounding(monkeypatch):
+    """Keep this tier hermetic: emit_action_card's preflight calls
+    _live_client_for_grounding() which resolves a real FSR client when
+    .env has creds, making the offline gate depend on appliance
+    reachability (tracker #113). Stub it to None so the preflight path
+    runs without a socket. Also clear the _shared._LIVE_CLIENT_CACHE so
+    a client cached by a prior test (under random ordering, when the box
+    is reachable) doesn't leak into this module's emit_action_card path."""
+    import fsr_playbooks.mcp_server._shared as _shared
+    import fsr_playbooks.mcp_server.tools_execution as TE
+    monkeypatch.setattr(TE, "_live_client_for_grounding", lambda: None)
+    _shared._LIVE_CLIENT_CACHE.clear()
+
+
+def test_record_staged_action_appends_staged_no_output_call():
+    t = SkillTrace()
+    call = t.record_staged_action(
+        "fortigate-firewall", "block_ip_new", {"ip": "203.0.113.77"})
+    assert call is not None
+    assert call.staged is True
+    assert call.observed_output is None
+    assert call.resolved_inputs["connector"] == "fortigate-firewall"
+    assert call.resolved_inputs["operation"] == "block_ip_new"
+    assert len(t) == 1
+
+
+def test_staged_action_is_deduped_against_same_op():
+    t = SkillTrace()
+    assert t.record_staged_action("fortigate-firewall", "block_ip_new",
+                                  {"ip": "1.2.3.4"}) is not None
+    # Re-staging the same op (re-emitted card across turns) is a no-op.
+    assert t.record_staged_action("fortigate-firewall", "block_ip_new",
+                                  {"ip": "1.2.3.4"}) is None
+    assert len(t) == 1
+
+
+def test_executed_op_wins_over_staged_duplicate():
+    t = SkillTrace()
+    t.record_run_op("fortigate-firewall", "block_ip_new", {"ip": "1.2.3.4"},
+                    {"status": "blocked"})
+    # The action later staged again must NOT add a second step -- the executed
+    # one (with its real output) wins.
+    assert t.record_staged_action("fortigate-firewall", "block_ip_new",
+                                  {"ip": "1.2.3.4"}) is None
+    assert len(t) == 1
+    assert t.calls[0].staged is False
+
+
+def test_staged_flag_round_trips_through_json():
+    t = SkillTrace()
+    t.record_staged_action("fortigate-firewall", "block_ip_new", {"ip": "9.9.9.9"})
+    t2 = SkillTrace.from_json(t.to_json())
+    assert t2.calls[0].staged is True
+    assert t2.calls[0].observed_output is None
+
+
+def test_legacy_call_has_staged_false_and_omits_key():
+    t = SkillTrace()
+    t.record_run_op("virustotal", "get_ip_report", {"ip": "1.1.1.1"}, {"x": 1})
+    assert "staged" not in t.calls[0].to_dict()
+    assert t.calls[0].staged is False
+
+
+def test_emit_action_card_records_into_active_trace():
+    t = SkillTrace()
+    st.set_active_trace(t)
+    try:
+        out = emit_action_card(
+            id="contain-1",
+            connector="fortigate-firewall",
+            operation="block_ip_new",
+            summary="Block the malicious source IP",
+            args={"method": "Quarantine Based", "ip_addresses": "203.0.113.77", "time_to_live": "1 Hour"},
+            editable_fields=["ip_addresses"],
+        )
+    finally:
+        st.clear_active_trace()
+    # The card still renders for the analyst...
+    assert out["ok"] is True
+    # ...AND the staged action was recorded for the trace compiler.
+    assert len(t) == 1
+    assert t.calls[0].staged is True
+    assert t.calls[0].resolved_inputs["operation"] == "block_ip_new"
+
+
+def test_emit_action_card_no_active_trace_is_safe():
+    st.clear_active_trace()
+    out = emit_action_card(
+        id="contain-2", connector="fortigate-firewall", operation="block_ip_new",
+        summary="Block IP", args={"method": "Quarantine Based", "ip_addresses": "203.0.113.77", "time_to_live": "1 Hour"}, editable_fields=["ip_addresses"],
+    )
+    assert out["ok"] is True  # no trace active → no crash, just no recording
+
+
+def test_trace_build_replays_staged_containment_guarded():
+    """End-to-end: enrichment (malicious verdict) + a STAGED containment compile
+    into a playbook whose containment step is present and gated behind the
+    verdict decision."""
+    t = SkillTrace()
+    t.record_run_op(
+        "virustotal", "get_ip_report", {"ip": "203.0.113.77"},
+        {"attributes": {"last_analysis_stats": {"malicious": 7}}},
+        ref_prefix="data",
+    )
+    t.record_staged_action(
+        "fortigate-firewall", "block_ip_new", {"ip": "203.0.113.77"})
+
+    out = build_playbook_from_trace(t.to_json(), name="Enrich And Contain")
+    assert out["ok"] is True
+    doc = yaml.safe_load(out["yaml"])
+    pb = doc["playbooks"][0]
+    names = [s["name"] for s in pb["steps"]]
+    # The staged containment is present as a real connector step...
+    block = next(s for s in pb["steps"] if s["name"] == "Block Ip New")
+    assert block["operation"] == "block_ip_new"
+    # ...gated behind the synthesized malicious-verdict decision (safe-by-default).
+    assert "Assess Verdict" in names
+    assert "Confirmed Malicious" in names
+    dec = next(s for s in pb["steps"] if s["name"] == "Confirmed Malicious")
+    # ...and behind the analyst Confirm/Stop gate, which now sits between the
+    # verdict decision and containment: the compiled playbook runs without the
+    # agent loop's tier gate, so the artifact carries its own.
+    assert dec["conditions"][0]["next"] == "Confirm Containment"
+    confirm = next(s for s in pb["steps"] if s["name"] == "Confirm Containment")
+    assert confirm["type"] == "manual_input"
+    assert {o["display"]: o["next"] for o in confirm["options"]}["Confirm"] == "Block Ip New"
+
+
+# --- the card states the branch it chose ----------------------------------------
+#
+# `block_ip_new` is a discriminated union: `ip_addresses` applies only under
+# `method: Quarantine Based`. Picking the wrong branch is a silent no-op the
+# connector reports as Success, so the card must say which branch it is on.
+
+def test_action_card_carries_the_discriminated_branch_it_chose():
+    from fsr_playbooks.mcp_server import emit_action_card
+
+    r = emit_action_card(
+        id="c1", connector="fortigate-firewall", operation="block_ip_new",
+        summary="Block IP",
+        args={"method": "Quarantine Based", "ip_addresses": "203.0.113.9",
+              "time_to_live": "1 Hour"},
+        editable_fields=["ip_addresses"])
+    assert r["ok"], r
+    branch = {b["param"]: b for b in r["card"].get("branch") or []}
+    assert "method" in branch, "card does not say which block method it chose"
+    m = branch["method"]
+    assert m["value"] == "Quarantine Based"
+    assert "ip_addresses" in m["activates"]
+    assert "ip_block_policy" in m["inactive"]
+    # A param catalogued under both branches is active, never listed as ignored.
+    assert not (set(m["activates"]) & set(m["inactive"]))
+
+
+def test_branch_annotation_is_absent_for_a_flat_operation():
+    from fsr_playbooks.mcp_server._shared import op_branch_for
+
+    assert op_branch_for("fortigate-firewall", "no_such_op_at_all", {}) == []
+
+
+def test_an_approved_staged_action_is_one_step_not_two():
+    """Live: one approved block card left two `block_ip_new` calls on the trace
+    (the staged one and the executed one), so the bottled playbook would block
+    twice. The executed call replaces its staged twin, keeping its place and
+    step name, and carries the real output."""
+    t = SkillTrace()
+    t.record_staged_action("fortigate-firewall", "block_ip_new",
+                           {"method": "Quarantine Based", "ip_addresses": "203.0.113.9"})
+    t.record_run_op("fortigate-firewall", "block_ip_new",
+                    {"method": "Quarantine Based", "ip_addresses": "203.0.113.9"},
+                    {"newly_blocked": ["203.0.113.9"]}, config="cfg-1")
+    assert len(t.calls) == 1
+    c = t.calls[0]
+    assert not getattr(c, "staged", False)
+    assert c.observed_output == {"newly_blocked": ["203.0.113.9"]}
+    assert c.resolved_inputs["config"] == "cfg-1"
+
+
+def test_a_second_execution_of_an_op_is_still_its_own_step():
+    """Only a STAGED twin is replaced: two real executions are two steps."""
+    t = SkillTrace()
+    t.record_run_op("virustotal", "query_ip", {"ip": "203.0.113.9"}, {"v": 1})
+    t.record_run_op("virustotal", "query_ip", {"ip": "203.0.113.10"}, {"v": 2})
+    assert len(t.calls) == 2

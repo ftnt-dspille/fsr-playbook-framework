@@ -1,0 +1,651 @@
+"""Pluggable LLM callables for the eval harness.
+
+A *provider* is a `Callable[[str, str], str]` returning the candidate
+YAML for `(system_prompt, user_prompt)`. Real LLM providers (Anthropic,
+OpenAI, LMStudio) sit behind the same interface as deterministic test
+providers (echo / gold) so the harness CSV always has a "perfect"
+control row to compare against.
+
+Adding a new model: register a factory under a name and the harness
+picks it up via `--models name1,name2,...`.
+"""
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Callable
+from typing import Any
+
+from fsr_playbooks.llm._loop_helpers import _ENHANCE_VERIFY_TOOLS, MAX_TOOL_TURNS
+
+# Pre-submit gates whose envelope (ready_to_push / fixes / warnings) the scorer
+# reads. ONE source with the loop guards: edit_playbook verifies too, and a
+# second hand-kept list here is what made it score as "never verified".
+_VERIFY_TOOL_NAMES = frozenset({"verify_playbook"}) | _ENHANCE_VERIFY_TOOLS
+
+
+ProviderFn = Callable[[str, str], str]
+
+_YAML_FENCE = re.compile(r"```(?:yaml)?\s*\n(.*?)```", re.DOTALL)
+
+
+def extract_yaml(text: str) -> str:
+    """Pull a fenced ```yaml block out of an LLM response, falling back
+    to the raw text if no fence is present (some local models forget)."""
+    m = _YAML_FENCE.search(text or "")
+    return (m.group(1) if m else text).strip()
+
+
+# ---------------------------------------------------------------------------
+# Deterministic providers (always available)
+# ---------------------------------------------------------------------------
+
+def gold_provider(gold_lookup: Callable[[str], str | None]) -> ProviderFn:
+    """Returns the task's gold YAML verbatim -- a control row showing
+    "the harness would score 4/4 if a model produced perfect output."
+
+    `gold_lookup(prompt)` should return the gold YAML for the matching
+    task, or None.
+    """
+    def _call(system: str, prompt: str) -> str:
+        gold = gold_lookup(prompt)
+        return gold if gold is not None else ""
+    return _call
+
+
+def echo_provider(system: str, prompt: str) -> str:  # noqa: ARG001
+    """Always returns an empty playbook -- proves the harness scores
+    failures cleanly. Useful as a smoke test in CI."""
+    return "collection: Echo\nplaybooks: []\n"
+
+
+# ---------------------------------------------------------------------------
+# Real provider stubs -- wired only when the corresponding env / SDK is
+# available. The harness never imports these eagerly so a missing key
+# doesn't break offline runs.
+# ---------------------------------------------------------------------------
+
+def _anthropic_provider() -> ProviderFn:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+    import anthropic  # type: ignore[import-not-found]
+    client = anthropic.Anthropic()
+    model = resolved_model("anthropic")
+
+    def _call(system: str, prompt: str) -> str:
+        resp = client.messages.create(
+            model=model, max_tokens=4096, system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        chunks = [c.text for c in resp.content if getattr(c, "type", "") == "text"]
+        return "\n".join(chunks)
+    return _call
+
+
+def _openai_provider() -> ProviderFn:
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY not set")
+    from openai import OpenAI  # type: ignore[import-not-found]
+    client = OpenAI()
+    model = resolved_model("openai")
+
+    def _call(system: str, prompt: str) -> str:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        return resp.choices[0].message.content or ""
+    return _call
+
+
+def _lmstudio_provider() -> ProviderFn:
+    """Local LMStudio via its OpenAI-compatible REST API.
+
+    Uses `LMSTUDIO_BASE_URL` (default http://localhost:1234/v1) +
+    `LMSTUDIO_MODEL` to talk to whatever model is currently loaded.
+    """
+    base_url = os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
+    model = resolved_model("lmstudio")
+    import requests  # type: ignore[import-untyped]
+
+    def _call(system: str, prompt: str) -> str:
+        r = requests.post(
+            f"{base_url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.0,
+            },
+            timeout=120,
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"] or ""
+    return _call
+
+
+# ---------------------------------------------------------------------------
+# Agentic providers -- full tool-use loop with the same MCP tool registry the
+# Studio chat uses. Output is a dict {text, trace, turns} so the harness can
+# score tool-budget / no-spiral / adherence empirically. The harness detects
+# the dict return and routes it through the agentic gates.
+# ---------------------------------------------------------------------------
+
+# Cap on tool-use turns per agentic eval task. IMPORTED, not restated: this was
+# hard-coded to 12 while production ran 16, and the comment claimed to mirror a
+# file (`web/backend/llm/_loop_helpers.py`) that does not exist -- so a build
+# task that needed 13 rounds was truncated by the harness and scored as the
+# model failing. Same class as the EVAL_HTTP_TIMEOUT and `temperature` traps:
+# a client-side limit read as agent regression. Bind it to the real ceiling so
+# it cannot drift again.
+_AGENTIC_MAX_TURNS = MAX_TOOL_TURNS
+
+# Per-task cancel signal. The harness runs each task under a wall-clock
+# deadline (EVAL_TASK_TIMEOUT); when it fires the task's thread cannot be
+# killed, so the agentic loops check this between turns and before each tool
+# call and stop -- otherwise an abandoned task keeps dispatching tools into the
+# NEXT task's audit log. A contextvar, so each task's thread sees only its own.
+import contextvars as _cv
+
+TASK_CANCEL: _cv.ContextVar[Any] = _cv.ContextVar("eval_task_cancel", default=None)
+
+
+class TaskCancelled(Exception):
+    """Raised inside an agentic loop whose task the harness abandoned."""
+
+
+def _check_cancel() -> None:
+    ev = TASK_CANCEL.get()
+    if ev is not None and ev.is_set():
+        raise TaskCancelled()
+
+
+# Per-task tool-slice override, set by the harness around each cell (see
+# `tools_for_intent`). None = advertise the full SAFE_TOOLS registry, which is
+# what every pre-existing task has always run under. Phase 1.2 needs this
+# because the tool-selection number is only meaningful against the surface the
+# user actually hits -- the connector serves an intent slice, not the registry.
+_TOOL_SLICE: list[str] | None = None
+
+# Redesign Phase 2: when a task runs under `tool_slice: "turnplan"` (optionally
+# "turnplan:<intent>"), the cell resolves through plan_turn() instead of the
+# legacy intent slices -- full surface advertised, affordance gate installed at
+# dispatch, and the TurnPlan prompt (prior + constraints + gap-card rule)
+# replaces the harness system prompt (see harness._prompt_for).
+_TURN_PLAN = None
+
+
+def eval_turn_plan():
+    """The TurnPlan active for the current cell, or None (legacy slicing)."""
+    return _TURN_PLAN
+
+
+def set_tool_slice(intent: str | None) -> None:
+    """Restrict the advertised tools to `intents.tools_for_intent(intent)`.
+
+    Pass None to restore the full registry; pass "turnplan[:<intent>]" to
+    resolve the cell through Phase 2's plan_turn() (full surface + dispatch
+    affordance gate + TurnPlan prompt). Resolved to names here (not tool
+    dicts) so the provider keeps ownership of the cache_control marker."""
+    global _TOOL_SLICE, _TURN_PLAN
+    if _TURN_PLAN is not None:
+        from fsr_playbooks.llm.turn_plan import set_turn_plan  # type: ignore
+        set_turn_plan(None)
+        _TURN_PLAN = None
+    if intent is None:
+        _TOOL_SLICE = None
+        return
+    if intent == "turnplan" or intent.startswith("turnplan:"):
+        from fsr_playbooks.llm.turn_plan import (  # type: ignore
+            plan_turn,
+            set_turn_plan,
+        )
+        _, _, sub = intent.partition(":")
+        # Budget stated to the model matches the loop's real ceiling, so the
+        # soft-close nudge (budget.note, injected by the agentic loops) fires
+        # before the wall instead of describing a wall that isn't there.
+        plan = plan_turn(sub or "triage", max_tool_turns=_AGENTIC_MAX_TURNS)
+        set_turn_plan(plan)
+        _TURN_PLAN = plan
+        _TOOL_SLICE = [t["name"] for t in plan.tools]
+        return
+    from fsr_playbooks.llm.intents import tools_for_intent  # type: ignore
+    _TOOL_SLICE = [t["name"] for t in tools_for_intent(intent)]
+
+
+def _import_studio_tools():
+    """Pull the same SAFE_TOOLS registry the chat backend uses, so agentic
+    evals exercise the exact tool surface end users hit. Also returns
+    the HITL audit-log helpers so the agentic providers can snapshot
+    per-task escalation behavior."""
+    import sys
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    backend = repo / "web" / "backend"
+    if str(backend) not in sys.path:
+        sys.path.insert(0, str(backend))
+    from fsr_playbooks.llm.tools import (  # type: ignore
+        anthropic_tools,
+        clear_audit_log,
+        dispatch,
+        openai_tools,
+        set_eval_policy,
+        snapshot_audit_log,
+    )
+    return (anthropic_tools, openai_tools, dispatch,
+            clear_audit_log, snapshot_audit_log, set_eval_policy)
+
+
+def _agentic_anthropic_provider() -> Callable:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+    import json as _json
+
+    import anthropic  # type: ignore[import-not-found]
+    client = anthropic.Anthropic()
+    model = resolved_model("agentic_anthropic")
+    anthropic_tools, _, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
+    raw_tools = anthropic_tools()
+
+    def _tools_now() -> list[dict]:
+        # Resolved per call so a per-task slice (set_tool_slice) applies.
+        # Unsliced runs rebuild an identical list, so the prompt-cache
+        # breakpoint below still hits across tasks.
+        picked = ([t for t in raw_tools if t["name"] in _TOOL_SLICE]
+                  if _TOOL_SLICE is not None else raw_tools)
+        # Cache the tool list -- mark the last entry so the cache breakpoint
+        # includes every preceding tool def.
+        out = [dict(t) for t in picked]
+        if out:
+            out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+        return out
+
+    def _call(system: str, prompt: str) -> dict:
+        tools = _tools_now()
+        # Anthropic accepts `system` as either a string or a list of
+        # content blocks; the block form is required to attach
+        # cache_control. Static across the whole eval run.
+        system_blocks = [{
+            "type": "text", "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }]
+        history: list[dict] = [{"role": "user", "content": prompt}]
+        trace: list[dict] = []
+        text_chunks: list[str] = []
+        usage_log: list[dict] = []
+        turns = 0
+        for _ in range(_AGENTIC_MAX_TURNS):
+            _check_cancel()
+            turns += 1
+            resp = client.messages.create(
+                model=model, max_tokens=4096, system=system_blocks,
+                messages=history, tools=tools,
+            )
+            u = getattr(resp, "usage", None)
+            if u is not None:
+                usage_log.append({
+                    "input_tokens": getattr(u, "input_tokens", 0),
+                    "output_tokens": getattr(u, "output_tokens", 0),
+                    "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0),
+                    "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0),
+                })
+            assistant_blocks: list[dict] = []
+            tool_uses: list[tuple[str, str, dict]] = []
+            for b in resp.content:
+                if b.type == "text":
+                    assistant_blocks.append({"type": "text", "text": b.text})
+                    text_chunks.append(b.text)
+                elif b.type == "tool_use":
+                    assistant_blocks.append({
+                        "type": "tool_use", "id": b.id,
+                        "name": b.name, "input": dict(b.input),
+                    })
+                    tool_uses.append((b.id, b.name, dict(b.input)))
+            history.append({"role": "assistant", "content": assistant_blocks})
+            if resp.stop_reason != "tool_use" or not tool_uses:
+                break
+            tool_results: list[dict] = []
+            for call_id, name, args in tool_uses:
+                _check_cancel()
+                result = dispatch(name, args)
+                content = result if isinstance(result, str) else _json.dumps(
+                    result, default=str)
+                entry: dict[str, Any] = {
+                    "name": name,
+                    "args": args,
+                    "args_chars": len(_json.dumps(args, default=str)),
+                    "result_chars": len(content),
+                }
+                # Result envelope flags so the investigation-recall scorer
+                # (and partial-failure assertions) can see what each pivot
+                # returned without re-running it.
+                if isinstance(result, dict):
+                    entry["ok"] = result.get("ok")
+                    entry["code"] = result.get("code")
+                    # `dispatch` returns a BARE `{"error": "<Type>: <msg>"}`
+                    # when a tool raises -- no `ok`, no `code`, and no audit
+                    # row. In an archived trace that call is indistinguishable
+                    # from a successful one except by a suspiciously small
+                    # `result_chars`, which is how five raising calls in
+                    # run 20260813T211826Z read as the agent making
+                    # duplicate lookups. Keep the text (bounded) so a trace
+                    # can be bucketed without re-running the model.
+                    if result.get("error") is not None:
+                        entry["error"] = str(result["error"])[:200]
+                # Capture the verify_playbook envelope (small, structured)
+                # so the scorer can compute verify-related metrics without
+                # re-running the tool.
+                # `verify_enhancement` returns the same envelope plus
+                # regressions, and it is the ONLY pre-submit gate on the
+                # enhance path -- capture it too, or every enhance turn reads
+                # as "never reached ready_to_push" for having used the correct
+                # gate.
+                if name in _VERIFY_TOOL_NAMES \
+                        and isinstance(result, dict):
+                    entry["verify"] = {
+                        "ready_to_push": bool(result.get("ready_to_push")),
+                        "required_fix_count": len(result.get("required_fixes") or []),
+                        "warning_count": len(result.get("warnings") or []),
+                    }
+                _thread_result(entry, name, result)
+                trace.append(entry)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": call_id,
+                    "content": content,
+                })
+            # TurnPlan item 3: state the shrinking budget instead of letting
+            # the cap truncate the turn (mirrors the openai-compatible loop).
+            if _TURN_PLAN is not None:
+                _note = _TURN_PLAN.budget.note(turns)
+                if _note:
+                    tool_results.append(
+                        {"type": "text", "text": f"[turn budget] {_note}"})
+            history.append({"role": "user", "content": tool_results})
+        return {"text": "\n".join(text_chunks), "trace": trace,
+                "turns": turns, "usage": usage_log,
+                "audit": _snap()}
+    return _call
+
+
+#: Models that reject an explicit `temperature`. Populated at run time from
+#: the API's own 400 rather than hard-coded, so a new reasoning model screens
+#: correctly without a code change here.
+_NO_TEMPERATURE: set[str] = set()
+
+
+def _agentic_openai_compatible(*, base_url: str, model: str,
+                               headers: dict[str, str] | None = None,
+                               ) -> Callable:
+    """Agentic loop over any OpenAI-compatible chat-completions endpoint with
+    function-calling. Mirrors `_agentic_anthropic_provider` so the same gates
+    apply. Backs both LM Studio (local, no auth) and Frank (the Fortilab AI
+    gateway, Bifrost virtual key)."""
+    import json as _json
+
+    import requests  # type: ignore[import-untyped]
+    _, openai_tools, dispatch, _clr, _snap, _set_pol = _import_studio_tools()
+    raw_tools = openai_tools()
+
+    def _tools_now() -> list[dict]:
+        # Per call so a per-task slice (set_tool_slice) applies -- the
+        # tool-selection eval is only meaningful against the surface the
+        # user actually hits.
+        if _TOOL_SLICE is None:
+            return raw_tools
+        return [t for t in raw_tools
+                if (t.get("function") or {}).get("name") in _TOOL_SLICE]
+
+    def _call(system: str, prompt: str) -> dict:
+        tools = _tools_now()
+        history: list[dict] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        trace: list[dict] = []
+        text_chunks: list[str] = []
+        turns = 0
+        for _ in range(_AGENTIC_MAX_TURNS):
+            _check_cancel()
+            turns += 1
+            payload = {"model": model, "messages": history, "tools": tools}
+            # Reasoning models (o1/o3/o4, and the gpt-5 reasoning tier) accept
+            # ONLY the default temperature and 400 on any explicit value. We
+            # want temperature=0 everywhere it is allowed -- a screen that
+            # varies sampling is measuring noise -- so it is sent by default
+            # and dropped for the models that refuse it, learned once per
+            # model rather than retried every turn.
+            #
+            # This was worth finding: an `o4-mini` screen came back 0/5 with
+            # `ERR (provider call raised)` in 0.2s per task, which reads as a
+            # model that cannot do the work. It was this parameter. Same shape
+            # as the EVAL_HTTP_TIMEOUT note above -- a client-side detail
+            # scoring as an agent regression.
+            if model not in _NO_TEMPERATURE:
+                payload["temperature"] = 0.0
+            r = requests.post(
+                f"{base_url}/chat/completions",
+                json=payload,
+                headers=headers or {},
+                # The long authoring tasks legitimately exceed 180s (14+ tool
+                # calls, each a round trip). Every `ERR (provider call raised)`
+                # on `select_build_offer` and `soc_phish_block_with_approval`
+                # was THIS timeout, not the model failing -- and an ERR row
+                # scores 0, so a client-side limit was reading as an agent
+                # that could not do the task.
+                timeout=float(os.environ.get("EVAL_HTTP_TIMEOUT", "180")),
+            )
+            if (r.status_code == 400 and model not in _NO_TEMPERATURE
+                    and "temperature" in r.text):
+                _NO_TEMPERATURE.add(model)
+                payload.pop("temperature", None)
+                r = requests.post(
+                    f"{base_url}/chat/completions",
+                    json=payload,
+                    headers=headers or {},
+                    timeout=float(os.environ.get("EVAL_HTTP_TIMEOUT", "180")),
+                )
+            r.raise_for_status()
+            msg = r.json()["choices"][0]["message"]
+            history.append(msg)
+            if msg.get("content"):
+                text_chunks.append(msg["content"])
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                break
+            for tc in calls:
+                fn = tc.get("function") or {}
+                name = fn.get("name") or ""
+                try:
+                    args = _json.loads(fn.get("arguments") or "{}")
+                except Exception:
+                    args = {}
+                _check_cancel()
+                result = dispatch(name, args)
+                content = result if isinstance(result, str) else _json.dumps(
+                    result, default=str)
+                entry: dict[str, Any] = {
+                    "name": name,
+                    "args": args,
+                    "args_chars": len(_json.dumps(args, default=str)),
+                    "result_chars": len(content),
+                }
+                # Result envelope flags so the investigation-recall scorer
+                # (and partial-failure assertions) can see what each pivot
+                # returned without re-running it.
+                if isinstance(result, dict):
+                    entry["ok"] = result.get("ok")
+                    entry["code"] = result.get("code")
+                    # `dispatch` returns a BARE `{"error": "<Type>: <msg>"}`
+                    # when a tool raises -- no `ok`, no `code`, and no audit
+                    # row. In an archived trace that call is indistinguishable
+                    # from a successful one except by a suspiciously small
+                    # `result_chars`, which is how five raising calls in
+                    # run 20260813T211826Z read as the agent making
+                    # duplicate lookups. Keep the text (bounded) so a trace
+                    # can be bucketed without re-running the model.
+                    if result.get("error") is not None:
+                        entry["error"] = str(result["error"])[:200]
+                # `verify_enhancement` returns the same envelope plus
+                # regressions, and it is the ONLY pre-submit gate on the
+                # enhance path -- capture it too, or every enhance turn reads
+                # as "never reached ready_to_push" for having used the correct
+                # gate.
+                if name in _VERIFY_TOOL_NAMES \
+                        and isinstance(result, dict):
+                    entry["verify"] = {
+                        "ready_to_push": bool(result.get("ready_to_push")),
+                        "required_fix_count": len(result.get("required_fixes") or []),
+                        "warning_count": len(result.get("warnings") or []),
+                    }
+                _thread_result(entry, name, result)
+                trace.append(entry)
+                history.append({
+                    "role": "tool", "tool_call_id": tc.get("id", ""),
+                    "content": content,
+                })
+            # TurnPlan item 3 (constraints are STATED, not discovered): once
+            # the loop nears its ceiling, tell the model instead of letting
+            # the cap truncate it mid-thought. The connector's live loop
+            # should mirror this injection.
+            if _TURN_PLAN is not None:
+                _note = _TURN_PLAN.budget.note(turns)
+                if _note:
+                    # A user-role note: gateways refuse a system message
+                    # that is not first.
+                    history.append({"role": "user",
+                                    "content": f"[turn budget] {_note}"})
+        return {"text": "\n".join(text_chunks), "trace": trace,
+                "turns": turns, "audit": _snap()}
+    return _call
+
+
+# Result keys the scorer reads off a call record (scoring.delivered_yaml,
+# scoring's enhancement-delivery grade). Threaded for these tools only: a whole
+# result per call would bloat every archived row.
+_THREADED_RESULT_KEYS = ("ok", "code", "verified_id", "ready_to_push", "after_yaml")
+_THREADED_RESULT_TOOLS = _VERIFY_TOOL_NAMES | {
+    "emit_enhancement_offer", "emit_playbook_offer", "emit_card"}
+
+
+def _thread_result(entry: dict[str, Any], name: str, result: Any) -> None:
+    """Attach the scorer-relevant slice of a tool's result to its trace entry.
+    Without it, `edit_playbook`'s edited document (`after_yaml`) and every
+    verify's `verified_id` were invisible: an edit-path delivery scored as no
+    delivery, and an offer's id could never be matched to the verify that
+    issued it."""
+    if name in _THREADED_RESULT_TOOLS and isinstance(result, dict):
+        entry["result"] = {k: result[k] for k in _THREADED_RESULT_KEYS
+                           if k in result}
+
+
+def _agentic_lmstudio_provider() -> Callable:
+    """LM Studio's local OpenAI-compatible endpoint. No auth."""
+    return _agentic_openai_compatible(
+        base_url=os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
+        model=resolved_model("agentic_lmstudio"),
+    )
+
+
+def _agentic_frank_provider() -> Callable:
+    """Frank -- the Fortilab AI gateway, via its Bifrost virtual key.
+
+    Deliberately reads FRANK_* rather than the global OPENAI_* config so
+    switching Frank's model can't silently move an eval baseline (the same
+    isolation the .env comment calls for). Sends the key both as a Bearer
+    token and as `x-bf-vk`, which is how Bifrost accepts a virtual key."""
+    key = os.environ.get("FRANK_API_KEY")
+    if not key:
+        raise RuntimeError("FRANK_API_KEY not set (see .env)")
+    # No default: the gateway is an internal host, and hardcoding it here puts
+    # it in a tracked file that publishes to the public mirror. Required from
+    # the environment like FRANK_API_KEY and FRANK_MODEL either side of it.
+    base_url = os.environ.get("FRANK_BASE_URL")
+    if not base_url:
+        raise RuntimeError("FRANK_BASE_URL not set (see .env)")
+    model = resolved_model("agentic_frank")
+    if not model:
+        raise RuntimeError("FRANK_MODEL not set (see .env)")
+    return _agentic_openai_compatible(
+        base_url=base_url, model=model,
+        headers={"Authorization": f"Bearer {key}", "x-bf-vk": key},
+    )
+
+
+def _agentic_openai_api_provider() -> Callable:
+    """The model FortiSOAR actually runs in production: gpt-4.1-mini.
+
+    Deliberately does NOT read OPENAI_ENDPOINT. That variable points at the
+    Fortilab gateway, which serves two self-hosted models (GLM-5.2, Qwen3.6)
+    and no GPT -- pointing this at it would silently measure a different
+    model than production, which is the exact mistake the first Frank
+    baseline made. Override with EVAL_OPENAI_BASE_URL / EVAL_OPENAI_MODEL."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    return _agentic_openai_compatible(
+        base_url=os.environ.get("EVAL_OPENAI_BASE_URL",
+                                "https://api.openai.com/v1"),
+        model=resolved_model("agentic_openai_api"),
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+
+#: Where each provider's CONCRETE model id comes from: (env var, default).
+#: One table, read by the providers AND stamped into archived runs, so an
+#: archive can never name a different model than the one that ran. Before it,
+#: a screen archived only "agentic_frank" -- two runs on different Frank models
+#: (qwen3.8-27b, deepseek-v4-flash) were indistinguishable on disk.
+_MODEL_SOURCE: dict[str, tuple[str, str | None]] = {
+    "anthropic": ("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+    "openai": ("EVAL_OPENAI_MODEL", "gpt-4o-mini"),
+    "lmstudio": ("LMSTUDIO_MODEL", "local-model"),
+    "agentic_anthropic": ("EVAL_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+    "agentic_lmstudio": ("LMSTUDIO_MODEL", "local-model"),
+    "agentic_frank": ("FRANK_MODEL", None),
+    "agentic_openai_api": ("EVAL_OPENAI_MODEL", "gpt-4.1-mini"),
+}
+
+
+def resolved_model(name: str) -> str | None:
+    """The concrete model id provider `name` runs, or None (gold/echo, or a
+    provider whose model env var is unset and has no default)."""
+    src = _MODEL_SOURCE.get(name)
+    if src is None:
+        return None
+    env, default = src
+    return os.environ.get(env) or default
+
+
+_LAZY_FACTORIES: dict[str, Callable[[], ProviderFn]] = {
+    "anthropic": _anthropic_provider,
+    "openai": _openai_provider,
+    "lmstudio": _lmstudio_provider,
+    "agentic_anthropic": _agentic_anthropic_provider,
+    "agentic_lmstudio": _agentic_lmstudio_provider,
+    "agentic_frank": _agentic_frank_provider,
+    "agentic_openai_api": _agentic_openai_api_provider,
+}
+
+
+def get_provider(name: str, *, gold_lookup=None) -> ProviderFn:
+    """Resolve a provider by name. Lazy: real providers only import their
+    SDK when first called."""
+    if name == "echo":
+        return echo_provider
+    if name == "gold":
+        if gold_lookup is None:
+            raise ValueError("gold provider requires a gold_lookup callable")
+        return gold_provider(gold_lookup)
+    if name in _LAZY_FACTORIES:
+        return _LAZY_FACTORIES[name]()
+    raise ValueError(
+        f"unknown provider {name!r}; known: gold, echo, "
+        + ", ".join(_LAZY_FACTORIES))
+
+

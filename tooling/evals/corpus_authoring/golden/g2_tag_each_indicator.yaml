@@ -1,0 +1,26 @@
+collection: Golden - Tag Each Indicator
+description: Iterate a list of indicators and update each one.
+visible: true
+playbooks:
+  - name: Tag Each Indicator
+    description: For every indicator in the input list, set its reputation.
+    is_active: true
+    steps:
+      - name: Start
+        type: start
+        next: Collect Indicators
+      - name: Collect Indicators
+        type: set_variable
+        next: Update Each
+        vars:
+          indicatorList: "{{ vars.input.records }}"
+      - name: Update Each
+        type: update_record
+        module: indicators
+        record: "{{ vars.item['@id'] }}"
+        for_each:
+          item: "{{ vars.indicatorList }}"
+          parallel: false
+          condition: ""
+        resource:
+          reputation: Malicious

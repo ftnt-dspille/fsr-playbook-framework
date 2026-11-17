@@ -1,0 +1,163 @@
+{
+  "type": "workflow_collections",
+  "data": [
+    {
+      "@context": "/api/3/contexts/WorkflowCollection",
+      "@type": "WorkflowCollection",
+      "name": "00 - a Import testing",
+      "description": null,
+      "visible": true,
+      "image": null,
+      "uuid": "65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+      "id": 189,
+      "createDate": 1775924778.180994,
+      "modifyDate": 1775924784.561227,
+      "deletedAt": null,
+      "importedBy": [],
+      "recordTags": [],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "triggerLimit": null,
+          "name": "query critical",
+          "aliasName": null,
+          "tag": null,
+          "description": null,
+          "isActive": true,
+          "debug": false,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": false,
+          "parameters": [],
+          "synchronous": false,
+          "lastModifyDate": 1777838297,
+          "collection": "/api/3/workflow_collections/65ab88db-6ccc-4b45-890e-3d7c5bbf0228",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/48ab1e4b-f25b-41d3-8fae-2d8027a49098",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "get crit",
+              "description": null,
+              "arguments": {
+                "query": {
+                  "sort": [],
+                  "limit": 30,
+                  "logic": "AND",
+                  "filters": [
+                    {
+                      "type": "object",
+                      "field": "severity",
+                      "value": [
+                        "7efa2220-39bb-44e4-961f-ac368776e3b0"
+                      ],
+                      "module": "severity",
+                      "display": "",
+                      "operator": "in",
+                      "template": "multiselectpicklist",
+                      "enableJinja": true,
+                      "OPERATOR_KEY": "$",
+                      "useInOperator": true,
+                      "displayTemplate": "",
+                      "previousOperator": "in",
+                      "previousTemplate": "multiselectpicklist"
+                    }
+                  ]
+                },
+                "module": "alerts?$limit=30",
+                "step_variables": []
+              },
+              "status": null,
+              "top": "158",
+              "left": "244",
+              "stepType": "/api/3/workflow_step_types/b593663d-7d13-40ce-a3a3-96dece928770",
+              "group": null,
+              "uuid": "fb0b25f4-7587-493b-9e2a-85b7817bd83a"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Set vars",
+              "description": null,
+              "arguments": {
+                "var1": "value1",
+                "var2": "{{vars.steps.get_crit[0].createDate}}",
+                "var3": "{{globalVars.Current_Date}}"
+              },
+              "status": null,
+              "top": "363",
+              "left": "416",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "0b76f2cf-18b2-443a-8ccb-0051244df5a3"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "__triggerLimit": true,
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  }
+                },
+                "triggerOnSource": true,
+                "triggerOnReplicate": false
+              },
+              "status": null,
+              "top": "40",
+              "left": "40",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "48ab1e4b-f25b-41d3-8fae-2d8027a49098"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "get crit -> Set vars",
+              "targetStep": "/api/3/workflow_steps/0b76f2cf-18b2-443a-8ccb-0051244df5a3",
+              "sourceStep": "/api/3/workflow_steps/fb0b25f4-7587-493b-9e2a-85b7817bd83a",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "3f8b49ac-0572-46e4-9576-7e9331eaccd5"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> get crit",
+              "targetStep": "/api/3/workflow_steps/fb0b25f4-7587-493b-9e2a-85b7817bd83a",
+              "sourceStep": "/api/3/workflow_steps/48ab1e4b-f25b-41d3-8fae-2d8027a49098",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "60a4d97f-a034-47a3-9361-178a5c062114"
+            }
+          ],
+          "groups": [],
+          "priority": "/api/3/picklists/2b563c61-ae2c-41c0-a85a-c9709585e3f2",
+          "playbookOrigin": "/api/3/picklists/15c1e8c9-22bf-4e66-8fbb-0a502d4a4a3f",
+          "isEditable": true,
+          "uuid": "ec997a36-4ff0-4b2a-974e-cd9f2b5aff7e",
+          "id": 2502,
+          "createUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "createDate": 1777343210.956823,
+          "modifyUser": "/api/3/people/3451141c-bac6-467c-8d72-85e0fab569ce",
+          "modifyDate": 1777838297.105759,
+          "owners": [],
+          "isPrivate": false,
+          "deletedAt": null,
+          "importedBy": [],
+          "recordTags": []
+        }
+      ]
+    }
+  ],
+  "macros": [
+    {
+      "name": "Current_Date",
+      "value": "{{arrow.utcnow().timestamp}}",
+      "default_value": "{{arrow.utcnow().timestamp}}"
+    }
+  ],
+  "exported_tags": []
+}

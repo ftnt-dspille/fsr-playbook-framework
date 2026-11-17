@@ -1,0 +1,81 @@
+{
+  "fixture": "invest_intrusion_incident",
+  "captured": "20260530T192043Z",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "pending_approval",
+  "recall": 1.0,
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "module": "incidents",
+        "uuid": "a0668705-9dc8-4797-a2c8-8f1e1f34942a",
+        "relationships": true
+      },
+      "ok": true
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "module": "alerts",
+        "iri": "/api/3/alerts/9d6c91ab-86b2-4918-a7bf-5936f5e78720",
+        "relationships": true
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "incidents",
+        "q": "192.168.77.30",
+        "limit": 10
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "192.168.77.30",
+        "limit": 15
+      },
+      "ok": true
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "module": "incidents",
+        "iri": "/api/3/incidents/11559595-8751-4b23-93c3-5944a8e9b157",
+        "relationships": false
+      },
+      "ok": null
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "module": "incidents",
+        "iri": "/api/3/incidents/306000ab-4768-4221-b931-bb7761508455",
+        "relationships": false
+      },
+      "ok": null
+    },
+    {
+      "name": "list_configured_connectors",
+      "args": {
+        "probe": true
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-threat-intelligence",
+        "op": "ip_reputation",
+        "params": {
+          "ip_address": "12.62.213.134"
+        }
+      },
+      "ok": null
+    }
+  ]
+}

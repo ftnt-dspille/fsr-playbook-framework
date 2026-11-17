@@ -1,0 +1,38 @@
+{
+  "name": "repair_wrong_containment_param",
+  "mode": "repair",
+  "prompt": "This playbook ran on the box and the run reported Success, but nothing was ever banned on the firewall -- the FortiGate step came back with `newly_blocked`, `already_blocked`, `error_with_block` and `vdom_not_exist` all empty. Find the defect and return the corrected complete YAML. Change nothing else.",
+  "broken_yaml_path": "tooling/evals/broken/phish_block_wrong_containment_param.yaml",
+  "gold_yaml_path": "tooling/evals/golds/soc_phish_block_with_approval.yaml",
+  "notes": "Second repair defect class: `block_ip_new` called Address Based with the singular `ip`, which on a real appliance answers Success and bans nothing (live-verified on the lab FortiGate -- every result bucket empty). This is the SYMPTOM the prompt describes, and the fixture grades whether the agent restores the Quarantine Based / `ip_addresses` shape rather than deleting the step. The compiler already sees this one -- it raises `param-set conflict on fortigate-firewall.block_ip_new`, so the broken state fails `draft`, same tier as `repair_bad_step_ref`. That was NOT assumed; it was measured while calibrating, and it is worth knowing: a defect that costs a live containment is statically detectable today. The tier that no static gate can see is covered by `repair_loop_over_wrong_field`. The tempting wrong fixes here are destructive -- drop the block, or replace containment with a comment; both clear every diagnostic and are caught only by `no_collateral_damage`.",
+  "ir_assertions": [
+    {
+      "kind": "arg_text_contains",
+      "type": "connector",
+      "contains": "ip_addresses",
+      "note": "containment passes the plural `ip_addresses` param, not `ip`"
+    },
+    {
+      "kind": "arg_text_contains",
+      "type": "connector",
+      "contains": "quarantine based",
+      "note": "the only block_ip_new branch that bans anything"
+    },
+    {
+      "kind": "connector_op",
+      "connector": "fortigate",
+      "operation_contains": "block_ip",
+      "note": "the block step is still there -- not deleted to silence it"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "manual_input"
+      },
+      "to": {
+        "connector": "fortigate"
+      },
+      "note": "the approval gate still precedes the block -- a fix must not reroute it"
+    }
+  ]
+}

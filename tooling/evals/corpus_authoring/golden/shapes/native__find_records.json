@@ -1,0 +1,17 @@
+{
+  "connector": "native",
+  "operation": "find_records",
+  "shape": {
+    "__list_of__": {
+      "id": "int",
+      "@id": "str",
+      "uuid": "str",
+      "@type": "str",
+      "name": "str",
+      "severity": "str",
+      "status": "str"
+    },
+    "__len__": 3
+  },
+  "note": "find_record output is a bare LIST of record dicts (live-confirmed). NOTE: the compiler ALREADY catches field-on-list mistakes for native steps statically (missing_field_on_step_output / bad_value), so this gotcha is NOT runtime-only. The runtime-only class is CONNECTOR-OP outputs, whose shapes the compiler cannot know."
+}

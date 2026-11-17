@@ -1,0 +1,497 @@
+"""TurnPlan -- the single per-turn resolution point (redesign Phase 2).
+
+Phase 1 consolidated the tool *surface*; this module consolidates the
+*routing*. Historically a turn's prompt, tool slice, and tier behavior were
+resolved at three independent points that never saw each other (intent
+derivation, tool slicing, prompt layering -- see the Agentic Assistant Design
+Assessment §1a). The consequences were structural: the model could not reach a
+capability the router didn't anticipate, affordances appeared and disappeared
+opaquely, and a request that crossed the triage/build boundary dead-ended in
+prose instead of a ``capability_gap`` card.
+
+``plan_turn()`` replaces that with ONE function returning ONE object:
+
+    TurnPlan(prompt, tools, tier_policy, budget, gates)
+
+and three deliberate inversions of the old design:
+
+1. **The full consolidated surface is advertised.** Intent no longer removes
+   tools from the model's list; it becomes a *stated prior* in the prompt
+   ("you are on an alert record") that the model may override when the
+   analyst's ask says otherwise.
+2. **The gate moves to dispatch.** What the old slices protected is enforced
+   where it matters -- at the call -- via tier policy (already declared on
+   every description since Phase 1) plus a small set of *affordance* gates
+   keyed on real page state (e.g. no open playbook => nothing to patch), not
+   on intent. A gated call returns a structured refusal that names the gap
+   and points at ``emit_card(card_type='capability_gap')`` -- fail closed
+   with a path forward, never a silent removal.
+3. **The model is told its constraints.** The prompt states the tool budget,
+   the approval-tier contract, and the never-dead-end rule up front, so
+   approval is a plan and running out of turns ends in a graceful close.
+
+Hosts install the plan for the duration of a turn with ``set_turn_plan()``
+(ContextVar, same pattern as the read-only-turn gate in ``tools.py``);
+``dispatch`` consults the active plan's gates. A host that never installs a
+plan sees zero behavior change (fail-open, like every other turn-scoped gate).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from ._loop_helpers import MAX_TOOL_TURNS, today_line
+from .intents import (
+    INTENTS,
+    classify_message,
+    gate_directive,
+    load_intent_prompt,
+    resolve_intent,
+)
+from .provider import TurnRequest
+
+# Default hard ceiling mirrors the historical connector loop cap. The plan
+# turns it from an invisible cliff into a stated budget + graceful close.
+DEFAULT_MAX_TOOL_TURNS = MAX_TOOL_TURNS   # one ceiling, not two copies
+# When this many calls remain, budget_note() starts telling the model to
+# wrap up instead of letting the ceiling truncate it mid-thought.
+SOFT_CLOSE_REMAINING = 3
+
+
+@dataclass(frozen=True)
+class TurnBudget:
+    """The turn's tool-call budget, stated to the model instead of hidden."""
+
+    max_tool_turns: int = DEFAULT_MAX_TOOL_TURNS
+    soft_close_remaining: int = SOFT_CLOSE_REMAINING
+
+    def remaining(self, calls_used: int) -> int:
+        return max(0, self.max_tool_turns - calls_used)
+
+    def note(self, calls_used: int) -> str:
+        """A mid-loop nudge for the host to inject once the budget runs low.
+
+        Empty while there is headroom; a wrap-up directive inside the soft
+        window; a hard close order at zero."""
+        left = self.remaining(calls_used)
+        if left == 0:
+            return (
+                "Tool budget exhausted. Do not call more tools. Close the "
+                "turn now: summarize what was established, and if the task "
+                "is unfinished, say exactly what remains and how to resume."
+            )
+        if left <= self.soft_close_remaining:
+            return (
+                f"{left} tool call{'s' if left != 1 else ''} left this turn "
+                "-- wrap up. Prefer delivering a result (a card or a "
+                "conclusion) over starting a new line of investigation."
+            )
+        return ""
+
+
+# Card types whose accept-path writes to the OPEN playbook. With no playbook
+# open there is nothing to patch/enhance, so the affordance gate refuses them
+# at dispatch (still advertised -- the refusal teaches, removal never did).
+_OPEN_PLAYBOOK_CARD_TYPES = frozenset({"enhancement_offer"})
+# Its mirror: card types that create a NEW playbook, refused while one is open.
+_NEW_PLAYBOOK_CARD_TYPES = frozenset({"playbook_offer"})
+_NEW_PLAYBOOK_TOOLS = frozenset({"emit_playbook_offer"})
+# Direct (pre-union) emitters for the same frontier, kept in lockstep with
+# intents.ENHANCE_ONLY_TOOLS.
+_OPEN_PLAYBOOK_TOOLS = frozenset({
+    "emit_enhancement_offer", "verify_enhancement", "edit_playbook",
+})
+
+
+@dataclass(frozen=True)
+class TurnContext:
+    """The real page/session state the plan grounds on -- facts, not intent."""
+
+    page: str | None = None            # e.g. "alert record #37326", "playbook editor"
+    has_open_playbook: bool = False
+    has_trace: bool = False            # a triage transcript exists to bottle
+    scenario_title: str | None = None
+    #: A1.3 -- the tools this page most often needs, best first. A RANKING,
+    #: not a slice: every one of them is already in the advertised array, and
+    #: so is everything they are ranked above. Naming them here is what lets
+    #: the host stop SUBTRACTING per page, which is what was discarding the
+    #: prompt-cache prefix (tool definitions are part of it) on every page
+    #: change. Empty = no page preference, and the prior says nothing.
+    preferred_tools: tuple[str, ...] = ()
+
+
+#: Env override for the requested reasoning depth (`low`..`max`), every
+#: intent, every provider. Unset means the per-intent default below.
+REASONING_ENV = "FSR_TURN_REASONING"
+
+#: Reasoning depth per intent, measured on Anthropic Sonnet 5 (applied only
+#: by the Anthropic provider; see `TurnRequest.reasoning_default`). Triage at
+#: `medium`: a first-look investigation of a FortiEDR alert, two runs per
+#: depth, reached the same verdict and named the same facts at the model
+#: default (high) and at medium, in about 40% less time (135/147s vs
+#: 97/92s); `low` skipped pivots and once wrote its assessment twice. Build
+#: is not measured, so it keeps the model default.
+INTENT_REASONING_DEFAULT: dict[str, str] = {"triage": "medium"}
+
+
+def _has_deferrable_tail(tools: list[dict[str, Any]]) -> bool:
+    """True when the surface carries a long tail worth searching for.
+
+    Deferring is only a win when there is a tail: with no `mcp_*` tools the
+    provider's own `apply_deferred_loading` no-ops, and asking for it anyway
+    would put a tool-search tool in the cached prefix for nothing.
+    """
+    return any(str(t.get("name", "")).startswith("mcp_") for t in tools)
+
+
+def _ask_for(budget: TurnBudget, tools: list[dict[str, Any]],
+             intent: str = "") -> TurnRequest:
+    """The capability ASK this turn makes of whatever provider serves it.
+
+    Provider-neutral by construction: this says what the turn WANTS, and
+    `HostEmulation` decides who does it. On a provider that serves none of
+    these (the OpenAI-compatible backend the product runs today) every one
+    comes back as host emulation and the wire is byte-identical to before --
+    which is exactly why asking is safe to switch on everywhere at once.
+
+    What is asked, and why each is unconditional rather than tuned:
+
+    * the tool budget -- the plan already computed it and states it in the
+      prompt; handing the same number to a provider that tracks it server-side
+      replaces `budget_note` with a countdown the model can actually see.
+    * history pruning -- the host was already rewriting the transcript every
+      turn (`shrink_history`). Asking means a provider that can clear old tool
+      results server-side does it instead, and we stop paying to resend what
+      it would have cleared. Never both (see `HostEmulation`).
+    * deferred tools -- only when there IS a tail (see above).
+    * reasoning depth -- the env override when set (`REASONING_ENV`), else
+      the intent's measured default (`INTENT_REASONING_DEFAULT`), which only
+      the provider it was measured on applies.
+    """
+    import os
+    depth = (os.environ.get(REASONING_ENV, "") or "").strip().lower() or None
+    return TurnRequest(
+        reasoning=depth,
+        reasoning_default=None if depth else INTENT_REASONING_DEFAULT.get(intent),
+        max_tool_turns=budget.max_tool_turns,
+        prune_history=True,
+        defer_tools=_has_deferrable_tail(tools),
+    )
+
+
+def _scope_is_create_new() -> bool:
+    from ..mcp_server._shared import SCOPE_CREATE_NEW, get_playbook_scope
+    return get_playbook_scope() == SCOPE_CREATE_NEW
+
+
+def _playbook_side_refusal(name: str, args: dict[str, Any] | None
+                           ) -> dict[str, Any] | None:
+    """A playbook (build) turn uses the playbook tools only.
+
+    The advertised list is one constant across intents (it is the prompt-cache
+    prefix), so the build slice in ``intents.py`` was enforced by the prompt
+    alone -- and a troubleshooting turn ran ``run_op`` to probe a fix, parking
+    on an approval card instead of delivering it. The triage-only tools
+    (connector calls, record reads/writes, SIEM/FAZ/FMG, containment cards) are
+    refused here; the run-a-playbook verbs stay available in both intents.
+    """
+    from .intents import RUN_VERB_TOOLS, TRIAGE_ONLY_TOOLS
+    blocked = name in (TRIAGE_ONLY_TOOLS - RUN_VERB_TOOLS)
+    if name == "emit_card":
+        blocked = (args or {}).get("card_type") == "action"
+    if not blocked:
+        return None
+    return {
+        "ok": False,
+        "code": "not_a_playbook_tool",
+        "error": (
+            f"'{name}' is not available while building or fixing a playbook: "
+            "this turn uses the playbook tools. For a record's field names, "
+            "find(kind='field', module=...); to learn an op's inputs and "
+            "output, get_op_schema; to see what a run did, "
+            "why_did_playbook_fail / list_playbook_runs; to check a draft, "
+            "verify_playbook. Put the connector call in the playbook as a "
+            "step rather than running it now."
+        ),
+    }
+
+
+@dataclass(frozen=True)
+class TurnPlan:
+    """Everything a host needs to run one turn, resolved in one place."""
+
+    intent: str
+    prompt: str
+    tools: list[dict[str, Any]] = field(default_factory=list)
+    # The intent prompt alone, before the context-prior/constraints layers. A
+    # host that assembles its own prompt stack (grounding, personas, house
+    # rules) starts from this and appends the layered blocks itself -- so the
+    # plan stays the single source of the base text without dictating order.
+    base_prompt: str = ""
+    tier_policy: dict[str, int] = field(default_factory=dict)
+    budget: TurnBudget = field(default_factory=TurnBudget)
+    context: TurnContext = field(default_factory=TurnContext)
+
+    #: What this turn asks of the provider (A2). The loop reads it rather than
+    #: each call site restating it -- the same consolidation this module exists
+    #: for. A host that never installs a plan asks for nothing and gets the
+    #: pre-seam behaviour, which is why this is safe to default on.
+    ask: TurnRequest = field(default_factory=TurnRequest)
+
+    #: Set when this plan is a STAND-IN for a derivation that failed, naming
+    #: what failed. A failsafe plan states no page facts -- it only keeps the
+    #: dispatch gate armed. See ``TurnPlan.failsafe``.
+    failsafe_reason: str | None = None
+
+    #: True only when the caller NAMED the intent. `resolve_intent(None)` is
+    #: "build", so a plan derived without one (the resume re-bind) must not
+    #: be read as a playbook turn -- that would fence a resumed triage loop.
+    intent_stated: bool = False
+
+    @classmethod
+    def failsafe(cls, reason: str) -> TurnPlan:
+        """The plan to install when deriving the real one FAILED.
+
+        A host that uses TurnPlan derives one per turn, and every derivation
+        site is wrapped so a turn is never broken by the gate. That is right,
+        but it made the FAILURE mode fail *open*: `_ACTIVE_PLAN` stayed None,
+        `gate_refusal` was never consulted, and the affordance gate silently
+        disappeared for that turn. The gate's whole job is to be the thing
+        standing between a from-scratch create and a model calling
+        `emit_enhancement_offer` with nothing open -- so "we could not work out
+        the page state" must mean the gate stays ON, not that it evaporates.
+
+        The distinction this preserves: *no plan installed* means no host is
+        using TurnPlan (the framework's own MCP callers), and stays fail-open.
+        *A failsafe plan installed* means a host tried and could not, and the
+        gated frontier is closed until it can.
+
+        The refusal it produces does not claim there is no open playbook --
+        we do not know that. It says the state could not be resolved, and
+        points at the same path forward.
+        """
+        return cls(intent="", prompt="", base_prompt="",
+                   failsafe_reason=reason)
+
+    def gate_refusal(self, name: str, args: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The dispatch-level affordance gate.
+
+        Returns a structured refusal dict when the call is not afforded by the
+        current page state, else None. Refusals fail CLOSED with a visible path
+        forward -- the model is told to name the gap via
+        ``emit_card(card_type='capability_gap')`` rather than dead-ending.
+        """
+        if self.intent_stated and self.intent == "build":
+            refusal = _playbook_side_refusal(name, args)
+            if refusal is not None:
+                return refusal
+        gated = name in _OPEN_PLAYBOOK_TOOLS
+        if name == "emit_card":
+            gated = (args or {}).get("card_type") in _OPEN_PLAYBOOK_CARD_TYPES
+        if gated and self.failsafe_reason is not None:
+            # Distinct code AND distinct wording: this is not "there is no
+            # open playbook", it is "we could not find out". Reporting the
+            # first would be asserting a fact we do not have -- and a host
+            # reading these codes to decide whether to retry needs the two
+            # kept apart (the same reason `would_drop_fields` and
+            # `live_unreadable` are separate guard codes).
+            return {
+                "ok": False,
+                "code": "state_unresolved",
+                "error": (
+                    "This session's playbook state could not be resolved "
+                    f"({self.failsafe_reason}), so patch/enhance calls are "
+                    "held rather than run against an unknown target. Say "
+                    "which playbook to open, or emit_card("
+                    "card_type='capability_gap', ...) naming the gap and the "
+                    "closest available path -- do not end in prose asking "
+                    "them to advise."
+                ),
+            }
+        creates_new = name in _NEW_PLAYBOOK_TOOLS or (
+            name == "emit_card"
+            and (args or {}).get("card_type") in _NEW_PLAYBOOK_CARD_TYPES)
+        if creates_new and self.context.has_open_playbook and not _scope_is_create_new():
+            # The mirror of the frontier below: with a playbook open, a
+            # create-new offer saves a SECOND playbook and leaves the one on
+            # the canvas untouched (analyst sim, empty designer playbook).
+            return {
+                "ok": False,
+                "code": "not_afforded",
+                "error": (
+                    "A playbook is open in the designer, so the change goes "
+                    "INTO it: build it with edit_playbook (on an empty "
+                    "playbook, add the start step first with no `after`), then "
+                    "end with emit_card(card_type='enhancement_offer', "
+                    "payload={id, summary, verified_id}). playbook_offer "
+                    "creates a separate new playbook and would leave the open "
+                    "one unchanged -- only after the analyst picks 'Create new "
+                    "playbook' on the playbook_scope choice."
+                ),
+            }
+        if gated and not self.context.has_open_playbook:
+            return {
+                "ok": False,
+                "code": "not_afforded",
+                "error": (
+                    "There is no open playbook in this session, so there is "
+                    "nothing to patch or enhance. If the analyst's request "
+                    "needs an open playbook, say which one to open; if the "
+                    "capability they asked for doesn't exist here, emit_card("
+                    "card_type='capability_gap', ...) naming the gap and the "
+                    "closest available path -- do not end in prose asking "
+                    "them to advise."
+                ),
+            }
+        return None
+
+
+# Phase 3: the disposition prompt. Focus used to come from tool ABSENCE (the
+# Track C5 build/triage wall dropped the other posture's tools from the
+# advertised slice); with the full surface advertised, focus must come from
+# stated discipline instead. Each prior gets a paragraph saying what the
+# out-of-posture surface is FOR -- grounding vs. bottling -- and what counts
+# as drift. Safety never lived here: live state-changing calls still hit the
+# tier-3 approval gate at dispatch regardless of what the prose says.
+_DISPOSITIONS = {
+    "build": (
+        "Disposition: you are authoring a playbook. This turn uses the "
+        "playbook tools only: the live investigation surface (record reads, "
+        "hunts, run_op, action cards) is not available here. Ground your "
+        "steps with the playbook tools -- find(kind='field', module=...) for "
+        "a record's fields, get_op_schema for an operation's inputs and "
+        "output, why_did_playbook_fail / list_playbook_runs for what a run "
+        "did, verify_playbook to check a draft. A live action the analyst "
+        "wants becomes a step in the playbook, not a call now."
+    ),
+    "triage": (
+        "Disposition: you are working a live record. The authoring surface "
+        "(compile, validate, push, enhance) is available for when the "
+        "analyst asks to bottle this investigation or edit a playbook. When "
+        "the investigation reveals a repeatable pattern, OFFERING to bottle "
+        "it is welcome; silently drifting into building one instead of "
+        "finishing the investigation is not."
+    ),
+}
+
+
+def _context_prior(intent: str, ctx: TurnContext) -> str:
+    facts = []
+    if ctx.page:
+        facts.append(f"the analyst is on {ctx.page}")
+    if ctx.scenario_title:
+        facts.append(f"the case is: {ctx.scenario_title}")
+    if ctx.has_open_playbook:
+        facts.append("a playbook is open in the editor")
+    if ctx.has_trace:
+        facts.append(
+            "this session already carries an investigation trace "
+            "(build_playbook_from_trace can bottle it directly)"
+        )
+    stated = "; ".join(facts) if facts else "no page state was provided"
+    ranked = ""
+    if ctx.preferred_tools:
+        # Steering by PROMPT, not by tool array. The alternative -- reordering
+        # or trimming `tools[]` per page -- moves bytes inside the cached
+        # prefix, so it buys focus by paying for a full prefix rebuild every
+        # time the analyst changes page.
+        names = ", ".join(f"`{t}`" for t in ctx.preferred_tools)
+        ranked = (
+            f" On this page the tools that usually matter, best first, are: "
+            f"{names}. Reach for those before scanning the rest -- they are a "
+            f"starting point, not a restriction."
+        )
+    block = (
+        "\n\n## Turn context (a prior, not a cage)\n"
+        f"Working prior: **{intent}**. Page state: {stated}. The full tool "
+        "surface is available to you regardless of this prior -- if the "
+        "analyst's request crosses into other work (triage from the editor, "
+        "authoring from an alert), follow the request, not the prior."
+        + ranked
+    )
+    disposition = _DISPOSITIONS.get(intent)
+    if disposition:
+        block += "\n" + disposition
+    return block
+
+
+def _constraints(budget: TurnBudget) -> str:
+    return (
+        "\n\n## Constraints (stated up front)\n"
+        f"- {today_line()}\n"
+        f"- Tool rounds: up to {budget.max_tool_turns} this turn -- use what "
+        "the task needs, no more. Repeating calls you already made, or "
+        "failing call after call, ends the turn early; when told few rounds "
+        "remain, wrap up -- deliver a result, don't open a new line of "
+        "investigation.\n"
+        "- Every tool's description declares its Approval tier. A tier-3 "
+        "call suspends this turn for analyst approval -- that is normal; "
+        "plan for it rather than avoiding the action.\n"
+        "- Never dead-end the analyst. If the request cannot be fulfilled "
+        "with the capabilities available, emit_card("
+        "card_type='capability_gap', ...) naming exactly what is missing "
+        "and the closest path forward. A prose close like 'this may not be "
+        "feasible, please advise' is a failure."
+    )
+
+
+def plan_turn(
+    intent: Any = None,
+    *,
+    context: TurnContext | None = None,
+    message: str | None = None,
+    max_tool_turns: int = DEFAULT_MAX_TOOL_TURNS,
+) -> TurnPlan:
+    """Resolve one turn: prompt + tools + tier policy + budget, in one place."""
+    from .tools import TOOL_TIERS, anthropic_tools
+
+    stated = intent in INTENTS
+    intent = resolve_intent(intent)
+    ctx = context or TurnContext()
+    budget = TurnBudget(max_tool_turns=max_tool_turns)
+
+    tools = anthropic_tools()  # the FULL consolidated surface -- no slicing
+    tier_policy = {t["name"]: TOOL_TIERS.get(t["name"], 0) for t in tools}
+
+    base_prompt = load_intent_prompt(intent)
+    prompt = base_prompt
+    prompt += _context_prior(intent, ctx)
+    prompt += _constraints(budget)
+    if message is not None:
+        prompt += gate_directive(classify_message(message), ctx.scenario_title)
+
+    return TurnPlan(
+        intent=intent, prompt=prompt, tools=tools, base_prompt=base_prompt,
+        tier_policy=tier_policy, budget=budget, context=ctx,
+        ask=_ask_for(budget, tools, intent), intent_stated=stated,
+    )
+
+
+# --- turn-scoped installation (same pattern as set_read_only_turn) ---------
+
+# Held on SessionState (llm.session_state) as `turn_plan`.
+
+
+def set_turn_plan(plan: TurnPlan | None) -> Any:
+    """Install the plan for this turn; dispatch consults its gates.
+    Returns a token for ``reset_turn_plan``."""
+    from . import session_state
+    return session_state.update(turn_plan=plan)
+
+
+def reset_turn_plan(token: Any) -> None:
+    """Undo ``set_turn_plan``. Never raises (turn-boundary cleanup)."""
+    from . import session_state
+    session_state.reset_or(token, turn_plan=None)
+
+
+def active_turn_plan() -> TurnPlan | None:
+    from . import session_state
+    return session_state.current().turn_plan
+
+
+__all__ = [
+    "TurnPlan", "TurnBudget", "TurnContext", "plan_turn",
+    "set_turn_plan", "reset_turn_plan", "active_turn_plan",
+    "DEFAULT_MAX_TOOL_TURNS", "SOFT_CLOSE_REMAINING",
+]

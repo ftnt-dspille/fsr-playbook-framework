@@ -1,0 +1,288 @@
+"""PicklistMixin -- resolving and rewriting picklist friendly token references."""
+from __future__ import annotations
+
+import difflib
+import re
+import sqlite3
+from typing import Any
+
+from ..errors import CompileError, ErrorCode
+from ..ir import Step
+
+# A real FortiSOAR picklist IRI is `/api/3/picklists/<uuid>`. Tests and recipe
+# templates sometimes carry a placeholder suffix (`/api/3/picklists/x`); those
+# are not opaque uuids the agent copied from another box, and flagging them
+# would be a false positive on the very authoring surface the validation is
+# meant to help. Only validate uuid-shaped IRIs -- the case #15 names.
+_PICKLIST_IRI_RE = re.compile(r"^/api/3/picklists/[0-9a-fA-F-]{32,}$")
+
+
+class PicklistMixin:
+    """Methods for resolving and rewriting picklist friendly tokens."""
+
+    conn: sqlite3.Connection
+
+    def _resolve_picklist_friendly_tokens(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Rewrite bare picklist-field string values in `arguments.resource`
+        to the canonical `/api/3/picklists/<uuid>` IRI.
+
+        Module is derived from `collection` (create/insert) or
+        `collectionType` (update). A field is a candidate iff
+        `module_fields.picklist_name IS NOT NULL`. A value is rewritten iff
+        it's a non-empty string that:
+          - is not already an IRI (`/api/...`),
+          - contains no Jinja template markers (`{{`, `{%`),
+          - matches a row in `picklists` for that listName.
+        Unknown labels emit a BAD_VALUE with a "did you mean" suggestion.
+
+        List values are walked element-wise (covers multiselectpicklist).
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        resource = a.get("resource")
+        if not isinstance(resource, dict):
+            return
+
+        # Module IRI source per step type. `collection` on create/insert is
+        # the module IRI; on update it's the record IRI -- use collectionType
+        # there. Bail if we can't pin down the module -- without it we can't
+        # look up which fields are picklist-backed.
+        if step.type == "create_record":
+            mod_iri = a.get("collection")
+        else:
+            mod_iri = a.get("collectionType")
+        if not isinstance(mod_iri, str) or not mod_iri.startswith("/api/3/"):
+            return
+        module = mod_iri.split("/api/3/", 1)[1].split("?", 1)[0].rstrip("/")
+        if not module:
+            return
+
+        picklist_fields = {
+            row[0]: row[1] for row in self.conn.execute(
+                "SELECT field_name, picklist_name FROM module_fields "
+                "WHERE module_name=? AND picklist_name IS NOT NULL",
+                (module,),
+            ).fetchall()
+        }
+        if not picklist_fields:
+            return
+
+        rpath = f"{path}.arguments.resource"
+        for fname, fvalue in list(resource.items()):
+            list_name = picklist_fields.get(fname)
+            if not list_name:
+                continue
+            if isinstance(fvalue, list):
+                new_list = []
+                changed = False
+                for i, item in enumerate(fvalue):
+                    out = self._rewrite_one_picklist_token(
+                        item, list_name, f"{rpath}.{fname}[{i}]", errors,
+                    )
+                    if out is not item:
+                        changed = True
+                    new_list.append(out)
+                if changed:
+                    resource[fname] = new_list
+            else:
+                out = self._rewrite_one_picklist_token(
+                    fvalue, list_name, f"{rpath}.{fname}", errors,
+                )
+                if out is not fvalue:
+                    resource[fname] = out
+
+    def _rewrite_one_picklist_token(
+        self, value: Any, list_name: str, vpath: str,
+        errors: list[CompileError],
+    ) -> Any:
+        """Return the IRI for a friendly token, or the original value if
+        it's already an IRI / Jinja expression / non-string. Appends a
+        BAD_VALUE error to `errors` when the label doesn't match.
+        """
+        if not isinstance(value, str) or not value:
+            return value
+        # Pass-through: a Jinja expression resolves at runtime.
+        if "{{" in value or "{%" in value:
+            return value
+        # A picklist IRI: validate it resolves to THIS list. A stale or
+        # cross-box IRI (e.g. copied from another appliance) used to pass
+        # through silently and fail at runtime with an opaque
+        # `/api/3/picklists/1c4d...` -- the agent can't self-correct from
+        # a uuid. Resolve it back to a friendly affordance: which list the
+        # IRI actually belongs to (if any) + the valid values for the list
+        # this field expects. Only validate when the list itself is known
+        # to the catalog -- a custom picklist we have no rows for can't be
+        # checked, and flagging it would be a false positive (#15).
+        if value.startswith("/api/3/picklists/") and _PICKLIST_IRI_RE.match(value):
+            known = self.conn.execute(
+                "SELECT 1 FROM picklists WHERE list_name=? LIMIT 1",
+                (list_name,),
+            ).fetchone()
+            if known is None:
+                return value  # unknown list -- can't validate, pass through
+            own = self.conn.execute(
+                "SELECT 1 FROM picklists WHERE list_name=? AND item_iri=?",
+                (list_name, value),
+            ).fetchone()
+            if own is not None:
+                return value  # correct canonical IRI for this list
+            # Not in this list. Is it a real IRI from the WRONG list?
+            wrong = self.conn.execute(
+                "SELECT list_name FROM picklists WHERE item_iri=? LIMIT 1",
+                (value,),
+            ).fetchone()
+            valid = [r[0] for r in self.conn.execute(
+                "SELECT item_value FROM picklists WHERE list_name=?",
+                (list_name,),
+            ).fetchall()]
+            if wrong is not None:
+                msg = (
+                    f"picklist IRI {value!r} belongs to picklist "
+                    f"{wrong[0]!r}, but field expects picklist "
+                    f"{list_name!r}. Valid values for {list_name!r}: "
+                    f"{', '.join(sorted(valid)[:8])}"
+                    f"{'…' if len(valid) > 8 else ''}"
+                )
+            else:
+                msg = (
+                    f"picklist IRI {value!r} is not in the catalog (stale, "
+                    f"or copied from another box). Picklist {list_name!r} "
+                    f"expects: {', '.join(sorted(valid)[:8])}"
+                    f"{'…' if len(valid) > 8 else ''}"
+                )
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=msg,
+                path=vpath,
+                severity="error",
+                check="picklist_iri_drift",
+            ))
+            return value
+        # A non-picklist /api/ IRI (e.g. a record IRI) is not ours to check.
+        if value.startswith("/api/"):
+            return value
+        row = self.conn.execute(
+            "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
+            (list_name, value),
+        ).fetchone()
+        if row and row[0]:
+            return row[0]
+        if row:
+            # The value is real but this catalog carries no IRI for it -- the
+            # shipped baseline blanks them because picklist IRIs are
+            # per-install. Keep the friendly value: rewriting to '' would wipe
+            # the field, and reporting BAD_VALUE would be a lie about a value
+            # that IS valid. `warmup` fills the IRI in.
+            return value
+        # Build a "did you mean" suggestion from the same picklist.
+        candidates = [r[0] for r in self.conn.execute(
+            "SELECT item_value FROM picklists WHERE list_name=?",
+            (list_name,),
+        ).fetchall()]
+        sug = difflib.get_close_matches(value, candidates, n=1, cutoff=0.6)
+        # Recipe-template placeholders are intentional -- flag as a
+        # warning so the template compiles cleanly until the author
+        # fills it in.
+        is_placeholder = value.startswith("TODO") or value.startswith("<TODO")
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(f"picklist value {value!r} is not in picklist "
+                     f"{list_name!r} (valid: "
+                     f"{', '.join(sorted(candidates)[:8])}"
+                     f"{'…' if len(candidates) > 8 else ''})"),
+            path=vpath,
+            near=sug[0] if sug else None,
+            suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+            severity="warning" if is_placeholder else "error",
+            check="picklist_drift",
+        ))
+        return value
+
+    # Friendly `kind:` → canonical (formType, dataType, type, templateUrl)
+    # for the inputVariables section of a manual_input step. Each row was
+    # picked by querying live FSR (`probe playbook-steps --live`) for the
+    # dominant (formType, dataType, type, templateUrl) tuple -- see the
+    # SQL in MI_DECISION_VALIDATION_AUDIT.md §4.
+    _WEBADDR = "app/components/form/fields/webAddress.html"
+    _INPUT_HTML = "app/components/form/fields/input.html"
+    _INPUT_FIELD_KINDS: dict[str, dict[str, Any]] = {
+        # text family
+        "text":     {"formType": "text",     "dataType": "text", "type": "string",  "templateUrl": _INPUT_HTML},
+        "textarea": {"formType": "textarea", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/textarea.html"},
+        "richtext": {"formType": "richtext", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/markdownEditor.html"},
+        "html":     {"formType": "html",     "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/htmlEditor.html"},
+        "password": {"formType": "password", "dataType": "text", "type": "string",  "templateUrl": "app/components/form/fields/password.html"},
+        # webAddress.html family -- text dataType but typed sub-formats. Confirmed
+        # against live FSR (ipv4/ipv6/domain present in data/fsr_reference.db).
+        "ipv4":     {"formType": "ipv4",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "ipv6":     {"formType": "ipv6",     "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "domain":   {"formType": "domain",   "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "email":    {"formType": "email",    "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "url":      {"formType": "url",      "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "phone":    {"formType": "phone",    "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        "filehash": {"formType": "filehash", "dataType": "text", "type": "string",  "templateUrl": _WEBADDR},
+        # numeric
+        "integer":  {"formType": "integer",  "dataType": "text", "type": "integer", "templateUrl": _INPUT_HTML},
+        "number":   {"formType": "integer",  "dataType": "text", "type": "integer", "templateUrl": _INPUT_HTML},
+        "decimal":  {"formType": "decimal",  "dataType": "text", "type": "number",  "templateUrl": _INPUT_HTML},
+        # bool
+        "checkbox": {"formType": "checkbox", "dataType": "checkbox", "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
+        "boolean":  {"formType": "checkbox", "dataType": "checkbox", "type": "boolean", "templateUrl": "app/components/form/fields/checkbox.html"},
+        # date / time
+        "datetime": {"formType": "datetime", "dataType": "text", "type": "string",  "templateUrl": _INPUT_HTML},
+        "date":     {"formType": "date",     "dataType": "text", "type": "string",  "templateUrl": _INPUT_HTML},
+        # selectors. `select` is the friendly name for FSR's "Dynamic List"
+        # (static enum). Distinct from `picklist` (FSR-managed list) and
+        # `multiselect`/`multiselectpicklist` (their multi-value variants).
+        "select":             {"formType": "dynamicList",         "dataType": "dynamicList", "type": "array",     "templateUrl": "app/components/form/fields/dynamicList.html"},
+        "multiselect":        {"formType": "multiselect",         "dataType": "dynamicList", "type": "array",     "templateUrl": "app/components/form/fields/dynamicList.html"},
+        "picklist":           {"formType": "picklist",            "dataType": "picklist",    "type": "picklists", "templateUrl": "app/components/form/fields/typeahead.html"},
+        "multiselectpicklist":{"formType": "multiselectpicklist", "dataType": "picklist",    "type": "picklists", "templateUrl": "app/components/form/fields/typeahead.html"},
+        # lookup -- `type` is overridden per-field with the target module name
+        # (people / indicators / alerts / etc.); see _expand_input_variables.
+        "lookup":   {"formType": "lookup", "dataType": "lookup", "type": "lookup", "templateUrl": "app/components/form/fields/typeahead.html"},
+        # files / structured
+        "file":     {"formType": "file",   "dataType": "file",   "type": "string", "templateUrl": "app/components/form/fields/file.html"},
+        "image":    {"formType": "image",  "dataType": "file",   "type": "string", "templateUrl": "app/components/form/fields/file.html"},
+        "json":     {"formType": "object", "dataType": "object", "type": "object", "templateUrl": "app/components/form/fields/json.html"},
+        "object":   {"formType": "object", "dataType": "object", "type": "object", "templateUrl": "app/components/form/fields/json.html"},
+    }
+
+    # Per-kind humanised "title" shown next to the field in the FSR UI.
+    _INPUT_FIELD_TITLE: dict[str, str] = {
+        "text": "Text", "textarea": "Text Area", "richtext": "Rich Text",
+        "html": "Rich Text (HTML)", "password": "Password",
+        "ipv4": "IPv4", "ipv6": "IPv6", "domain": "Domain",
+        "email": "Email", "url": "URL", "phone": "Phone Number",
+        "filehash": "File Hash",
+        "integer": "Integer", "number": "Integer", "decimal": "Decimal",
+        "checkbox": "Checkbox", "boolean": "Checkbox",
+        "datetime": "Datetime", "date": "Date",
+        "select": "Dynamic List", "multiselect": "Multi Select",
+        "picklist": "Picklist", "multiselectpicklist": "Multi Picklist",
+        "lookup": "Lookup",
+        "file": "File", "image": "Image",
+        "json": "JSON", "object": "JSON",
+    }
+
+    # Name/label substring → more specific input `kind:`. Order matters --
+    # ipv4 must beat the bare "ip" rule for ip_address-style fields.
+    _KIND_HINTS = (
+        ("ipv6", "ipv6"),
+        ("ipv4", "ipv4"),
+        ("ip_address", "ipv4"), ("ipaddress", "ipv4"), ("ip address", "ipv4"),
+        ("email", "email"), ("e-mail", "email"),
+        ("url", "url"),
+        ("domain", "domain"), ("hostname", "domain"), ("fqdn", "domain"),
+        ("filehash", "filehash"), ("sha256", "filehash"), ("sha1", "filehash"),
+        ("md5", "filehash"), ("file_hash", "filehash"),
+    )
+
+    def _suggest_specific_kind(self, name: str, label: str) -> str | None:
+        hay = f"{name} {label}".lower()
+        for needle, kind in self._KIND_HINTS:
+            if needle in hay:
+                return kind
+        return None
+

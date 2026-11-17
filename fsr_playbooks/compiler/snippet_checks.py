@@ -1,0 +1,268 @@
+"""Static checks for ``code_snippet`` step bodies (pilot gaps B1 + B2).
+
+FortiSOAR's code-snippet connector runs the authored Python inside a
+restricted sandbox (the ``python_inline_code_editor`` operation). Two whole
+classes of failure are deterministic and catchable *before* a live run -- they
+bit the 2026-06-25 archetype pilot as errors E2 and E3:
+
+- **B1 -- syntax (E2).** A top-level ``return`` (or any other ``SyntaxError``)
+  fails the snippet the instant the sandbox compiles it. ``compile(src,
+  "<snippet>", "exec")`` reproduces the exact error in microseconds with zero
+  dependencies, so we never need a heavyweight Pyodide/sandbox exec to find it.
+
+- **B2 -- sandbox bans (E3).** The sandbox bans a *specific* set of names and
+  modules (``open``, ``os``, ``sys``, ``subprocess``, ``importlib``, ``imp``)
+  and -- unless the connector config enables it -- bans ``import`` outright. A
+  snippet that ``open()``\\s a file or imports ``os`` passes a vanilla Python
+  ``compile()`` (and even Pyodide, which *has* ``open``) yet fails FortiSOAR at
+  runtime with ``Uses of ['open'] is restricted``. We model the ban with a
+  small **per-version manifest** (``SANDBOX_CONSTRAINTS``) -- the natural sibling
+  of ``STEP_WIRE_SHAPES.json``'s per-step shapes -- and an ``ast.walk``.
+
+The import ban is **config-aware**: the sandbox's *default* config disallows
+imports, but a config with ``allow_imports`` enabled relaxes it. The always-banned
+names (``open`` and friends) are restricted regardless of ``allow_imports``.
+Callers resolve the connector config and pass ``allow_imports=`` so the import
+check reflects the config that will actually run the snippet.
+
+This module is pure (stdlib only, no DB, no live FSR). It returns plain tuples;
+the linter maps them onto ``CompileError`` so the existing CLI / MCP / Monaco
+surfaces light up with no wiring change.
+"""
+from __future__ import annotations
+
+import ast
+from typing import NamedTuple
+
+
+class SnippetFinding(NamedTuple):
+    """One static finding about a snippet body.
+
+    ``severity`` is ``"error"`` (will fail the sandbox at runtime) or
+    ``"warning"`` (likely to fail, but depends on a config we can't fully
+    resolve offline). ``name`` is the offending symbol, used for dedupe and
+    messaging.
+    """
+    severity: str
+    name: str
+    message: str
+    suggestion: str
+    lineno: int
+
+
+# Per-connector-version sandbox constraints. Keyed by the code-snippet
+# connector version (``arguments.version``, default "2.1.4"). The default
+# entry covers every version we haven't pinned explicitly.
+#
+# - ``banned_names``: identifiers/modules the sandbox restricts *regardless* of
+#   ``allow_imports`` -- used both as bare names (``open(...)``) and as import
+#   targets (``import os``). FortiSOAR raises ``Uses of [...] is restricted``.
+# - ``imports_allowed_by_default``: whether ``import`` works without a config
+#   that enables it. The sandbox default is False -- imports are off unless the
+#   connector config turns them on.
+#
+# This mirrors the FortiSOAR code-snippet sandbox (v2.1.4) observed in the pilot.
+# Graduate to a JSON manifest (sibling of STEP_WIRE_SHAPES.json) if it grows.
+_DEFAULT_CONSTRAINTS = {
+    "banned_names": frozenset({
+        "open", "os", "sys", "subprocess", "importlib", "imp",
+        "eval", "exec", "compile", "__import__",
+        # INTROSPECTION BUILTINS. Measured on 8.0 by live runs, each of which
+        # cost a pipeline: the snippet reports the SAME
+        # "Uses of [...] is restricted" as the process/filesystem names above,
+        # so these are the same class of restriction, not a config question.
+        #
+        # `isinstance` is worth a note of its own: before it is refused as a
+        # name it fails differently, with "isinstance() arg 2 must be a type,
+        # a tuple of types, or a union" -- because `list` and `dict` are not
+        # bound in the sandbox at all. Both errors read as a bug in the
+        # snippet rather than as a sandbox restriction.
+        #
+        # The portable spelling for a type test is attribute access inside
+        # `try/except AttributeError` (e.g. probe `.keys` to tell a mapping
+        # from a list); for `enumerate`, a manual index counter.
+        "isinstance", "hasattr", "enumerate",
+        # FSR injects `vars` as a Jinja context object, but the sandbox
+        # blocks it from Python code -- accessing `vars.steps.X` or
+        # `vars.input.params.X` in a code_snippet fails with
+        # "Uses of ['vars'] is restricted in the code snippet".
+        # Authors must use Jinja templates ({{ vars.steps.X.field }})
+        # so the value is resolved before Python runs.
+        "vars",
+        # BUILTINS NOT BOUND IN THE SANDBOX. The FSR code-snippet sandbox
+        # does not bind `set` (and likely other builtins) -- calling
+        # `set()` fails with "Uses of ['set'] is restricted". Use a list
+        # or dict for dedup instead: `seen = {}` / `seen[k] = True`.
+        "set",
+        # Measured on 8.0.1 by live runs: `all(...)` and `map(...)` fail the step
+        # with "Uses of ['all'] is restricted" (and 'map'). A local named `seq`
+        # ran fine, so it is not banned.
+        "all", "map",
+    }),
+    "imports_allowed_by_default": False,
+}
+
+SANDBOX_CONSTRAINTS: dict[str, dict] = {
+    "2.1.4": _DEFAULT_CONSTRAINTS,
+}
+
+
+def _constraints_for(version: str | None) -> dict:
+    return SANDBOX_CONSTRAINTS.get(version or "", _DEFAULT_CONSTRAINTS)
+
+
+def _banned_suggestion(name: str) -> str:
+    """Context-specific fix hint for a banned name."""
+    if name == "vars":
+        return ("use Jinja templates to inject values before Python runs, "
+                "e.g. x = {{ vars.steps.Step.field | tojson }}")
+    if name == "set":
+        return ("use a dict for dedup instead: seen = {}; seen[k] = True")
+    if name in ("isinstance", "hasattr"):
+        return ("use attribute access in try/except AttributeError instead")
+    if name == "enumerate":
+        return "use a manual index counter instead"
+    if name == "all":
+        return "loop with a flag instead: ok = True; for x in xs: ok = ok and bool(x)"
+    if name == "map":
+        return "use a list comprehension instead: [str(x) for x in xs]"
+    return f"remove the use of {name!r}; the sandbox has no filesystem/process access"
+
+
+def check_snippet(
+    code: str | None,
+    *,
+    version: str | None = None,
+    allow_imports: bool | None = None,
+) -> list[SnippetFinding]:
+    """Statically vet a code-snippet body.
+
+    ``code``: the snippet source (``arguments.code`` / ``arguments.python`` /
+        ``arguments.params.python_function``). Empty/None → no findings.
+    ``version``: the code-snippet connector version, to pick the constraint set.
+    ``allow_imports``: the resolved connector config's import setting. ``None``
+        means "unknown" → fall back to the manifest's default; in that case an
+        ``import`` is a *warning* (it may be allowed by a config we can't see).
+        ``False`` makes it an error; ``True`` suppresses the import check.
+
+    Returns findings in source order. B1 (syntax) short-circuits: a snippet that
+    doesn't parse can't be AST-walked, so we return the single syntax finding.
+    """
+    if not code or not isinstance(code, str) or not code.strip():
+        return []
+
+    # Strip Jinja templates before parsing so the AST walk doesn't flag
+    # `vars`/`steps`/`input` inside templates as Python identifiers.
+    #   {{ expr }}  → None   (expression substitution)
+    #   {% stmt %}  → pass   (control-flow / set / macro)
+    # Both are resolved by the FSR template engine before Python runs.
+    import re
+    code = re.sub(r"\{\{.*?\}\}", "None", code, flags=re.DOTALL)
+    code = re.sub(r"\{%.*?%\}", "pass", code, flags=re.DOTALL)
+
+    # --- B1: syntax. ---
+    # `compile(..., "exec")` runs the symbol-table pass too, so it catches
+    # `'return' outside function` (E2) -- `ast.parse` alone does not, since that
+    # error is raised during compilation, not parsing. We compile() to vet, then
+    # ast.parse() the same source for the B2 walk.
+    try:
+        compile(code, "<snippet>", "exec")
+        tree = ast.parse(code, "<snippet>", "exec")
+    except SyntaxError as e:
+        return [SnippetFinding(
+            severity="error",
+            name="SyntaxError",
+            message=(f"code-snippet body is not valid Python: {e.msg} "
+                     f"(line {e.lineno})"),
+            suggestion=(
+                "fix the syntax; a top-level `return` is the usual culprit -- "
+                "the sandbox runs the body at module scope, so drop `return` and "
+                "`print(<value>)` instead -- a snippet's output is what it prints "
+                "(measured on 8.0: `return`, a result variable and a bare expression "
+                "all leave code_output null)"
+                if e.msg and "return" in e.msg.lower()
+                else "fix the syntax error before pushing"),
+            lineno=e.lineno or 1,
+        )]
+
+    # --- B2: sandbox bans. ---
+    cons = _constraints_for(version)
+    banned: frozenset = cons["banned_names"]
+    imports_default = cons["imports_allowed_by_default"]
+    imports_ok = imports_default if allow_imports is None else allow_imports
+
+    findings: list[SnippetFinding] = []
+    seen: set[tuple[str, int]] = set()
+
+    def _add(f: SnippetFinding) -> None:
+        key = (f.name, f.lineno)
+        if key not in seen:
+            seen.add(key)
+            findings.append(f)
+
+    for node in ast.walk(tree):
+        # Bare/attribute name use of a banned symbol: open(...), os.system(...)
+        if isinstance(node, ast.Name) and node.id in banned:
+            _add(SnippetFinding(
+                severity="error",
+                name=node.id,
+                message=(f"code-snippet uses {node.id!r}, which the FortiSOAR "
+                         f"sandbox restricts -- runtime fails with "
+                         f"\"Uses of ['{node.id}'] is restricted\""),
+                suggestion=_banned_suggestion(node.id),
+                lineno=getattr(node, "lineno", 1),
+            ))
+        # import os / import subprocess as sp / from os import path
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.Import):
+                mods = [a.name.split(".")[0] for a in node.names]
+            else:
+                mods = [(node.module or "").split(".")[0]]
+            ln = getattr(node, "lineno", 1)
+            for mod in mods:
+                if mod in banned:
+                    _add(SnippetFinding(
+                        severity="error",
+                        name=mod,
+                        message=(f"code-snippet imports {mod!r}, which the "
+                                 "FortiSOAR sandbox restricts regardless of "
+                                 "the import setting"),
+                        suggestion=(f"don't import {mod!r}; use "
+                                    "fsr_playbooks.helpers or a connector op "
+                                    "instead"),
+                        lineno=ln,
+                    ))
+                elif not imports_ok:
+                    sev = "error" if allow_imports is False else "warning"
+                    qual = ("the connector config disables imports"
+                            if allow_imports is False
+                            else "the sandbox disables imports unless the "
+                                 "connector config enables them")
+                    _add(SnippetFinding(
+                        severity=sev,
+                        name=mod or "import",
+                        message=(f"code-snippet imports {mod!r}, but {qual}"),
+                        suggestion=("enable allow_imports on the code-snippet "
+                                    "connector config, or drop the import"),
+                        lineno=ln,
+                    ))
+
+    # --- B3: no output. ---
+    # A snippet's output is what it prints. Measured on 8.0.1: a body that never
+    # prints (a bare computation, or assigning `output = ...`) finishes "Success"
+    # with code_output null, so the next step silently gets nothing.
+    prints = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "print"
+                 for n in ast.walk(tree))
+    raises = any(isinstance(n, ast.Raise) for n in ast.walk(tree))
+    if not prints and not raises:
+        _add(SnippetFinding(
+            severity="warning",
+            name="no-print",
+            message=("code-snippet never prints, so its code_output is null: the step "
+                     "succeeds and the next step gets nothing"),
+            suggestion="print() the value the next step needs; print(dict) keeps the type",
+            lineno=1,
+        ))
+
+    findings.sort(key=lambda f: (f.lineno, f.name))
+    return findings

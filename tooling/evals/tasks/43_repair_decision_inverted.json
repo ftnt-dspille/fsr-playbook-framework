@@ -1,0 +1,32 @@
+{
+  "name": "repair_decision_inverted",
+  "mode": "repair",
+  "prompt": "This playbook ran on the box and reported success, but it blocked the wrong alerts -- malicious sender IPs sailed through untouched while a couple of clean ones were quarantined. Find the defect and return the corrected complete YAML. Change nothing else.",
+  "broken_yaml_path": "tooling/evals/broken/phish_block_decision_inverted.yaml",
+  "gold_yaml_path": "tooling/evals/golds/phish_block_decision_correct.yaml",
+  "notes": "Fifth repair defect class, in the ROUTING LOGIC rather than a parameter shape (repair_wrong_containment_param) or a loop target (repair_loop_over_wrong_field): the reputation gate compares `< 50` instead of `> 50`, so a high-reputation malicious IP takes the default/Clean arm and a low one gets blocked. Compiles and verifies clean -- a backwards comparison is a legal decision -- so only a diagnosis that names the inverted threshold, or the behavioral arm a malicious verdict actually takes, catches it. The tempting wrong fix is to drop the decision and always block, caught by no_collateral_damage.",
+  "ir_assertions": [
+    {
+      "kind": "arg_text_contains",
+      "type": "decision",
+      "contains": "reputation > 50",
+      "note": "the gate routes the HIGH-reputation (malicious) verdict to the block"
+    },
+    {
+      "kind": "connector_op",
+      "connector": "fortigate",
+      "operation_contains": "block_ip",
+      "note": "the block step is still there -- not deleted to silence it"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "decision"
+      },
+      "to": {
+        "connector": "fortigate"
+      },
+      "note": "the gate still precedes the block -- a fix must not reroute it"
+    }
+  ]
+}

@@ -1,0 +1,180 @@
+"""Locate the reference database.
+
+Resolution order (first hit wins):
+
+1. ``$FSRPB_DB`` -- explicit override (e.g. a warmed, instance-specific DB).
+2. ``<repo>/data/fsr_reference.db`` -- the in-repo probed cache (dev: full ~65 MB,
+   gitignored). Present only in a source checkout.
+3. ``fsr_playbooks/_data/fsr_reference.db`` -- the packaged slim catalog shipped in
+   the wheel. Stable tables only (step types/handlers, jinja, recipes, api
+   endpoints, plus the ``modules`` *name* catalog -- module type names are
+   globally stable for an FSR version and carry no per-install UUIDs); the
+   UUID-bearing per-install tables (connectors/operations/picklists) ship empty.
+
+A fresh ``pip install fsr_playbooks`` has (3): enough to compile playbooks that
+reference solely the stable catalog AND to validate/canonicalize module names
+offline (e.g. ``Alerts`` → ``alerts``). A playbook that references a live
+connector op / picklist needs ``warmup`` against a target SOAR (which sources
+the data through pyfsr) to fill those tables first -- until then the resolver
+reports a clear ``CompileError`` (it does NOT fall back to a live lookup).
+``warmup`` also overwrites the baseline ``modules`` catalog with the target's
+own set, picking up any custom modules.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+_PKG_DIR = Path(__file__).resolve().parent
+#: Slim catalog shipped inside the wheel (package-data).
+PACKAGED_SLIM_DB = _PKG_DIR / "_data" / "fsr_reference.db"
+#: Full probed cache in a source checkout (repo root is the package's parent).
+REPO_PROBED_DB = _PKG_DIR.parent / "data" / "fsr_reference.db"
+
+
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def is_usable_sqlite(path: Path) -> bool:
+    """True only for a file that is actually a populated sqlite database.
+
+    ``exists()`` is not enough. ``sqlite3.connect()`` creates a **zero-byte**
+    file the moment it is pointed at a missing path, and writes the header only
+    on first write -- so a process that merely opened the dev cache and never
+    wrote leaves a 0-byte file behind. That file then wins the resolution order
+    below and shadows the packaged catalog, and every lookup fails with
+    "no such table: picklists". Running the tooling suite and then the
+    fsr_playbooks suite in one checkout did exactly that: 95 tests red, with
+    nothing in the diff to explain it.
+
+    Checked through sqlite itself, NEVER a raw ``open()``: on POSIX, closing any
+    file descriptor on a file drops every fcntl lock the PROCESS holds on it --
+    including a live sqlite connection's. ``default_db_path()`` runs this on
+    every call and the enrichment writers call that per write, so under
+    parallel sweeps a writer lost its lock mid-transaction and a page landed at
+    offset 0 (``data/fsr_reference.db`` corrupted 2026-09-27, and three times
+    in August). sqlite shares one lock set per inode across a process's
+    connections and defers closing its fds while locks are held, so opening
+    through it is safe. ``mode=ro`` never creates the file.
+    """
+    import sqlite3
+    try:
+        con = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return False
+    try:
+        # 0 on an empty (0-byte) file; raises on a non-database header.
+        return con.execute("PRAGMA schema_version").fetchone()[0] > 0
+    except sqlite3.Error:
+        return False
+    finally:
+        con.close()
+
+
+def default_db_path() -> Path:
+    """Return the reference DB to use, honoring ``$FSRPB_DB`` then dev/packaged.
+
+    Always returns a ``Path`` (never ``None``); the chosen path may not exist if
+    neither a probed nor a packaged DB is available, so callers that need a live
+    connection should still handle a missing file.
+    """
+    env = os.environ.get("FSRPB_DB")
+    if env:
+        return Path(env)
+    if is_usable_sqlite(REPO_PROBED_DB):
+        return REPO_PROBED_DB
+    return PACKAGED_SLIM_DB
+
+
+def writable_reference_db() -> Path | None:
+    """The reference DB if it is ours to write, else ``None``.
+
+    For *opportunistic enrichment* writes -- observed output schemas, live-exec
+    verification rows. These belong in the reference DB proper (the resolver
+    reads `operations` back out of it), so they cannot be diverted to a cache
+    file the way `runtime_cache_db_path` diverts the health table. But they
+    must not land on the packaged catalog: in a checkout that dirties the
+    tracked, shipped `_data/fsr_reference.db` on an ordinary test run, and in a
+    wheel install it writes into ``site-packages``.
+
+    ``None`` means "no writable reference DB" -- callers skip the write. That
+    is the honest outcome for enrichment: it is a nice-to-have that a later
+    ``warmup`` reproduces, never something correctness depends on.
+
+    OPT-IN (``FSRPB_ENRICH=1``). Every chat sweep, known-answer run and pytest
+    worker used to write this store, in parallel -- the load under which it
+    corrupted. Nothing correctness-bearing is lost: on an appliance (wheel
+    install, no ``$FSRPB_DB``) this already resolved to None.
+    """
+    if os.environ.get("FSRPB_ENRICH") != "1":
+        return None
+    db = default_db_path()
+    return None if db == PACKAGED_SLIM_DB else db
+
+
+def runtime_cache_db_path() -> Path:
+    """Where mutable runtime caches (connector health, …) may be written.
+
+    Deliberately NOT ``default_db_path()``. That can resolve to the packaged
+    slim catalog inside the installed package, and the health cache writes on
+    its *read* path too (``_cached_health`` calls ``CREATE TABLE IF NOT
+    EXISTS``), so a plain lookup mutated package data. Two ways that bites:
+
+    * in a checkout, the tracked ``fsr_playbooks/_data/fsr_reference.db`` came
+      back dirty from an ordinary test run, and nearly rode along in a commit;
+    * installed as a wheel, it writes into ``site-packages`` -- which is
+      root-owned or read-only in plenty of real deployments.
+
+    A DB the caller named (``$FSRPB_DB``) is writable and instance-scoped, so it
+    keeps taking the cache. The packaged catalog and the dev corpus
+    (``data/fsr_reference.db``) are both redirected to the user cache dir.
+    """
+    env = os.environ.get("FSRPB_CACHE_DB")
+    if env:
+        return Path(env)
+    db = default_db_path()
+    if db not in (PACKAGED_SLIM_DB, REPO_PROBED_DB):
+        return db
+    # The dev corpus is redirected too: it is the pinned reference store the
+    # evals measure and the one that keeps corrupting under parallel writers.
+    root = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    name = "runtime_cache.dev.db" if db == REPO_PROBED_DB else "runtime_cache.db"
+    path = Path(root) / "fsr_playbooks" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+class WarmupClobberGuard(RuntimeError):
+    """Raised when a warmup/box-sync write would clobber the dev cache."""
+
+
+def warmup_write_path() -> Path:
+    """Resolve where a *warmup* (box-catalog sync) may write, with a guard.
+
+    Warmup replaces the reference DB's connector/operation tables with a target
+    SOAR's *installed* catalog. Run in a source checkout with ``$FSRPB_DB``
+    unset, that write lands on ``REPO_PROBED_DB`` -- the full dev corpus -- and a
+    small box (e.g. 21 connectors) silently overwrites hundreds, reddening the
+    tooling gate and degrading the compiler's grounding. This has bitten us.
+
+    So warmup must NOT default to the canonical dev cache. Callers that sync a
+    box catalog should resolve their write target through this function instead
+    of ``default_db_path()``:
+
+      * ``$FSRPB_DB`` set  → write there (a scratch/instance DB -- the right habit);
+      * otherwise          → refuse, unless ``$FSRPB_ALLOW_DEV_DB_CLOBBER=1`` is
+        set to deliberately rebuild the dev cache in place.
+
+    Read paths are unaffected -- they keep using ``default_db_path()``.
+    """
+    env = os.environ.get("FSRPB_DB")
+    if env:
+        return Path(env)
+    if os.environ.get("FSRPB_ALLOW_DEV_DB_CLOBBER") == "1":
+        return REPO_PROBED_DB
+    raise WarmupClobberGuard(
+        "refusing to warmup-write the dev cache "
+        f"({REPO_PROBED_DB}): a box sync would clobber the full reference "
+        "corpus. Set FSRPB_DB to a scratch copy first (recommended), or "
+        "FSRPB_ALLOW_DEV_DB_CLOBBER=1 to rebuild the dev cache in place."
+    )

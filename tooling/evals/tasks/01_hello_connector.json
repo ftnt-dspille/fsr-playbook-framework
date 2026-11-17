@@ -1,0 +1,35 @@
+{
+  "name": "hello_connector",
+  "prompt": "Author a manual-trigger FortiSOAR playbook called 'Hello Connector' that first sets a variable `target_org` to a fixed organization name, then calls the `fortinet-fortisiem` connector's `get_org_name_by_org_id` operation, passing that variable as the `domain_id` parameter. Output the complete YAML.",
+  "gold_yaml_path": "examples/hello_connector.yaml",
+  "notes": "Smallest possible connector-call playbook. Tests Compiles + gold.",
+  "ir_assertions": [
+    {
+      "kind": "connector_op",
+      "connector": "fortinet-fortisiem",
+      "operation_contains": "get_org_name_by_org_id",
+      "note": "calls the named fortisiem operation"
+    },
+    {
+      "kind": "step_type_present",
+      "type": "set_variable",
+      "note": "sets target_org before the call"
+    },
+    {
+      "kind": "arg_text_contains",
+      "type": "connector",
+      "contains": "target_org",
+      "note": "the connector call consumes the variable, not a literal"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "set_variable"
+      },
+      "to": {
+        "type": "connector"
+      },
+      "note": "the variable is set BEFORE the connector runs"
+    }
+  ]
+}

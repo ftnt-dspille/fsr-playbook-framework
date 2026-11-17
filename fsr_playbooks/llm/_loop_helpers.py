@@ -1,0 +1,2676 @@
+"""Pieces shared between the Anthropic and LM Studio agent loops.
+
+Kept here (not in `provider.py`) because they're implementation details
+of the loop, not part of the protocol contract a future provider has to
+honor. A new provider can opt in to self-repair by importing these.
+"""
+from __future__ import annotations
+
+import hashlib
+import ipaddress
+import json
+import re
+from typing import Any
+
+from .ask_scope import REPLY_LANGUAGE_NOTE
+
+# Per-turn OUTPUT-token ceiling, shared by every provider loop.
+#
+# This was a hardcoded 4096 in all three providers -- not configurable, not
+# per-intent. A whole real playbook plus the prose that introduces it does not
+# fit in 4096 output tokens, so a build turn physically could not return its
+# document intact: the reply came back cut off mid-word with the token-cap stop
+# reason, and the widget then had to defend against saving the fragment. That
+# is a product limit, not a test artifact.
+#
+# Raised UNIFORMLY rather than per-intent because a cap is a ceiling, not an
+# allocation -- you are billed on the tokens actually emitted, so a triage turn
+# that answers in 300 tokens costs exactly the same under a 16k ceiling as
+# under a 4k one. A per-intent budget would buy nothing, and would require
+# plumbing `intent` down into the provider, which is deliberately unaware of it.
+#
+# 16384 is the smallest ceiling that comfortably fits a real playbook while
+# staying within the output limit of every model on this path (gpt-4o caps at
+# exactly 16384; gpt-4.1-mini at 32768). Each provider takes a
+# `max_output_tokens` ctor override so a deployment pinned to a model with a
+# lower limit can drop it without a release.
+DEFAULT_MAX_OUTPUT_TOKENS = 16384
+
+#: Shown when a forced wrap-up round still produced no text. Plain and honest:
+#: the analyst gets a reply that says what happened instead of an empty one.
+EMPTY_WRAPUP_TEXT = ("I looked this up but did not manage to write an answer. "
+                     "Ask me again and I will summarize what I found.")
+
+
+def unexecuted_tool_calls_note(stop_reason: str | None, names: list[str]) -> str:
+    """Assistant-turn text standing in for tool calls that will not run.
+
+    A round that stops for anything but a tool-call finish (`length` /
+    `max_tokens` above all) is treated as terminal, so its tool calls are
+    never executed. Leaving them in history anyway makes the NEXT request --
+    any guard nudge or forced round -- invalid: both OpenAI and Anthropic
+    reject a tool call with no matching tool result (HTTP 400). Found live:
+    a gpt-5.4-mini build round spent the whole 16384-token cap and stopped
+    mid-call, and the guard's follow-up request died on the dangling call.
+    Providers drop the calls and replay this note instead, so the model
+    knows why nothing ran."""
+    called = ", ".join(sorted(set(n for n in names if n))) or "a tool"
+    return (f"[My previous output stopped ({stop_reason or 'unknown'}) before "
+            f"the call to {called} completed, so it was not made.]")
+
+
+# Read-only reference tools: results are deterministic for the same
+# args, so we can replace duplicate tool_results with a stub pointing
+# back at the first call. Excludes anything that mutates remote state
+# or depends on time-varying data (validate_yaml, run_op, push_*).
+_IDEMPOTENT_TOOLS: frozenset[str] = frozenset({
+    "find_connector",
+    "find_operation",
+    "get_op_schema",
+    "get_step_type",
+    "find_step_examples",
+    "find_step_recipe",
+    "find_jinja_filter",
+    "find_jinja_pattern",
+    "get_filter_examples",
+    "picklist_for_field",
+    "search_playbooks",
+    "list_configured_connectors",
+    "resolve_picklist_value",
+})
+
+# Tools whose `yaml_text` argument is large and re-sent every retry. We
+# keep only the most recent N of each in the LLM context; older ones
+# get their yaml_text stubbed since the agent only repairs from the
+# latest draft.
+_YAML_BODY_TOOLS: frozenset[str] = frozenset({"validate_yaml", "compile_yaml"})
+_YAML_BODY_KEEP_LATEST = 1
+
+# §2.3 output budgeting -- cap oversized tool *result* bodies. A single large
+# result (e.g. verify_playbook ~47KB, duplicate-enrichment ~40KB) is neither an
+# idempotent dup nor a yaml arg body, so the two passes above never touch it; a
+# short chain of them blows the context window. We keep the most recent
+# `_RESULT_KEEP_LATEST` oversized results in full (the agent repairs/reasons from
+# the freshest data) and clip older ones to a head+tail preview. Deterministic:
+# a clipped body is under the threshold, so re-running shrink is a fixed point
+# and the block stays byte-stable across turns.
+_RESULT_CAP_CHARS = 8000
+_RESULT_KEEP_LATEST = 1
+_RESULT_HEAD_CHARS = 5000
+_RESULT_TAIL_CHARS = 1500
+
+
+def _args_hash(args: Any) -> str:
+    try:
+        blob = json.dumps(args, sort_keys=True, default=str)
+    except Exception:
+        blob = str(args)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
+# ─────────────────────── model view of a tool result ───────────────────────
+#
+# What the MODEL reads back, not what the host gets: ToolResultEvent still
+# carries the full result (the widget renders the card from it). Audit of 801
+# build-session calls: three tools were ~73% of all tool-result text, mostly
+# echoing what the model had just sent -- emit_card returned the whole card
+# (6.4k avg), edit/verify results carried full step bodies in
+# diff_summary.changes (1.7k) and after_yaml/applied/how_to_apply on calls
+# that passed. Every one of those is re-sent on each later call of the turn.
+
+_EDIT_RESULT_TOOLS = frozenset({"edit_playbook", "verify_enhancement",
+                                "verify_playbook"})
+_CHANGE_KEYS = ("playbook", "step", "kind", "type", "changed_fields")
+_FIND_LIST_CAP = 3
+
+
+def model_view(name: str, result: Any) -> Any:
+    """The part of `result` worth re-reading on every later call."""
+    if not isinstance(result, dict):
+        return result
+    if name == "emit_card":
+        card = result.get("card")
+        if result.get("ok") is not False and isinstance(card, dict):
+            out = {k: v for k, v in result.items() if k != "card"}
+            out["card_id"] = card.get("id")
+            out["delivered"] = True
+            return out
+        return result
+    if name in _EDIT_RESULT_TOOLS:
+        out = dict(result)
+        ds = out.get("diff_summary")
+        if isinstance(ds, dict) and ds.get("changes"):
+            ds = dict(ds)
+            ds["changes"] = [
+                {**{k: c[k] for k in _CHANGE_KEYS if c.get(k) not in (None, [])},
+                 # a rename keeps its old/new names
+                 **({"before": c["before"].get("name"), "after": c["after"].get("name")}
+                    if c.get("kind") == "renamed"
+                    and isinstance(c.get("before"), dict)
+                    and isinstance(c.get("after"), dict) else {})}
+                for c in ds["changes"] if isinstance(c, dict)]
+            out["diff_summary"] = ds
+        ev = out.get("evidence")
+        if isinstance(ev, dict):
+            ev = {k: v for k, v in ev.items() if k != "type_trace_path"}
+            if out.get("ready_to_push"):
+                ev.pop("typed_walk", None)
+            out["evidence"] = ev
+        out.pop("applied", None)
+        if out.get("ready_to_push"):
+            # Nothing left to fix: the handle is what the next call needs.
+            out.pop("after_yaml", None)
+            out.pop("checks_run", None)
+        else:
+            out.pop("how_to_apply", None)
+            # The next edit starts from the open playbook, not this draft, so
+            # the draft mostly invites re-typing the document (live: the
+            # malware build did). Kept only when a fix points at a line in it.
+            if not any(str((f or {}).get("path") or "").startswith("<line")
+                       for f in out.get("required_fixes") or []):
+                out.pop("after_yaml", None)
+        return out
+    if name == "find":
+        out = dict(result)
+        if isinstance(out.get("results"), list) and out.get("kind") == "jinja_block":
+            out["results"] = out["results"][:_FIND_LIST_CAP]
+        if isinstance(out.get("examples"), list):
+            out["examples"] = out["examples"][:_FIND_LIST_CAP]
+        return out
+    return result
+
+
+def clip_head_tail(body: str, marker: str, head: int = _RESULT_HEAD_CHARS,
+                   tail: int = _RESULT_TAIL_CHARS) -> str:
+    """Head + tail preview of an over-cap body. `marker` takes the number of
+    clipped chars as `{n}`. With the defaults the result is well under
+    `_RESULT_CAP_CHARS`, so clipping it again is a no-op (a fixed point)."""
+    clipped = len(body) - head - tail
+    return body[:head] + marker.format(n=clipped) + body[-tail:]
+
+
+# A JSON result is compacted by structure before it is ever cut by position.
+# Head+tail keeps the first and last few KB, so a verdict that sits in the
+# middle is lost: live, a VirusTotal report's last_analysis_stats came after a
+# 10 KB per-engine map and whois/rdap, and the model told the analyst the vote
+# counts "were cut off" while the card showed 0/92. Compaction keeps every key
+# and every small value; only long strings, long lists and the bulkiest
+# sub-objects shrink, each with a note saying how much went.
+#: Floor for the string cap; the cap starts at half the budget so the result
+#: the model reads THIS round keeps as much of a long field as the old head did.
+_COMPACT_STRING_CHARS = 600
+_COMPACT_LIST_ITEMS = 20
+#: A container whose children are all at most this size is a map/list of small
+#: things (per-engine verdicts, rows) and is elided whole; otherwise its largest
+#: child goes first, so a small verdict dict beside a bulky sibling survives.
+_COMPACT_SMALL_CHILD_CHARS = 300
+_COMPACT_MAX_ELISIONS = 200
+#: Tool output is third-party data. Past these, compaction is skipped and the
+#: body gets the plain head + tail: a huge body would make the repeated sizing
+#: slow, and deep nesting would recurse past Python's stack.
+_COMPACT_MAX_BODY_CHARS = 1_000_000
+_COMPACT_MAX_DEPTH = 60
+
+
+def _too_deep(v: Any, limit: int) -> bool:
+    stack = [(v, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > limit:
+            return True
+        if isinstance(node, dict):
+            stack.extend((x, depth + 1) for x in node.values())
+        elif isinstance(node, list):
+            stack.extend((x, depth + 1) for x in node)
+    return False
+
+
+def _json_len(v: Any) -> int:
+    return len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str))
+
+
+def _shorten(v: Any, cap: int) -> Any:
+    if isinstance(v, str) and len(v) > cap:
+        return v[:cap] + f"... [+{len(v) - cap} chars]"
+    if isinstance(v, list):
+        kept = [_shorten(x, cap) for x in v[:_COMPACT_LIST_ITEMS]]
+        if len(v) > _COMPACT_LIST_ITEMS:
+            kept.append(f"... [+{len(v) - _COMPACT_LIST_ITEMS} more items]")
+        return kept
+    if isinstance(v, dict):
+        return {k: _shorten(x, cap) for k, x in v.items()}
+    return v
+
+
+def _children(node: Any) -> list[tuple[Any, Any]]:
+    if isinstance(node, dict):
+        return list(node.items())
+    if isinstance(node, list):
+        return list(enumerate(node))
+    return []
+
+
+def _elide_one(root: Any) -> bool:
+    """Replace the bulkiest sub-object with a size note. Walks down while one
+    child holds most of its parent; then elides that node's largest child, or
+    the node itself when every child is small. Never elides the root."""
+    parent: Any = None
+    pkey: Any = None
+    node = root
+    while True:
+        kids = [(k, v, _json_len(v)) for k, v in _children(node)
+                if isinstance(v, (dict, list))]
+        if not kids:
+            break
+        k, v, n = max(kids, key=lambda t: t[2])
+        if n * 2 > _json_len(node):
+            parent, pkey, node = node, k, v
+            continue
+        break
+    sized = [(k, v, _json_len(v)) for k, v in _children(node)]
+    big = [t for t in sized if t[2] > _COMPACT_SMALL_CHILD_CHARS
+           and isinstance(t[1], (dict, list))]
+    if big:
+        k, v, n = max(big, key=lambda t: t[2])
+        node[k] = _elided(v, n)
+        return True
+    if parent is None:
+        return False
+    parent[pkey] = _elided(node, _json_len(node))
+    return True
+
+
+def _elided(v: Any, n: int) -> str:
+    what = (f"{len(v)} keys" if isinstance(v, dict)
+            else f"{len(v)} items" if isinstance(v, list) else "value")
+    return f"[omitted for size: {what}, {n} chars]"
+
+
+def compact_json_body(body: str, target: int,
+                      note: str = "[+{n} chars compacted by the output budgeter]"
+                      ) -> str | None:
+    """`body` compacted by structure to at most `target` chars, or None when
+    it is not JSON or cannot get there (the caller then clips by position).
+    Keys and small values are never dropped. `note` (with `{n}` = chars
+    removed) rides along as `_budget_note`, so the model knows it is partial."""
+    if len(body) > _COMPACT_MAX_BODY_CHARS:
+        return None
+    try:
+        parsed = json.loads(body)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    if not isinstance(parsed, (dict, list)) or _too_deep(parsed, _COMPACT_MAX_DEPTH):
+        return None
+    room = target - len(note) - 80
+    cap = max(_COMPACT_STRING_CHARS, room // 2)
+    while True:
+        data = _shorten(parsed, cap)
+        for _ in range(_COMPACT_MAX_ELISIONS):
+            if _json_len(data) <= room or not _elide_one(data):
+                break
+        if _json_len(data) <= room or cap == _COMPACT_STRING_CHARS:
+            break
+        cap = max(_COMPACT_STRING_CHARS, cap // 2)
+    removed = max(0, len(body) - _json_len(data))
+    text = note.strip().strip("\u2026").strip().format(n=removed)
+    if isinstance(data, dict):
+        data["_budget_note"] = text
+    else:
+        data.append(text)
+    out = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
+    return out if len(out) <= target else None
+
+
+def clip_tool_body(body: str, marker: str, head: int, tail: int) -> str:
+    """The over-cap body the model reads: compacted by structure when it is
+    JSON, else (or when compaction cannot fit) the head + tail preview."""
+    try:
+        compact = compact_json_body(body, head + tail, note=marker)
+    except (RecursionError, MemoryError, ValueError, TypeError):
+        compact = None  # never let the budgeter break a turn
+    if compact is not None:
+        return compact
+    return clip_head_tail(body, marker, head=head, tail=tail)
+
+
+#: The cap on the result the model reads THIS round. A backstop for outliers,
+#: not a budget: build results (verify reports, edit_playbook) run to ~17k on a
+#: real box and the model repairs from them, so the latest result stays whole up
+#: to here. Older results are clipped harder by shrink_history (_RESULT_CAP_CHARS).
+_LATEST_RESULT_CAP_CHARS = 20000
+_LATEST_RESULT_HEAD_CHARS = 15000
+_LATEST_RESULT_TAIL_CHARS = 4000
+
+
+def cap_model_content(content: str) -> str:
+    """The per-result cap for every provider. Applied to the string the MODEL
+    reads back, never to the result the host and widget receive: a result
+    the host parses (a card, a verdict) keeps its full form in ToolResultEvent.
+    shrink_history's pass 3 only ever ran on the Anthropic history shape, so
+    an OpenAI or FortiAI turn had no cap at all."""
+    if len(content) <= _LATEST_RESULT_CAP_CHARS:
+        return content
+    return clip_tool_body(
+        content, "\n… [truncated {n} chars; narrow the query] …\n",
+        head=_LATEST_RESULT_HEAD_CHARS, tail=_LATEST_RESULT_TAIL_CHARS)
+
+
+def shrink_history(history: list[Any]) -> int:
+    """Compact the conversation in place to cut redundant tokens.
+
+    Two passes, both cache-friendly (we only modify *older* turns; the
+    most recent assistant + tool_result blocks stay byte-identical so
+    Anthropic's prompt cache is preserved):
+
+    1. Idempotent tool dedup -- for whitelisted read-only tools, when the
+       same (name, args) appears more than once, replace later
+       tool_result blocks with a stub pointing at the first call. The
+       agent still sees the call happened; it doesn't re-pay for the
+       body.
+    2. YAML body cap -- for `validate_yaml`/`compile_yaml`, replace the
+       `yaml_text` argument in older tool_use blocks with a stub. Only
+       the latest call needs the full body; the agent repairs from
+       there.
+
+    Returns the number of bytes saved (rough estimate, useful for
+    telemetry / tests).
+    """
+    saved = 0
+
+    # Walk every assistant turn's tool_use blocks in order, indexing by
+    # call_id → (name, args_hash). Then walk user turns' tool_result
+    # blocks; if a tool_use has an earlier matching twin AND the tool is
+    # idempotent, stub the duplicate's tool_result.
+    seen_by_signature: dict[tuple[str, str], str] = {}
+    canonical_for: dict[str, str] = {}  # call_id → original call_id (when dup)
+    yaml_call_ids: list[str] = []  # in encounter order
+
+    for msg in history:
+        content = getattr(msg, "content", None)
+        if not isinstance(content, list):
+            continue
+        if msg.role == "assistant":
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_use":
+                    continue
+                name = block.get("name") or ""
+                cid = block.get("id") or ""
+                if not cid:
+                    continue
+                if name in _YAML_BODY_TOOLS:
+                    yaml_call_ids.append(cid)
+                if name in _IDEMPOTENT_TOOLS:
+                    sig = (name, _args_hash(block.get("input")))
+                    prior = seen_by_signature.get(sig)
+                    if prior:
+                        canonical_for[cid] = prior
+                    else:
+                        seen_by_signature[sig] = cid
+
+    # Stub duplicate tool_results.
+    for msg in history:
+        content = getattr(msg, "content", None)
+        if msg.role != "user" or not isinstance(content, list):
+            continue
+        for i, block in enumerate(content):
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") != "tool_result":
+                continue
+            cid = block.get("tool_use_id")
+            if not isinstance(cid, str):
+                continue
+            orig = canonical_for.get(cid)
+            if not orig:
+                continue
+            old = block.get("content") or ""
+            if not isinstance(old, str):
+                continue
+            stub = (
+                f'{{"_cached_dup_of": "{orig}", '
+                f'"note": "identical args to an earlier call this session -- '
+                f'reuse that result"}}'
+            )
+            if old != stub:
+                saved += max(0, len(old) - len(stub))
+                block["content"] = stub
+
+    # Cap older yaml_text bodies. Keep the most recent N call ids intact.
+    keep = set(yaml_call_ids[-_YAML_BODY_KEEP_LATEST:]) if yaml_call_ids else set()
+    if len(yaml_call_ids) > _YAML_BODY_KEEP_LATEST:
+        for msg in history:
+            content = getattr(msg, "content", None)
+            if msg.role != "assistant" or not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_use":
+                    continue
+                if block.get("name") not in _YAML_BODY_TOOLS:
+                    continue
+                if block.get("id") in keep:
+                    continue
+                inp = block.get("input")
+                if not isinstance(inp, dict):
+                    continue
+                body = inp.get("yaml_text")
+                if not isinstance(body, str) or len(body) < 200:
+                    continue
+                stub = "<elided -- superseded by a later validate_yaml call>"
+                saved += len(body) - len(stub)
+                inp["yaml_text"] = stub
+
+    # Pass 3 -- §2.3 cap oversized tool_result bodies. Collect every
+    # tool_result with an over-threshold string body, in history order, then
+    # clip all but the most recent `_RESULT_KEEP_LATEST` of them. Already-clipped
+    # bodies are under the threshold so they're skipped (fixed point).
+    oversized: list[tuple[Any, str]] = []  # (block, content) in encounter order
+    for msg in history:
+        content = getattr(msg, "content", None)
+        if msg.role != "user" or not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            body = block.get("content")
+            if isinstance(body, str) and len(body) > _RESULT_CAP_CHARS:
+                oversized.append((block, body))
+
+    to_clip = (oversized[:-_RESULT_KEEP_LATEST]
+               if _RESULT_KEEP_LATEST > 0 else oversized)
+    for block, body in to_clip:
+        new_body = clip_tool_body(
+            body, "\n… [+{n} chars capped by the output budgeter -- "
+                  "a later turn superseded this result] …\n",
+            head=_RESULT_HEAD_CHARS, tail=_RESULT_TAIL_CHARS)
+        saved += len(body) - len(new_body)
+        block["content"] = new_body
+
+    return saved
+
+
+# Per-turn tool-round CEILING -- a cost/time net, not the runaway guard.
+# Raised 16 → 40 (2026-09-27): over 362 sweep turns the 16 cap fired 5 times
+# and every one was productive (28-33 calls, 100% distinct), cutting builds
+# off mid-authoring. Runaways are stopped by ProgressMeter instead, which
+# ends a turn on repetition or sustained failure long before this.
+MAX_TOOL_TURNS = 40
+# Cap on extra "fix the YAML" turns auto-issued when the assistant's
+# final message contains a yaml block that fails to compile. Each repair
+# turn is roughly one extra LLM round-trip; 2 keeps cost bounded.
+MAX_SELF_REPAIR_TURNS = 2
+
+# §2.8 -- cap on read-only (tier ≤ 2) tool calls dispatched concurrently
+# within a single turn. `dispatch`/`run_op` are sync and touch shared
+# state (the connector requests session, in-process health/config caches,
+# sqlite), so we bound fan-out rather than letting a turn open arbitrarily
+# many upstream sockets at once.
+MAX_PARALLEL_TOOLS = 8
+
+# §2.2 -- wall-clock deadline for a single Anthropic stream round-trip.
+# A stalled network or overloaded upstream can block the `async for`
+# indefinitely; this caps it so the turn fails cleanly instead of hanging.
+# Overrideable via ANTHROPIC_STREAM_TIMEOUT_SECS env for local testing.
+import os as _os
+
+STREAM_TIMEOUT_SECS: int = int(_os.environ.get("ANTHROPIC_STREAM_TIMEOUT_SECS", "300"))
+
+
+import asyncio as _asyncio
+
+
+async def drain_with_idle_timeout(pump, *, timeout: float):
+    """Yield items from the async generator ``pump`` live, bounded by a
+    per-item *inactivity* timeout.
+
+    Every provider's ``stream()`` needs the same scaffolding: surface each
+    streamed delta to the consumer (and thus the connector's ``chat_poll``
+    feed) the instant the upstream yields it, while still failing cleanly if
+    the upstream stalls. Buffering the whole round-trip just to wrap it in one
+    ``asyncio.wait_for`` -- the old approach -- defeated live streaming (the
+    answer only appeared on turn completion). This helper keeps that timeout
+    guarantee without the buffering, so the per-delta plumbing lives in ONE
+    place and each provider only supplies its SDK-specific ``pump``.
+
+    Mechanics: ``pump`` runs as a background task feeding a queue; the consumer
+    reads the queue under ``asyncio.wait_for(timeout)`` (3.9-compatible -- no
+    ``asyncio.timeout()``).
+
+    - Items from ``pump`` are re-yielded verbatim (the provider tags them,
+      e.g. ``("text", str)`` / ``("final", msg)``).
+    - If no item *or* completion arrives within ``timeout`` seconds, the pump
+      is cancelled and ``asyncio.TimeoutError`` is raised.
+    - An exception raised inside ``pump`` is re-raised in the consumer's
+      context, so the provider's existing error mapping handles it unchanged.
+    """
+    q: _asyncio.Queue = _asyncio.Queue()
+
+    async def _run() -> None:
+        try:
+            async for item in pump:
+                await q.put(("item", item))
+            await q.put(("end", None))
+        except Exception as exc:  # surfaced to the consumer below
+            await q.put(("error", exc))
+
+    task = _asyncio.ensure_future(_run())
+    try:
+        while True:
+            try:
+                kind, payload = await _asyncio.wait_for(q.get(), timeout)
+            except _asyncio.TimeoutError:
+                task.cancel()
+                raise
+            if kind == "item":
+                yield payload
+            elif kind == "end":
+                return
+            else:  # ("error", exc)
+                raise payload
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+# ───────────────────────── triage discipline ─────────────────────────
+#
+# Model-agnostic guards layered on top of raw tool dispatch for the TRIAGE
+# agent. All three rules were learned from live gpt-4o-mini runs (memory
+# `openai_terse_triage_shallow`): a weak model under-weights the system prompt
+# + pre-flight blocks and acts on the immediate user message, so depth swings
+# wildly on phrasing. A terse opener shortcut to
+#   get_record → find_containment_actions → emit_action_card  (3 calls, no hunt)
+# while a richly-enumerated prompt over-hunted (16 calls). Prose in the system
+# prompt can't hold a weak model; these guards enforce the same discipline structurally
+# so behavior is consistent regardless of model or phrasing.
+#
+# All three fire only on triage-specific tool names, so build flows (whose tool
+# slice excludes them) are unaffected.
+
+# Containment-staging tools -- refused until the hunt floor is met.
+# Uses INTERNAL canonical names (what _effective_tool_name returns), not model-facing names.
+_CONTAINMENT_STAGING_TOOLS: frozenset[str] = frozenset({
+    "find_containment_actions", "emit_action_card",
+})
+# Evidence-gathering tools that count toward the floor. get_record (the alert
+# pull) and the find_* discovery meta-tools are deliberately EXCLUDED so the
+# floor forces real evidence beyond pulling the record + listing actions.
+#
+# MUTABLE on purpose, same Option-A posture as `intents.TRIAGE_ONLY_TOOLS`: the
+# connector registers its own read-only hunt tools at import
+# (`fsr_soc_triage.registry`) and extends this set with them. An explicit list
+# alone silently under-counts every tool the framework doesn't know by name --
+# which is exactly how a real GA investigation that ran `fmg_get_device_status`,
+# `fmg_get_ha_status`, `fmg_get_policy_package_status` and
+# `faz_search_device_events` scored **0 of 3** evidence calls and left
+# containment locked on the analyst's follow-up "isolate that host" turn.
+_INVESTIGATION_TOOLS: set[str] = {
+    "search_module_records", "run_op",
+    "siem_search", "siem_events_for_incident",
+    "get_host_context", "get_user_context", "get_ip_context",
+    "get_device_info", "get_incident_details", "get_associated_events_new",
+    "faz_search", "faz_get_alerts", "faz_raw_query",
+    "fmg_device", "edr_host",
+}
+# Second line of defence against the same drift: whole read-only hunt FAMILIES
+# count even when an individual name was never registered here. These prefixes
+# are only ever used by SIEM / FortiAnalyzer / FortiManager query tools, all of
+# which are genuine evidence gathering.
+_INVESTIGATION_PREFIXES: tuple[str, ...] = ("siem_", "faz_", "fmg_")
+
+
+def _is_read_only_mcp_evidence(name: str) -> bool:
+    """True for a materialized `mcp_<server>__<tool>` that is read-only.
+
+    Native MCP tools carry the same evidence weight as the curated hunt tools --
+    `mcp_soc__enrich_indicator` and `mcp_fortisiem__get_context_by_entity` ARE
+    investigation -- but they are materialized at runtime, so no static list can
+    name them and the `siem_`/`faz_`/`fmg_` prefixes don't match. Tier is the
+    honest signal: the materializer records tier 1 for a read-only server rule
+    and 3 for a mutating one, so a containment tool like
+    `mcp_soc__block_indicator` is excluded by construction rather than by name.
+
+    Fail-closed: an unknown or untiered name credits nothing.
+    """
+    if not name.startswith("mcp_") or "__" not in name:
+        return False
+    try:
+        from . import tools as _llm_tools
+        return _llm_tools.TOOL_TIERS.get(name) == 1
+    except Exception:  # noqa: BLE001 - never let crediting break a turn
+        return False
+
+
+def counts_as_investigation(name: str) -> bool:
+    """True when `name` is evidence gathering and should credit the hunt floor."""
+    if name in _CONTAINMENT_STAGING_TOOLS:
+        return False
+    return (name in _INVESTIGATION_TOOLS
+            or name.startswith(_INVESTIGATION_PREFIXES)
+            or _is_read_only_mcp_evidence(name))
+
+
+def credit_as_investigation(*names: str) -> None:
+    """Register extra tool names as hunt-floor evidence (used by the connector's
+    triage registry so its hunt tools aren't invisible to the floor)."""
+    _INVESTIGATION_TOOLS.update(n for n in names if n)
+def _search_sig(args: Any) -> str:
+    """The identity of a search_module_records call: every argument, with the
+    module and query case-folded. Empty for a search with no query (a listing
+    is not a correlation search and is never refused as a repeat)."""
+    a = dict(args or {})
+    q = str(a.pop("q", None) or a.pop("query", None) or "").strip().lower()
+    a.pop("q", None)
+    a.pop("query", None)
+    if not q:
+        return ""
+    a["module"] = str(a.get("module") or "").strip().lower()
+    return q + "\x00" + json.dumps(a, sort_keys=True, default=str)
+
+
+# Full pivot floor: record + cross-module search + external enrichment + a
+# pivot ≈ 3 genuine evidence calls before containment may be staged.
+MIN_INVESTIGATION_BEFORE_CONTAINMENT = 3
+
+
+def _is_analyst_ordered(name: str, args: Any) -> bool:
+    """True when the model DECLARED that the analyst explicitly ordered this
+    containment (tracker #60).
+
+    The floor exists to stop the agent from contain-first-scope-later. It was
+    never meant to answer an explicit order with a refusal -- but that is what
+    it did, because the guard sees only `(name, args)`: the analyst's "isolate
+    that host" lives in the message text one layer up and is invisible here.
+
+    NOTE: this is the SECONDARY path. It is kept because it costs nothing and
+    an explicit declaration should be honored, but nothing may depend on it --
+    the box model set `requested_by` on 0 of 4 live containment calls across 2
+    runs. It does not lie about intent; it ignores an optional parameter. The
+    path that actually fires is `_detect_analyst_order` over the user's own
+    message -- see its docstring for why the original objection to reading the
+    phrasing no longer holds.
+
+    This exempts STAGING, not execution. The card still goes to a human, and
+    the tier/approval gate is untouched -- that gate is what actually stops a
+    bad action, and this changes nothing about it.
+
+    Covers BOTH staging tools. Scoping it to `emit_action_card` alone was
+    unreachable in practice: a card names a connector + operation, so the agent
+    must call `find_containment_actions` first to discover them -- and that call
+    is floor-gated too, so an explicit order died at step one and never reached
+    the exempted step two. The live matrix caught this (row TO: two
+    `hunt_floor_guard` blocks on discovery, `terminal=end_turn`, no card) after
+    the unit tests missed it by calling `emit_action_card` directly.
+
+    Fails closed -- anything but the exact string keeps the floor.
+    """
+    if name not in _CONTAINMENT_STAGING_TOOLS:
+        return False
+    return str((args or {}).get("requested_by") or "").strip().lower() == "analyst"
+
+
+# An imperative containment verb. Deliberately not every synonym in
+# `_CONTAINMENT_VERBS` -- this reads human phrasing, not op names.
+_ORDER_VERBS = (
+    r"block|isolate|quarantine|contain|disable|suspend|revoke|ban|deactivate|"
+    r"blacklist|block\s?list|kill|terminate|shut\s?down|"
+    r"take\s+(?:\S+\s+){1,3}offline|"
+    r"remediate|lock\s+out"
+)
+# Directive framing: the verb opens the clause, or follows a lead-in that makes
+# it a request rather than a question about one.
+_ORDER_RE = re.compile(
+    r"(?:^|[.;!?\n]\s*|,\s*(?:then|and)\s+|\b(?:please|now|go\s+ahead\s+and|"
+    r"i\s+want\s+you\s+to|i\s+need\s+you\s+to|you\s+(?:should|must|need\s+to)|"
+    r"let'?s)\s+)"
+    r"(?:please\s+|just\s+|immediately\s+)?"
+    rf"(?:{_ORDER_VERBS})\b",
+    re.IGNORECASE,
+)
+# Phrasings that use a containment verb WITHOUT ordering one: a question about
+# whether to act, a hypothetical, or a description of something already done.
+_NOT_AN_ORDER_RE = re.compile(
+    r"\b(?:was|were|is|are|been|got|already)\s+(?:\w+\s+){0,2}"
+    rf"(?:{_ORDER_VERBS})(?:ed|d)?\b"
+    rf"|\b(?:should|shall|would|could|can|may|might|do|did|does)\s+(?:i|we|you|it|they)\b"
+    rf"|\bif\s+(?:i|we|you|they)\s+(?:{_ORDER_VERBS})\b"
+    rf"|\bwhy\s+(?:was|were|is|are)\b"
+    rf"|\b(?:{_ORDER_VERBS})(?:ed|d)\s+by\b",
+    re.IGNORECASE,
+)
+
+
+def latest_user_text(messages: Any) -> str:
+    """The text of the most recent user message in a provider's history.
+
+    Every provider builds `TriageDiscipline` from its own `messages` list, so
+    this lives here rather than being open-coded three times -- three copies of
+    a content-shape walk is exactly the parallel-list drift that has bitten
+    this file before. `Message.content` is a plain string on a user turn but a
+    block list on a tool-result turn; only the text blocks are the analyst's
+    words. Returns "" when there is no user text to read.
+    """
+    for msg in reversed(list(messages or ())):
+        if str(getattr(msg, "role", "") or "") != "user":
+            continue
+        content = getattr(msg, "content", None)
+        if isinstance(content, str):
+            if content.strip():
+                return content
+            continue
+        if isinstance(content, list):
+            # A tool_result turn carries no analyst words; skip past it to the
+            # message that actually prompted this turn.
+            parts = [str(b.get("text") or "") for b in content
+                     if isinstance(b, dict) and b.get("type") == "text"]
+            joined = "\n".join(p for p in parts if p)
+            if joined.strip():
+                return joined
+    return ""
+
+
+def _detect_analyst_order(user_text: str) -> bool:
+    """True when the analyst's own message is an explicit order to contain.
+
+    This is the path the exemption actually runs on. The original design put
+    the declaration on the tool call instead, reasoning that "a regex over the
+    user's wording would put a phrasing-dependent branch in a security gate,
+    where a miss is another silent refusal." Live evidence inverts that:
+
+      * The declared field misses 100% of the time (0 of 4 calls, 2 runs), so
+        it *is* the silent-refusal path the objection warned about. A detector
+        with imperfect recall is strictly better than one with zero.
+      * A miss here costs exactly what today costs -- the floor holds and the
+        agent is told to investigate first. It is the status quo, not a new
+        failure mode.
+      * A false positive costs a card staged early. It does NOT act: this
+        exempts staging only, and the tier/approval gate still routes the card
+        to a human. The gate that stops a bad action is untouched.
+
+    Asymmetric costs, so this leans toward recall: it fires on an imperative
+    containment verb in directive position, and stands down on the phrasings
+    that use the same verbs without ordering anything -- a question about
+    whether to act ("should we block it?"), a hypothetical ("if we block the
+    IP..."), or a report of something already done ("the IP was blocked by the
+    firewall"). Empty/None text is not an order.
+    """
+    text = (user_text or "").strip()
+    if not text:
+        return False
+
+    # Evaluate clause-by-clause so one descriptive sentence in a long message
+    # can't veto an order in another ("The IP was blocked yesterday. Block it
+    # on the edge firewall too.").
+    for clause in re.split(r"(?<=[.;!?\n])\s+", text):
+        if not clause.strip():
+            continue
+        if _NOT_AN_ORDER_RE.search(clause):
+            continue
+        if _ORDER_RE.search(clause):
+            return True
+    return False
+
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+# Internal = an address that can only live inside the customer's network. Not
+# `ip.is_private`: Python also counts the RFC 5737 documentation ranges
+# (192.0.2/24, 198.51.100/24, 203.0.113/24) and other reserved blocks as
+# "private". Used by the per-indicator enrichment cap and by autonomy.
+_INTERNAL_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",   # RFC 1918
+    "100.64.0.0/10",                                     # RFC 6598 carrier NAT
+    "fc00::/7",                                          # RFC 4193 ULA
+))
+
+
+def is_internal_ip(ip: Any) -> bool:
+    """True for an address that exists only inside a network: RFC 1918,
+    carrier-grade NAT, IPv6 ULA, loopback, link-local."""
+    if isinstance(ip, str):
+        try:
+            ip = ipaddress.ip_address(ip.strip())
+        except ValueError:
+            return False
+    if ip.is_loopback or ip.is_link_local:
+        return True
+    return any(ip.version == n.version and ip in n for n in _INTERNAL_NETS)
+
+
+def _classify_ips(args: Any) -> tuple[set[str], set[str]]:
+    """Return (internal, external) IPv4 literals found anywhere in ``args``."""
+    internal: set[str] = set()
+    external: set[str] = set()
+    try:
+        blob = json.dumps(args, default=str)
+    except Exception:
+        blob = str(args)
+    for tok in _IP_RE.findall(blob):
+        try:
+            ip = ipaddress.ip_address(tok)
+        except ValueError:
+            continue
+        if is_internal_ip(ip):
+            internal.add(tok)
+        else:
+            external.add(tok)
+    return internal, external
+
+
+def _effective_tool_name(name: str, args: Any) -> str:
+    """Fold the consolidated `emit_card` union onto the retired per-type
+    emitter name every discipline rule keys on. Without this the union tool
+    walked straight past the hunt floor and the staged-card gag -- the same
+    union-blindness class as the wire splice (effect probe A2) and the
+    deliverable grader."""
+    if name == "emit_card":
+        ct = str((args or {}).get("card_type") or "").strip().lower()
+        if ct == "action":
+            return "emit_action_card"
+    return name
+
+
+_TERMINAL_OFFER_CARD_TYPES = frozenset({"playbook_offer", "enhancement_offer"})
+
+
+def is_delivered_offer(name: str, args: Any, result: Any) -> bool:
+    """True when the model just delivered a terminal OFFER card successfully.
+
+    A playbook_offer / enhancement_offer is the turn's terminal action -- the
+    analyst clicks Create/Apply on it. The connector truncates the turn's wire
+    at a gating card (ops_turn_io `_close_on`), so any further model round only
+    narrates text that is then discarded. Ending the turn here saves that round
+    (measured ~13-14% of a build turn's input, Frank build-matrix).
+
+    Scoped to the two offer cards on purpose: a verdict card is NON-gating (it
+    may be followed by an action card), so it must not end the turn. The loop's
+    own forced-delivery paths already end the turn on these same cards; this
+    unifies the model-emitted path with them.
+    """
+    if not (isinstance(result, dict) and result.get("ok") is True
+            and isinstance(result.get("card"), dict)):
+        return False
+    if name in ("emit_playbook_offer", "emit_enhancement_offer"):
+        return True
+    if name == "emit_card":
+        ct = str((args or {}).get("card_type") or "").strip().lower()
+        return ct in _TERMINAL_OFFER_CARD_TYPES
+    return False
+
+
+def is_offer_attempt(name: str, args: Any) -> bool:
+    """True when a call is TRYING to emit a terminal offer card -- known from
+    the call shape alone, before it is dispatched.
+
+    The mirror of `is_delivered_offer`, which can only judge a call AFTER it
+    ran (it reads the result). This judges the attempt up front so a SECOND
+    offer in the same turn can be refused before it renders a duplicate card:
+    the offer card is itself the save prompt, so a model that re-emits the same
+    playbook as a "save"/"confirm" follow-up would put two identical cards in
+    front of the analyst. Scoped to the two offer cards, exactly like
+    `is_delivered_offer`."""
+    if name in ("emit_playbook_offer", "emit_enhancement_offer"):
+        return True
+    if name == "emit_card":
+        ct = str((args or {}).get("card_type") or "").strip().lower()
+        return ct in _TERMINAL_OFFER_CARD_TYPES
+    return False
+
+
+def _is_verdict_emit(name: str, args: Any) -> bool:
+    """True for a verdict-card emission, under either the retired or the
+    consolidated name."""
+    return name == "emit_verdict" or (
+        name == "emit_card" and isinstance(args, dict)
+        and str(args.get("card_type") or "").strip().lower() == "verdict")
+
+
+# Build-only tools whose presence in a turn's advertised slice marks it an
+# authoring turn -- the triage slice subtracts every one (intents.
+# BUILD_ONLY_TOOLS; a test pins the subset). ONE list for every provider and
+# guard: the copies drifted, and the fortiai proxy kept testing
+# `"emit_action_card" not in allowed_names` after that tool folded into
+# `emit_card`, so every proxy turn -- triage included -- counted as authoring.
+AUTHORING_MARKER_TOOLS = frozenset({
+    "verify_playbook", "push_playbook", "verify_enhancement", "edit_playbook",
+})
+
+
+def is_authoring_slice(allowed_names) -> bool:
+    """True when the advertised tools include a build-only authoring tool."""
+    return bool(AUTHORING_MARKER_TOOLS & set(allowed_names or ()))
+
+
+class TriageDiscipline:
+    """Per-session triage guard. ``evaluate(name, args)`` atomically checks the
+    three discipline rules and, when the call is allowed, records it -- returning
+    a guard envelope to short-circuit dispatch or ``None`` to proceed. ONE
+    atomic call so the read-only parallel batch (dispatched across threads via
+    ``asyncio.to_thread``) can't race the counter/seen-set.
+
+    Two guard *shapes* are returned, and the distinction is load-bearing
+    (tracker #60):
+
+    * ``kind: "guard_defer"`` (``ok: True``, ``directive``) -- a NON-terminal
+      deferral. The hunt-floor guard uses this: "investigate first, then retry."
+      It must NOT read as a tool failure, or the model ends the turn on a
+      perfectly good reason to stop (an ``ok: false`` tool_result).
+    * ``kind: "guard_redirect"`` (``ok: False``, ``error``) -- a TERMINAL
+      redirect. The call-once and capability guards use this:
+      "don't do this; do something else."
+
+    Attempts -- not successes -- count toward the hunt floor, so a config gap or a
+    failing enrichment can't deadlock the floor (the model still gets credit for
+    trying to investigate, and MAX_TOOL_TURNS bounds the loop).
+
+    When initialized with an optional ``state`` (Investigation instance), the
+    discipline seeds its counters from the state and mutates the shared state
+    object as the turn progresses so the caller can persist it afterwards.
+
+    ``capabilities`` (a Capabilities instance) adds the §E capability guard:
+    a ``run_op`` against a connector already recorded unavailable this session
+    short-circuits with a ``guard_redirect`` instead of re-probing; call
+    ``note_result`` after each dispatched tool so outcomes keep the shared
+    capabilities object current (the caller persists it post-turn)."""
+
+    def __init__(
+        self,
+        *,
+        floor: int = MIN_INVESTIGATION_BEFORE_CONTAINMENT,
+        state: Any = None,  # Investigation | None
+        capabilities: Any = None,  # Capabilities | None
+        authoring: bool = False,
+        user_text: str = "",
+    ):
+        import threading
+        self.floor = floor
+        self._shared_state = state  # None or an Investigation instance
+        self._capabilities = capabilities  # None or a Capabilities instance
+        # Authoring/build turns don't triage a live alert. `find_containment_actions`
+        # is DISCOVERY ("which ops could block an IP?") that a build agent
+        # legitimately uses while authoring -- so the hunt-floor investigation gate
+        # (no containment before N evidence calls) must not fire on it here. The
+        # gate stays fully intact for triage (authoring=False). Actual staging
+        # (`emit_action_card`) isn't in the build tool-slice at all, so nothing
+        # containment is being STAGED -- only discovered.
+        self._authoring = authoring
+        # Seed invest_attempts from state if provided
+        if state is not None and hasattr(state, "invest_attempts"):
+            self.invest_attempts = state.invest_attempts
+        else:
+            self.invest_attempts = 0
+        # Pre-populate _called from state if provided
+        self._called: set[str] = set()
+        if state is not None and hasattr(state, "called_once_sigs"):
+            self._called.update(state.called_once_sigs)
+        # Hunt floor is permanently satisfied if state says so
+        self._hunt_floor_met = state is not None and getattr(state, "hunt_floor_met", False)
+        # Seeded from the analyst's OWN message, which is the path that fires;
+        # `_is_analyst_ordered` can still set it later from a declared
+        # `requested_by`, but nothing depends on the model doing so (it never
+        # has -- 0 of 4 live calls). Turn-scoped: this instance is rebuilt per
+        # turn, so an order never outlives the message that gave it.
+        self._analyst_ordered = _detect_analyst_order(user_text)
+        # Correlation searches already made this turn: {module\x00query} sigs,
+        # for the duplicate-search guard. Turn-scoped like _analyst_ordered --
+        # a later turn may legitimately re-search after the world changed.
+        self._corr_searched: set[str] = set()
+        # How many distinct evidence tools remain before the floor lifts --
+        # surfaced in the block message so the model knows it's making progress.
+        self._lock = threading.Lock()
+
+    def _check_locked(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        # 1b. Duplicate-search discipline (#128). The SAME search_module_records
+        # call already run this turn is refused. "The same" is every argument:
+        # keyed on (module, query) alone it refused pages 2-4 of a 1930-row
+        # result as repeats, and told the model the first page was the whole
+        # set (live, a device's automation history).
+        if name == "search_module_records":
+            sig = _search_sig(args)
+            if sig and sig in self._corr_searched:
+                q = str((args or {}).get("q") or (args or {}).get("query") or "")
+                module = str((args or {}).get("module") or "")
+                return refusal("triage.duplicate_search", {
+                    "ok": False,
+                    "kind": "guard_redirect",
+                    "duplicate_search_guard": True,
+                    "error": (
+                        f"Skipped: you already ran this exact search of "
+                        f"`{module}` for {q!r} this turn. Use the result you "
+                        f"already have; for more rows, ask for the next page "
+                        f"or a narrower filter."
+                    ),
+                })
+        # 3. Hunt floor -- no containment before real investigation. Prescriptive:
+        # weak models re-spam a blocked tool when told "retry later", so name the
+        # ONE next call to make and forbid re-calling the blocked tool.
+        # An explicit order declared on EITHER staging call covers the rest of
+        # the turn. Without this, a model that correctly declares intent on
+        # `find_containment_actions` (the tool whose docstring asks for it) then
+        # loses the exemption on the `emit_action_card` that call exists to feed
+        # -- and the order is refused one step later than before. Turn-scoped on
+        # purpose: this instance is rebuilt per turn, so a declared order never
+        # outlives the message that gave it.
+        if _is_analyst_ordered(name, args):
+            self._analyst_ordered = True
+        if (name in _CONTAINMENT_STAGING_TOOLS
+                and not (self._authoring and name == "find_containment_actions")
+                and not self._analyst_ordered
+                and not self._hunt_floor_met
+                and self.invest_attempts < self.floor):
+            remaining = self.floor - self.invest_attempts
+            if "search_module_records" not in self._called:
+                next_step = (
+                    "`search_module_records` on the `incidents` module for the "
+                    "host and external IP from the alert (then again on `alerts`)"
+                )
+            else:
+                next_step = (
+                    "enrich the EXTERNAL (public) IP with a threat-intel "
+                    "connector via `run_op` (VirusTotal / FortiGuard / Shodan), "
+                    "or pivot the host with `siem_search_host` / `get_ip_context`"
+                )
+            return refusal("triage.hunt_floor", {
+                # A deferral is NOT a failure -- it is steering. The envelope
+                # MUST read as "deferred, go investigate, then retry", not "this
+                # call failed" (tracker #60). On the box model a deferral arrived
+                # as {ok: false, error: ...} -- the same shape as an ordinary tool
+                # failure -- and an ordinary failure is a good reason to end a
+                # turn. That is exactly the 33% failure mode: the model read the
+                # deferral as a failure and stopped. So the deferral gets its OWN
+                # shape: ok: true (the guard succeeded in deferring), kind:
+                # "guard_defer" (distinct from a terminal guard_redirect),
+                # `directive` (not `error`), and `deferred`/`executed` flags so
+                # the model can tell a deferred call from a failed one at a
+                # glance. The terminal guards (call-once, capability) keep the failure-shaped guard_redirect envelope.
+                "ok": True,
+                "kind": "guard_defer",
+                "deferred": True,
+                "executed": False,
+                "hunt_floor_guard": True,
+                "investigation_calls": self.invest_attempts,
+                "required": self.floor,
+                # The retry is the POINT of this guard: it defers containment,
+                # it does not cancel it. Callers keep the block non-terminal for
+                # exactly this reason (see the provider dispatch sites).
+                "resume_call": name,
+                "directive": (
+                    f"Deferred, not cancelled: `{name}` was NOT executed yet. "
+                    f"You've run {self.invest_attempts} of {self.floor} required "
+                    f"investigation steps, and staging containment now would act "
+                    f"on an alert you haven't scoped. Your NEXT call must be: "
+                    f"{next_step}. Then, after ~{remaining} more evidence "
+                    f"call(s), CALL `{name}` AGAIN with the same arguments -- "
+                    f"that retry is required and will succeed. Do not call "
+                    f"`{name}` again before those evidence calls, and do not end "
+                    f"your turn without staging the card the analyst asked for."
+                ),
+            })
+        return None
+
+    def evaluate(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        """Atomic check-and-record. Returns a guard envelope (block) or None
+        (allowed -- and the call is recorded as dispatched)."""
+        name = _effective_tool_name(name, args)
+        with self._lock:
+            guard = self._check_locked(name, args or {})
+            if guard is not None:
+                return guard
+            # Record the call. Call-once discovery tools are recorded under their
+            # (name, target_type) signature so a different indicator type isn't
+            # blocked; every other tool records by bare name (the hunt-floor and
+            # `search_module_records`-seen checks key on bare names).
+            self._called.add(name)
+            if name == "search_module_records":
+                _sig = _search_sig(args)
+                if _sig:
+                    self._corr_searched.add(_sig)
+            if counts_as_investigation(name):
+                self.invest_attempts += 1
+                # Once floor is met, mark it in the shared state
+                if (self._shared_state is not None and
+                        self.invest_attempts >= self.floor and
+                        not self._hunt_floor_met):
+                    self._hunt_floor_met = True
+                    self._shared_state.hunt_floor_met = True
+            # Mutate the shared state to keep invest_attempts in sync
+            if self._shared_state is not None:
+                self._shared_state.invest_attempts = self.invest_attempts
+                # Keep called_once_sigs in sync
+                self._shared_state.called_once_sigs = list(self._called)
+            return None
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Record capability facts (§E) from a dispatched tool's result into the
+        shared Capabilities object. Call after every successful dispatch; no-op
+        when the discipline has no capabilities state.
+
+        - ``run_op`` failing with ``connector_not_configured`` /
+          ``connector_unhealthy`` marks the connector unavailable -- the next
+          ``run_op`` against it short-circuits instead of re-probing.
+        - ``run_op`` succeeding confirms the connector (and clears any stale
+          unavailable entry -- a connector fixed mid-session works again).
+        - ``list_configured_connectors`` succeeding clears ALL unavailable
+          entries: it's the re-check gesture (capability-gap "Re-check &
+          continue"), and a still-broken connector re-records itself on the
+          next attempt anyway.
+        """
+        name = _effective_tool_name(name, args)
+        caps = self._capabilities
+        if caps is None or not isinstance(result, dict):
+            return
+        import time
+        with self._lock:
+            if name == "run_op":
+                connector = str((args or {}).get("connector") or "")
+                if not connector:
+                    return
+                code = result.get("code")
+                if (result.get("ok") is False
+                        and code in ("connector_not_configured",
+                                     "connector_unhealthy")):
+                    caps.unavailable[connector] = code
+                    caps.noted_at = time.time()
+                elif result.get("ok") is True:
+                    caps.unavailable.pop(connector, None)
+                    if connector not in caps.confirmed:
+                        caps.confirmed.append(connector)
+                    caps.noted_at = time.time()
+            elif name == "list_configured_connectors":
+                if result.get("ok") is not False and caps.unavailable:
+                    caps.unavailable.clear()
+                    caps.noted_at = time.time()
+
+
+#: A closed ```yaml fence. The group is the YAML body; the whole match is the
+#: fence, so a caller can replace it.
+YAML_FENCE_RE = re.compile(r"```ya?ml\n([\s\S]*?)```", re.IGNORECASE)
+
+
+def extract_yaml_block(text: str) -> str | None:
+    """Return the contents of the LAST fenced ```yaml block, or None.
+    Mirrors the frontend's extractYamlBlock so the in-chat YAML the user
+    sees and the YAML we self-repair against are exactly the same string.
+    """
+    matches = list(YAML_FENCE_RE.finditer(text))
+    return matches[-1].group(1) if matches else None
+
+
+class FenceHold:
+    """Streams a model round's text, holding back from its first code fence.
+
+    The prose before a fence goes out as it streams. The fence and everything
+    after it wait for the end of the round, so the loop can decide what the
+    reply delivers (`agent_loop._neutralise_failing_fences`). Trailing backticks
+    that could open a fence are held until the next delta settles them.
+
+    `feed` returns the text that may be sent now; `finish` returns the text
+    that was held and is still undelivered, and resets the hold."""
+
+    def __init__(self) -> None:
+        self._open = False
+        self._held = ""
+        self._ticks = ""
+
+    def feed(self, delta: str) -> str:
+        if self._open:
+            self._held += delta
+            return ""
+        buf = self._ticks + delta
+        at = buf.find("```")
+        if at != -1:
+            self._open = True
+            self._held = buf[at:]
+            self._ticks = ""
+            return buf[:at]
+        n = len(buf) - len(buf.rstrip("`"))
+        self._ticks = buf[len(buf) - n:]
+        return buf[:len(buf) - n]
+
+    def finish(self) -> str:
+        rest = self._held if self._open else self._ticks
+        self._open = False
+        self._held = ""
+        self._ticks = ""
+        return rest
+
+
+# Tools whose YAML argument actually REACHES THE ANALYST: the offer/patch cards
+# the widget renders, plus `push_playbook` (after which the playbook exists in
+# FortiSOAR whether or not it was ever shown).
+#
+# `verify_playbook` / `verify_enhancement` are deliberately ABSENT, and that is
+# the whole point of the distinction. They are gates: passing one means the
+# bytes are good, not that anybody received them. Live shape -- a turn drafted a
+# playbook, cleared `verify_playbook`, ran out of tool budget before calling
+# `emit_playbook_offer`, and was then told "do not re-emit the YAML". The
+# playbook was correct, verified, and invisible.
+#
+# `validate_yaml` / `compile_yaml` are absent for the same reason, one step
+# earlier: they are the scratchpad.
+#
+# NOTE this list answers "did the user end up with it", which is NOT the same
+# question as "what YAML did this turn produce, so I can compile it" -- the
+# latter rightly includes the scratchpad tools above. Nothing currently pins
+# the relationship between the two, so if a scoring-side carrier list is ever
+# added, keep this one a subset of it and add a test that says so.
+_DELIVERY_CARRIERS: dict[str, tuple[str, ...]] = {
+    "emit_playbook_offer": ("yaml",),
+    "push_playbook": ("yaml_text",),
+    # The consolidated emit_card also carries deliverables when a playbook_offer
+    # or verdict card_type is used. The payload field holds the YAML
+    # or verdict data.
+    "emit_card": ("payload",),
+}
+
+
+def analyst_has_the_yaml(history: list[dict[str, Any]]) -> bool:
+    """Would the user actually END UP with a playbook from this turn?
+
+    Not "was a playbook written anywhere" -- the two come apart, and the gap is
+    where the bug lives. A turn can draft YAML, push it through `validate_yaml`
+    twice, and end with the analyst holding nothing, because a tool argument is
+    not a deliverable. Observed live on `build_plain_request_no_record`: the
+    fixed wrap-up correctly detected authoring, said "do not re-emit the YAML",
+    and the playbook died inside the tool call it was validated in.
+
+    So delivery means one of two things:
+      * a fenced ```yaml block in assistant TEXT -- what the widget saves; or
+      * a call to a DELIVERY carrier (see `_DELIVERY_CARRIERS`), because build
+        turns are fenceless in practice and the offer card is the real product.
+
+    Anything else -- research, validation, compilation -- is work in progress.
+    """
+    for msg in history:
+        # ASSISTANT turns only. Tool results carry other people's playbooks --
+        # `search_playbooks` returns the corpus, fenced -- and scanning every
+        # role made "the model read a playbook" indistinguishable from "the
+        # model wrote one". Observed: a 39-call research turn that authored
+        # nothing scored as delivered, took the do-not-re-emit branch, and left
+        # the analyst with a status paragraph. The user turn is excluded for
+        # the same reason: YAML the analyst pasted in is input, not output.
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and extract_yaml_block(content):
+            return True
+        # OpenAI shape: tool calls carry a JSON-encoded arguments string.
+        for call in (msg.get("tool_calls") or []):
+            fn = (call or {}).get("function") or {}
+            if _carries_delivery(fn.get("name"), fn.get("arguments")):
+                return True
+        # Anthropic shape: content is a block list with tool_use inputs.
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text" and extract_yaml_block(
+                        str(block.get("text") or "")):
+                    return True
+                if block.get("type") == "tool_use" and _carries_delivery(
+                        block.get("name"), block.get("input")):
+                    return True
+    return False
+
+
+def _carries_delivery(name: Any, args: Any) -> bool:
+    """True when THIS tool is a delivery carrier and its body is substantive.
+
+    Accepts both the raw dict and the JSON string OpenAI sends. A stub body is
+    ignored: `yaml_text: ""` on a probing call delivers nothing.
+    """
+    # Handle emit_card by checking card_type and payload.
+    name_str = str(name or "")
+    if name_str == "emit_card":
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:  # noqa: BLE001 -- a malformed arg blob carries nothing
+                return False
+        if not isinstance(args, dict):
+            return False
+        card_type = args.get("card_type")
+        payload = args.get("payload", {})
+        if not isinstance(payload, dict):
+            return False
+        # emit_card carries delivery for playbook_offer or verdict
+        if card_type == "playbook_offer":
+            # Check if payload has substantive YAML
+            yaml_val = payload.get("yaml")
+            if isinstance(yaml_val, str) and len(yaml_val.strip()) > 40:
+                return True
+        elif card_type == "verdict":
+            # Verdict is delivery if it has a disposition (all verdicts do)
+            if payload.get("disposition"):
+                return True
+        return False
+
+    keys = _DELIVERY_CARRIERS.get(name_str)
+    if not keys:
+        return False
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:  # noqa: BLE001 -- a malformed arg blob carries nothing
+            return False
+    if not isinstance(args, dict):
+        return False
+    return any(isinstance(args.get(k), str) and len(args[k].strip()) > 40
+               for k in keys)
+
+
+def effective_emit_card_name(old_name: str) -> str | None:
+    """Map old emit tool names to emit_card, or return None if not applicable.
+
+    Old tools like emit_playbook_offer now route through emit_card(card_type=...).
+    This helper derives the effective advertised tool name for checks like
+    'is the tool in allowed_names'.
+
+    Returns "emit_card" for names that consolidated, None otherwise.
+    """
+    # Map consolidated names to their card_type equivalents
+    _CARD_TYPE_MAP = {
+        "emit_playbook_offer": "playbook_offer",
+        "emit_enhancement_offer": "enhancement_offer",
+        "emit_action_card": "action",
+        "emit_choice_card": "choice",
+        "emit_manual_input": "manual_input",
+        "emit_capability_gap_card": "capability_gap",
+    }
+    if old_name in _CARD_TYPE_MAP:
+        return "emit_card"
+    return None
+
+
+# One no-tools round is forced when the tool budget runs out, so the chat never
+# just goes silent. What that round should SAY depends on whether anything was
+# built, and conflating the two states is how a turn came to guarantee nothing.
+_WRAPUP_HAVE_YAML = (
+    "You've used the full tool-turn budget ({n} rounds) without finishing. "
+    "Stop calling tools. In 2-4 sentences, tell the user: (1) what state the "
+    "YAML is in (valid? warnings? errors?), (2) what specifically is left to "
+    "do, and (3) one concrete next step they can take. Do not re-emit the YAML."
+)
+
+_WRAPUP_NO_YAML = (
+    "You've used the full tool-turn budget ({n} rounds) and the user still has "
+    "no playbook -- anything you only passed to validate_yaml does not count, "
+    "they never saw it. Stop calling tools and deliver it now, from "
+    "what you already know -- this is your last round, so anything you leave "
+    "out the user does not get. Emit ONE complete playbook in a single ```yaml "
+    "fence: every workflow, every step, no placeholders and no ellipses. Then "
+    "in 1-2 sentences name what you could not verify and what to check first. "
+    "A draft you flag as unverified is useful; silence is not."
+)
+
+
+
+def budget_note(calls_used: int, max_turns: int = MAX_TOOL_TURNS) -> str:
+    """TurnPlan item 3: the early "N calls left -- wrap up" warning.
+
+    The cliff itself already has a handler (``wrapup_directive`` forces a
+    delivery round at exhaustion); this is the soft window BEFORE it, so the
+    model plans its close instead of being ambushed by the forced round.
+    Empty while there is headroom and at/after exhaustion."""
+    left = max_turns - calls_used
+    if left <= 0:
+        return ""
+    from .turn_plan import TurnBudget
+    return TurnBudget(max_tool_turns=max_turns).note(calls_used)
+
+def wrapup_directive(history: list[dict[str, Any]],
+                     max_turns: int = MAX_TOOL_TURNS) -> tuple[str, int]:
+    """The forced wrap-up round's directive and its token budget.
+
+    Returns `(directive, max_tokens)`. Lives here rather than inline in each
+    provider because both had their own copy of the same string, and a rule
+    duplicated across providers drifts silently -- the failure then reads as a
+    model difference between Frank and the box.
+
+    The bug this fixes: the only directive that existed asked "what state is the
+    YAML in?" and ended "Do not re-emit the YAML" -- sound advice when a
+    playbook exists, and a guarantee of an empty turn when none does. An
+    unmounted build request fans out across connector/step-type/Jinja lookups,
+    exhausts all {n} rounds before authoring anything, and was then explicitly
+    told not to deliver. The user asked for a playbook and got a paragraph
+    about how the research went. 2/2 reproducible; the record-mounted rows are
+    unaffected because grounding cuts the research roughly threefold.
+
+    The no-YAML branch gets the FULL output ceiling, not a bespoke number. 512
+    is ample for a status paragraph and 4096 is not enough for a real playbook
+    either -- driven at 4096 the wrap-up delivered an unterminated ```yaml fence
+    cut off mid-step, which is worse than silence because it looks like a
+    deliverable. This round is an authoring round; a cap is a ceiling and not a
+    spend (see DEFAULT_MAX_OUTPUT_TOKENS), so there is nothing to save by
+    guessing lower.
+    """
+    if analyst_has_the_yaml(history):
+        return _WRAPUP_HAVE_YAML.format(n=max_turns) + " " + REPLY_LANGUAGE_NOTE, 512
+    return (_WRAPUP_NO_YAML.format(n=max_turns) + " " + REPLY_LANGUAGE_NOTE,
+            DEFAULT_MAX_OUTPUT_TOKENS)
+
+
+# ---------------------------------------------------------------------------
+# Budget-ask: when the tool-turn budget runs out, ask the analyst before
+# forcing wrap-up. The provider emits a `emit_choice_card` (tier 0) with the
+# args from `budget_ask_card()`; the connector's _wire_transcript splices it
+# into a `choice_card` event, and `_envelope_stop_reason` maps the turn to
+# `awaiting_choice`. On resume:
+#   - "continue" -> a fresh chat_turn with BUDGET_CONTINUE_ROUNDS extra rounds
+#   - "deliver"  -> a fresh chat_turn with no tools (forced wrap-up)
+# Both providers share this so the card text + options are identical.
+# ---------------------------------------------------------------------------
+
+_BUDGET_ASK_PROMPT = (
+    "I've used all {n} of my tool-turn budget researching this. "
+    "Would you like me to continue with more rounds, or deliver "
+    "what I have so far?"
+)
+
+_BUDGET_ASK_OPTIONS = [
+    {"label": "Continue with more rounds",
+     "value": "continue",
+     "hint": "Give the agent 8 more tool rounds to finish the work."},
+    {"label": "Deliver now",
+     "value": "deliver",
+     "hint": "Stop researching and deliver the best draft from what was found."},
+]
+
+# Extra tool rounds granted on a "continue" resume. Deliberately less than the
+# original budget: the turn was already long, and the analyst can ask again.
+BUDGET_CONTINUE_ROUNDS = 8
+
+
+def budget_ask_card(max_turns: int = MAX_TOOL_TURNS) -> dict[str, Any]:
+    """The choice card args the provider emits at budget exhaustion.
+
+    Returns the args dict for a `emit_choice_card` dispatch call. The provider
+    dispatches this directly (tier 0) so the card lands in the transcript and
+    the widget renders it. The turn ends after the card; the analyst's resume
+    decision drives the next turn.
+    """
+    return {
+        "id": "_budget_ask",
+        "prompt": _BUDGET_ASK_PROMPT.format(n=max_turns),
+        "options": list(_BUDGET_ASK_OPTIONS),
+    }
+
+
+def connector_errors_for_reply(yaml_text: str) -> str | None:
+    """The connector check for a playbook in the reply text (see
+    `tools_emit.fenced_connector_errors`). Imported lazily: the tool layer
+    imports this module."""
+    from ..mcp_server.tools_emit import fenced_connector_errors as _impl
+    return _impl(yaml_text)
+
+
+def compile_errors(yaml_text: str) -> str | None:
+    """Run the same compiler the editor uses; return a bullet list of
+    blocking errors or None if clean. Imported lazily so a missing
+    compiler doesn't break test collection."""
+    try:
+        from fsr_playbooks.compiler import compile_yaml as _cy  # type: ignore
+    except Exception as exc:
+        return f"compiler import failed: {exc}"
+
+    from .._db import default_db_path
+    res = _cy(yaml_text, default_db_path())
+    if res.ok:
+        return None
+    blocking = [e for e in res.errors if e.severity != "warning"]
+    if not blocking:
+        return None
+    lines: list[str] = []
+    for e in blocking:
+        line = f"- [{e.code.value}] {e.message}"
+        if e.path:
+            line += f"  (path: {e.path})"
+        if e.suggestion:
+            line += f"  → {e.suggestion}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+# ─────────────────────── enhance-delivery guard ──────────────────────
+#
+# The enhance turn's terminal action -- `emit_enhancement_offer` -- is the ONLY
+# thing that applies a verified edit to the playbook the analyst has open.
+# System-prompt prose calls it "the MANDATORY terminal action", but a weak
+# model routinely VERIFIES the edit (gets `ready_to_push: True` + a
+# `verified_id`) and then, instead of calling the tool, writes a sentence like
+# "Call emit_enhancement_offer with verified_id abc… to apply this" and ends
+# the turn. From the analyst's seat nothing changed -- the exact live failure
+# the offer tool was built to remove, resurfacing one layer up (narrated, not
+# fenced). Grading it offline (`score_enhance_delivery`) catches it after the
+# fact; this guard catches it structurally, in the loop, the same way the P1
+# forced-assessment guard guarantees a written close.
+#
+# This is a DETECTOR only -- model-agnostic, no I/O. Each provider feeds it every
+# executed tool result via `note_result`, and at the terminal exit asks
+# `outstanding()` whether a verify passed with no offer to follow. If so the
+# provider runs ONE `tool_choice`-pinned round forcing the call (and overrides
+# `verified_id` with the handle recorded here, so a forced round can't deliver
+# the wrong bytes). Capped at one force via `mark_forced()` so it can't loop.
+
+# --- guard-fire telemetry ---------------------------------------------------
+# Every round-end guard forces through a `mark_*()` method, which records; every
+# other mechanism records through `guard_fires.refusal` / `record_guard_fire`.
+# A guard is a compensation for the model not choosing the
+# terminal tool on its own; whether it still earns its keep is an empirical
+# question, and until now nothing recorded the answer. A guard that never
+# fires across a corpus is dead weight that can be deleted; one that fires
+# often is pointing at a description or prompt that still needs work.
+#
+# Process-local and best-effort, mirroring the HITL audit log
+# (`tools.clear_audit_log` / `snapshot_audit_log`): callers clear before a
+# turn and snapshot after. Never affects control flow.
+
+# The counter itself, and the registry of every mechanism a site may record,
+# live in `guard_fires` (re-exported here: callers import from this module).
+from .guard_fires import (  # noqa: E402,F401
+    clear_guard_fires,
+    record_guard_fire,
+    refusal,
+    snapshot_guard_fires,
+)
+
+_ENHANCE_VERIFY_TOOL = "verify_enhancement"
+# Both gate an edit and hand back a verified_id; edit_playbook is the ops form.
+_ENHANCE_VERIFY_TOOLS = frozenset({_ENHANCE_VERIFY_TOOL, "edit_playbook"})
+_ENHANCE_OFFER_TOOL = "emit_enhancement_offer"
+
+
+class EnhanceDeliveryGuard:
+    """Tracks whether an enhance turn verified an edit but never delivered it.
+
+    Fires only when the offer tool is in the advertised slice AND a
+    verify_enhancement passed. Triage never advertises the offer tool. A build
+    turn WITH an open playbook (enhance) advertises it; a from-scratch CREATE
+    build does NOT -- the connector's _intent_drop_set drops ENHANCE_ONLY_TOOLS
+    when no playbook is mounted (see fsr_playbooks.llm.intents.ENHANCE_ONLY_TOOLS).
+    So the guard is inert on triage and on create, and active on enhance --
+    exactly where a verified edit could be narrated instead of delivered.
+    (The earlier "build-new-playbook never advertises it" claim was wrong: the
+    build slice DID advertise the offer tool until that gate was added.)
+    """
+
+    def __init__(self) -> None:
+        # The most recent PASSING verify's handle + a summary hint from its
+        # diff. Latest wins: a turn may verify several times while iterating,
+        # and only the last blessed bytes are what the analyst should get.
+        self._verified_id: str | None = None
+        self._summary_hint: str = ""
+        self._delivered = False
+        self._forced = False
+        # Second stage -- see `failed_edit`. Required fixes left by the LAST
+        # edit/verify call; 0 once one passes.
+        self._open_fixes = 0
+        self._closed_otherwise = False
+        self._fix_forced = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result into the delivery state."""
+        # Handle both old name and new emit_card
+        is_offer_delivery = (
+            name == _ENHANCE_OFFER_TOOL or
+            (name == "emit_card" and
+             isinstance(args, dict) and
+             args.get("card_type") == "enhancement_offer")
+        )
+        if is_offer_delivery:
+            # An offer was attempted. Only a genuinely successful one counts as
+            # delivery; a rejected handle (`unknown_verified_id`) still needs a
+            # forced re-delivery, so leave `_delivered` False in that case.
+            if not (isinstance(result, dict) and result.get("ok") is False):
+                self._delivered = True
+            return
+        if _is_ask(name, args) or (name == "emit_card" and isinstance(args, dict)
+                                   and args.get("card_type") == "capability_gap"):
+            # Asking the analyst, or naming the gap, is a deliberate close.
+            self._closed_otherwise = True
+        if name not in _ENHANCE_VERIFY_TOOLS or not isinstance(result, dict):
+            return
+        if result.get("ready_to_push") and result.get("verified_id"):
+            self._open_fixes = 0
+        elif result.get("ok") is False:
+            self._open_fixes = max(1, len(result.get("required_fixes") or []))
+        if result.get("ready_to_push") and result.get("verified_id"):
+            self._verified_id = str(result["verified_id"])
+            diff = result.get("diff_summary")
+            if isinstance(diff, dict) and diff.get("summary"):
+                self._summary_hint = str(diff["summary"])
+
+    def outstanding(self, allowed_names: set[str]) -> str | None:
+        """The verified_id that a passing verify blessed but no offer applied,
+        or None. Returns None once forced, so the guard fires at most once."""
+        # The old name is in CONSOLIDATED_AWAY so never advertised. Check for
+        # the consolidated emit_card (or old name if transitioning).
+        if _ENHANCE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
+            return None
+        if self._forced or self._delivered or not self._verified_id:
+            return None
+        return self._verified_id
+
+    def failed_edit(self, allowed_names: set[str]) -> int:
+        """Required fixes the turn's LAST edit left, when it is ending on them.
+
+        Live (box model, malware build): four edit attempts, the last one
+        down to four copies of one mechanical path fix, then the turn closed
+        in prose ("very close, needs a small fix") -- no offer, no Apply. The
+        delivery guard only covers a PASSING verify. This nudges the next step
+        once: fix and re-run, or say what blocks it. 0 when not outstanding."""
+        if _ENHANCE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
+            return 0
+        if (self._fix_forced or self._delivered or self._closed_otherwise
+                or self._verified_id):
+            return 0
+        return self._open_fixes
+
+    def mark_fix_forced(self) -> None:
+        self._fix_forced = True
+        record_guard_fire("EnhanceDeliveryGuard.failed_edit")
+
+    @property
+    def summary_hint(self) -> str:
+        return self._summary_hint
+
+    def mark_forced(self) -> None:
+        self._forced = True
+        record_guard_fire(type(self).__name__)
+
+
+# ─────────────────────── create-delivery guard ───────────────────────
+#
+# The CREATE counterpart to EnhanceDeliveryGuard, and it exists for the same
+# reason: `emit_playbook_offer` is the mandatory terminal action of a
+# from-scratch build turn -- the card is what carries the YAML and gives the
+# analyst the one-click "Save as Playbook" CTA. A weak model routinely runs the
+# research tools, passes `verify_playbook`, and then writes "Next, I will author
+# a playbook that ..." and ends the turn. From the analyst's seat the chat
+# produced prose and no card, so there is nothing to accept -- the exact failure
+# the enhance guard already fixes one path over.
+#
+# This was an ASYMMETRY, not a design: the enhance guard's docstring notes it is
+# "inert on triage and on create", and nothing covered create. Live on the box
+# the same prompt would sometimes deliver the card and sometimes narrate,
+# because only the model's whim decided it.
+#
+# Same contract as the enhance guard: detector only, no I/O, fires at most once
+# via `mark_forced()`. The provider runs ONE `tool_choice`-pinned round and
+# overrides `yaml` with the bytes the gate actually blessed, so a forced round
+# can't ship YAML that never passed verify.
+
+_CREATE_VERIFY_TOOL = "verify_playbook"
+_CREATE_OFFER_TOOL = "emit_playbook_offer"
+_TRACE_BUILD_TOOL = "build_playbook_from_trace"
+
+
+# ─────────────── when the next move is the analyst's, not ours ───────────────
+#
+# Live: "I want to create a new playbook." The model looked up step types,
+# verified an empty start/end draft, and closed with "Tell me what it should
+# do". CreateDeliveryGuard then forced a Save-as-Playbook card for a playbook
+# that did nothing. Both guards exist to stop a turn from STALLING; they must
+# not overrule a turn that is correctly waiting on the analyst.
+#
+# The signals are STRUCTURAL, never a parse of anyone's wording: a phrase list
+# over the request misses every phrasing nobody wrote down, and reading the
+# model's prose for a "?" guesses at intent the model can state outright.
+#   - the model asked through a `choice` card (the prompt's way to ask);
+#   - the verified draft has no action steps -- nothing exists to deliver;
+#   - a playbook is open -- the right card is enhancement_offer, not this one.
+
+_ASK_CARD_TYPES = frozenset({"choice"})
+
+
+def _is_ask(name: str, args: Any) -> bool:
+    return name == "emit_choice_card" or (
+        name == "emit_card" and isinstance(args, dict)
+        and args.get("card_type") in _ASK_CARD_TYPES)
+
+
+def _has_action_steps(yaml_text: str) -> bool:
+    from ..mcp_server.tools_emit import _has_action_steps as _impl
+    return _impl(yaml_text)
+
+
+def _playbook_is_open() -> bool:
+    from ..mcp_server._shared import get_grounded_yaml
+    return bool(get_grounded_yaml())
+
+
+class CreateDeliveryGuard:
+    """Tracks whether a build turn verified a NEW playbook but never offered it.
+
+    Fires only when `emit_playbook_offer` is in the advertised slice AND a
+    `verify_playbook` returned `ready_to_push`. The triage slice advertises the
+    offer tool too (its trace-compiled close), but triage never calls
+    `verify_playbook`, so the guard stays inert there -- it needs BOTH halves of
+    the pair.
+    """
+
+    def __init__(self) -> None:
+        # Bytes from the most recent PASSING verify. Latest wins: a build turn
+        # commonly verifies, repairs, and re-verifies, and only the last blessed
+        # YAML is what the analyst should be offered.
+        self._verified_yaml: str | None = None
+        # A trace build that compiled clean: deliverable as a TRACE offer (no
+        # `yaml` -- accept recompiles the recorded trace), not as bytes.
+        self._trace_ready = False
+        self._summary_hint: str = ""
+        self._delivered = False
+        self._forced = False
+        self._asked = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result into the delivery state."""
+        if _is_ask(name, args):
+            self._asked = True
+            return
+        # Handle both old name and new emit_card
+        is_offer_delivery = (
+            name == _CREATE_OFFER_TOOL or
+            (name == "emit_card" and
+             isinstance(args, dict) and
+             args.get("card_type") == "playbook_offer")
+        )
+        if is_offer_delivery:
+            # Only a genuinely successful offer counts as delivery; a rejected
+            # one still needs forcing, so leave `_delivered` False there.
+            if not (isinstance(result, dict) and result.get("ok") is False):
+                self._delivered = True
+            return
+        if name == _TRACE_BUILD_TOOL:
+            # Live (sweep row 5, twice): "save that as a playbook" ran
+            # build_playbook_from_trace, got a clean compile, and ended in
+            # prose -- the build is a PREVIEW, nothing the analyst can Accept.
+            # It counts as draft-closing for the other guards, so without this
+            # nothing forced the offer. Latest wins, as with verify below.
+            if (isinstance(result, dict) and result.get("ok")
+                    and (result.get("compile_summary") or {}).get("ok")
+                    and _has_action_steps(str(result.get("yaml") or ""))):
+                self._trace_ready = True
+                self._verified_yaml = None
+            return
+        if name != _CREATE_VERIFY_TOOL or not isinstance(result, dict):
+            return
+        if not result.get("ready_to_push"):
+            return
+        # The blessed bytes are the ones that went IN to verify -- the result is
+        # a punch list, not the document.
+        yaml_text = args.get("yaml_text") or args.get("yaml")
+        if (isinstance(yaml_text, str) and yaml_text.strip()
+                and _has_action_steps(yaml_text)):
+            self._verified_yaml = yaml_text
+            self._trace_ready = False
+            summary = result.get("summary")
+            if isinstance(summary, str) and summary:
+                self._summary_hint = summary
+
+    def outstanding(self, allowed_names: set[str]) -> str | None:
+        """The verified YAML a passing verify blessed but no offer delivered,
+        or None. Returns None once forced, so the guard fires at most once."""
+        # The old name is in CONSOLIDATED_AWAY so never advertised. Check for
+        # the consolidated emit_card (or old name if transitioning).
+        if _CREATE_OFFER_TOOL not in allowed_names and "emit_card" not in allowed_names:
+            return None
+        if self._forced or self._delivered or not (
+                self._verified_yaml or self._trace_ready):
+            return None
+        # Not a stalled delivery -- see "when the next move is the analyst's".
+        # With a playbook open the right card is an enhancement_offer, which
+        # EnhanceDeliveryGuard owns; a forced playbook_offer would save a copy.
+        if self._asked or _playbook_is_open():
+            return None
+        # "" = a trace offer is owed (see `apply_bytes`).
+        return self._verified_yaml or ""
+
+    def apply_bytes(self, payload: dict[str, Any]) -> None:
+        """Put the deliverable on a forced offer's payload. Never trust the
+        forced round's own `yaml`: verified bytes when a verify blessed some,
+        otherwise none at all, so the emitter builds the card from the
+        recorded trace (and accept recompiles it)."""
+        if self._verified_yaml:
+            payload["yaml"] = self._verified_yaml
+        else:
+            payload.pop("yaml", None)
+
+    @property
+    def directive(self) -> str:
+        how = ("`verify_playbook` cleared it" if self._verified_yaml else
+               "`build_playbook_from_trace` compiled it from this investigation")
+        return (
+            f"You drafted a playbook and {how}, but you have not delivered it. "
+            "Call `emit_card(card_type='playbook_offer', ...)` now -- describing "
+            "the playbook in prose is NOT a substitute for the call, and the "
+            "analyst has no way to save it without the card. Write the "
+            "`summary` (in the payload) as one or two plain-English lines "
+            "describing what the playbook does."
+        )
+
+    @property
+    def summary_hint(self) -> str:
+        return self._summary_hint
+
+    def mark_forced(self) -> None:
+        self._forced = True
+        record_guard_fire(type(self).__name__)
+
+
+# ─────────────────────── build-progress guard ────────────────────────
+#
+# The failure the delivery guards CANNOT catch: a build turn that researches
+# and then never drafts. On a live appliance (connector 0.5.65, fsr_playbooks 0.6.5,
+# gpt-4.1-mini) a "build me a playbook that ..." turn ran
+#
+#     get_step_type x4 -> find_connector x3 -> find_operation x2 -> get_op_schema x2
+#
+# and ended with prose ("Next, I will author a playbook that ...") -- no
+# validate_yaml, no verify_playbook, no offer. 11 tool calls of pure research
+# against a 16-call budget, so it did not run out of turns; it just stopped.
+#
+# CreateDeliveryGuard is correctly inert here: with no passing verify there are
+# no blessed bytes, and forcing an offer would hand the analyst UNVERIFIED YAML
+# -- the precise thing that guard exists to prevent. So this is a distinct
+# problem with a distinct fix. It is not a delivery failure (nothing was ready
+# to deliver); it is a PROGRESS failure -- the turn never entered the authoring
+# half of the loop at all.
+#
+# Hence: don't force the terminal action, force the NEXT one. The provider
+# injects a directive and CONTINUES the loop rather than terminating, so the
+# model drafts -> verifies -> offers naturally, with CreateDeliveryGuard still
+# backstopping the delivery end. Fires at most once per turn.
+
+# Tools that prove a turn actually entered the authoring half of the loop.
+# Note: emit_card with playbook_offer, enhancement_offer, or
+# verdict card_type also proves authoring intent (handled in BuildProgressGuard.note_result).
+_AUTHORING_PROGRESS_TOOLS = frozenset({
+    "validate_yaml", "compile_yaml", "verify_playbook",
+    "emit_playbook_offer", "build_playbook_from_trace",
+    # Enhance authors too -- its own pair means the turn is not stalled.
+    "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
+    # Triage verdicts
+    "emit_verdict",
+    # The consolidated emit_card when used for offer or verdict types also proves authoring.
+    "emit_card",
+})
+
+# Tools that mean the analyst asked to RUN or DIAGNOSE an existing playbook, not
+# to author a new one. This is load-bearing, not defensive, and it is now the
+# ONLY thing covering that case.
+#
+# There used to be a second mechanism ("Lever 2"): an LLM call per build turn
+# classified run-vs-author and narrowed the slice to `run_playbook` alone. It
+# was deleted because it never actually carried the case it was written for --
+# it failed OPEN to normal build behavior, and was observed doing exactly that
+# live ("Run the Link Similar Alerts playbook." kept the full build slice and
+# called find_connector / list_playbook_runs / find_operation). This check was
+# written for that fail-open path, i.e. for the common case, so removing the
+# classifier removes a per-turn LLM round-trip and no protection.
+#
+# On the full build slice, without this check, a RUN request gets nudged to
+# "draft the full playbook YAML now" -- authoring something nobody asked for,
+# which is worse than the stall being fixed.
+_RUN_INTENT_TOOLS = frozenset({
+    "run_playbook", "list_playbook_runs", "why_did_playbook_fail",
+    "get_run_env", "dry_run_playbook", "step_through_playbook",
+    "diagnose_yaml_against_pb_execution",
+    # analyze_playbook ("Read the playbook") READS/diagnoses an existing
+    # playbook; it wraps step_through_playbook (already here). A turn that runs
+    # it is diagnosing, not authoring -- without this, a "why is my YAML
+    # invalid" turn that gave a complete explanation got hijacked by
+    # BuildProgressGuard into authoring an edit + offer cards it was never
+    # asked for (observed: Frank build-matrix row B2, +8 rounds).
+    "analyze_playbook",
+})
+
+
+# The draft-then-stop half (see BuildProgressGuard.unverified_draft): tools
+# that check a draft without blessing it, and the ones that close the loop.
+_DRAFT_CHECK_TOOLS = frozenset({"validate_yaml", "compile_yaml"})
+_DRAFT_CLOSING_TOOLS = frozenset({
+    "verify_playbook", "emit_playbook_offer", "build_playbook_from_trace",
+    "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
+})
+_DRAFT_CLOSING_CARD_TYPES = frozenset({
+    "playbook_offer", "enhancement_offer",
+})
+
+FAILED_EDIT_DIRECTIVE = (
+    "Your last edit_playbook call still has {n} required fix(es), so the "
+    "analyst has nothing to apply. Each required_fixes entry names what to "
+    "change. Send the corrected, complete operations list to edit_playbook "
+    "again, and when it is ready_to_push deliver it with "
+    "emit_card(card_type='enhancement_offer', ...). If something outside the "
+    "playbook blocks it, emit_card(card_type='capability_gap', ...) naming it. "
+    "Do not end the turn describing the fix in prose."
+)
+
+
+UNVERIFIED_DRAFT_DIRECTIVE = (
+    "You drafted playbook YAML and checked it, but you never ran "
+    "`verify_playbook`, so the analyst has nothing they can save. Call "
+    "`verify_playbook` with your final YAML now; when it is ready_to_push, "
+    "deliver it with `emit_card(card_type='playbook_offer', ...)`. Do not end "
+    "the turn with the YAML in prose."
+)
+
+
+# Research only an AUTHORING turn does. Triage and build advertise the same full
+# surface, so "the slice has verify_playbook" cannot tell them apart; what the
+# turn looked up can. A triage turn (get_record, siem_search ...) rarely needs a
+# step type, but an enrichment turn does look at an op schema before it runs the
+# op -- so `get_op_schema` counts here only while the turn has executed no
+# investigation (BuildProgressGuard.outstanding). `find` counts only for its
+# authoring kinds -- kind=action/operation/connector are shared with triage.
+_BUILD_RESEARCH_TOOLS = frozenset({
+    "get_step_type", "get_op_schema", "find_step_examples",
+    "find_jinja_pattern", "get_filter_examples",
+})
+_BUILD_RESEARCH_FIND_KINDS = frozenset({"example", "recipe", "jinja", "api"})
+
+
+class BuildProgressGuard:
+    """Tracks a build turn that ran only research tools and never authored.
+
+    Fires only when the slice is genuinely a BUILD slice (it advertises
+    `emit_playbook_offer` AND `verify_playbook`) and at least one tool ran. A
+    turn that ran no tools at all is a conversational reply, not a stalled
+    build, and forcing YAML out of "what can you do?" would be worse than the
+    bug -- so `outstanding()` requires prior tool use.
+    """
+
+    def __init__(self) -> None:
+        self._any_tool = False
+        self._authored = False
+        self._run_intent = False
+        self._investigated = False
+        # An op was ATTEMPTED (any result) -- see `outstanding`.
+        self._ran_op = False
+        self._forced = False
+        self._build_research = False
+        # Second stage -- see `unverified_draft`.
+        self._drafted = False
+        # The last draft a check passed clean, with action steps -- what the
+        # loop verifies itself when the turn ends on it (see agent_loop).
+        self.clean_draft: str | None = None
+        self._closed = False
+        self._verify_forced = False
+        self._asked = False
+        # The most recent required_fixes a check reported, and whether any draft
+        # check ever failed -- used only at the terminal exit, to tell the
+        # analyst what is left instead of ending a build turn on bare prose.
+        self.last_fixes: list[str] = []
+        self._incomplete_shown = False
+        self._delivered = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        self._any_tool = True
+        if _is_ask(name, args):
+            self._asked = True
+        if name in _AUTHORING_PROGRESS_TOOLS:
+            self._authored = True
+        if name in _RUN_INTENT_TOOLS:
+            self._run_intent = True
+        # The hunt floor's own rule: an answered op run or evidence read means
+        # the turn is looking at data, not stalled on a playbook.
+        if counts_as_investigation(name) and _answered(result):
+            self._investigated = True
+        # An op attempt is investigation whatever came back: an errored,
+        # deferred or not-yet-run op still means the turn is on the op path.
+        if name == "run_op" or (
+                name == "find" and isinstance(args, dict)
+                and args.get("kind") == "action"
+                and args.get("action_type") == "enrichment"):
+            self._ran_op = True
+        if name in _BUILD_RESEARCH_TOOLS or (
+                name == "find" and isinstance(args, dict)
+                and args.get("kind") in _BUILD_RESEARCH_FIND_KINDS):
+            self._build_research = True
+        if name in _DRAFT_CHECK_TOOLS:
+            self._drafted = True
+            text = args.get("yaml_text") if isinstance(args, dict) else None
+            if (isinstance(result, dict) and result.get("ok") is True
+                    and not result.get("errors") and isinstance(text, str)
+                    and text.strip() and _has_action_steps(text)):
+                self.clean_draft = text
+        if name in _DRAFT_CLOSING_TOOLS or (
+                name == "emit_card" and isinstance(args, dict)
+                and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES):
+            self._closed = True
+        # An offer actually went out (the turn is not a dead-end).
+        if isinstance(result, dict) and result.get("ok") is not False and (
+                name in ("emit_playbook_offer", "emit_enhancement_offer")
+                or (name == "emit_card" and isinstance(args, dict)
+                    and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES)):
+            self._delivered = True
+        # Remember the latest unmet fixes from any check (verify_playbook or the
+        # verify inside edit_playbook), so a turn that ends still-broken can say
+        # what is left rather than dead-ending.
+        if isinstance(result, dict):
+            fixes = result.get("required_fixes")
+            if isinstance(fixes, list) and fixes:
+                self.last_fixes = [
+                    (f.get("message") or f.get("fix") or str(f))
+                    if isinstance(f, dict) else str(f)
+                    for f in fixes
+                ]
+            elif result.get("ready_to_push") is True:
+                self.last_fixes = []
+
+    def incomplete(self, allowed_names: set[str]) -> bool:
+        """True when a build turn is ending with a drafted-but-unfinished
+        playbook and nothing to deliver -- the model authored or edited, a check
+        still reports fixes, and it neither offered nor asked. The terminal
+        branch turns this into a `choice` card listing the fixes, so the analyst
+        is never left on bare prose (the "never dead-end" house rule). Fires at
+        most once, and only on a build slice that can emit a card."""
+        if self._incomplete_shown or self._delivered or self._asked:
+            return False
+        if not (self._drafted or self._authored):
+            return False
+        if self.clean_draft is not None or not self.last_fixes:
+            return False
+        if "emit_card" not in allowed_names:
+            return False
+        return is_authoring_slice(allowed_names)
+
+    def mark_incomplete_shown(self) -> None:
+        self._incomplete_shown = True
+        record_guard_fire("BuildProgressGuard.incomplete")
+
+    def unverified_draft(self, allowed_names: set[str]) -> bool:
+        """True when a build turn drafted YAML but is ending without ever
+        running `verify_playbook` or delivering anything.
+
+        The gap between the two guards: BuildProgressGuard counts
+        validate/compile as progress, and CreateDeliveryGuard needs a PASSING
+        verify before it has bytes to offer -- so a turn that stops after
+        `validate_yaml` / `compile_yaml` ends with YAML in prose and no Create
+        button. Seen replaying the live build row on gpt-5.4-mini (1 of 3).
+        Nudges the NEXT step (verify, then offer) rather than forcing an offer
+        of unverified YAML. Fires at most once."""
+        if self._verify_forced or self._closed or not self._drafted:
+            return False
+        if self._run_intent or _CREATE_VERIFY_TOOL not in allowed_names:
+            return False
+        if self._asked:
+            return False
+        return (_CREATE_OFFER_TOOL in allowed_names
+                or "emit_card" in allowed_names)
+
+    def mark_verify_forced(self) -> None:
+        self._verify_forced = True
+        record_guard_fire("BuildProgressGuard.unverified_draft")
+
+    def outstanding(self, allowed_names: set[str]) -> bool:
+        """True when a build turn is ending with research but no authoring.
+        False when the model asked the analyst (a `choice` card) -- waiting on
+        their answer is the correct move, not a stall."""
+        # Check for either old name OR new consolidated emit_card
+        if (_CREATE_OFFER_TOOL not in allowed_names and
+                "emit_card" not in allowed_names):
+            return False
+        if _CREATE_VERIFY_TOOL not in allowed_names:
+            return False
+        # Triage turns lack build-only tools like verify_playbook, push_playbook,
+        # verify_enhancement. If none of those are present, this is a triage turn
+        # and the guard should not fire (a research-heavy triage turn on a full
+        # registry should not be nudged to author YAML it was never asked for).
+        if not is_authoring_slice(allowed_names):
+            return False
+        if self._forced or self._authored or not self._any_tool:
+            return False
+        # A run/diagnose turn is not a stalled build -- see _RUN_INTENT_TOOLS.
+        if self._run_intent:
+            return False
+        # Nor is a turn that executed an op or read hunt evidence. Live, a
+        # reputation question ran get_op_schema x2 and run_op x2 and was forced
+        # into authoring: get_op_schema is build research, but an op that ran
+        # means the turn is investigating. A build turn that executed nothing
+        # keeps the guard (see _BUILD_RESEARCH_TOOLS).
+        if self._investigated or self._ran_op:
+            return False
+        # Nor is a triage turn. Live, every turn advertises verify_playbook, so
+        # without this a triage turn that pulled the record and searched the
+        # SIEM was told to "draft the full playbook YAML now".
+        if not self._build_research:
+            return False
+        return not self._asked
+
+    def mark_forced(self) -> None:
+        self._forced = True
+        record_guard_fire(type(self).__name__)
+
+
+# ─────────────────────── verdict-delivery guard ────────────────────────
+#
+# TRIAGE turns that run evidence/enrichment tools (get_record, search_*,
+# siem_*, faz_*, run_op, mcp_* read tools, find with enrichment kind) should
+# END with a structured verdict card. The turn ran investigation work; the
+# analyst needs a summary to decide on action. Without a forced verdict, a
+# triage turn can devolve into prose ("Here's what I found...") and leave the
+# analyst without a clear disposition.
+#
+# Same contract as the other guards: detector only, fires at most once via
+# `mark_forced()`. The provider injects a directive and CONTINUES the loop
+# rather than terminating, so the model authors a verdict -> emits the card.
+# Only fires for triage turns (authoring turns have their own P1 guard).
+
+def is_verdict_evidence(name: str, args: Any = None) -> bool:
+    """True when a tool's result can back a verdict finding.
+
+    ONE rule shared with the hunt floor (`counts_as_investigation`), plus the
+    record pull itself -- the floor excludes `get_record` so containment needs
+    evidence BEYOND the alert, but a verdict may cite the alert. This used to be
+    its own frozenset of pre-consolidation names (`siem_search_incidents`,
+    `faz_get_logs`, `search_records` ...); after the tools were consolidated only
+    `get_record` and `run_op` still matched, so a live investigation through
+    `siem_search` / `faz_search` / `mcp_*` counted as no evidence at all."""
+    if name == "get_record":
+        return True
+    if name == "find_record":
+        return isinstance(args, dict) and args.get("kind") == "enrichment"
+    return counts_as_investigation(name)
+
+
+def evidence_id_line(call_id: str | None, name: str, args: Any, success: bool) -> str:
+    """The line that opens a citable tool result: its own id, the value a
+    verdict finding must cite. The prompt said ids were "shown in tool
+    results", but an OpenAI-shaped tool message carries the id only in its
+    envelope, never in the text -- live on the box model nearly every first
+    verdict cited prose ("get_record on alert X showed ...") and was refused
+    for invalid evidence ids, learning the real ids only from the refusal."""
+    if not call_id or not success or not is_verdict_evidence(name, args):
+        return ""
+    return f"[evidence id: {call_id}]\n"
+
+
+def verdict_directive(evidence_ids: list[str]) -> str:
+    """Forced-round directive for the verdict guard.
+
+    States the whole payload contract, from the validator's own constants: a
+    live forced verdict was refused for `disposition: "inconclusive"` because
+    the model was never told the set, and the round had no second try."""
+    from ..mcp_server.tools_emit import verdict_contract
+    ids_str = ", ".join(evidence_ids[:10]) + ("..." if len(evidence_ids) > 10 else "")
+    return (
+        "You investigated using evidence tools but did not emit a verdict. "
+        "Call `emit_card(card_type='verdict', payload={...})` now, where "
+        + verdict_contract() + ". "
+        f"Evidence tool_use_ids from this turn: {ids_str or 'none'}. "
+        + REPLY_LANGUAGE_NOTE
+    )
+
+
+def verdict_repair_directive(result: Any, args: Any) -> str:
+    """One repair attempt after the validator refused a forced verdict: the
+    refusal is shown to the model verbatim, never silently remapped."""
+    msg = (result or {}).get("message") if isinstance(result, dict) else None
+    try:
+        sent = json.dumps(args, default=str)[:1500]
+    except Exception:  # noqa: BLE001
+        sent = str(args)[:1500]
+    return (f"Your verdict card was refused: {msg or 'invalid payload'}. You sent: "
+            f"{sent}. Call `emit_card(card_type='verdict', ...)` again with that "
+            "fixed; keep everything that was valid.")
+
+
+def _answered(result: Any) -> bool:
+    """A tool result that carries an answer: not an error envelope, and not a
+    guard's redirect or deferral (steering, not evidence)."""
+    if not isinstance(result, dict):
+        return result is not None
+    if result.get("kind") in ("guard_redirect", "guard_defer"):
+        return False
+    return not (result.get("ok") is False or "error" in result)
+
+
+class VerdictDeliveryGuard:
+    """Tracks triage turns that ran evidence tools but never emitted a verdict.
+
+    Fires only on triage turns (no build-only authoring tools in allowed_names)
+    AND when the turn ran ≥1 evidence/enrichment tool. A triage turn with pure
+    research (no evidence tools called, just planning or asking questions) stays
+    inert -- there is nothing to verdict on yet.
+
+    ``enabled`` False turns it off for a turn whose host says a verdict is not
+    its conclusion (the ``verdicts`` turn tag): live, a ZTPF device assistant
+    asked "what was the latest automation on this device" got a forced
+    needs_more_info verdict card restating its answer.
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self._enabled = enabled
+        self._ran_evidence_tool = False
+        self._emitted_verdict = False
+        self._forced = False
+        self._authored = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result into the verdict state."""
+        # Evidence is a lookup that ANSWERED. On a live appliance, a containment turn
+        # ("Block the IP ... on FortiGate") called get_record with no iri, got
+        # an argument error, and was forced into a verdict round -- which could
+        # cite nothing (the citation gate refuses failed calls) and displaced
+        # the block the analyst asked for.
+        if is_verdict_evidence(name, args) and _answered(result):
+            self._ran_evidence_tool = True
+        # Authoring is what the turn DID, not what it was offered: triage and
+        # build advertise the same full surface, so a slice-based check read
+        # every live turn as a build and the guard never fired.
+        if name in _DRAFT_CHECK_TOOLS or name in _DRAFT_CLOSING_TOOLS or (
+                name == "emit_card" and isinstance(args, dict)
+                and args.get("card_type") in _DRAFT_CLOSING_CARD_TYPES):
+            self._authored = True
+        # A verdict counts only when it was DELIVERED. A guard deferral also
+        # carries `ok: True` (it must not read as a failure), and counting it
+        # silenced this guard on exactly the turn that needed it.
+        if (_is_verdict_emit(name, args) and isinstance(result, dict)
+                and result.get("ok") is True and _answered(result)):
+            self._emitted_verdict = True
+
+    def outstanding(self, allowed_names: set[str]) -> bool:
+        """True when this turn gathered evidence, authored nothing, and ended
+        without a verdict. Fires at most once."""
+        if not self._enabled:
+            return False
+        if "emit_card" not in allowed_names and "emit_verdict" not in allowed_names:
+            return False
+        if self._authored or not self._ran_evidence_tool:
+            return False
+        return not (self._forced or self._emitted_verdict)
+
+    def mark_forced(self) -> None:
+        self._forced = True
+        record_guard_fire(type(self).__name__)
+
+
+UNATTENDED_CONTAIN_DIRECTIVE = (
+    "Your verdict is true_positive and nothing is staged. No analyst is "
+    "watching this triage, so containment you do not stage now is never "
+    "proposed. Stage the containment this threat calls for now (for example a "
+    "block of the malicious external address), using the evidence you already "
+    "have; do not re-investigate. Find the action first with "
+    "find(kind='action', action_type='containment') for the target, then stage "
+    "it with emit_card(card_type='action') using the connector and operation "
+    "that returns; never invent a connector name. If no containment applies, "
+    "say why in one sentence.")
+
+
+def forced_containment(disposition: str | None) -> dict[str, Any] | None:
+    """The containment action to STAGE for a confident true_positive the model
+    declined to stage itself, or None when nothing qualifies.
+
+    Unattended, a confirmed true_positive whose cited evidence rates an EXTERNAL
+    target malicious must not end the turn with nothing staged: the admin's
+    enforced policy then has no card to act on and a real threat is left
+    uncontained (live on .159 the box model ended 5/5 confirmed-C2 turns on the
+    verdict card). This builds the block the matching policy rule defines
+    against THIS turn's cited-malicious target, so the policy always has a card
+    to judge. The policy still refuses a protected / internal / unrated /
+    rate-capped target, so forcing the card never bypasses a check -- it only
+    removes the model's option to silently decline containment of a confirmed
+    threat. Returns an emit_card('action') payload (connector/operation/args/
+    summary), read from the SAME turn registry the policy evaluates."""
+    if disposition != "true_positive":
+        return None
+    from . import session_state
+    policy = session_state.current().autonomy_policy
+    if policy is None or not getattr(policy, "enabled", False):
+        return None
+    from ..mcp_server._citation_validator import get_turn_evidence
+    ev = get_turn_evidence()
+    if ev is None:
+        return None
+    from .autonomy import _RATED_SEVERITIES, _ip_targets, _is_internal, _is_ip
+    rule = next((r for r in policy.rules
+                 if r.action.connector and r.action.op
+                 and r.when.target is not None and r.when.target.kind == "ip"), None)
+    if rule is None:
+        return None
+    rated = getattr(rule.when.evidence, "rated", None) if rule.when.evidence else None
+    ok_sev = _RATED_SEVERITIES.get(rated or "malicious", frozenset({"error"}))
+    for entry in ev.valid_ids().values():
+        if entry.get("ok") is not True:
+            continue
+        finding = entry.get("finding")
+        if not (isinstance(finding, dict) and finding.get("severity") in ok_sev):
+            continue
+        # The target is what the lookup was ABOUT: the reader's own indicator
+        # first, then the call's params/args (a run_op nests the ip under
+        # `params`, so the top-level args alone would miss it).
+        raw_a = entry.get("args")
+        a = raw_a if isinstance(raw_a, dict) else {}
+        raw_params = a.get("params")
+        params = raw_params if isinstance(raw_params, dict) else {}
+        candidates = [finding.get("indicator"), *_ip_targets(params), *_ip_targets(a)]
+        for ip in candidates:
+            ip = str(ip or "").strip()
+            if ip and _is_ip(ip) and not _is_internal(ip):
+                return {"connector": rule.action.connector,
+                        "operation": rule.action.op,
+                        "args": {"ip_addresses": [ip]},
+                        "summary": f"Contain {ip} ({rule.id})"}
+    return None
+
+
+def close_directive(disposition: str, rule: Any) -> str:
+    """The ask for a close the admin's ``rule`` would take: which fields the
+    write may change and the values it must use, read from the rule itself."""
+    a = rule.action
+    values = a.values or {}
+    parts = []
+    for f in a.fields or []:
+        allowed = values.get(f)
+        parts.append(f"{f} (to {' or '.join(allowed)})" if allowed else f)
+    fields = ", ".join(parts) if parts else "the fields a close sets"
+    return (
+        f"Your verdict is {disposition} and nothing is staged. No analyst is "
+        "watching this triage, and the admin's policy closes records like "
+        "this one, so a close you do not stage now never happens. Stage it "
+        f"now with update_record on the record this turn is about (module "
+        f"{a.module or 'of that record'}), setting each of these fields and "
+        f"no others: {fields}. Use the evidence you already have; do not "
+        "re-investigate. "
+        "If the record should not be closed, say why in one sentence.")
+
+
+class ContainmentFollowThrough:
+    """Unattended triage only: a delivered verdict with nothing staged gets
+    ONE directive to stage what that verdict calls for -- the containment of a
+    true_positive, or the close of a false positive when the admin's autonomy
+    policy has a rule that closes it.
+
+    On a live appliance, the box model ended 5 of 5 confirmed C2 auto-triage turns on
+    the verdict card, so no block was ever proposed and no autonomy policy had
+    anything to act on; a false positive under an enforced close rule ended
+    the same way, so the alert stayed open. The directive goes into the SAME
+    turn on purpose: the policy judges a staged action against this turn's
+    delivered verdict and cited lookups, which a new turn would not carry. Any
+    staged approval ends the turn before this is consulted, so reaching it
+    means nothing is staged.
+    """
+
+    def __init__(self, enabled: bool = False) -> None:
+        self._enabled = bool(enabled)
+        self._disposition: str | None = None
+        self._confidence: float | None = None
+        self._fired = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        """Fold one executed tool result in: the last DELIVERED verdict wins."""
+        if (_is_verdict_emit(name, args) and isinstance(result, dict)
+                and result.get("ok") is True and _answered(result)):
+            card = result.get("card")
+            if not isinstance(card, dict):
+                card = {}
+            payload = args.get("payload") if isinstance(args, dict) else None
+            if not isinstance(payload, dict):
+                payload = {}
+            self._disposition = str(
+                card.get("disposition")
+                or payload.get("disposition") or "").strip().lower() or None
+            conf = card.get("confidence", payload.get("confidence"))
+            try:
+                self._confidence = float(conf) if conf is not None else None
+            except (TypeError, ValueError):
+                self._confidence = None
+
+    def _close_rule(self, allowed_names: set[str]) -> Any:
+        """The bound policy's first rule that would close a record on this
+        verdict, or None. No policy, a switched-off one, or a verdict below
+        the rule's bar asks for nothing: the close would only wait for a
+        person, who can close the record as easily."""
+        if "update_record" not in allowed_names or self._disposition is None:
+            return None
+        from . import session_state
+        policy = session_state.current().autonomy_policy
+        if policy is None or not getattr(policy, "enabled", False):
+            return None
+        for rule in policy.rules:
+            v = rule.when.verdict
+            if (rule.action.tool == "update_record"
+                    and self._disposition in v.disposition
+                    and self._confidence is not None
+                    and self._confidence >= v.min_confidence):
+                return rule
+        return None
+
+    def directive(self, allowed_names: set[str]) -> tuple[str, str] | None:
+        """(usage stop reason, directive) once, or None."""
+        if not self._enabled or self._fired:
+            return None
+        if self._disposition == "true_positive":
+            if "run_op" not in allowed_names and "emit_card" not in allowed_names:
+                return None
+            return "containment_follow_through", UNATTENDED_CONTAIN_DIRECTIVE
+        rule = self._close_rule(allowed_names)
+        if rule is not None and self._disposition:
+            return "close_follow_through", close_directive(self._disposition, rule)
+        return None
+
+    def outstanding(self, allowed_names: set[str]) -> bool:
+        """True once: unattended, a verdict delivered that calls for a staged
+        action, and a tool that can stage it is advertised."""
+        return self.directive(allowed_names) is not None
+
+    def mark_fired(self) -> None:
+        self._fired = True
+        record_guard_fire(type(self).__name__)
+
+    @property
+    def disposition(self) -> str | None:
+        """The last delivered verdict's disposition (for the containment
+        fallback: force the block the policy defines when a true_positive
+        ended with nothing staged)."""
+        return self._disposition
+
+
+# --------------------------------------------------------------------------
+# Readable dates in the MODEL's view of a tool result
+# --------------------------------------------------------------------------
+# FortiSOAR stores dates as epoch numbers (`dueBy: 1791046800`,
+# `createDate: 1784052208.18`). Left to convert them itself the model is often
+# wrong -- live on Frank a task due 2026-10-03 was reported as "Jun 2026" and
+# one due 2027-02-01 as "Feb 1, 2025". So every dict that carries an
+# epoch-valued date field gets a sibling `_dates` map with the UTC rendering.
+# The raw value is never rewritten: filters compare epochs, and other code
+# (the widget, evidence builders) reads the same result.
+_DATE_KEY = re.compile(
+    r"(?i)(date|time|timestamp|stamp|dueby|due|expir\w*|seen|since|until)$"
+    r"|(?:[a-z0-9])(At|On)$")
+_EPOCH_S = (946_684_800, 4_102_444_800)          # 2000-01-01 .. 2100-01-01
+
+
+def _epoch_seconds(v: Any) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if _EPOCH_S[0] <= v < _EPOCH_S[1]:
+        return float(v)
+    if _EPOCH_S[0] * 1000 <= v < _EPOCH_S[1] * 1000:
+        return v / 1000.0
+    return None
+
+
+def _render_utc(secs: float) -> str:
+    import datetime as _dt
+    t = _dt.datetime.fromtimestamp(secs, tz=_dt.timezone.utc)
+    return t.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def with_readable_dates(obj: Any, _depth: int = 0) -> Any:
+    """A copy of ``obj`` where each dict holding epoch date fields also carries
+    ``_dates: {field: "YYYY-MM-DD HH:MM UTC"}``. Unchanged when there are none."""
+    if _depth > 8:
+        return obj
+    if isinstance(obj, list):
+        return [with_readable_dates(x, _depth + 1) for x in obj]
+    if not isinstance(obj, dict):
+        return obj
+    out: dict[str, Any] = {}
+    dates: dict[str, str] = {}
+    for k, v in obj.items():
+        if isinstance(k, str) and k != "_dates" and _DATE_KEY.search(k):
+            secs = _epoch_seconds(v)
+            if secs is not None:
+                dates[k] = _render_utc(secs)
+        out[k] = with_readable_dates(v, _depth + 1)
+    if dates:
+        out["_dates"] = {**dates, **(obj.get("_dates") or {})} \
+            if isinstance(obj.get("_dates"), dict) else dates
+    return out
+
+
+def today_line(now: Any = None) -> str:
+    """One prompt line stating today's date. The model is otherwise never told,
+    so "overdue", "due Friday" and "last week" were guesses. ``FSRPB_TODAY``
+    pins it (tests, goldens)."""
+    import datetime as _dt
+    import os as _os
+    pinned = _os.environ.get("FSRPB_TODAY")
+    if pinned:
+        day = pinned
+    else:
+        day = (now or _dt.datetime.now(_dt.timezone.utc)).strftime("%Y-%m-%d (%A)")
+    return (f"Today is {day}, UTC. Dates in tool results appear under `_dates` "
+            "already converted -- use those, never convert epoch numbers "
+            "yourself.")
+
+
+# --------------------------------------------------------------------------
+# PromisedActionGuard -- a tool call written as text instead of made
+# --------------------------------------------------------------------------
+# This guard used to also match PROMISES in the closing prose ("I'll proceed
+# with the update now -- please approve the card") with a phrase regex. That
+# was intent detection over wording, which this codebase does not do: a phrase
+# list misses every phrasing nobody wrote down and fires on ones it should
+# not. What remains is structural -- our own call-marker syntax copied into
+# prose -- and the prompt's rule that a card is raised BY the call.
+
+# The history a later turn replays renders earlier tool calls as text markers
+# (`[called name(args)]`, `[tool result: ...]` -- the connector's `_text_of`).
+# A model that copies that format has written a call down instead of making
+# it: live on the build sweep, "now also set notified" ended with a perfect
+# `[called edit_playbook(...)]` / `[tool result: {"ok": true, "card": ...}]`
+# transcript in prose and no call at all -- 3 of 4 runs. Our own syntax, so
+# matching it is structural, not a guess at intent.
+_FABRICATED_CALL = re.compile(r"\[(?:called [A-Za-z_]\w*\(|tool result: )")
+
+
+def fabricated_call(text: str) -> str | None:
+    """The first tool-call marker the model WROTE as text, or None."""
+    m = _FABRICATED_CALL.search(text or "")
+    return (text or "")[m.start():m.start() + 160] if m else None
+
+
+FABRICATED_CALL_DIRECTIVE = (
+    'You wrote a tool call as text ("{said}") instead of making it. Text like '
+    "that runs nothing: no tool was called and no card exists. Make the call "
+    "now with the tool itself, and do not write call or result markers in "
+    "your reply."
+)
+
+
+class PromisedActionGuard:
+    """Fires once when a turn ends having written a tool call as text instead
+    of making it."""
+
+    def __init__(self) -> None:
+        self._delivered = False
+        self._forced = False
+
+    def note_result(self, name: str, args: dict[str, Any], result: Any) -> None:
+        if not isinstance(result, dict):
+            return
+        if (name == "emit_card" or name.startswith("emit_")) and result.get("ok") is True:
+            self._delivered = True
+        if (result.get("pending_approval") or result.get("approval_id")
+                or result.get("status") == "pending_approval"):
+            self._delivered = True
+
+    def outstanding(self, text: str) -> str | None:
+        if self._forced or self._delivered:
+            return None
+        return fabricated_call(text)
+
+    def directive(self, said: str) -> str:
+        return FABRICATED_CALL_DIRECTIVE.format(said=said.replace('"', "'"))
+
+    def mark_forced(self) -> None:
+        self._forced = True
+        record_guard_fire(type(self).__name__)
+
+
+
+# --------------------------------------------------------------------------
+# ProgressMeter -- stop a turn that has stopped learning
+# --------------------------------------------------------------------------
+# A fixed round count cannot tell a deep build from a loop. What a runaway
+# actually looks like, measured on 362 sweep turns:
+#   * repetition -- rounds whose every call was already made this turn;
+#   * flailing   -- a long run of rounds in which EVERY call failed (one turn
+#     guessed seven module names in a row, each a 404).
+# An error followed by a DIFFERENT call is the model correcting itself (a
+# refused card, re-sent with the fix) and is progress. Replayed over all 362
+# turns this rule stopped 2, both flailing, and cut no productive work.
+STALL_ERROR_ROUNDS = 6
+
+
+class ProgressMeter:
+    def __init__(self, error_rounds: int = STALL_ERROR_ROUNDS) -> None:
+        self._error_rounds = error_rounds
+        self._round: list[bool] = []   # errored, per call of the round
+        self._errors = 0
+
+    def note_result(self, name: str, args: Any, result: Any) -> None:
+        self._round.append(_stall_error(result))
+
+    def end_round(self) -> str | None:
+        """Fold the round just executed; return 'flail' on a stall."""
+        calls, self._round = self._round, []
+        if not calls:
+            return None
+        all_error = all(calls)
+        self._errors = self._errors + 1 if all_error else 0
+        if self._errors >= self._error_rounds:
+            record_guard_fire("ProgressMeter.flail")
+            return "flail"
+        return None
+
+
+def call_signature(name: str, args: Any) -> str:
+    """Identity of a call: name plus canonical args (same form the providers'
+    repeated-failure guard keys on)."""
+    try:
+        return name + "|" + json.dumps(args, sort_keys=True, default=str)
+    except Exception:
+        return name + "|" + repr(args)
+
+
+def _stall_error(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if result.get("kind") in ("guard_redirect", "guard_defer"):
+        return False
+    return result.get("ok") is False or bool(result.get("error"))
+
+
+_STALL_WHY = {
+    "flail": "failed on every call",
+}
+_STALL_DIRECTIVE = (
+    "Your last rounds {why} -- more calls will not change that. Stop calling "
+    "tools and answer the analyst now from what you have: what you "
+    "established, what you could not get and why, and the one thing they can "
+    "do next. If they asked for a playbook and have none yet, deliver your "
+    "best draft in one ```yaml fence and say what is unverified."
+)
+
+
+def stall_directive(reason: str) -> str:
+    return (_STALL_DIRECTIVE.format(why=_STALL_WHY.get(reason, reason))
+            + " " + REPLY_LANGUAGE_NOTE)

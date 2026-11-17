@@ -1,0 +1,30 @@
+{
+  "name": "enhance_rename_step",
+  "mode": "enhance",
+  "prompt": "Rename the Enrich IP step to Reputation Lookup. Leave every other step exactly as it is.",
+  "before_scenario": "e5_preserve_untouched_steps",
+  "gold_yaml_path": "tooling/evals/golds/enhance_rename_step_after.yaml",
+  "notes": "The fixture that found a grader punishing a correct answer. `verify_enhancement` raised `step_renamed_silently` at ERROR severity even for a rename the analyst asked for by name, so no correct answer to this scenario could pass `no_collateral_damage` -- and the same call gates `ready_to_push` and the #126 card, so the analyst was told their own request was a regression. Fixed 2026-08-13: a rename that is BOTH on a step the user named AND accompanied by a rename verb reports as `step_renamed_as_requested` at warning severity; every other rename still blocks. The assertions carry the other half -- an agent that refuses to rename, or renames the step but leaves `Start` pointing at the old name, must not score. Renaming ANY other step is still an error-severity regression, which is what keeps this from being a licence to rewrite.",
+  "ir_assertions": [
+    {
+      "kind": "reachable",
+      "from": {
+        "name_contains": "Reputation Lookup"
+      },
+      "to": {
+        "connector": "fortigate"
+      },
+      "note": "the renamed step exists AND is still wired to the block"
+    },
+    {
+      "kind": "reachable",
+      "from": {
+        "type": "start"
+      },
+      "to": {
+        "name_contains": "Reputation Lookup"
+      },
+      "note": "Start was repointed -- a rename that orphans the step is not a rename"
+    }
+  ]
+}

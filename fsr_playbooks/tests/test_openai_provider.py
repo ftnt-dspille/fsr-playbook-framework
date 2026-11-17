@@ -1,0 +1,342 @@
+"""OpenAIProvider -- wire-format translation + HITL approval parity.
+
+The OpenAI client is mocked so tests need no live endpoint. These cover
+the bits that differ from / extend the LM Studio loop: tool-call delta
+accumulation, and the tier-3+ approval suspend → resume round-trip that
+the FortiSOAR connector depends on.
+"""
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from fsr_playbooks.llm.approvals import InMemoryApprovalGateway
+from fsr_playbooks.llm.openai_provider import OpenAIProvider
+from fsr_playbooks.llm.provider import (
+    ApprovalRequestEvent,
+    DoneEvent,
+    Message,
+    TextEvent,
+    ToolResultEvent,
+    ToolUseEvent,
+    UsageEvent,
+)
+
+
+def _delta_chunk(*, content=None, tool_calls=None, finish=None):
+    delta = MagicMock(content=content, tool_calls=tool_calls)
+    choice = MagicMock(delta=delta, finish_reason=finish)
+    return MagicMock(choices=[choice], usage=None)
+
+
+def _usage_chunk(prompt=10, completion=5):
+    return MagicMock(choices=[], usage=MagicMock(prompt_tokens=prompt,
+                                                 completion_tokens=completion))
+
+
+def _tool_call_delta(*, index, id=None, name=None, args=None):
+    fn = MagicMock()
+    fn.name = name
+    fn.arguments = args
+    return MagicMock(index=index, id=id, function=fn)
+
+
+class _FakeStream:
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    def __aiter__(self):
+        async def gen():
+            for c in self._chunks:
+                yield c
+        return gen()
+
+
+def _provider(chunks, *, gateway=None, model="gpt-4o"):
+    if chunks and isinstance(chunks[0], list):
+        create = AsyncMock(side_effect=[_FakeStream(c) for c in chunks])
+    else:
+        create = AsyncMock(return_value=_FakeStream(chunks))
+    client = MagicMock()
+    client.chat = MagicMock()
+    client.chat.completions = MagicMock(create=create)
+    return OpenAIProvider(model=model, base_url="http://x/v1", api_key="x",
+                          client=client, approval_gateway=gateway)
+
+
+async def _drain(gen):
+    out = []
+    async for ev in gen:
+        out.append(ev)
+    return out
+
+
+# Explicit tool schema so `block_ip` passes the intent-slice guard
+# (allowed_names is derived from the advertised tools, not the registry).
+_BLOCK_IP_TOOLS = [{
+    "type": "function",
+    "function": {"name": "block_ip", "description": "Block an IP",
+                 "parameters": {"type": "object",
+                                "properties": {"ip": {"type": "string"}}}},
+}]
+
+# Same, for the tool this file's streaming test dispatches. `tools=[]` used to
+# mean "provider, use your own list"; it is now an explicit EMPTY slice, so the
+# allowed-names guard refuses every call and dispatch is never reached -- the
+# assertion then fails for a reason that has nothing to do with delta
+# accumulation.
+_FIND_CONNECTOR_TOOLS = [{
+    "type": "function",
+    "function": {"name": "find_connector", "description": "Find a connector",
+                 "parameters": {"type": "object",
+                                "properties": {"q": {"type": "string"}}}},
+}]
+
+
+def test_streams_text_and_usage():
+    chunks = [_delta_chunk(content="Hello "), _delta_chunk(content="world."),
+              _delta_chunk(finish="stop"), _usage_chunk(prompt=20, completion=3)]
+    p = _provider(chunks)
+    events = asyncio.run(_drain(p.stream(
+        system="s", messages=[Message(role="user", content="hi")],
+        tools=[], tags={})))
+    assert "".join(e.text for e in events if isinstance(e, TextEvent)) == "Hello world."
+    usage = next(e for e in events if isinstance(e, UsageEvent))
+    assert usage.input_tokens == 20 and usage.output_tokens == 3
+    assert any(isinstance(e, DoneEvent) for e in events)
+
+
+def test_accumulates_tool_call_args_across_deltas():
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="c1",
+                                                  name="find_connector", args='{"q":')]),
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, args='"virus')]),
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, args='total"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    turn2 = [_delta_chunk(content="done"), _delta_chunk(finish="stop"), _usage_chunk()]
+    p = _provider([turn1, turn2])
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
+               return_value={"matches": []}) as mock_dispatch, \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=1):
+        events = asyncio.run(_drain(p.stream(
+            system="", messages=[], tools=_FIND_CONNECTOR_TOOLS, tags={})))
+    mock_dispatch.assert_called_once()
+    name, args = mock_dispatch.call_args[0]
+    assert name == "find_connector" and args == {"q": "virustotal"}
+    assert any(isinstance(e, ToolUseEvent) for e in events)
+    assert any(isinstance(e, ToolResultEvent) for e in events)
+
+
+def test_tool_result_carries_duration_ms():
+    """Every dispatched tool stamps server-side wall-time (ms) on its
+    ToolResultEvent and the matching ToolCallUsage, so the widget can
+    freeze a per-tool duration and the turn record can profile slowness."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="c1",
+                                                  name="find_connector", args='{"q":"vt"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    turn2 = [_delta_chunk(content="done"), _delta_chunk(finish="stop"), _usage_chunk()]
+    p = _provider([turn1, turn2])
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
+               return_value={"matches": []}), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=1):
+        events = asyncio.run(_drain(p.stream(system="", messages=[], tools=[], tags={})))
+    tr = next(e for e in events if isinstance(e, ToolResultEvent))
+    assert isinstance(tr.duration_ms, int) and tr.duration_ms >= 0
+    usage = next(e for e in events
+                 if isinstance(e, UsageEvent) and e.tool_calls)
+    assert usage.tool_calls[0].duration_ms == tr.duration_ms
+
+
+def test_tier3_call_suspends_and_stashes_session():
+    """A tier-3+ tool returning pending_approval must emit an
+    ApprovalRequestEvent + DoneEvent(pending_approval) and stash the
+    session in the injected gateway (connector-critical path)."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="call_x",
+                                                  name="block_ip", args='{"ip":"1.2.3.4"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    gw = InMemoryApprovalGateway()
+    p = _provider(turn1, gateway=gw)
+    envelope = {"pending_approval": True, "approval_id": "appr_1", "tier": 3,
+                "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
+                "args_hash": "abc", "summary": "Block 1.2.3.4",
+                "requires_step_up": False}
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
+        events = asyncio.run(_drain(p.stream(system="sys", messages=[
+            Message(role="user", content="block that ip")], tools=_BLOCK_IP_TOOLS, tags={})))
+    appr = next(e for e in events if isinstance(e, ApprovalRequestEvent))
+    assert appr.approval_id == "appr_1" and appr.tier == 3
+    done = next(e for e in events if isinstance(e, DoneEvent))
+    assert done.stop_reason == "pending_approval"
+    stashed = gw.peek("appr_1")
+    assert stashed is not None
+    assert stashed.tool == "block_ip" and stashed.tool_use_id == "call_x"
+    # The assistant tool_calls turn is in the snapshot; system is NOT.
+    assert all(m.get("role") != "system" for m in stashed.history_snapshot)
+    assert any(m.get("role") == "assistant" and m.get("tool_calls")
+               for m in stashed.history_snapshot)
+
+
+def test_stashed_session_id_is_the_chat_session_not_the_trace_id():
+    """`stream()` mints a per-call trace id (uuid4().hex[:8]) for telemetry
+    correlation. What gets stashed on the SuspendedSession must be the CALLER's
+    chat session id from tags -- the trace id keys nothing in the connector's
+    session store, so stashing it left the monitor's Pending panel pointing at
+    a session that could not be resolved (null intent, null user) and made
+    `waiting_approval` underivable for every live session."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="call_x",
+                                                  name="block_ip", args='{"ip":"1.2.3.4"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    gw = InMemoryApprovalGateway()
+    p = _provider(turn1, gateway=gw)
+    envelope = {"pending_approval": True, "approval_id": "appr_sid", "tier": 3,
+                "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
+                "args_hash": "abc", "summary": "Block 1.2.3.4",
+                "requires_step_up": False}
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
+        asyncio.run(_drain(p.stream(
+            system="sys", messages=[Message(role="user", content="block that ip")],
+            tools=_BLOCK_IP_TOOLS,
+            tags={"session_id": "sess-abc-1785336293381"})))
+    stashed = gw.peek("appr_sid")
+    assert stashed.session_id == "sess-abc-1785336293381"
+
+
+def test_stashed_session_id_falls_back_to_trace_id_without_tags():
+    """No caller session id (direct/unit use) -> keep the old behaviour rather
+    than stashing an empty string."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="call_x",
+                                                  name="block_ip", args='{"ip":"1.2.3.4"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    gw = InMemoryApprovalGateway()
+    p = _provider(turn1, gateway=gw)
+    envelope = {"pending_approval": True, "approval_id": "appr_nosid", "tier": 3,
+                "tool": "block_ip", "preview": {"ip": "1.2.3.4"},
+                "args_hash": "abc", "summary": "s", "requires_step_up": False}
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
+        asyncio.run(_drain(p.stream(system="sys", messages=[
+            Message(role="user", content="block that ip")],
+            tools=_BLOCK_IP_TOOLS, tags={})))
+    stashed = gw.peek("appr_nosid")
+    assert stashed.session_id and len(stashed.session_id) == 8
+
+
+def test_resume_approve_redispatches_and_continues():
+    """Resuming an approved suspension re-dispatches the gated tool with
+    _approved=True, emits its ToolResultEvent, and re-enters the loop to
+    produce the model's closing turn."""
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="call_x",
+                                                  name="block_ip", args='{"ip":"1.2.3.4"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    post_resume = [_delta_chunk(content="Blocked."), _delta_chunk(finish="stop"), _usage_chunk()]
+    gw = InMemoryApprovalGateway()
+    p = _provider([turn1, post_resume], gateway=gw)
+
+    envelope = {"pending_approval": True, "approval_id": "appr_2", "tier": 3,
+                "tool": "block_ip", "preview": {}, "args_hash": "h",
+                "requires_step_up": False}
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
+        asyncio.run(_drain(p.stream(system="sys", messages=[
+            Message(role="user", content="block it")], tools=_BLOCK_IP_TOOLS, tags={})))
+
+    suspended = gw.pop("appr_2")
+    assert suspended is not None
+
+    with patch("fsr_playbooks.llm.agent_loop.dispatch",
+               return_value={"ok": True, "blocked": "1.2.3.4"}) as mock_dispatch:
+        events = asyncio.run(_drain(p.resume(suspended=suspended, decision="approve")))
+
+    # re-dispatched with the approval bypass sentinel
+    assert mock_dispatch.call_args[0][0] == "block_ip"
+    assert mock_dispatch.call_args[0][1].get("_approved") is True
+    tr = next(e for e in events if isinstance(e, ToolResultEvent))
+    assert tr.call_id == "call_x" and tr.result.get("ok") is True
+    # loop continued: closing text + terminal done
+    assert "".join(e.text for e in events if isinstance(e, TextEvent)) == "Blocked."
+    assert any(isinstance(e, DoneEvent) for e in events)
+
+
+def test_resume_deny_synthesizes_denial_without_dispatch():
+    gw = InMemoryApprovalGateway()
+    turn1 = [
+        _delta_chunk(tool_calls=[_tool_call_delta(index=0, id="call_d",
+                                                  name="block_ip", args='{"ip":"9.9.9.9"}')]),
+        _delta_chunk(finish="tool_calls"), _usage_chunk(),
+    ]
+    post = [_delta_chunk(content="Understood, not blocking."),
+            _delta_chunk(finish="stop"), _usage_chunk()]
+    p = _provider([turn1, post], gateway=gw)
+    envelope = {"pending_approval": True, "approval_id": "appr_3", "tier": 3,
+                "tool": "block_ip", "preview": {}, "args_hash": "h"}
+    with patch("fsr_playbooks.llm.agent_loop.dispatch", return_value=envelope), \
+         patch("fsr_playbooks.llm.agent_loop._tier_for", return_value=3):
+        asyncio.run(_drain(p.stream(system="sys", messages=[
+            Message(role="user", content="block it")], tools=_BLOCK_IP_TOOLS, tags={})))
+    suspended = gw.pop("appr_3")
+    # On deny, dispatch must NOT be called for the gated tool.
+    with patch("fsr_playbooks.llm.agent_loop.dispatch") as mock_dispatch:
+        events = asyncio.run(_drain(p.resume(suspended=suspended, decision="deny")))
+    mock_dispatch.assert_not_called()
+    tr = next(e for e in events if isinstance(e, ToolResultEvent))
+    assert tr.result.get("code") == "user_denied"
+
+
+# ── stop_reason contract normalization ───────────────────────────────────────
+# Regression: the OpenAI path used to leak the raw finish_reason ("stop") into
+# the connector's stop_reason contract, so a normal turn ended on "stop"
+# instead of "end_turn" (which the AnthropicProvider emits natively and the
+# live chat test T3 + widget contract expect). See _contract_stop_reason.
+def test_contract_stop_reason_normalizes_openai_finish_reasons():
+    from fsr_playbooks.llm.openai_provider import _contract_stop_reason
+
+    # The headline bug: OpenAI's "stop" must become the contract's "end_turn".
+    assert _contract_stop_reason("stop") == "end_turn"
+    # A missing/empty finish_reason is a clean completion → end_turn.
+    assert _contract_stop_reason(None) == "end_turn"
+    assert _contract_stop_reason("") == "end_turn"
+    # Token-limit truncation gets its OWN reason. It used to map onto
+    # "max_turns", which reads as the tool-loop budget -- so a build turn cut off
+    # mid-playbook was indistinguishable from the benign "out of tool turns,
+    # send another message" stop. The tool loop emits `max_tool_turns`, so the
+    # two must never share a token again.
+    assert _contract_stop_reason("length") == "max_tokens"
+    assert _contract_stop_reason("length") != "max_turns"
+    # Content filter is a terminal error per the contract.
+    assert _contract_stop_reason("content_filter") == "error"
+    # Already-contract / unknown values pass through unchanged (forward-safe).
+    assert _contract_stop_reason("end_turn") == "end_turn"
+    assert _contract_stop_reason("awaiting_choice") == "awaiting_choice"
+
+
+def test_output_cap_is_configurable_and_no_longer_4096():
+    """A whole playbook plus its prose does not fit in 4096 output tokens.
+
+    The cap was hardcoded in all three provider loops, so a build turn could
+    not physically return its document intact -- it came back truncated with the
+    token-cap stop reason. Pin the raised default and the per-instance override
+    so the limit can never silently drift back to a value a playbook outgrows.
+    """
+    from fsr_playbooks.llm._loop_helpers import DEFAULT_MAX_OUTPUT_TOKENS
+    from fsr_playbooks.llm.openai_provider import OpenAIProvider, lmstudio
+
+    assert DEFAULT_MAX_OUTPUT_TOKENS > 4096
+    # gpt-4o's own output ceiling is exactly 16384 -- going above it would 400.
+    assert DEFAULT_MAX_OUTPUT_TOKENS <= 16384
+
+    assert OpenAIProvider(api_key="x").max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS
+    assert OpenAIProvider(api_key="x", max_output_tokens=2048).max_output_tokens == 2048
+    assert lmstudio().max_output_tokens == DEFAULT_MAX_OUTPUT_TOKENS

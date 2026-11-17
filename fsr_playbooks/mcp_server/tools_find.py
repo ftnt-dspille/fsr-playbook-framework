@@ -1,0 +1,537 @@
+"""One discovery tool over the fragmented `find_*` / `search_*` cluster.
+
+Phase 1 of the tool-surface consolidation (assessment 1b): the model was
+choosing between 14+ overlapping discovery variants whose semantic boundaries
+(containment vs enrichment vs record; find_api_example vs search_api_examples)
+are taught nowhere. `find(kind, query, ...)` is the single entry point; the
+existing specialized tools stay registered during the migration so nothing the
+prompts or fixtures rely on breaks, and tool-gate arbitrates when the old
+names are dropped from the advertised slice.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from ._shared import mcp
+
+FIND_KINDS = (
+    "connector", "operation", "action", "example", "recipe",
+    "api", "jinja", "playbook",
+    # B3a: three corpus searches that were their own tools, called 0 times in
+    # 287 live sessions while each cost a schema on every turn.
+    "step", "jinja_block", "filter_usage",
+    # A module's fields, from the catalog -- the build-side answer to "what is
+    # the alert's destination IP called?" (record reads are triage tools).
+    "field",
+)
+
+
+@mcp.tool()
+def find(kind: str, query: str = "", connector: str = "",
+         target_type: str = "", action_type: str = "",
+         module: str = "", limit: int = 10) -> dict[str, Any]:
+    """ONE search tool for every discovery catalog -- pick `kind`, pass a
+    plain-language `query`; each result names the follow-up call that uses it.
+
+    Which kind to pick: `action` = what can be done to a TARGET here, only what is
+    configured and healthy -- containment (stage via emit_card
+    card_type='action'), enrichment (run_op), record writes; prefer it when
+    the analyst named a target or asked to act; filter with `target_type`
+    (ip/host/user/url/domain/hash/file/email) and `action_type`. `connector`
+    = which integration handles X, then `operation` (needs `connector`) →
+    get_op_schema → run_op. `example` = a worked call (`connector` set) or
+    vendor API docs. `recipe` = a step-sequence pattern for a build. `api` =
+    a vendor's raw API for HTTP-fallback steps. `playbook` = existing
+    playbooks, this box's first (uuid + parameters to reference). `step` = examples of one step type (query = its name, e.g. decision).
+    `jinja` = a filter for a transform; `filter_usage` = real usages of one
+    named filter; `jinja_block` = whole {% set %}/{% for %} idioms.
+    `field` = a module's record fields (`module` required, `query` ranks
+    them) -- look one up before writing `vars.input.records[0].<field>`.
+    """
+    k = (kind or "").strip().lower()
+    if k not in FIND_KINDS:
+        return {"ok": False, "code": "unknown_kind",
+                "message": f"kind {kind!r} not recognized",
+                "valid_kinds": list(FIND_KINDS)}
+
+    from . import (  # noqa: PLC0415 - late import avoids a registration cycle
+        find_api_product,
+        find_connector,
+        find_containment_actions,
+        find_enrichment_actions,
+        find_jinja_filter,
+        find_operation,
+        find_operation_example,
+        find_recipe,
+        find_record_actions,
+        search_api_examples,
+        search_playbooks,
+    )
+
+    out: dict[str, Any]
+    if k == "connector":
+        out = find_connector(query, limit=limit)
+    elif k == "operation":
+        if not connector:
+            return {"ok": False, "code": "missing_connector",
+                    "message": "kind='operation' needs `connector` -- use "
+                               "kind='connector' first to find its name"}
+        out = find_operation(connector, query, limit=limit)
+        if isinstance(out, dict):
+            status = _connector_status(connector)
+            if status:
+                out["connector_status"] = status
+    elif k == "action":
+        out = _find_actions(
+            find_containment_actions, find_enrichment_actions,
+            find_record_actions, query=query, target_type=target_type,
+            action_type=action_type, module=module, limit=limit)
+    elif k == "example":
+        if connector:
+            out = find_operation_example(connector, op=query or None,
+                                         limit=limit)
+        else:
+            out = search_api_examples(query, limit=limit)
+            # The catalog is optional; an install without it must say where
+            # to look instead, not hand the model a SQLite error string.
+            first = out[0] if isinstance(out, list) and len(out) == 1 else None
+            if isinstance(first, dict) and first.get("code") == "catalog_unavailable":
+                msg = first.get("hint", "")
+                if not connector:
+                    msg = ("kind='example' without `connector` searches the "
+                           "vendor API catalog, which is not installed here. "
+                           "Pass `connector=<name>` to get that connector's "
+                           "worked operation calls. " + msg)
+                out = {"ok": False, "code": "catalog_unavailable",
+                       "message": msg, "results": []}
+    elif k == "recipe":
+        out = _trim_recipe_templates(find_recipe(query, limit=limit))
+    elif k == "api":
+        out = find_api_product(query, limit=limit)
+    elif k == "jinja":
+        out = find_jinja_filter(query, limit=limit)
+    elif k == "step":
+        from .tools_corpus import find_step_examples  # noqa: PLC0415
+        step_type = _resolve_step_type(query)
+        if step_type is None:
+            return {"ok": False, "code": "unknown_step_type", "kind": k,
+                    "message": "kind='step' takes a step TYPE as `query` and "
+                               "returns real examples of it; it does not "
+                               f"search by description. {query!r} names no "
+                               "step type -- pass one of `valid_step_types`.",
+                    "valid_step_types": sorted(_step_type_names())}
+        # A few examples show the shape; ten of them is 3-6KB re-sent on every
+        # later round of the turn (same reasoning as RECIPE_TEMPLATES_SHOWN).
+        rows = find_step_examples(step_type,
+                                  limit=min(limit, STEP_EXAMPLES_SHOWN))
+        if not rows:
+            # A packaged install ships without the step corpus. An empty list
+            # here invited the model to reword the query round after round.
+            return {"ok": False, "code": "no_step_examples", "kind": k,
+                    "step_type": step_type,
+                    "message": f"this install has no stored examples of "
+                               f"{step_type}; rewording the query will not "
+                               "find any. Author the step from its schema."}
+        out = {"step_type": step_type, "results": rows}
+    elif k == "jinja_block":
+        from .tools_jinja import find_jinja_pattern  # noqa: PLC0415
+        out = find_jinja_pattern(query, limit=limit)
+    elif k == "field":
+        out = _find_fields(module, query, limit=limit)
+    elif k == "filter_usage":
+        from .tools_jinja import get_filter_examples  # noqa: PLC0415
+        out = get_filter_examples(query, limit=limit)
+    else:  # playbook
+        out = _find_playbooks(query, limit, search_playbooks)
+    if isinstance(out, dict):
+        out.setdefault("kind", k)
+        return out
+    # A few catalogs (e.g. the jinja filter search) return a bare list.
+    return {"kind": k, "results": out}
+
+
+STEP_EXAMPLES_SHOWN = 3
+
+
+def _step_type_names() -> dict[str, str]:
+    """Authoring name -> canonical FSR step type, the names YAML is written in
+    (`set_variable`, `update_record`): the ones a model has in hand."""
+    from fsr_playbooks.compiler.resolver._constants import (  # noqa: PLC0415
+        SHORT_TYPE_TO_FSR,
+    )
+    return dict(SHORT_TYPE_TO_FSR)
+
+
+def _squash(text: str) -> str:
+    return "".join(ch for ch in (text or "").lower() if ch.isalnum())
+
+
+def _resolve_step_type(query: str) -> str | None:
+    """The canonical step type a `kind='step'` query names, or None.
+
+    The examples are keyed by the canonical FSR name (`SetVariable`,
+    `UpdateRecord`), which is not what a model writes: it has the authoring
+    name (`set_variable`), often spaced or cased differently, or with extra
+    words after it ("update_record comments"). Matching only the canonical
+    name exactly returned an empty list for all of those -- an empty result
+    that reads as "no examples exist". So: canonical or authoring name,
+    compared with case/space/underscore removed; failing that, the longest
+    type name contained in the query."""
+    q = _squash(query)
+    if not q:
+        return None
+    names = _step_type_names()
+    by_squash: dict[str, str] = {}
+    for short, canonical in names.items():
+        by_squash.setdefault(_squash(canonical), canonical)
+        by_squash[_squash(short)] = canonical      # authoring name wins a tie
+    if q in by_squash:
+        return by_squash[q]
+    held = [n for n in by_squash if len(n) >= 5 and n in q]
+    return by_squash[max(held, key=len)] if held else None
+
+
+# Full YAML for the best matches only. Each template is up to ~6KB, and with
+# find's default limit of 10 one recipe search put ~50KB into the context --
+# re-sent on every later call of the turn (analyst-sim: 17 recipe searches
+# were 38% of all tool-result text). The rest keep name + when_to_use.
+RECIPE_TEMPLATES_SHOWN = 2
+
+
+def _trim_recipe_templates(out: Any) -> Any:
+    rows = out.get("recipes") if isinstance(out, dict) else None
+    if not isinstance(rows, list) or len(rows) <= RECIPE_TEMPLATES_SHOWN:
+        return out
+    trimmed = 0
+    for r in rows[RECIPE_TEMPLATES_SHOWN:]:
+        if isinstance(r, dict) and r.pop("yaml_template", None):
+            trimmed += 1
+    if trimmed:
+        out["note"] = (
+            f"YAML shown for the top {RECIPE_TEMPLATES_SHOWN} only; for "
+            "another, find(kind='recipe', query=<its name>, limit=1).")
+    return out
+
+
+def _connector_status(name: str) -> dict[str, Any] | None:
+    """Is `name` configured here, and its last known health -- from the same
+    caches run_op's preflight reads (configured rows: 2 min; health: warmup /
+    last probe). Lets a build pick a connector without the slow
+    list_configured_connectors(probe=True) call (13s live). None when there is
+    no live instance or the lookup fails: say nothing rather than guess."""
+    try:
+        from probes._env import get_client, get_config
+        if not get_config().is_live():
+            return None
+        from .tools_execution import _cached_health, _configured_rows
+        rows = _configured_rows(get_client())
+        row = next((r for r in rows if r.get("name") == name), None)
+        if row is None:
+            return {"configured": False}
+        cached = _cached_health(name, str(row.get("version") or ""), "")
+        return {"configured": True,
+                "health": (cached or {}).get("status") or "unknown"}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _box_playbook_row(r: dict[str, Any]) -> dict[str, Any]:
+    uuid = str(r.get("uuid") or "")
+    iri = r.get("@id") or (f"/api/3/workflows/{uuid}" if uuid else "")
+    params = r.get("parameters") or []
+    return {
+        "name": r.get("name"),
+        "on_this_box": True,
+        "uuid": uuid,
+        "workflowReference": iri,
+        "parameters": [p for p in params if isinstance(p, str)],
+        "active": r.get("isActive"),
+        "collection": r.get("collection"),
+    }
+
+
+def _find_playbooks(query: str, limit: int, search_corpus) -> dict[str, Any]:
+    """The analyst's playbooks on this FortiSOAR, then reference examples.
+
+    Analyst sim: asked to call "our existing 'Block IP - Shared' playbook", the
+    model had no way to see it -- this kind searched only the reference
+    library -- and guessed `target: <name>` (an error: target resolves within
+    the YAML) and then a raw step type that compiled and called nothing. A
+    workflow_reference to an existing playbook needs its uuid and parameters;
+    that is exactly what the box rows carry.
+    """
+    from . import _shared  # noqa: PLC0415
+    lim = max(1, min(int(limit or 10), 25))
+    box_rows: list[dict[str, Any]] = []
+    note = None
+    client = _shared._live_client()
+    api = getattr(client, "playbooks", None) if client is not None else None
+    if api is None:
+        note = ("not connected to a FortiSOAR, so the analyst's own playbooks "
+                "were not searched -- only reference examples below")
+    else:
+        try:
+            rows = api.find(name_contains=query, limit=lim) if query else api.find(limit=lim)
+            box_rows = [_box_playbook_row(r) for r in rows or [] if isinstance(r, dict)]
+        except Exception as exc:  # noqa: BLE001 -- the library half still answers
+            note = f"could not search this FortiSOAR's playbooks ({type(exc).__name__}: {exc})"
+    corpus = search_corpus(query, limit=lim)
+    corpus_rows = corpus if isinstance(corpus, list) else (corpus or {}).get("results") or []
+    out: dict[str, Any] = {
+        "kind": "playbook",
+        "results": box_rows + [dict(r, on_this_box=False)
+                               if isinstance(r, dict) and r.get("name") else r
+                               for r in corpus_rows],
+        "on_this_box": len(box_rows),
+    }
+    if box_rows:
+        out["how_to_call"] = ("call one with a workflow_reference step: "
+                              "`workflowReference: <its workflowReference>` plus "
+                              "one key per name in its `parameters`")
+    if note:
+        out["note"] = note
+    return out
+
+
+# Action results shown to the model per call. Default 10 across all families;
+# the schema and the clamp both stop at ACTION_LIMIT_MAX.
+ACTION_LIMIT_DEFAULT = 10
+ACTION_LIMIT_MAX = 15
+# How many candidates each action catalog is asked for before the query ranks
+# them. Ranking happens on the full candidate set, so a relevant op past the
+# first `limit` of its catalog is still found.
+_ACTION_CANDIDATES = 50
+_ACTION_HINT = ("Each row is a summary. Parameter types and select options: "
+                "get_op_schema(connector, op).")
+
+# Words that carry no signal in an action query. Kept small: an action name
+# or title is short, so over-filtering the query only drops real matches.
+_QUERY_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "at", "by",
+    "with", "from", "into", "that", "this", "these", "those", "it", "its", "is",
+    "are", "be", "as", "do", "does", "get", "use", "my", "our", "your", "some",
+    "any", "all", "new", "one", "i", "we", "you", "me", "please", "need",
+    "want", "should", "can", "will", "just", "then", "than", "there", "what",
+    "which", "how", "when", "where", "not", "if", "about", "over", "up", "out",
+    "action", "actions", "op", "ops", "operation", "run", "target",
+})
+
+
+def _stem(word: str) -> str:
+    """`connections` -> `connection`. Enough for matching op and title words."""
+    return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+
+
+def _query_terms(query: str) -> set[str]:
+    from .tools_connector_discovery import _word_tokens  # noqa: PLC0415
+    return {_stem(w) for w in _word_tokens(query)
+            if len(w) > 1 and not w.isdigit() and w not in _QUERY_STOPWORDS}
+
+
+def _row_terms(row: dict[str, Any]) -> set[str]:
+    from .tools_connector_discovery import _word_tokens  # noqa: PLC0415
+    text = " ".join(str(row.get(k) or "") for k in ("op", "title", "category"))
+    return {_stem(w) for w in _word_tokens(text)}
+
+
+def _compact_action(row: dict[str, Any]) -> dict[str, Any]:
+    """The model-facing row. The full signature (`params`) stays with
+    get_op_schema: it is most of the bytes and the card path validates against
+    the catalog, not against this row. What stays is what the next call needs:
+    the names to fill, whether it needs approval, where it runs, and the
+    preferred branch of a multi-branch containment op."""
+    out: dict[str, Any] = {k: row[k] for k in ("action", "action_type", "connector",
+                                               "op", "title", "tier")
+                           if row.get(k) is not None}
+    if row.get("requires_approval"):
+        out["requires_approval"] = True
+    names = [p.get("name") if isinstance(p, dict) else p
+             for p in row.get("required_params") or []]
+    out["required"] = [n for n in names if n]
+    if row.get("runs_on_agent"):
+        out["runs_on_agent"] = True
+    if row.get("deprecated"):
+        out["deprecated"] = True
+    for k in ("preferred_params", "preferred_params_why", "indicator_param"):
+        if k in row:
+            out[k] = row[k]
+    if "action" in row:  # a record write: its body template is the thing to fill
+        for k in ("tool", "args", "collection", "params", "notes"):
+            if k in row:
+                out[k] = row[k]
+    return out
+
+
+def _interleave(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Round-robin across families, so a cap of 10 cannot be spent entirely on
+    the first catalog. Used when there is no query to rank by."""
+    out: list[dict[str, Any]] = []
+    for i in range(max((len(g) for g in groups), default=0)):
+        out.extend(g[i] for g in groups if i < len(g))
+    return out
+
+
+def _find_actions(containment, enrichment, record, *, query: str,
+                  target_type: str, action_type: str, module: str,
+                  limit: int) -> dict[str, Any]:
+    """Merge the three action catalogs into one ranked, capped list.
+
+    The three-way split (containment / enrichment / record) was a boundary the
+    model had to memorize; here it is data. `action_type` restricts to one
+    family; otherwise containment + enrichment are both consulted (record only
+    when explicitly asked or `module` names a write target), and every action
+    is tagged with the family it came from.
+
+    With a `query`, containment and enrichment candidates are scored by word
+    overlap with their op name, title and category; the ones sharing no word
+    with the query are dropped and the rest are sorted by score. Without one
+    the families are interleaved. Either way the answer is capped at `limit`
+    (default 10, at most 15), and `more` says how many were cut.
+    """
+    fam = (action_type or "").strip().lower()
+    valid = ("containment", "enrichment", "record")
+    if fam and fam not in valid:
+        return {"ok": False, "code": "unknown_action_type",
+                "message": f"action_type {fam!r} not recognized",
+                "valid_action_types": list(valid)}
+    lim = max(1, min(int(limit or ACTION_LIMIT_DEFAULT), ACTION_LIMIT_MAX))
+    # The query ranks; it is never the target. Passed as one it made the
+    # catalogs reject a prose "target type" and return nothing.
+    target = (target_type or "").strip()
+    q_terms = _query_terms(query or "")
+    families: dict[str, list[dict[str, Any]]] = {}
+    sections: dict[str, Any] = {}
+
+    unavailable: list[dict[str, Any]] = []
+
+    def _take(name: str, res: dict[str, Any]) -> None:
+        sections[name] = {kk: vv for kk, vv in res.items() if kk != "actions"}
+        # Lifted to the top: a dropped-but-capable connector buried in
+        # `sections` was never read live (see find_containment_actions).
+        unavailable.extend(res.get("unavailable") or [])
+        rows = families.setdefault(name, [])
+        for a in res.get("actions") or []:
+            row = dict(a)
+            row["action_type"] = name
+            rows.append(row)
+
+    if fam in ("", "containment"):
+        _take("containment", containment(target_type=target,
+                                         limit=_ACTION_CANDIDATES))
+    if fam in ("", "enrichment"):
+        _take("enrichment", enrichment(target_type=target,
+                                       limit=_ACTION_CANDIDATES))
+    if fam == "record" or (not fam and module):
+        res = record(action=query, module=module or "alerts")
+        if res.get("ok") is False:      # query was prose, not an action name
+            res = record(action="", module=module or "alerts")
+        _take("record", res)
+
+    dropped_by_query = 0
+    if q_terms:
+        # Containment and enrichment are matched by target, so the query is the
+        # only thing that narrows them to what was asked. Record writes are
+        # already matched by action name in find_record_actions: they keep
+        # their order and sort after the scored rows.
+        scored: list[tuple[int, dict[str, Any]]] = []
+        for name, rows in families.items():
+            for r in rows:
+                if name == "record":
+                    scored.append((0, r))
+                    continue
+                sc = len(q_terms & _row_terms(r))
+                if sc:
+                    scored.append((sc, r))
+                else:
+                    dropped_by_query += 1
+        ranked = [r for _, r in sorted(scored, key=lambda x: -x[0])]
+    else:
+        ranked = _interleave([families[k] for k in ("containment", "enrichment", "record")
+                              if k in families])
+
+    shown = [_compact_action(r) for r in ranked[:lim]]
+    more = len(ranked) - len(shown)
+    hint = _ACTION_HINT
+    if more > 0:
+        hint = (f"{more} more matched; narrow with query, target_type or "
+                f"action_type. " + hint)
+    out: dict[str, Any] = {"target_type": target, "action_type": fam or "all",
+                           "actions": shown, "count": len(ranked),
+                           "sections": sections, "hint": hint}
+    if more > 0:
+        out["more"] = more
+    if q_terms and not ranked and dropped_by_query:
+        out["message"] = (f"No action's name or title shares a word with the "
+                          f"query {query!r} ({dropped_by_query} candidates for "
+                          f"this target). Retry with fewer or different words, "
+                          f"or without a query.")
+    if unavailable:
+        out["unavailable"] = unavailable
+    return out
+
+
+def _find_fields(module: str, query: str, *, limit: int) -> dict[str, Any]:
+    """A module's fields from the catalog, best match to `query` first.
+
+    Live: build turns read `vars.input.records[0].destIp` (the field is
+    `destinationIp`) because record reads are refused there and nothing else
+    named the fields. Catalog-only: no record data, no box call."""
+    import difflib  # noqa: PLC0415
+    import sqlite3  # noqa: PLC0415
+
+    from fsr_playbooks import module_schema  # noqa: PLC0415
+
+    from ._shared import _db  # noqa: PLC0415
+    name = module_schema.module_name(module or "")
+    if not name:
+        return {"ok": False, "code": "missing_module",
+                "message": "kind='field' needs `module` (e.g. alerts, incidents)"}
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT field_name, title, type, picklist_name FROM module_fields "
+            "WHERE module_name=? ORDER BY field_name", (name,)).fetchall()
+        known = False
+        if not rows:
+            try:
+                known = conn.execute(
+                    "SELECT 1 FROM modules WHERE name=?", (name,)).fetchone() is not None
+            except sqlite3.OperationalError:  # no modules table on an old DB
+                known = False
+    finally:
+        conn.close()
+    if not rows and known:
+        # The module is in the catalog (its name is a baseline) but its field
+        # list was never read from this box. Not a bad name: a warm fills it.
+        return {"ok": False, "code": "module_fields_unwarmed",
+                "module": name,
+                "message": (f"the catalog knows the module {name!r} but has no "
+                            "field list for it yet; fields are read from this "
+                            "FortiSOAR box by a warm, which has not filled them"),
+                "hint": ("retry in a minute: the warm runs in the background and "
+                         "the next lookup of this module should answer")}
+    if not rows:
+        return {"ok": False, "code": "module_not_in_catalog",
+                "module": name,
+                "message": (f"the catalog has no module named {name!r} -- the "
+                            "name is wrong, or it is a custom module the catalog "
+                            "has not seen (modules are plural: alerts, incidents, "
+                            "indicators)")}
+    fields = [{"name": r[0], "title": r[1] or "", "type": r[2] or "",
+               **({"picklist": r[3]} if r[3] else {})} for r in rows]
+    q = (query or "").strip().lower()
+    if q:
+        words = q.replace("_", " ").split()
+
+        def score(f: dict[str, Any]) -> float:
+            hay = f"{f['name']} {f['title']}".lower()
+            hits = sum(1 for w in words if w in hay)
+            close = difflib.SequenceMatcher(None, q.replace(" ", ""),
+                                            f["name"].lower()).ratio()
+            return hits + close
+        fields.sort(key=score, reverse=True)
+    return {"ok": True, "module": name, "count": len(rows),
+            "fields": fields[:max(1, limit)],
+            "system_fields": sorted(module_schema.SYSTEM_FIELDS),
+            "usage": ("the trigger record's field: vars.input.records[0].<name>; "
+                      "a find_record result's: vars.steps.<Step>[0].<name>")}

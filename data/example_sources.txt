@@ -1,0 +1,35 @@
+# Example playbook sources for harvest_examples.py
+# Paths outside the repo are machine-local and will be skipped if not found.
+# The harvested output (yaml_template content) is what ships and may not contain
+# real hostnames, IPs, credentials, or capture dates.
+
+# Framework examples (excluding *.test.yaml and broken/)
+# Note: manifest globs cannot exclude; filtering happens in harvest_examples.py
+../fsr-playbook-framework/examples/*.yaml
+
+# pyfsr examples
+../pyfsr/examples/playbooks/**/*.yaml
+../pyfsr/examples/playbooks/*.yaml
+
+# Miscellaneous demos
+../Miscellaneous/fortisoar/demos/**/*.yaml
+
+# ztpf2 playbooks (tag lab_*/probe_* files as labs)
+../Miscellaneous/fortisoar/ztpf2/*.yaml
+../Miscellaneous/fortisoar/ztpf2/buttons/*.yaml
+
+# Connector examples and evals
+../ConnectorsV2/fsr-playbook-builder/scripts/eval_fixtures/real_*.yaml
+../ConnectorsV2/fsr-playbook-builder/examples/*.yaml
+../pyfsr/scripts/archetype_pilot_*.yaml
+
+# Other sources
+../Miscellaneous/fndn/fst-faig-ready/playbooks/cert_automation/*.yaml
+../Miscellaneous/fortisoar/playbooks/close_aged_cases.yaml
+../Miscellaneous/fortisoar/siem-experts-2026/playbooks/billionaire_club_response.yaml
+../TEC/noc-automation-with-fsr/public/playbooks/restore-cloud-workload.yaml
+../ConnectorsV2/connector-ninjaone/playbooks/ninjaone.yaml
+../ConnectorsV2/fortinet-fortisiemv2/playbooks/playbooks.yaml
+
+# Step fragments (kind=step)
+../fsr-playbook-framework/tooling/recipes/steps/*.yaml

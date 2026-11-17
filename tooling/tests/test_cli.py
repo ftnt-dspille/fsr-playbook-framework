@@ -1,0 +1,182 @@
+"""CLI smoke tests -- invoke each subcommand as a subprocess.
+
+We use subprocess (not import) because that's how users actually run
+fsrpb. Catches PYTHONPATH / module-resolution regressions the unit
+tests would miss.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+
+import pytest
+
+# Use the SAME interpreter running the tests (the project .venv), not a bare
+# "python3" -- under pre-commit's minimal PATH that resolves to the system python
+# which lacks the project deps (jinja2/mcp), so the CLI subprocess ImportError'd
+# even though the test process itself had them. sys.executable is venv-correct
+# everywhere (make tests, pre-commit, CI).
+CLI = [sys.executable, "cli.py"]  # cwd will be python/
+
+
+def _run(repo_root, *args, **kw):
+    return subprocess.run(
+        CLI + list(args),
+        cwd=repo_root / "tooling",
+        capture_output=True, text=True, **kw,
+    )
+
+
+def test_compile(repo_root, db_path, tmp_path):
+    out = tmp_path / "out.json"
+    r = _run(repo_root, "compile", str(repo_root / "examples" / "hello_connector.yaml"),
+             "-o", str(out))
+    assert r.returncode == 0, r.stderr
+    data = json.loads(out.read_text())
+    assert data["data"][0]["workflows"][0]["name"] == "Hello Connector"
+
+
+def test_validate_ok(repo_root, db_path):
+    r = _run(repo_root, "validate", str(repo_root / "examples" / "hello_connector.yaml"))
+    assert r.returncode == 0, r.stderr
+
+
+def test_validate_errors_json(repo_root, db_path, tmp_path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        "collection: T\nplaybooks:\n  - name: P\n    steps:\n"
+        "      - name: s\n        type: connetor\n"
+    )
+    r = _run(repo_root, "validate", str(bad), "--json")
+    assert r.returncode == 1
+    payload = json.loads(r.stdout)
+    assert any(e["code"] == "unknown_step_type" for e in payload)
+
+
+def test_validate_reports_warnings_on_a_clean_compile(repo_root, db_path, tmp_path):
+    """`validate` must PRINT warning-severity diagnostics, not swallow them.
+
+    A parent reading a key its child never returns is a warning, not a compile
+    error -- the playbook emits fine and fails silently at runtime. `validate`
+    used to print a bare "ok" over exactly that, because it only reported
+    diagnostics when the compile was blocked.
+    """
+    bad = tmp_path / "child_contract.yaml"
+    bad.write_text(
+        "collection: T\n"
+        "playbooks:\n"
+        "  - name: Child\n"
+        "    parameters: [base]\n"
+        "    steps:\n"
+        "      - name: start\n"
+        "        type: start\n"
+        "        next: Early\n"
+        "      - name: Early\n"
+        "        type: set_variable\n"
+        "        next: Last\n"
+        "        vars:\n"
+        "          dropped: 'set in a NON-final step'\n"
+        "      - name: Last\n"
+        "        type: set_variable\n"
+        "        vars:\n"
+        "          kept: 'set in the final step'\n"
+        "  - name: Parent\n"
+        "    parameters: [base]\n"
+        "    steps:\n"
+        "      - name: start\n"
+        "        type: start\n"
+        "        next: Call child\n"
+        "      - name: Call child\n"
+        "        type: workflow_reference\n"
+        "        next: Read it\n"
+        "        target: Child\n"
+        "        apply_async: false\n"
+        "        pass_parent_env: false\n"
+        "        pass_input_record: false\n"
+        "      - name: Read it\n"
+        "        type: set_variable\n"
+        "        vars:\n"
+        "          got: \"{{ vars.steps.Call_child.dropped }}\"\n"
+    )
+    r = _run(repo_root, "validate", str(bad))
+    assert r.returncode == 0, r.stderr          # a warning does not block
+    combined = r.stdout + r.stderr
+    assert "bad_var_reference" in combined, combined
+    assert "dropped" in combined, combined
+
+
+def test_explain_handler(repo_root, db_path):
+    r = _run(repo_root, "explain", "handler", "cond")
+    assert r.returncode == 0
+    assert "cond(step, conditions" in r.stdout
+
+
+def test_explain_step(repo_root, db_path):
+    r = _run(repo_root, "explain", "step", "Decision")
+    assert r.returncode == 0
+    assert "handler: cond" in r.stdout
+
+
+def test_roundtrip_subcommand(repo_root, db_path, corpus_path, tmp_path):
+    src = json.loads(corpus_path.read_text())
+    target = None
+    for col in src["data"]:
+        for wf in col.get("workflows", []):
+            if wf.get("uuid") == "688c7f82-d148-40d7-a308-392412170b7a":
+                target = (col, wf)
+                break
+        if target: break
+    if not target:
+        pytest.skip("known target playbook missing from corpus")
+    col, wf = target
+    extract = {
+        "type": "workflow_collections", "macros": [], "exported_tags": [],
+        "data": [{
+            "@type": "WorkflowCollection", "name": col["name"],
+            "description": col.get("description", ""),
+            "visible": col.get("visible", True), "uuid": col["uuid"],
+            "workflows": [wf],
+        }],
+    }
+    p = tmp_path / "single.json"
+    p.write_text(json.dumps(extract))
+    r = _run(repo_root, "roundtrip", str(p))
+    assert r.returncode == 0, r.stderr
+
+
+def test_push_subcommand_registered(repo_root):
+    """We don't hit the live FSR in tests -- just confirm the subcommand
+    is wired and shows up in --help."""
+    r = _run(repo_root, "--help")
+    assert r.returncode == 0
+    assert " push " in r.stdout
+
+
+def test_decompile(repo_root, db_path, corpus_path, tmp_path):
+    src = json.loads(corpus_path.read_text())
+    extract = {
+        "type": "workflow_collections", "macros": [], "exported_tags": [],
+        "data": [src["data"][0]],
+    }
+    p = tmp_path / "in.json"
+    p.write_text(json.dumps(extract))
+    r = _run(repo_root, "decompile", str(p))
+    assert r.returncode == 0, r.stderr
+    assert "collection:" in r.stdout
+    assert "playbooks:" in r.stdout
+
+
+def test_decompile_is_the_authoring_yaml_and_no_layout_is_leaner(repo_root, db_path, corpus_path, tmp_path):
+    """Default output is the minimal authoring form (no iris, no resolved routes);
+    --no-layout also drops step positions and uuids; --raw is the old internal dump."""
+    src = json.loads(corpus_path.read_text())
+    p = tmp_path / "in.json"
+    p.write_text(json.dumps({"type": "workflow_collections", "macros": [], "exported_tags": [], "data": [src["data"][0]]}))
+    default = _run(repo_root, "decompile", str(p))
+    lean = _run(repo_root, "decompile", str(p), "--no-layout")
+    raw = _run(repo_root, "decompile", str(p), "--raw")
+    assert default.returncode == lean.returncode == raw.returncode == 0, (default.stderr, lean.stderr, raw.stderr)
+    assert "- id:" in raw.stdout and "- id:" not in default.stdout      # the old dump numbers every step
+    assert "top:" in default.stdout and "top:" not in lean.stdout       # layout kept by default, dropped on request
+    assert len(lean.stdout.splitlines()) < len(default.stdout.splitlines())

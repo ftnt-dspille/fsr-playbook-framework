@@ -1,0 +1,113 @@
+{
+  "fixture": "invest_excessive_mail_egress",
+  "captured": "20260606T143951Z",
+  "model": "deployed:fsr-playbook-builder-0.3.121",
+  "stop_reason": "awaiting_action_card",
+  "recall": 1.0,
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "module": "alerts",
+        "uuid": "b62fb2d5-d27e-4d7e-8bd8-53e4878ba614"
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "192.168.77.10"
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "incidents",
+        "q": "192.168.77.10"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_enrichment_actions",
+      "args": {
+        "target_type": "ip"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "query_ip",
+        "params": {
+          "ip": "35.189.45.227"
+        },
+        "step_name": "Enrich Destination IP 35.189.45.227"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "op": "ioc_search",
+        "params": {
+          "indicator": "35.189.45.227"
+        },
+        "step_name": "Fortiguard IOC Lookup - 35.189.45.227"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "virustotal",
+        "op": "query_ip",
+        "params": {
+          "ip": "155.43.146.236"
+        },
+        "step_name": "Enrich Exfil IP 155.43.146.236 (FTP)"
+      },
+      "ok": null
+    },
+    {
+      "name": "run_op",
+      "args": {
+        "connector": "fortinet-fortiguard-ioc",
+        "op": "ioc_search",
+        "params": {
+          "indicator": "155.43.146.236"
+        },
+        "step_name": "Fortiguard IOC Lookup - 155.43.146.236"
+      },
+      "ok": null
+    },
+    {
+      "name": "find_containment_actions",
+      "args": {
+        "target_type": "host"
+      },
+      "ok": null
+    },
+    {
+      "name": "emit_action_card",
+      "args": {
+        "id": "quarantine_192_168_77_10",
+        "connector": "fortigate-firewall",
+        "operation": "quarantine_host",
+        "summary": "Quarantine compromised host 192.168.77.10 to block further exfiltration",
+        "args": {
+          "macs": "TO_BE_PROVIDED",
+          "vdom": ""
+        },
+        "editable_fields": [
+          "macs",
+          "vdom"
+        ]
+      },
+      "ok": null
+    }
+  ]
+}

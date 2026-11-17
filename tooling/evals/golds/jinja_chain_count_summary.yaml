@@ -1,0 +1,39 @@
+# Gold answer for the `jinja_chain_count_summary` eval fixture.
+#
+# The point of the fixture is the typed Jinja chain: an integer (`| length`)
+# rendered INSIDE a string. Concatenation happens at template level, so no
+# filter ever receives the wrong type -- `| length | upper` (int into upper)
+# and `| upper | length` (upper over a list) are the two wrong shapes the
+# `verified` gate exists to catch.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: Alert Artifact Count To Slack
+    description: Count the alert's artifacts and post the tally to Slack.
+    steps:
+      - name: On Alert Create
+        type: start_on_create
+        next: Build Message Body
+        module: alerts
+
+      - name: Build Message Body
+        type: set_variable
+        next: Post To Slack
+        vars:
+          message_body: "Alert artifacts: {{ vars.input.records[0].artifactsRelatedToAlerts | length }}"
+
+      - name: Post To Slack
+        type: connector
+        next: Done
+        connector: slack
+        operation: send_message
+        config: ""
+        params:
+          channel: "#soc-alerts"
+          message: "{{ vars.message_body }}"
+
+      - name: Done
+        type: end

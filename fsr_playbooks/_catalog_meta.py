@@ -1,0 +1,316 @@
+"""Catalog provenance & freshness metadata -- the ``_catalog_meta`` table.
+
+The offline compiler reads a cached reference DB (see :mod:`fsr_playbooks._db`).
+That cache is *warmed* from one specific live SOAR. Two failure classes follow:
+
+1. **Cross-instance mistakes** -- compiling against a catalog warmed from a
+   *different* SOAR. Instance A's picklist IRIs / connector configs mis-resolve
+   on B, producing a playbook that looks valid but silently misbehaves. Today
+   this is a silent-wrong-answer class.
+2. **Staleness** -- the live SOAR drifts (a publish adds a module/field, a
+   picklist value is edited) after the catalog was warmed.
+
+``_catalog_meta`` is a small key/value table that records *where* and *when* the
+catalog was warmed so both classes become detectable. It is the **current
+state** used by freshness checks; ``_probe_runs`` remains the per-run audit log.
+
+Keys written by :func:`stamp_instance` and the freshness probes:
+
+==========================  ==============================================
+key                         meaning
+==========================  ==============================================
+``instance_label``          human label of the warmed instance (e.g. ``dev``)
+``base_url``               normalized base URL the catalog was warmed from
+``base_url_hash``          short hash of ``base_url`` (cheap identity check)
+``instance_serial``        license serial of the last live warm's target
+                           (e.g. ``FSRVMTEST260001``, from
+                           ``GET /api/auth/license?param=license_details``) --
+                           the one identity that survives URL/port changes;
+                           unlike ``base_url_hash``, REFRESHED each live warm
+``fsr_version``            ``GET /api/version`` build at warm time (Tier-0)
+``last_publish_time``       ``GET /api/publish/error`` epoch (Tier-1 watermark)
+``structural_warmed_at``    ISO-8601 UTC of the last Tier-1 warm
+``data_warmed_at``          ISO-8601 UTC of the last Tier-2 warm
+``modules_warmed_at``       ISO-8601 UTC module_fields/picklists were read
+                            from the instance itself (on-platform warm)
+``count:<coll>``            ``$limit=0`` ``hydra:totalItems`` per collection
+``etag:<coll>``             last seen response ETag per collection
+``schema_version``          ``_catalog_meta`` layout version
+==========================  ==============================================
+
+This module ships in the wheel: the multi-instance guard runs at *compile*
+time, so the read side must live in the package, not in dev-only ``tooling/``.
+It has no third-party dependencies and never hits the network.
+"""
+from __future__ import annotations
+
+import hashlib
+import os
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any
+
+SCHEMA_VERSION = "1"
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def ensure_table(conn: sqlite3.Connection) -> None:
+    """Create ``_catalog_meta`` if absent. Safe on shipped/already-built DBs."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS _catalog_meta ("
+        "  key        TEXT PRIMARY KEY,"
+        "  value      TEXT,"
+        "  updated_at TEXT NOT NULL)"
+    )
+
+
+def get(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
+    try:
+        row = conn.execute(
+            "SELECT value FROM _catalog_meta WHERE key = ?", (key,)
+        ).fetchone()
+    except sqlite3.OperationalError:
+        # Table absent on an old/slim DB -- treat as unstamped.
+        return default
+    if row is None:
+        return default
+    return row[0]
+
+
+def get_all(conn: sqlite3.Connection) -> dict[str, str]:
+    try:
+        rows = conn.execute("SELECT key, value FROM _catalog_meta").fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {r[0]: r[1] for r in rows}
+
+
+def set_(conn: sqlite3.Connection, key: str, value: str | None) -> None:
+    ensure_table(conn)
+    conn.execute(
+        "INSERT INTO _catalog_meta (key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+        "updated_at = excluded.updated_at",
+        (key, value, _utcnow()),
+    )
+
+
+# ----------------------- instance identity -----------------------
+
+def license_serial_from_details(payload: Any) -> str | None:
+    """Pull the durable license serial out of a license_details payload.
+
+    Pure (no network) -- feeds :func:`stamp_instance`'s ``instance_serial``
+    and the serial-authored instance-mismatch check. The serial (e.g.
+    ``FSRVMTEST260001``) is stable across URL/port/proxy changes, which a
+    base_url hash is not: one appliance routinely answers on both ``https://h``
+    and ``https://h:13000`` (live-confirmed -- same serial both listeners) and
+    URL-only identity reads those as two boxes. Cluster-safe: prefers the
+    ``primary`` role node.
+    """
+    if not isinstance(payload, dict):
+        return None
+    nodes = payload.get("nodes") or {}
+    pick = None
+    for nd in nodes.values():
+        if not isinstance(nd, dict):
+            continue
+        meta = nd.get("node") or {}
+        if meta.get("role") == "primary":
+            pick = nd
+            break
+        if pick is None:
+            pick = nd
+    if pick is None and isinstance(payload.get("details"), dict):
+        return payload["details"].get("serial_no")
+    serial = ((pick or {}).get("details") or {}).get("serial_no")
+    return str(serial) if serial else None
+
+
+def normalize_base_url(url: str) -> str:
+    """Canonicalize a base URL for stable identity comparison.
+
+    Lowercases the host, drops the scheme, any trailing slash, and any
+    *default* port (``:443`` / ``:80``): two configs that differ only by
+    ``http`` vs ``https``, a trailing ``/``, or an explicit default port are
+    the same instance for catalog purposes. A non-default port (e.g. the
+    ``:13000`` migration listener) is kept -- it identifies a distinct
+    listener. Note an true *instance UUID* is not comparable here: 8.0.0
+    exposes no per-appliance UUID (``GET /api/version`` is a shared build
+    string), so URL identity + the cheap auto-warm fallback is the whole
+    story -- mis-detection costs a lazy re-warm, not a dead push.
+    """
+    u = (url or "").strip()
+    for prefix in ("https://", "http://"):
+        if u.lower().startswith(prefix):
+            u = u[len(prefix):]
+            break
+    u = u.rstrip("/").lower()
+    host = u.split("/")[0]
+    for default in (":443", ":80"):
+        if host.endswith(default):
+            u = host[: -len(default)] + u[len(host):]
+            break
+    return u
+
+
+def base_url_hash(url: str) -> str:
+    return hashlib.sha256(normalize_base_url(url).encode()).hexdigest()[:16]
+
+
+def stamp_instance(
+    conn: sqlite3.Connection,
+    *,
+    instance_label: str | None,
+    base_url: str,
+    fsr_version: str | None = None,
+    last_publish_time: str | int | None = None,
+    instance_serial: str | None = None,
+) -> None:
+    """Record which instance (and version/watermark) the catalog was warmed
+    from. Called by the Tier-1 structural warmup (``probe_modules`` et al.)."""
+    ensure_table(conn)
+    set_(conn, "instance_label", instance_label or "")
+    set_(conn, "base_url", normalize_base_url(base_url))
+    set_(conn, "base_url_hash", base_url_hash(base_url))
+    set_(conn, "schema_version", SCHEMA_VERSION)
+    set_(conn, "structural_warmed_at", _utcnow())
+    if fsr_version is not None:
+        set_(conn, "fsr_version", str(fsr_version))
+    if last_publish_time is not None:
+        set_(conn, "last_publish_time", str(last_publish_time))
+    if instance_serial:
+        set_(conn, "instance_serial", str(instance_serial))
+
+
+def record_count(conn: sqlite3.Connection, collection: str, total: int) -> None:
+    set_(conn, f"count:{collection}", str(total))
+
+
+def record_etag(conn: sqlite3.Connection, collection: str, etag: str) -> None:
+    set_(conn, f"etag:{collection}", etag)
+
+
+def record_modules_warmed(conn: sqlite3.Connection) -> None:
+    """Mark ``module_fields``/``picklists`` as read from the instance they are
+    used on.
+
+    Separate from :func:`stamp_instance` on purpose: the connector's on-platform
+    warm reaches its own appliance through crudhub with no ``FSR_BASE_URL``, so
+    it has no base URL to stamp -- yet its module schema is exactly the box's.
+    Without this marker a box-warmed catalog was indistinguishable from the
+    generic shipped snapshot, and field checks stayed warnings there.
+    """
+    set_(conn, "modules_warmed_at", _utcnow())
+
+
+def record_data_warmed_at(conn: sqlite3.Connection) -> None:
+    """Record the current UTC timestamp as the last Tier-2 warm time."""
+    set_(conn, "data_warmed_at", _utcnow())
+
+
+# ----------------------- Tier-2 freshness consume side -----------------------
+# The capture side (record_etag / record_data_warmed_at) is written by the
+# warmup probes. These read-side helpers let a conditional-refetch consumer
+# decide *whether* to refetch (TTL) and *how* (If-None-Match with the stored
+# ETag). They are pure -- no network -- so they ship in the wheel alongside the
+# multi-instance guard.
+
+DEFAULT_TTL_SECONDS = 24 * 60 * 60  # 1 day
+
+
+def get_data_warmed_at(conn: sqlite3.Connection) -> str | None:
+    """ISO-8601 UTC of the last Tier-2 warm, or ``None`` if never warmed."""
+    return get(conn, "data_warmed_at")
+
+
+def get_etag(conn: sqlite3.Connection, collection: str) -> str | None:
+    """Last-seen response ETag for ``collection``, or ``None`` if unrecorded."""
+    return get(conn, f"etag:{collection}")
+
+
+def is_ttl_expired(
+    conn: sqlite3.Connection, ttl_seconds: int = DEFAULT_TTL_SECONDS
+) -> bool:
+    """True when the Tier-2 catalog is stale and a refresh should be considered.
+
+    Stale means: never warmed (no ``data_warmed_at``), the stamp is unparseable
+    (treat as expired -- better to refetch than trust a corrupt timestamp), or
+    the warm is at least ``ttl_seconds`` old. A timestamp without an explicit
+    offset is assumed UTC (matches :func:`_utcnow`).
+    """
+    stamp = get_data_warmed_at(conn)
+    if not stamp:
+        return True
+    try:
+        warmed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return True
+    if warmed.tzinfo is None:
+        warmed = warmed.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - warmed).total_seconds()
+    return age >= ttl_seconds
+
+
+# ----------------------- the multi-instance guard -----------------------
+
+def check_instance(conn: sqlite3.Connection, base_url: str) -> tuple[str, str, str]:
+    """Compare ``base_url`` against the instance the catalog was warmed from.
+
+    Returns ``(status, stamped_label, stamped_hash)`` where status is one of:
+
+    - ``"ok"``        -- the catalog was warmed from this instance.
+    - ``"mismatch"``  -- warmed from a *different* instance (silent-wrong risk).
+    - ``"unstamped"`` -- catalog carries no instance stamp (slim/unwarmed DB);
+                        nothing to validate against, so callers pass silently.
+    """
+    stamped_hash = get(conn, "base_url_hash") or ""
+    stamped_label = get(conn, "instance_label") or ""
+    if not stamped_hash:
+        return "unstamped", stamped_label, stamped_hash
+    if base_url_hash(base_url) == stamped_hash:
+        return "ok", stamped_label, stamped_hash
+    return "mismatch", stamped_label, stamped_hash
+
+
+def instance_guard(conn: sqlite3.Connection, errors: list) -> None:
+    """Append a compile diagnostic if the configured target instance differs
+    from the one the catalog was warmed from.
+
+    The intended target is read from ``$FSR_BASE_URL`` (the same var the warmup
+    tooling uses). When it is unset there is no "intended" instance to compare
+    against, so this is a no-op -- offline compiles stay clean. When set:
+
+    - mismatch → a *warning* by default (the author may genuinely intend to
+      compile portable, stable-only playbooks), escalated to a blocking *error*
+      when ``$FSRPB_STRICT_INSTANCE`` is truthy.
+    - unstamped catalog → silent (no basis to complain).
+
+    Imported lazily by the resolver so this module stays free of compiler deps.
+    """
+    target = os.environ.get("FSR_BASE_URL", "").strip()
+    if not target:
+        return
+    status, label, _ = check_instance(conn, target)
+    if status != "mismatch":
+        return
+    from .compiler.errors import CompileError, ErrorCode
+
+    strict = (os.environ.get("FSRPB_STRICT_INSTANCE", "") or "").strip().lower() \
+        in ("1", "true", "yes", "on")
+    warmed_from = f" (warmed from {label!r})" if label else ""
+    errors.append(CompileError(
+        code=ErrorCode.INSTANCE_MISMATCH,
+        message=(
+            f"reference catalog was warmed from a DIFFERENT SOAR{warmed_from} "
+            f"than the configured target {normalize_base_url(target)!r}; "
+            f"picklist IRIs / connector configs may mis-resolve"
+        ),
+        path="",
+        suggestion="re-run warmup against the target instance, "
+                   "or unset FSR_BASE_URL to compile stable-only",
+        severity="error" if strict else "warning",
+    ))

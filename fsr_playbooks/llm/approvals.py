@@ -1,0 +1,497 @@
+"""Suspended-session store for the HITL approval flow.
+
+When a provider loop hits a tier-3+ tool call, it stashes everything
+needed to resume -- history snapshot, system prompt, tools list, tags,
+the pending tool_use id, and the original tool args -- under the
+`approval_id` minted by `tools.dispatch`. A subsequent POST to
+`/api/approvals/{approval_id}` resolves the decision: on approve we
+re-dispatch with the internal `_approved=True` sentinel and patch the
+synthetic tool_result; on deny we substitute `{ok: false,
+code: "user_denied"}` and resume. The HITL guardrails plan calls for
+single-use scope, so each entry is consumed (popped) on resolution.
+
+This is in-memory: the chat backend is single-process today. If we
+later run multiple workers, swap the dict for Redis or sqlite-backed
+storage -- the public surface (`stash`, `pop`, `peek`) is small enough
+that the migration is mechanical.
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import secrets as _secrets
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+from .authorization import args_digest, needs_approval
+
+# The result a skipped call gets. One definition, used by run_turn and every
+# provider's resume. It used to be the bare `{"ok": false, "code":
+# "superseded_by_approval"}`, which a model read as "queued for approval": in
+# an offline profile build it batched seven step creates, the first carded,
+# and after the approval it told the analyst "the remaining six were routed
+# through the approval flow" and presented all seven as built -- one existed.
+# So the result says what happened in words: it did NOT run, nothing holds it,
+# and the way forward is to call it again.
+SUPERSEDED_RESULT: dict[str, Any] = {
+    "ok": False,
+    "code": "superseded_by_approval",
+    "executed": False,
+    "message": (
+        "NOT RUN. This call was in the same batch as a call that needed the "
+        "analyst's approval, so it was dropped: it did not execute, and "
+        "nothing is queued or held for it. If it is still needed, call it "
+        "again now -- a gated call gets its own approval card. Do not report "
+        "it as done."
+    ),
+}
+
+
+def superseded_result_json() -> str:
+    """`SUPERSEDED_RESULT` as the JSON text a provider puts in a tool message."""
+    import json
+    return json.dumps(SUPERSEDED_RESULT)
+
+
+@dataclass
+class SkippedToolCall:
+    """A tool call from the same assistant turn that was not dispatched
+    because an earlier call in the same turn triggered an approval gate.
+
+    On resume, these are synthesized as superseded_by_approval results
+    so the model receives one tool_result per tool_use it emitted.
+    """
+    call_id: str
+    name: str
+    args: dict[str, Any]
+
+
+# 10 minutes. Long enough that a user can context-switch to read the
+# args; short enough that a stale approval doesn't sit around for hours
+# if someone walks away.
+_TTL_SECONDS = 600
+
+
+# --- HMAC binding (Phase 3.1) ---------------------------------------------
+#
+# The in-memory record already binds the decision to its args (resume
+# re-dispatches `suspended.args`, never request-supplied args). HMAC closes
+# the *store-tampering* gap: if the session store leaks or is writable
+# (e.g. the persisted/sqlite-backed gateway in 3.2), an attacker could swap
+# the stored args before the human approves and the server would re-dispatch
+# the substituted call. We bind `approval_id + tool + args_hash + created_at`
+# under a server-side secret at stash time; `verify()` recomputes the token
+# at resume and `compare_digest`s it. Tampered args change `args_hash`, so
+# the token no longer matches and resume fails closed.
+#
+# Secret resolution, in order:
+#   1. `FSR_APPROVAL_HMAC_KEY` env var -- explicit, deployment-controlled.
+#   2. A per-host key FILE (default ~/.fsr_approval_hmac_key, 0600), created once
+#      and read by every worker. This is what makes the persisted gateway work
+#      across FortiSOAR's MULTIPLE worker processes: chat_turn stashes a session
+#      on one worker and chat_resume pops it on another, so the token must verify
+#      under a secret ALL workers agree on. A per-process random key cannot do
+#      that -- cross-worker resume fails closed with approval_not_found -- which is
+#      exactly the bug this replaces. The file also survives worker restarts.
+#   3. Per-process random key -- last resort, only if the file can't be read or
+#      created (e.g. a read-only FS). Degrades to the old cross-worker behavior
+#      rather than crashing.
+_SECRET_ENV = "FSR_APPROVAL_HMAC_KEY"
+_SECRET_FILE_ENV = "FSR_APPROVAL_HMAC_KEY_FILE"
+_RUNTIME_SECRET = _secrets.token_bytes(32)
+_PERSISTENT_SECRET: bytes | None = None
+
+
+def _default_key_file():
+    from pathlib import Path
+    return Path.home() / ".fsr_approval_hmac_key"
+
+
+def _persistent_secret() -> bytes:
+    """A stable 32-byte secret shared by every worker on the host.
+
+    Provisioned once into a 0600 key file; concurrent workers race to create it
+    via O_CREAT|O_EXCL and the losers read the winner's key, so every worker ends
+    up with the same secret. Cached after the first resolution. Falls back to the
+    per-process key if the filesystem is unavailable."""
+    global _PERSISTENT_SECRET
+    if _PERSISTENT_SECRET is not None:
+        return _PERSISTENT_SECRET
+    from pathlib import Path
+    path = Path(os.environ.get(_SECRET_FILE_ENV) or _default_key_file())
+    try:
+        if path.exists():
+            key = bytes.fromhex(path.read_text().strip())
+            if len(key) >= 16:
+                _PERSISTENT_SECRET = key
+                return key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        key = _secrets.token_bytes(32)
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, key.hex().encode("ascii"))
+            finally:
+                os.close(fd)
+        except FileExistsError:
+            # Another worker created it first -- adopt its key.
+            key = bytes.fromhex(path.read_text().strip())
+        _PERSISTENT_SECRET = key
+        return key
+    except Exception:
+        # Read-only / unavailable FS: keep working with the per-process key.
+        _PERSISTENT_SECRET = _RUNTIME_SECRET
+        return _PERSISTENT_SECRET
+
+
+def _secret() -> bytes:
+    env = os.environ.get(_SECRET_ENV)
+    if env:
+        return env.encode("utf-8")
+    return _persistent_secret()
+
+
+def _batch_hash(batch: list[Any] | None) -> str:
+    """The batched calls, in order, as one digest. Empty for a single-call
+    approval, so a token minted before batches existed still verifies."""
+    if not batch:
+        return ""
+    payload = json.dumps([[b.name, b.args] for b in batch],
+                         sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _bind_token(approval_id: str, tool: str,
+                args: dict[str, Any] | None, created_at: float,
+                batch: list[Any] | None = None) -> str:
+    parts = [approval_id, tool, args_digest(tool, args), repr(created_at)]
+    bh = _batch_hash(batch)
+    if bh:
+        # The analyst approves every call the card lists, so every one of
+        # them is bound: a batch member edited in the store fails closed.
+        parts.append(bh)
+    msg = "|".join(parts).encode("utf-8")
+    return hmac.new(_secret(), msg, hashlib.sha256).hexdigest()
+
+
+def bind(s: SuspendedSession) -> None:
+    """Compute and attach the HMAC token. Call once, after construction,
+    before stashing."""
+    s.token = _bind_token(s.approval_id, s.tool, s.args, s.created_at,
+                          getattr(s, "batch", None))
+
+
+def verify(s: SuspendedSession) -> bool:
+    """True iff the session's token matches a freshly computed HMAC over its
+    current fields. A missing token fails closed."""
+    if not s.token:
+        return False
+    expected = _bind_token(s.approval_id, s.tool, s.args, s.created_at,
+                           getattr(s, "batch", None))
+    return hmac.compare_digest(s.token, expected)
+
+
+# --------------------------------------------------------------------------
+# Batched approval: one card for N gated calls from one assistant turn
+# --------------------------------------------------------------------------
+# A model building something emits its writes together -- seven step creates
+# for a seven-step profile. Only the first used to card; the rest were
+# dropped, and even once the drop was reported honestly the analyst faced
+# seven cards in a row for one request. Instead, the gated calls that follow
+# the first one in the same turn join its card, and one decision covers the
+# lot: approve runs them all in order, deny runs none.
+#
+# What joins: the contiguous run of calls after the gated one whose own
+# dispatch ALSO returns a pending approval -- probed through the real gate, so
+# a pre-card refusal (out of scope, unknown record) stops the batch rather
+# than riding along under someone else's approval. The first call that would
+# not card ends the batch; it and everything after it are dropped exactly as
+# before (SUPERSEDED_RESULT), so no ungated call runs out of order.
+BATCH_LIMIT = 25
+
+
+@dataclass
+class BatchedCall:
+    """A gated call that shares the pending call's approval card."""
+    call_id: str
+    name: str
+    args: dict[str, Any]
+    tier: int = 3
+    summary: str | None = None
+    preview: dict[str, Any] = field(default_factory=dict)
+
+    def card(self) -> dict[str, Any]:
+        """The wire form an approval card lists."""
+        return {"tool_use_id": self.call_id, "tool": self.name,
+                "args": self.args, "tier": self.tier,
+                "summary": self.summary, "preview": self.preview}
+
+
+def collect_batch(remaining: list[tuple[str, str, dict[str, Any]]],
+                  dispatch_fn: Any, tier_fn: Any,
+                  ) -> tuple[list[BatchedCall], list[tuple[str, str, dict[str, Any]]]]:
+    """Split the calls after a gated one into (batch, still-remaining).
+
+    ``dispatch_fn(name, args)`` is the provider's guarded dispatch; it is only
+    called for a call whose tier already says it gates, so it can only return
+    an approval envelope or a refusal -- never run the tool.
+    """
+    batch: list[BatchedCall] = []
+    for cid, name, args in remaining:
+        if len(batch) >= BATCH_LIMIT:
+            break
+        try:
+            gated = needs_approval(int(tier_fn(name, args)))
+        except Exception:  # noqa: BLE001 -- an unknown tier never batches
+            gated = False
+        if not gated:
+            break
+        try:
+            env = dispatch_fn(name, args)
+        except Exception:  # noqa: BLE001
+            break
+        if not (isinstance(env, dict) and env.get("pending_approval")):
+            break
+        batch.append(BatchedCall(
+            call_id=cid, name=name, args=args,
+            tier=int(env.get("tier", 3)), summary=env.get("summary"),
+            preview=env.get("preview") or {}))
+    # The batch is a contiguous prefix, so what is left is the rest in order.
+    return batch, list(remaining[len(batch):])
+
+
+def _approved_dispatch(name: str, args: dict[str, Any]) -> Any:
+    """Re-dispatch an approved call past the gate -- exactly how every
+    provider re-dispatches the pending call itself."""
+    from .tools import dispatch  # local: tools imports this module
+    return dispatch(name, {**(args or {}), "_approved": True}, _internal=True)
+
+
+def resolve_batch(s: SuspendedSession, decision: str,
+                  dispatch_fn: Any = None,
+                  ) -> list[tuple[BatchedCall, dict[str, Any]]]:
+    """Each batched call's result for ``decision``: run in order on approve,
+    denied on anything else. Blocking -- providers run it off-loop."""
+    dispatch_fn = dispatch_fn or _approved_dispatch
+    out: list[tuple[BatchedCall, dict[str, Any]]] = []
+    for b in getattr(s, "batch", None) or []:
+        if decision == "approve":
+            try:
+                res = dispatch_fn(b.name, b.args)
+            except Exception as exc:  # noqa: BLE001 -- one failure, not the batch
+                res = {"ok": False, "code": "dispatch_error", "message": str(exc)}
+        else:
+            res = {"ok": False, "code": "user_denied",
+                   "reason": "User denied the action."}
+        out.append((b, res if isinstance(res, dict) else {"ok": True, "result": res}))
+    return out
+
+
+@dataclass
+class SuspendedSession:
+    approval_id: str
+    session_id: str
+    tool: str
+    tool_use_id: str
+    args: dict[str, Any]
+    tier: int
+    # Wire-form history up to (but NOT including) the user turn that
+    # would carry the tool_result blocks for the just-stopped assistant
+    # turn. The assistant turn (text + tool_use blocks) IS included.
+    history_snapshot: list[Any]
+    # tool_result blocks for tool_uses that resolved before the
+    # pending one. Resume appends these + the resolved pending result
+    # + placeholder denials for `remaining_tool_calls` into a single
+    # user turn before re-entering the provider loop.
+    prior_tool_result_blocks: list[dict[str, Any]]
+    # Tool calls from the same assistant turn that hadn't run yet
+    # when we suspended. Stored as (call_id, name, args). On resume
+    # they're synthesized as `{ok: false, code: "superseded_by_approval"}`
+    # so the model sees one tool_result per tool_use it emitted.
+    remaining_tool_calls: list[SkippedToolCall]
+    system: str
+    tags: dict[str, Any]
+    summary: str | None = None
+    # The tool slice the suspended turn was advertising. Resume re-enters the
+    # provider loop with THIS list (not []), so the model can act on the
+    # approved action's outcome -- retry with fixed args (through a fresh
+    # tier gate), or finish the request's remaining steps -- instead of only
+    # narrating. Old pickled sessions lack the attr: read via getattr.
+    # Not HMAC-bound (same trust level as history_snapshot/system): dispatch
+    # re-checks tiers on every call, so advertisement is not authorization.
+    tools: list[Any] = field(default_factory=list)
+    # Gated calls from the same turn that share this card (see
+    # `collect_batch`). HMAC-bound with the pending call. Old pickled
+    # sessions lack the attr: read via getattr.
+    batch: list[BatchedCall] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
+    # Serialized turn evidence (tool_use_id -> {name, ok}) so citations survive
+    # suspension and resume on a different thread. TurnEvidence.to_dict() serializes
+    # it; TurnEvidence.from_dict() deserializes it.
+    turn_evidence_state: dict[str, Any] = field(default_factory=dict)
+    # HMAC token binding (approval_id, tool, args_hash, created_at) under the
+    # server secret. Set by `bind()` before stash; checked by `verify()` on
+    # resume. Empty until bound (verify fails closed on empty).
+    token: str = ""
+
+    def expired(self, now: float | None = None) -> bool:
+        return (now or time.time()) - self.created_at > _TTL_SECONDS
+
+
+class InMemoryApprovalGateway:
+    """In-process implementation of the ApprovalGateway protocol.
+    Single-process workers only; for multi-worker / connector use,
+    swap in a sqlite- or Redis-backed gateway."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._store: dict[str, SuspendedSession] = {}
+
+    def stash(self, s: SuspendedSession) -> None:
+        with self._lock:
+            self._gc_locked()
+            self._store[s.approval_id] = s
+
+    def peek(self, approval_id: str) -> SuspendedSession | None:
+        with self._lock:
+            self._gc_locked()
+            return self._store.get(approval_id)
+
+    def pop(self, approval_id: str) -> SuspendedSession | None:
+        """Single-use consume. Returns None if missing or expired."""
+        with self._lock:
+            self._gc_locked()
+            s = self._store.pop(approval_id, None)
+            if s and s.expired():
+                return None
+            return s
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+    def _gc_locked(self) -> None:
+        now = time.time()
+        dead = [k for k, v in self._store.items() if v.expired(now)]
+        for k in dead:
+            self._store.pop(k, None)
+
+
+class SqliteApprovalGateway:
+    """Phase 3.2 -- sqlite-backed gateway so suspended HITL sessions survive a
+    worker restart. The web backend installs one at startup via
+    `set_default_gateway`; the connector has its own equivalent in
+    `storage.py`.
+
+    Each op opens a short-lived connection (sqlite handles its own locking),
+    so the gateway is cheap to construct and safe across threads. Sessions
+    are pickled -- both writer and reader are this same process family, and an
+    attacker who can write our sqlite file already has code-exec; the HMAC
+    binding (3.1) is what guards against *content* tampering. For tokens to
+    survive a restart the process must run with a stable
+    `FSR_APPROVAL_HMAC_KEY` (else `verify()` fails closed afterward -- safe,
+    the analyst just re-issues)."""
+
+    _SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS suspended_sessions ("
+        " approval_id TEXT PRIMARY KEY,"
+        " created_at REAL NOT NULL,"
+        " payload BLOB NOT NULL)"
+    )
+
+    def __init__(self, db_path: str) -> None:
+        self.db_path = str(db_path)
+        self._lock = threading.Lock()
+        with self._conn() as c:
+            c.execute(self._SCHEMA)
+
+    def _conn(self):  # sqlite3.Connection
+        import sqlite3
+        c = sqlite3.connect(self.db_path, timeout=5.0)
+        return c
+
+    def _gc(self, c) -> None:
+        c.execute("DELETE FROM suspended_sessions WHERE created_at < ?",
+                  (time.time() - _TTL_SECONDS,))
+
+    def stash(self, s: SuspendedSession) -> None:
+        import pickle  # noqa: S403 -- round-trips our own dataclass, same process family
+        blob = pickle.dumps(s, protocol=pickle.HIGHEST_PROTOCOL)
+        with self._lock, self._conn() as c:
+            self._gc(c)
+            c.execute(
+                "INSERT OR REPLACE INTO suspended_sessions"
+                " (approval_id, created_at, payload) VALUES (?, ?, ?)",
+                (s.approval_id, s.created_at, blob),
+            )
+
+    def _load(self, c, approval_id: str) -> SuspendedSession | None:
+        import pickle  # noqa: S403
+        row = c.execute(
+            "SELECT payload FROM suspended_sessions WHERE approval_id = ?",
+            (approval_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        s = pickle.loads(row[0])  # noqa: S301 -- our own file, see class docstring
+        return None if s.expired() else s
+
+    def peek(self, approval_id: str) -> SuspendedSession | None:
+        with self._lock, self._conn() as c:
+            self._gc(c)
+            return self._load(c, approval_id)
+
+    def pop(self, approval_id: str) -> SuspendedSession | None:
+        with self._lock, self._conn() as c:
+            self._gc(c)
+            s = self._load(c, approval_id)
+            c.execute("DELETE FROM suspended_sessions WHERE approval_id = ?",
+                      (approval_id,))
+            return s
+
+    def clear(self) -> None:
+        with self._lock, self._conn() as c:
+            c.execute("DELETE FROM suspended_sessions")
+
+
+# Backwards-compat facade. Existing callers (web/backend/routes/chat.py,
+# tests, and the provider's fallback path) use the module-level functions
+# against a process-wide default gateway. `set_default_gateway` lets the web
+# backend swap in a SqliteApprovalGateway at startup so both the stash side
+# (provider) and the resolve side (chat route) share one persisted store
+# without any further wiring. The connector instantiates its own gateway and
+# passes it to the provider explicitly rather than touching this singleton.
+_DEFAULT: InMemoryApprovalGateway | SqliteApprovalGateway = (
+    InMemoryApprovalGateway()
+)
+
+
+def set_default_gateway(
+    gw: InMemoryApprovalGateway | SqliteApprovalGateway,
+) -> None:
+    global _DEFAULT
+    _DEFAULT = gw
+
+
+def get_default_gateway() -> InMemoryApprovalGateway | SqliteApprovalGateway:
+    return _DEFAULT
+
+
+def stash(s: SuspendedSession) -> None:
+    _DEFAULT.stash(s)
+
+
+def peek(approval_id: str) -> SuspendedSession | None:
+    return _DEFAULT.peek(approval_id)
+
+
+def pop(approval_id: str) -> SuspendedSession | None:
+    return _DEFAULT.pop(approval_id)
+
+
+def clear() -> None:
+    _DEFAULT.clear()

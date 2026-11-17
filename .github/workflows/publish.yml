@@ -1,0 +1,59 @@
+name: Publish to PyPI
+
+# Builds the fsr_playbooks wheel and publishes it to PyPI via Trusted
+# Publishing (OIDC) -- no API token stored in the repo. PyPI verifies the
+# workflow identity directly.
+#
+# ONE-TIME PyPI SETUP (required before the first run):
+#   PyPI -> your account -> Publishing -> "Add a pending publisher"
+#     PyPI Project Name:  fsr_playbooks
+#     Owner:              ftnt-dspille
+#     Repository name:    fsr-playbook-framework
+#     Workflow name:      publish.yml
+#     Environment name:   pypi
+#
+# To release: tag the commit `vX.Y.Z` and publish a GitHub Release on it. The
+# version is derived from that tag by hatch-vcs -- there is NO version string to
+# bump in any file (see packaging/fsr_playbooks/pyproject.toml + RELEASING.md).
+# `git tag vX.Y.Z && git push origin vX.Y.Z`, then cut the Release. PyPI rejects
+# re-uploading an existing version, so each release needs a fresh, higher tag.
+#
+# `workflow_dispatch` off a branch with no tag at HEAD builds a dev version
+# (e.g. 0.4.11.devN) -- useful for a dry run, but don't publish those to PyPI.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: build + publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # hatch-vcs derives the version from the git tag, so the full history
+          # (and the tags) must be fetched -- the default depth-1 clone has none.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Build wheel
+        # Wheel only -- the external ../../fsr_playbooks source (grafted via
+        # force-include) makes a valid in-place wheel but cannot produce a
+        # correct sdist.
+        run: cd packaging/fsr_playbooks && uv build --wheel --out-dir dist
+
+      - name: Validate metadata
+        run: uvx twine check packaging/fsr_playbooks/dist/*.whl
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packaging/fsr_playbooks/dist

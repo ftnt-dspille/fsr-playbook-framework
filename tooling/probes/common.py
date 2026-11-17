@@ -1,0 +1,291 @@
+"""Shared helpers for probes.
+
+Probes are idempotent: drop+repopulate the tables they own per run, then write
+an `_probe_runs` audit row. Use `probe_session()` as a context manager.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from collections.abc import Iterable
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+STORE_DIR = REPO_ROOT / "data"
+DB_PATH = STORE_DIR / "fsr_reference.db"
+SCHEMA_PATH = STORE_DIR / "schema.sql"
+
+import os
+import sys
+
+# Harvest-time secret redaction (scripts/secret_redact.py): every probe that
+# stores a snippet or step arguments from a live appliance passes it through
+# these so a credential in a customer playbook never reaches a DB or a wheel.
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from secret_redact import redact_any, redact_obj  # noqa: E402,F401
+
+# Shipped in fsr_playbooks.warmup so `fsrpb warmup` writes verifications the
+# same way the probes do. Re-exported here for the probes that import it.
+from fsr_playbooks.warmup import record_verification  # noqa: F401
+
+# External DB we ATTACH read-only for enrichment (cross-vendor API examples
+# + extracted FortiSOAR connector method bodies). Env override
+# `FSRPB_API_CATALOG` lets a deploy point at a different file without
+# editing code. Default tracks the current location under
+# `Miscellaneous/fortisoar/corpus_builder/` (moved 2026-05 from
+# `Miscellaneous/api_examples_catalog/`).
+CATALOG_DB_PATH = Path(os.environ.get("FSRPB_API_CATALOG") or (
+    Path.home()
+    / "PycharmProjects"
+    / "Miscellaneous"
+    / "fortisoar"
+    / "corpus_builder"
+    / "catalog.sqlite"
+))
+
+# Canonical source roots for the probes. Kept here so a single edit moves all
+# probes if a directory is renamed.
+RPM_EXTRACTED_DIR = (
+    Path.home()
+    / "PycharmProjects"
+    / "Miscellaneous"
+    / "fortisoar"
+    / "corpus_builder"
+    / "repos"
+    / "fortisoar-rpm-extracted"
+)
+SCHEMA_JSON_PATH = (
+    Path.home() / "PycharmProjects" / "Miscellaneous" / "fortisoar" / "schema.json"
+)
+FSR_SCHEMA_TS_PATH = (
+    Path.home() / "PycharmProjects" / "FSRPlaybookConversion" / "fsr-schema.ts"
+)
+PB_EXAMPLES_GLOB = "pb_examples/**/*.json"  # resolved by callers
+
+# Modules in scope for v1 (Phase 0 lock).
+IN_SCOPE_MODULES = {"threat_intel_feeds", "indicators", "alerts", "incidents"}
+
+
+_SCHEMA_TABLE_RE = re.compile(
+    r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[\"'`]?(\w+)",
+    re.IGNORECASE,
+)
+
+
+def _schema_tables() -> set[str]:
+    """Table names schema.sql declares. Cached -- the file does not change."""
+    global _SCHEMA_TABLES_CACHE
+    if _SCHEMA_TABLES_CACHE is None:
+        _SCHEMA_TABLES_CACHE = set(_SCHEMA_TABLE_RE.findall(SCHEMA_PATH.read_text()))
+    return _SCHEMA_TABLES_CACHE
+
+
+_SCHEMA_TABLES_CACHE: set[str] | None = None
+
+
+def open_db(create: bool = True) -> sqlite3.Connection:
+    """Open the reference DB, applying schema.sql only when something is missing.
+
+    Two failure modes bracket this function, and it has to thread between them:
+
+    * Applying the schema only when the FILE DID NOT EXIST meant a table added
+      to schema.sql never reached an already-built corpus. It surfaced as
+      `no such table` from a probe that reads correctly, fixable only by
+      deleting the 63M db and rebuilding.
+
+    * Applying it on EVERY open turns every read into a write. Under the test
+      suite's rapid repeated opens that corrupted the database outright --
+      one run failed 313 tests with `database disk image is malformed`, the
+      next two passed clean.
+
+    So: cheap read of `sqlite_master`, and run the (idempotent) schema only if a
+    table it declares is absent. Steady state is one SELECT and no write.
+    """
+    STORE_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    # WAL, explicitly. The shipped db is already in WAL -- but nothing in the
+    # code ever SET it, so that was a property of the file, not of the store.
+    # A rebuilt db comes back in rollback-journal mode (sqlite's default),
+    # where the MCP server and a probe run writing the same tables from two
+    # processes is a genuinely more dangerous shape than it is under WAL. The
+    # `database disk image is malformed` this docstring describes is what that
+    # failure looks like, and "populated" is not the same as "intact". The
+    # pragma is persistent and idempotent, so this costs one no-op per open.
+    conn.execute("PRAGMA journal_mode = WAL")
+    if create:
+        have = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if _schema_tables() - have:
+            conn.executescript(SCHEMA_PATH.read_text())
+            conn.commit()
+    # Always attach catalog read-only when present; probes can ignore if not needed.
+    if CATALOG_DB_PATH.exists():
+        conn.execute(
+            f"ATTACH DATABASE '{CATALOG_DB_PATH}' AS catalog"  # noqa: S608 - fixed path
+        )
+    return conn
+
+
+@contextmanager
+def probe_session(probe_name: str, source_paths: Iterable[Path], version: str = "1"):
+    """Context manager: opens DB, yields conn, records `_probe_runs` row on success."""
+    conn = open_db()
+    try:
+        yield conn
+        row_counts = _row_counts_for(conn, probe_name)
+        conn.execute(
+            "INSERT INTO _probe_runs (probe_name, ts, source_paths, row_counts, version) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                probe_name,
+                datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                json.dumps([str(p) for p in source_paths]),
+                json.dumps(row_counts),
+                version,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Each probe declares the tables it owns so we can both wipe-on-rerun and
+# report row counts in `_probe_runs`.
+PROBE_TABLES: dict[str, tuple[str, ...]] = {
+    "probe_step_types": ("step_types", "step_examples"),
+    "probe_connectors": ("connectors", "operations", "operation_params", "operation_examples"),
+    "probe_modules": ("modules", "module_fields", "picklists"),
+    "probe_connector_configs": ("connector_configs",),
+    "probe_jinja": ("jinja_macros", "jinja_context_vars"),
+    # 'probe_jinja' is the live name; alias retained for any old refs.
+    "probe_playbook_patterns": ("recipes", "playbooks_seen"),
+    "probe_api_endpoints": ("api_endpoints", "api_endpoint_params", "api_endpoint_examples"),
+    "probe_playbooks": ("step_types", "step_examples", "playbooks_seen", "recipes"),
+    "probe_jinja_backend": ("jinja_globals", "jinja_tests"),
+    "probe_step_handlers": ("step_handlers",),
+    # probe_playbook_constraints owns no permanent rows -- only writes
+    # verification records -- so it has an empty table tuple.
+    "probe_playbook_constraints": (),
+    "probe_cleanup": (),
+    "probe_jinja_corpus": ("jinja_expressions", "jinja_filter_usage"),
+    "probe_playbook_steps": ("playbook_steps", "solution_packs",
+                             "solution_pack_connectors", "solution_pack_deps"),
+    "probe_op_safety": ("op_safety",),
+    # probe_param_types UPDATEs columns on operation_params in place,
+    # plus owns the param_type_probes ledger. We don't wipe the ledger
+    # on every run -- Phase 2.2 re-runs are deliberately incremental.
+    "probe_param_types": (),
+}
+
+
+def wipe_probe_tables(conn: sqlite3.Connection, probe_name: str) -> None:
+    for table in PROBE_TABLES[probe_name]:
+        conn.execute(f"DELETE FROM {table}")
+    # FTS rows tagged with kind owned by this probe get cleared by the probe
+    # itself when it rewrites them -- keep that explicit, not magical here.
+
+
+def conditional_refetch(
+    client,
+    *,
+    url: str,
+    conn: sqlite3.Connection,
+    collection: str,
+    params: dict | None = None,
+    ttl_seconds: int | None = None,
+) -> tuple[str, object]:
+    """Tier-2 freshness refresh: refetch ``collection`` only when stale.
+
+    The warmup probes capture an ETag (``record_etag``) and a warm timestamp
+    (``record_data_warmed_at``). This consumes both: it short-circuits while the
+    catalog is within its TTL, and otherwise issues a conditional GET
+    (``If-None-Match`` with the stored ETag) so an unchanged collection costs a
+    cheap 304 instead of a full re-pull.
+
+    Returns ``(outcome, payload)``:
+
+    - ``("fresh", None)``      -- within TTL; no request made.
+    - ``("unchanged", None)``  -- TTL expired, server returned **304** (ETag
+      matched). ``data_warmed_at`` is bumped (content is still current).
+    - ``("refreshed", body)``  -- TTL expired, server returned **200**. The new
+      ETag (if any) is recorded and ``data_warmed_at`` bumped; the caller is
+      responsible for writing ``body`` into the catalog tables.
+    - ``("error", message)``   -- the request failed or returned an unexpected
+      status; nothing is written.
+
+    Pure protocol/bookkeeping -- the caller owns per-collection table writes,
+    which differ by shape (picklists vs connector_configs vs …).
+
+    **Live behavior on FortiSOAR 8.0 (live-verified on a dev appliance):** the 304
+    ``unchanged`` path is effectively dead. FSR's Hydra collections
+    (``picklist_names`` / ``teams`` / ``staging_model_metadatas``) return an
+    ``ETag`` but **do not honor ``If-None-Match``** -- a conditional GET always
+    comes back 200 with the full body, so this helper records the (re-)fetched
+    ETag + bumps ``data_warmed_at`` and returns ``"refreshed"``. The non-Hydra
+    endpoints (``/api/integration/connectors/`` / ``/api/3/``) return no ETag at
+    all. So on FSR today the only working arm is the TTL ``fresh``
+    short-circuit, which trades freshness (a catalog warmed again within the TTL
+    window skips the fetch and may miss a just-published picklist value / field)
+    for fewer requests -- which is why the wiring stays **opt-in / default OFF**.
+    If a future FSR version honors ``If-None-Match``, the 304 arm revives with no
+    code change.
+    """
+    from fsr_playbooks import _catalog_meta
+
+    ttl = _catalog_meta.DEFAULT_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+    if not _catalog_meta.is_ttl_expired(conn, ttl):
+        return "fresh", None
+
+    headers = {}
+    etag = _catalog_meta.get_etag(conn, collection)
+    if etag:
+        headers["If-None-Match"] = etag
+
+    try:
+        resp = client.session.get(
+            client.base_url + url,
+            params=params,
+            headers=headers or None,
+            verify=client.verify_ssl,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return "error", f"{collection}: {exc!r}"
+
+    if resp.status_code == 304:
+        _catalog_meta.record_data_warmed_at(conn)
+        return "unchanged", None
+    if resp.status_code == 200:
+        new_etag = resp.headers.get("ETag")
+        if new_etag:
+            _catalog_meta.record_etag(conn, collection, new_etag)
+        _catalog_meta.record_data_warmed_at(conn)
+        return "refreshed", resp.json()
+    return "error", f"{collection}: unexpected status {resp.status_code}"
+
+
+LOCAL_SOURCE_METHODS = frozenset({
+    "rpm_info_json",
+    "schema_json",
+    "schema_ts",
+    "widget_constants",
+})
+
+LIVE_TRUSTED_METHODS = frozenset({
+    "live_api_get",
+    "live_api_render",
+    "live_op_exec",
+    "playbook_e2e",
+})
+
+
+def _row_counts_for(conn: sqlite3.Connection, probe_name: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for table in PROBE_TABLES.get(probe_name, ()):  # tolerate ad-hoc probes
+        cur = conn.execute(f"SELECT COUNT(*) FROM {table}")
+        out[table] = cur.fetchone()[0]
+    return out

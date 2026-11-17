@@ -1,0 +1,43 @@
+# Gold answer for the `jinja_chain_json_payload` eval fixture.
+#
+# Two typed expressions inside ONE structure: an integer count and a list
+# projection, rendered as a JSON-encoded string. `| map(attribute='value')`
+# must be `| list`-ed before `| to_json` -- a generator serializes to garbage.
+
+collection: Eval Golds
+description: Known-correct answers used to calibrate the behavioral graders.
+visible: true
+
+playbooks:
+  - name: Artifact Summary To Webhook
+    description: Build a JSON body from the alert's artifacts and POST it.
+    steps:
+      - name: On Alert Create
+        type: start_on_create
+        next: Build Payload
+        module: alerts
+
+      - name: Build Payload
+        type: set_variable
+        next: Post Payload
+        vars:
+          payload: >-
+            {{ {'count': vars.input.records[0].artifactsRelatedToAlerts | length,
+                'names': vars.input.records[0].artifactsRelatedToAlerts
+                         | map(attribute='value') | list} | to_json }}
+
+      - name: Post Payload
+        type: connector
+        next: Done
+        connector: cyops_utilities
+        operation: api_call
+        config: ""
+        params:
+          method: POST
+          url: https://hooks.example.com/soc/artifacts
+          body: "{{ vars.payload }}"
+          headers:
+            Content-Type: application/json
+
+      - name: Done
+        type: end

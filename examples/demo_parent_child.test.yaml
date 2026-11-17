@@ -1,0 +1,17 @@
+fixture: examples/demo_parent_child.yaml
+playbook: FSRPB Parent Caller
+input:
+  base: "7"
+
+timeout_s: 120
+
+expects:
+  status: finished
+  vars:
+    final_product: 70
+  steps:
+    Call_multiplier:
+      status: finished
+    Stamp_result:
+      status: finished
+cleanup: true

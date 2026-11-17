@@ -1,0 +1,1203 @@
+"""Trace → YAML compiler -- wire a playbook from the typed action trace.
+
+Consumes a `SkillTrace` (the SkillCalls the agent executed during triage,
+SKILL_BASED_PLAYBOOK_PLAN §2) and emits FSRPB YAML by **value-match over
+captured outputs** (§3) instead of the model guessing jinja paths:
+
+1. Emit one candidate step per SkillCall via the Phase-1 skill `compile()`
+   hooks, chained in trace (dependency) order.
+2. For each step's input args, scan *earlier* SkillCalls' `observed_output`
+   for the same value and back-derive a jinja path, replacing the literal
+   with `{{ vars.steps.<source>[.data].<path> }}`.
+3. The first occurrence of a one-off triage value (no earlier producer) is
+   left as a literal here; parameterizing it into a playbook input is a
+   later refinement. Branch preservation (decision steps from recorded
+   choice/manual-input values) is wired by the caller, not value-match.
+
+Value-match yields *candidate* wiring with possible false positives (a
+literal that happens to equal a prior output). That is fine -- §4 verifies
+each wire with `render_jinja`/`step_through_playbook` against the same
+captured outputs before push. This module does the deterministic part;
+verification is its own pass.
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from ..agent.skill_trace import SkillCall, SkillTrace
+from .skills import get_skill
+
+# A param value is only trusted for value-match if it is non-trivial -- short
+# ints, booleans, and tiny strings coincide across unrelated steps too often
+# (port 443, True, "yes"). IOC-shaped / structured / long values are safe.
+_MIN_STR_LEN = 4
+
+# Params that are never wired (they identify the step, not its data).
+# `agent` is agent-binding metadata for agent-routed connectors.
+# `tool` is the MCP tool name on call_mcp_tool steps -- metadata, not data.
+_SKIP_PARAMS = frozenset({"connector", "operation", "config", "agent", "tool"})
+
+
+def _jkey(step_name: str) -> str:
+    """FSR keys vars.steps.* off the step name with spaces→underscores."""
+    return step_name.replace(" ", "_")
+
+
+def _is_wirable_value(v: Any) -> bool:
+    """Reject trivial values that would produce false-positive matches."""
+    if isinstance(v, bool) or v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return False                       # numbers coincide too readily
+    if isinstance(v, str):
+        return len(v.strip()) >= _MIN_STR_LEN
+    if isinstance(v, (dict, list)):
+        return bool(v)                     # structured values are distinctive
+    return False
+
+
+# Embedded (substring) wiring is riskier than whole-value match, so it is
+# stricter: the prior-output scalar must be longer AND IOC-shaped (carry a digit
+# or a `.`/`:`/`/` separator). That targets IPs/domains/hashes/CVEs embedded in
+# query strings (`srcIpAddr = <ip>`) while excluding plain words like "Germany"
+# that coincide across unrelated steps.
+_MIN_EMBED_LEN = 7
+
+
+def _looks_structured(s: str) -> bool:
+    """IOC-ish: has a digit or a separator that plain prose words don't."""
+    return any(c.isdigit() for c in s) or any(c in s for c in ".:/")
+
+
+def _try_parse_json(s: str) -> Any | None:
+    """Parse `s` as JSON if it looks like a JSON object/array, else None."""
+    if not isinstance(s, str) or not s.strip().startswith(("{", "[")):
+        return None
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _find_record_field_expr(
+    record_fields: dict[str, Any], target: Any,
+) -> str | None:
+    """A full Jinja expression that resolves ``target`` from the trigger
+    record via ``vars.input.records[0]``, or None.
+
+    Handles JSON-string record fields (e.g. ``sourcedata``) by parsing
+    them and building a ``(vars.input.records[0].<field> | from_json).<inner>``
+    expression, using FortiSOAR's ``from_json`` Jinja filter.
+
+    Examples:
+        record_fields = {"sourceIp": "1.2.3.4"}, target = "1.2.3.4"
+        -> "{{ vars.input.records[0].sourceIp }}"
+
+        record_fields = {"sourcedata": '{"x": {"host": "smith"}}'}, target = "smith"
+        -> "{{ (vars.input.records[0].sourcedata | from_json).x.host }}"
+    """
+    # Fast path: simple walk (no JSON parsing)
+    suffix = _find_value_path(record_fields, target)
+    if suffix is not None:
+        return "{{ vars.input.records[0]" + suffix + " }}"
+    # Slow path: parse JSON-string fields and search inside
+    if not _is_wirable_value(target):
+        return None
+    for k, v in record_fields.items():
+        parsed = _try_parse_json(v) if isinstance(v, str) else None
+        if parsed is None:
+            continue
+        inner = _find_value_path(parsed, target)
+        if inner is not None:
+            return ("{{ (vars.input.records[0]" + _key_access(k)
+                    + " | from_json)" + inner + " }}")
+    return None
+
+
+def _embeddable_record_scalars(
+    record_fields: dict[str, Any],
+) -> list[tuple[str, str]]:
+    """``(scalar, jinja_expr)`` for IOC-shaped values in ``record_fields``,
+    including values nested inside JSON-string fields.
+
+    Analogous to :func:`_embeddable_scalars` but returns full Jinja
+    expressions (with ``| from_json`` for JSON-blob fields) instead of
+    path suffixes, so callers can use them directly as ``record_vars``
+    values.
+    """
+    found: list[tuple[str, str]] = []
+    # Simple walk
+    for scalar, path in _embeddable_scalars(record_fields):
+        found.append((scalar, "{{ vars.input.records[0]" + path + " }}"))
+    # JSON blob walk
+    for k, v in record_fields.items():
+        parsed = _try_parse_json(v) if isinstance(v, str) else None
+        if parsed is None:
+            continue
+        for scalar, inner_path in _embeddable_scalars(parsed):
+            expr = ("{{ (vars.input.records[0]" + _key_access(k)
+                    + " | from_json)" + inner_path + " }}")
+            found.append((scalar, expr))
+    return found
+
+
+def _key_access(k: str) -> str:
+    """Jinja key access; bracket-quote keys that aren't bare-identifier safe
+    (e.g. `hydra:member`)."""
+    if k.isidentifier():
+        return f".{k}"
+    return f"[{k!r}]"
+
+
+def _find_value_path(output: Any, target: Any) -> str | None:
+    """Return a jinja access suffix (e.g. `.attributes.ip` or
+    `['hydra:member'][0].ip`) into `output` whose leaf equals `target`, or
+    None. Depth-first; returns the first (shallowest-leftmost) match."""
+    def _walk(node: Any, path: str) -> str | None:
+        if node == target and type(node) == type(target):
+            return path
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if not isinstance(k, str):
+                    continue
+                r = _walk(v, path + _key_access(k))
+                if r is not None:
+                    return r
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                r = _walk(v, f"{path}[{i}]")
+                if r is not None:
+                    return r
+        return None
+
+    return _walk(output, "")
+
+
+def _embeddable_scalars(output: Any) -> list[tuple[str, str]]:
+    """`(scalar, path)` for distinctive, IOC-shaped string leaves of an output --
+    the candidates for embedded (substring) wiring."""
+    found: list[tuple[str, str]] = []
+
+    def _walk(node: Any, path: str) -> None:
+        if isinstance(node, str):
+            if len(node.strip()) >= _MIN_EMBED_LEN and _looks_structured(node):
+                found.append((node, path))
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                if isinstance(k, str):
+                    _walk(v, path + _key_access(k))
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                _walk(v, f"{path}[{i}]")
+
+    _walk(output, "")
+    return found
+
+
+def _embedded_spans(value: str, scalar: str) -> list[tuple[int, int]]:
+    """All non-overlapping bounded-token spans of `scalar` in `value`. Each must
+    be flanked by non-alphanumeric chars so we never wire a partial IOC
+    (`1.2.3.4` inside `1.2.3.40`). `scalar == value` (a whole-value match,
+    handled elsewhere) yields nothing. Returns every occurrence so a bidirectional
+    hunt (`srcIpAddr = X OR destIpAddr = X`) wires BOTH, not just the first."""
+    if scalar == value or not scalar:
+        return []
+    spans: list[tuple[int, int]] = []
+    start = 0
+    while True:
+        idx = value.find(scalar, start)
+        if idx < 0:
+            break
+        end = idx + len(scalar)
+        before = value[idx - 1] if idx > 0 else ""
+        after = value[end] if end < len(value) else ""
+        if not (before.isalnum() or after.isalnum()):
+            spans.append((idx, end))
+        start = end
+    return spans
+
+
+def _apply_spans(value: str, repls: list[tuple[int, int, str]]) -> str:
+    """Rewrite `value`, replacing each `(start, end, text)` span. Spans are
+    applied left-to-right; overlapping spans (a later one starting before the
+    previous ended) are dropped so the longest/earliest wins."""
+    out: list[str] = []
+    last = 0
+    for start, end, text in sorted(repls, key=lambda r: (r[0], -(r[1] - r[0]))):
+        if start < last:
+            continue
+        out.append(value[last:start])
+        out.append(text)
+        last = end
+    out.append(value[last:])
+    return "".join(out)
+
+
+def _embedded_substitution(value: str, prior: list[SkillCall]) -> str | None:
+    """If distinctive prior-output scalars appear as bounded tokens INSIDE the
+    string `value` (e.g. the IP in `srcIpAddr = 1.2.3.4`), return `value` with
+    EVERY such occurrence replaced by its `{{ vars.steps... }}` ref so the param
+    is re-runnable, else None. Whole-value matches are handled by the caller;
+    closest producer wins on overlap."""
+    repls: list[tuple[int, int, str]] = []
+    for src in reversed(prior):           # closest producer first (stable on ties)
+        for scalar, path in _embeddable_scalars(src.observed_output):
+            ref = _ref_for(src, path)
+            for span in _embedded_spans(value, scalar):
+                repls.append((span[0], span[1], ref))
+    if not repls:
+        return None
+    return _apply_spans(value, repls)
+
+
+def _ref_for(call: SkillCall, suffix: str) -> str:
+    """Build the full jinja reference into a prior step's output."""
+    base = f"vars.steps.{_jkey(call.step_name)}"
+    if call.ref_prefix:
+        base += f".{call.ref_prefix}"
+    return "{{ " + base + suffix + " }}"
+
+
+def wire_inputs(
+    inputs: dict[str, Any], prior: list[SkillCall]
+) -> tuple[dict[str, str], list[str]]:
+    """Value-match each wirable input against earlier observed outputs.
+
+    Returns `(wired_refs, unwired)` where `wired_refs` maps a param to a
+    `{{ vars.steps... }}` reference and `unwired` lists wirable params that
+    found no producer (candidates for parameterize / set_variable / gap).
+    """
+    wired: dict[str, str] = {}
+    unwired: list[str] = []
+    for param, value in inputs.items():
+        if param in _SKIP_PARAMS or not _is_wirable_value(value):
+            continue
+        matched = False
+        # Most-recent producer first -- closest dependency wins.
+        for src in reversed(prior):
+            suffix = _find_value_path(src.observed_output, value)
+            if suffix is not None:
+                wired[param] = _ref_for(src, suffix)
+                matched = True
+                break
+        if not matched:
+            # Whole-value match failed; for a string param, try wiring an
+            # IOC-shaped value EMBEDDED in it (e.g. the IP in a SIEM query
+            # `srcIpAddr = <ip>`) so a trace-built hunt is re-runnable instead
+            # of baking the IOC in as a literal.
+            sub = (_embedded_substitution(value, prior)
+                   if isinstance(value, str) else None)
+            if sub is not None:
+                wired[param] = sub
+            else:
+                unwired.append(param)
+    return wired, unwired
+
+
+# Step name of the synthetic input-staging step that reads the trigger record.
+_SET_INPUTS_STEP = "Set Inputs"
+
+
+def _step_param_container(step: dict[str, Any]) -> dict[str, Any] | None:
+    """The dict that holds a step's wirable params. Phase G: connector
+    args are at step level (no `arguments:` wrapper), so the step dict
+    itself is the param container. `set_variable` uses `vars`."""
+    if step.get("type") == "connector":
+        return step.get("arguments") or step
+    if step.get("type") == "set_variable":
+        return step.get("vars")
+    return None
+
+
+def _rules_lookup():
+    """A `(connector, op) -> visibility rules` callable backed by the reference
+    DB, or a no-op when the DB isn't available.
+
+    Opened once per compile rather than per step. Degrading to a no-op is
+    deliberate: without the catalog we cannot know which params are hidden, and
+    emitting the trace unpruned (today's behaviour) beats refusing to build.
+    """
+    try:
+        from .._db import default_db_path
+        from .resolver import Resolver
+        resolver = Resolver(default_db_path())
+    except Exception:  # noqa: BLE001 -- no catalog: leave params untouched
+        def _none(_c, _o):
+            return []
+        _none.enum = lambda _c, _o, _p: (None, None)
+        return _none
+
+    def _lookup(connector: str, operation: str):
+        return resolver.operation_param_rules(connector, operation)
+
+    # Same catalog, second question: a param's declared select options.
+    _lookup.enum = resolver.operation_param_enum
+    return _lookup
+
+
+def _is_fixed_choice(rules_for: Any, inputs: dict[str, Any], param: str) -> bool:
+    """True when the recorded value is drawn entirely from the param's DECLARED
+    select/multiselect options -- a choice the analyst made, not an indicator a
+    re-run must re-derive. Live: VirusTotal `query_ip` recorded
+    `relationships: ["Votes", "Comments", "Resolutions"]`, which counted as an
+    unwired gap and failed the offer's verified check. Catalog-backed, never a
+    heuristic: a plain-word host list is an indicator and must stay a gap."""
+    enum = getattr(rules_for, "enum", None)
+    connector, op = inputs.get("connector"), inputs.get("operation")
+    if enum is None or not connector or not op:
+        return False
+    try:
+        _ptype, options = enum(connector, op, param)
+    except Exception:  # noqa: BLE001 -- unknown param: not a known choice
+        return False
+    if not options:
+        return False
+    value = inputs.get(param)
+    values = value if isinstance(value, list) else [value]
+    return bool(values) and all(isinstance(v, str) and v in options for v in values)
+
+
+def _visible_params(
+    rules: list[tuple[str, str | None, str | None]],
+    provided: dict[str, Any],
+) -> set:
+    """Names in `provided` that FSR would actually SHOW, per the catalog rules.
+
+    A param is visible iff it has no gating parent, or some rule's parent is
+    itself visible AND that parent's provided value equals the condition.
+    Resolved to a fixed point because gating nests (block_ip_new: `duration` is
+    gated on `time_to_live`, which is gated on `method`).
+    """
+    by_name: dict[str, list[tuple[str | None, str | None]]] = {}
+    for name, parent, cond in rules:
+        by_name.setdefault(name, []).append((parent, cond))
+    visible = {n for n in provided if not by_name.get(n)
+               or any(p is None for p, _ in by_name[n])}
+    changed = True
+    while changed:
+        changed = False
+        for name in provided:
+            if name in visible:
+                continue
+            for parent, cond in by_name.get(name, []):
+                if (parent in visible
+                        and str(provided.get(parent)) == str(cond)):
+                    visible.add(name)
+                    changed = True
+                    break
+    return visible
+
+
+def prune_hidden_params(step: dict[str, Any], rules_for) -> list[str]:
+    """Drop params the chosen discriminator values make invisible. Returns the
+    dropped names.
+
+    A trace records every param the agent SENT, and a model routinely sends a
+    set spanning two branches of a conditional -- observed live on
+    `fortigate-firewall.block_ip_new`, where the recorded call carried
+    method='Quarantine Based' together with the Policy-Based-only
+    `ip_block_policy`/`ip_type`, and time_to_live='1 Day' together with
+    `duration` (only valid under 'Custom Time'). The compiler correctly rejects
+    that as a param-set conflict, so the trace compiled to NOTHING and the
+    analyst got no playbook -- P4 failing on exactly the containment op it
+    exists to bottle.
+
+    Pruning is FIDELITY, not leniency: FSR hides non-visible fields and does
+    not send them, so the pruned set is what actually executed. Keeping them
+    would emit a playbook that provably cannot run.
+    """
+    params = _step_param_container(step)
+    if step.get("type") != "connector" or not isinstance(params, dict):
+        return []
+    inner = params.get("params")
+    target = inner if isinstance(inner, dict) else params
+    # Phase G puts these at step level, but a trace whose recorded inputs
+    # carried an `arguments:` wrapper keeps them inside it -- and when that
+    # wrapper also nests `params:`, they sit in the container BETWEEN the step
+    # and the params, i.e. all three levels occur in the wild. Missing any one
+    # makes this function a silent no-op for that shape: on a live box the
+    # block_ip_new trace kept both branches, the compiler rejected the
+    # param-set conflict, and P4 produced no playbook -- the same failure this
+    # function was written to fix, reappearing through a different shape. It
+    # regressed twice on exactly that, so search every level rather than
+    # enumerating the shapes seen so far.
+    def _routing_key(key: str) -> Any:
+        for scope in (step, params, target):
+            value = scope.get(key)
+            if value:
+                return value
+        return None
+
+    connector = _routing_key("connector")
+    operation = _routing_key("operation")
+    if not connector or not operation:
+        return []
+    try:
+        rules = rules_for(str(connector), str(operation))
+    except Exception:  # noqa: BLE001 -- a catalog miss must not break the build
+        return []
+    if not rules:
+        return []
+    # Only consider names the catalog actually knows; `config`, jinja wiring
+    # keys and other step plumbing are not operation params.
+    known = {n for n, _, _ in rules}
+    provided = {k: v for k, v in target.items() if k in known}
+    visible = _visible_params(rules, provided)
+    dropped = sorted(set(provided) - visible)
+    for name in dropped:
+        target.pop(name, None)
+    return dropped
+
+
+def _has_jinja_ref(d: dict[str, Any]) -> bool:
+    """True if any leaf value in `d` is a jinja `{{ ... }}` reference."""
+    for v in d.values():
+        if isinstance(v, str) and "{{" in v:
+            return True
+        if isinstance(v, dict) and _has_jinja_ref(v):
+            return True
+    return False
+
+
+def _wire_nested_dict_leaves(
+    d: dict[str, Any],
+    record_fields: dict[str, Any] | None,
+    record_vars: dict[str, str],
+    used_vars: set,
+    val_to_var: dict[Any, str],
+) -> None:
+    """Recurse into a dict-valued gap param and parameterize each leaf that
+    matches a record field. Mutates `d` in place.
+
+    For `call_mcp_tool`'s `args: {ip: "1.2.3.4", direction: "any"}`, the `ip`
+    leaf matches `record_fields.destinationIp` and is rewritten to
+    `{{ vars.steps.Set Inputs.ip }}`. The `direction` leaf stays literal.
+    """
+    if not record_fields:
+        return
+    for k, v in list(d.items()):
+        if isinstance(v, dict):
+            _wire_nested_dict_leaves(v, record_fields, record_vars,
+                                     used_vars, val_to_var)
+            continue
+        if not _is_wirable_value(v):
+            continue
+        ref = _find_record_field_expr(record_fields, v)
+        embed_spans: list[tuple[int, int]] = []
+        if ref is None and isinstance(v, str):
+            for fval, fexpr in _embeddable_record_scalars(record_fields):
+                embed_spans = _embedded_spans(v, fval)
+                if embed_spans:
+                    ref = fexpr
+                    break
+        if ref is None:
+            continue
+        key = (type(v), v, ref)
+        var = val_to_var.get(key)
+        if var is None:
+            var = _safe_var_name(k, used_vars)
+            val_to_var[key] = var
+            record_vars[var] = ref
+        staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
+        if embed_spans and isinstance(v, str):
+            d[k] = _apply_spans(v, [(s, e, staged) for s, e in embed_spans])
+        else:
+            d[k] = staged
+
+
+def _safe_var_name(param: str, used: set) -> str:
+    """A jinja-safe, unique set_variable key derived from a param name."""
+    base = "".join(c if (c.isalnum() or c == "_") else "_" for c in param) or "input"
+    if base[0].isdigit():
+        base = "v_" + base
+    name, i = base, 2
+    while name in used:
+        name = f"{base}_{i}"
+        i += 1
+    used.add(name)
+    return name
+
+
+def wire_record_inputs(
+    steps: list[dict[str, Any]],
+    gaps: dict[str, list[str]],
+    record_fields: dict[str, Any] | None,
+    first_step: str | None,
+) -> tuple[dict[str, str], list[dict[str, Any]], str | None]:
+    """Parameterize one-off triage IOCs to the trigger record.
+
+    For every gap param (a value with no earlier producer that would
+    otherwise bake in as a literal), value-match its literal against the
+    triaged record's `record_fields`. On a hit at field path ``<suffix>``,
+    stage it on a synthetic ``Set Inputs`` ``set_variable`` step as
+    ``{{ vars.input.records[0]<suffix> }}`` and rewrite the consuming step's
+    param to ``{{ vars.steps.Set_Inputs.<var> }}``. The same literal reuses
+    one staged var (so two steps enriching the same IOC share it).
+
+    Caller guarantees a per-record (module-bound) trigger so
+    ``vars.input.records[0]`` resolves at runtime. Returns
+    ``(record_vars, steps, first_step)`` -- ``steps`` gains the Set Inputs
+    step at the front and ``first_step`` becomes ``"Set Inputs"`` when any
+    IOC was parameterized; otherwise all three are returned unchanged.
+    Mutates `gaps` in place (matched params are removed)."""
+    if not record_fields:
+        return {}, steps, first_step
+    by_name = {s.get("name"): s for s in steps}
+    record_vars: dict[str, str] = {}
+    used_vars: set = set()
+    val_to_var: dict[Any, str] = {}
+
+    for sname, params in list(gaps.items()):
+        step = by_name.get(sname)
+        container = _step_param_container(step) if step else None
+        if container is None:
+            continue
+        remaining: list[str] = []
+        for param in params:
+            literal = container.get(param)
+            ref = (_find_record_field_expr(record_fields, literal)
+                   if _is_wirable_value(literal) else None)
+            # Embedded fallback: an IOC-shaped record-field value sitting INSIDE
+            # a query string (`srcIpAddr = <alert_ip>`) parameterizes too, so a
+            # trace-built hunt re-runs on the triggering record's IOC. All
+            # occurrences are replaced (bidirectional `src… OR dst…` hunts).
+            embed_spans: list[tuple[int, int]] = []
+            if ref is None and isinstance(literal, str):
+                for fval, fexpr in _embeddable_record_scalars(record_fields):
+                    embed_spans = _embedded_spans(literal, fval)
+                    if embed_spans:
+                        ref = fexpr
+                        break
+            # Nested-dict fallback: a dict-valued gap (e.g. `call_mcp_tool`'s
+            # `args: {ip: "1.2.3.4, ...}`) can't be matched as a whole. Recurse
+            # into its leaves and parameterize each one that matches a record
+            # field, so an IP nested inside `args.ip` wires to
+            # `vars.input.records[0].destinationIp` just like a top-level param.
+            if ref is None and isinstance(literal, dict):
+                _wire_nested_dict_leaves(
+                    literal, record_fields, record_vars, used_vars,
+                    val_to_var)
+                # If at least one leaf was parameterized, this param is no
+                # longer an unwired gap. If none matched, it stays a gap.
+                if _has_jinja_ref(literal):
+                    continue
+            if ref is None:
+                remaining.append(param)
+                continue
+            key = (type(literal), literal, ref)
+            var = val_to_var.get(key)
+            if var is None:
+                var = _safe_var_name(param, used_vars)
+                val_to_var[key] = var
+                record_vars[var] = ref
+            staged = "{{ vars.steps." + _jkey(_SET_INPUTS_STEP) + "." + var + " }}"
+            if embed_spans and isinstance(literal, str):
+                container[param] = _apply_spans(
+                    literal, [(s, e, staged) for s, e in embed_spans])
+            else:
+                container[param] = staged
+        if remaining:
+            gaps[sname] = remaining
+        else:
+            del gaps[sname]
+
+    if not record_vars:
+        return {}, steps, first_step
+    set_inputs = {"type": "set_variable", "name": _SET_INPUTS_STEP,
+                  "vars": record_vars}
+    if first_step:
+        set_inputs["next"] = first_step
+    return record_vars, [set_inputs] + steps, _SET_INPUTS_STEP
+
+
+# Containment ops gate destructive change behind a malicious verdict.
+_CONTAINMENT_OP_HINTS = ("block_", "isolate_", "quarantine", "disable_",
+                         "deny_", "contain", "ban_", "remediat")
+# Output fields that signal "this indicator is malicious".
+_VERDICT_BOOL_FIELDS = frozenset({
+    "knownmalicious", "ismalicious", "is_malicious", "malicious",
+    "blacklisted", "isblacklisted", "is_blacklisted"})
+
+
+def _is_containment_op(op: str | None) -> bool:
+    op = (op or "").lower()
+    return any(h in op for h in _CONTAINMENT_OP_HINTS)
+
+
+def _find_verdict(output: Any) -> tuple[str, str] | None:
+    """`(jinja_suffix, kind)` for a malicious-verdict signal in `output`, or None.
+    `kind` is 'bool' (a True flag like `knownMalicious`) or 'count' (a `malicious`
+    integer > 0, e.g. VT's `last_analysis_stats.malicious`). Conservative: only
+    recognized fields count, so an unrecognized output yields no guess."""
+    def _walk(node: Any, path: str) -> tuple[str, str] | None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if not isinstance(k, str):
+                    continue
+                kl, sub = k.lower(), path + _key_access(k)
+                if isinstance(v, bool):
+                    if v and kl in _VERDICT_BOOL_FIELDS:
+                        return sub, "bool"
+                elif isinstance(v, int):          # bool already handled above
+                    if kl == "malicious" and v > 0:
+                        return sub, "count"
+                else:
+                    r = _walk(v, sub)
+                    if r is not None:
+                        return r
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                r = _walk(v, f"{path}[{i}]")
+                if r is not None:
+                    return r
+        return None
+
+    return _walk(output, "")
+
+
+def insert_containment_guard(
+    compiled: dict[str, Any], trace: SkillTrace
+) -> dict[str, Any]:
+    """Gate a containment op behind a malicious-verdict decision.
+
+    A trace that enriches an IOC then contains it compiles to an UNCONDITIONAL
+    linear chain -- re-running it would contain even when the enrichment comes
+    back clean (blocking a benign IP). When a recognized verdict signal exists in
+    an enrichment step BEFORE the first containment op, synthesize:
+
+      … enrich … → [set_variable: Assess Verdict] → [decision: Confirmed Malicious]
+                       ├─ malicious → containment → (its original next)
+                       └─ default   → skip (continue past containment)
+
+    Safe-by-default: the default branch SKIPS containment, so a wrong/absent
+    verdict never over-contains. No recognized signal → returns `compiled`
+    unchanged (no guess). Mutates and returns `compiled`."""
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
+    by_name = {c.step_name: c for c in trace.calls}
+
+    ci = next((i for i, s in enumerate(steps)
+               if s.get("type") == "connector"
+               and _is_containment_op(
+                   (s.get("arguments") or s).get("operation"))),
+              None)
+    if ci is None:
+        return compiled
+    cont = steps[ci]
+
+    verdict: tuple[str, str] | None = None
+    enrich: SkillCall | None = None
+    for s in reversed(steps[:ci]):            # closest enrichment first
+        if s.get("type") != "connector":
+            continue
+        sname = s.get("name")
+        call = by_name.get(sname) if isinstance(sname, str) else None
+        if call is None:
+            continue
+        v = _find_verdict(call.observed_output)
+        if v is not None:
+            verdict, enrich = v, call
+            break
+    if verdict is None or enrich is None:
+        return compiled
+
+    suffix, kind = verdict
+    sv_name, dec_name, var = "Assess Verdict", "Confirmed Malicious", "malicious_verdict"
+    var_ref = f"vars.steps.{_jkey(sv_name)}.{var}"
+    when = ("{{ " + var_ref + " }}" if kind == "bool"
+            else "{{ (" + var_ref + " | int) > 0 }}")
+
+    cont_name = cont["name"]
+    false_target = cont.get("next")
+    extra: list[dict[str, Any]] = []
+    if not false_target:                      # nothing after containment → skip marker
+        skip_name = "Containment Skipped"
+        extra.append({"type": "set_variable", "name": skip_name,
+                      "vars": {"containment_skipped": True}})
+        false_target = skip_name
+
+    sv = {"type": "set_variable", "name": sv_name,
+          "vars": {var: _ref_for(enrich, suffix)}, "next": dec_name}
+    dec = {"type": "decision", "name": dec_name,
+           "conditions": [{"display": "malicious", "when": when, "next": cont_name}],
+           "default": false_target}
+
+    # Rewire whatever pointed at the containment step to enter the guard instead.
+    if compiled.get("first_step") == cont_name:
+        compiled["first_step"] = sv_name
+    for s in steps:
+        if s.get("next") == cont_name:
+            s["next"] = sv_name
+
+    steps[ci:ci] = [sv, dec]                  # guard sits just before containment
+    steps.extend(extra)
+    compiled["steps"] = steps
+    return compiled
+
+
+# Step plumbing that sits in the same dict as the op params (Phase G puts
+# connector args at step level), so it must never be mistaken for a target.
+_STEP_PLUMBING_KEYS = frozenset({
+    "name", "type", "next", "conditions", "default", "operation", "connector",
+    "config", "params", "arguments", "step_variables", "ignore_errors",
+    "retry", "mock_result", "description", "options", "message", "vars",
+})
+
+
+def _sole_jinja_expr(value: Any) -> str | None:
+    """The inner expression of a value that is exactly one Jinja block, else None.
+
+    `"{{ vars.steps.enrich.ip }}"` -> `"vars.steps.enrich.ip"`. Anything mixed
+    with literal text, or holding more than one block, yields None: we only
+    assert on a param whose whole value is a reference, so there is no case
+    where a non-empty literal makes the check pass vacuously."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not (v.startswith("{{") and v.endswith("}}")) or v.count("{{") != 1:
+        return None
+    inner = v[2:-2].strip()
+    return inner or None
+
+
+def insert_containment_target_check(compiled: dict[str, Any]) -> dict[str, Any]:
+    """Skip a containment step whose target params render empty.
+
+    A containment op that iterates an empty target list does nothing and still
+    returns `status: Success` -- live-verified on FortiGate's `block_ip_new`,
+    which answers with all-empty outcome buckets and an unchanged ban list. In
+    a compiled playbook the target is a Jinja ref, so an upstream enrichment
+    returning no rows produces exactly that with no typo involved: gated
+    correctly, approved by a human, reported as done, nobody contained.
+
+    `run_op` already refuses that call during triage. The engine has no such
+    validator, so the guard has to be carried IN the artifact:
+
+      … → [decision: Containment Target Present]  present → containment
+                                                  default → [Containment Target Empty]
+
+    Asserted BEFORE the call, not after: the cause is an empty render, and
+    checking it up front means the firewall is never touched and the run is in
+    the same safe state as an analyst pressing Stop. So the branch lands where
+    Stop lands -- past containment, run continuing -- with a marker naming the
+    reason, rather than failing the run. A failed run is close to
+    information-free here (`error_message` is often None on a just-failed run;
+    the diagnostics cover Jinja render failures, not runtime step errors), so
+    dead-ending would trade a silent no-op for an unexplained red run.
+
+    Only params whose ENTIRE value is one Jinja block are asserted; a step with
+    no such param returns `compiled` unchanged (no guess). Idempotent. Run this
+    BEFORE `insert_containment_confirm`, which then rewires the present branch
+    through the human gate -- check, then ask, then contain."""
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
+    ci = next((i for i, s in enumerate(steps)
+               if s.get("type") == "connector"
+               and _is_containment_op(
+                   (s.get("arguments") or s).get("operation"))),
+              None)
+    if ci is None:
+        return compiled
+    cont = steps[ci]
+    cont_name = cont["name"]
+    dec_name, empty_name = "Containment Target Present", "Containment Target Empty"
+    if any(s.get("name") == dec_name for s in steps):
+        return compiled                       # already checked
+
+    container = cont.get("arguments") or cont
+    inner = container.get("params")
+    params = inner if isinstance(inner, dict) else container
+    exprs = [e for k, v in params.items()
+             if k not in _STEP_PLUMBING_KEYS
+             for e in (_sole_jinja_expr(v),) if e]
+    if not exprs:
+        return compiled                       # nothing referenced: nothing to assert
+
+    # `| default('', true) | length` is shape-agnostic -- a missing ref, an
+    # empty string, an empty list and an empty dict all measure 0.
+    when = "{{ " + " and ".join(
+        f"((({e}) | default('', true)) | length) > 0" for e in exprs) + " }}"
+
+    empty = {"type": "set_variable", "name": empty_name,
+             "vars": {"containment_skipped": True,
+                      "containment_skipped_reason": "empty_target"}}
+    if cont.get("next"):                      # else the marker ends the run
+        empty["next"] = cont["next"]
+    dec = {"type": "decision", "name": dec_name,
+           "conditions": [{"display": "target present", "when": when,
+                           "next": cont_name}],
+           "default": empty_name}
+
+    if compiled.get("first_step") == cont_name:
+        compiled["first_step"] = dec_name
+    for s in steps:
+        if s.get("next") == cont_name:
+            s["next"] = dec_name
+        for cond in (s.get("conditions") or []):
+            if isinstance(cond, dict) and cond.get("next") == cont_name:
+                cond["next"] = dec_name
+        if s.get("default") == cont_name:
+            s["default"] = dec_name
+
+    steps[ci:ci] = [dec]
+    steps.append(empty)
+    compiled["steps"] = steps
+    return compiled
+
+
+def insert_containment_confirm(compiled: dict[str, Any]) -> dict[str, Any]:
+    """Put an analyst Confirm/Stop manual-input step in front of containment.
+
+    The tier gate that protects a containment action during triage is dispatch
+    logic -- it lives in the AGENT loop, and a compiled playbook runs without it.
+    So a trace-built playbook needs its own human gate, carried IN the artifact:
+
+      … → [manual_input: Confirm Containment]  Confirm → containment
+                                               Stop    → skip past it
+
+    This is not redundant with `insert_containment_guard`. That one gates on a
+    recognized malicious-verdict field and returns the chain UNCHANGED when it
+    recognizes none -- so an unrecognized verdict shape today compiles a fully
+    ungated containment step. This runs regardless of whether a verdict was
+    found, so containment is never reached without a human saying yes.
+
+    `manual_input` routes on its own `options` (`{display, next}`), so no
+    decision step is needed for the fork.
+
+    Idempotent (a second call is a no-op) and safe to run after the verdict
+    guard: it rewires `next`, decision `conditions[].next`/`default`, and
+    `first_step` alike, so whatever pointed at containment -- including the
+    verdict decision's malicious branch -- now enters the confirmation."""
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
+    ci = next((i for i, s in enumerate(steps)
+               if s.get("type") == "connector"
+               and _is_containment_op(
+                   (s.get("arguments") or s).get("operation"))),
+              None)
+    if ci is None:
+        return compiled
+    cont = steps[ci]
+    cont_name = cont["name"]
+    confirm_name = "Confirm Containment"
+    if any(s.get("name") == confirm_name for s in steps):
+        return compiled                       # already gated
+
+    # Stopping continues past containment rather than dead-ending the run.
+    stop_target = cont.get("next")
+    extra: list[dict[str, Any]] = []
+    if not stop_target:
+        skip_name = "Containment Skipped"
+        if not any(s.get("name") == skip_name for s in steps):
+            extra.append({"type": "set_variable", "name": skip_name,
+                          "vars": {"containment_skipped": True}})
+        stop_target = skip_name
+
+    args = cont.get("arguments") or cont
+    op = args.get("operation") or "containment"
+    connector = args.get("connector") or "connector"
+    confirm = {
+        "type": "manual_input",
+        "name": confirm_name,
+        "message": (f"Run containment `{op}` via `{connector}`? "
+                    f"Choose Stop to skip it and continue."),
+        "options": [{"display": "Confirm", "next": cont_name},
+                    {"display": "Stop", "next": stop_target}],
+    }
+
+    # Everything that pointed at containment now enters the confirmation --
+    # except the confirmation's own Confirm branch.
+    if compiled.get("first_step") == cont_name:
+        compiled["first_step"] = confirm_name
+    for s in steps:
+        if s.get("next") == cont_name:
+            s["next"] = confirm_name
+        for cond in (s.get("conditions") or []):
+            if isinstance(cond, dict) and cond.get("next") == cont_name:
+                cond["next"] = confirm_name
+        if s.get("default") == cont_name:
+            s["default"] = confirm_name
+
+    steps[ci:ci] = [confirm]
+    steps.extend(extra)
+    compiled["steps"] = steps
+    return compiled
+
+
+def attach_containment_mock_result(
+    compiled: dict[str, Any], trace: SkillTrace
+) -> dict[str, Any]:
+    """Give every containment step the `mock_result` that makes a dry run dry.
+
+    `useMockOutput=true` is a **substitution**, not a kill switch: each step
+    honors its OWN `arguments.mock_result`, and a step that carries none has
+    nothing to substitute, so it **runs live** however the run was triggered.
+    A trace-compiled containment step used to carry no `mock_result` -- so a
+    nominally mocked run of a compiled playbook really blocked an address on a
+    real firewall. (`globalMock` must stay false; some handlers ignore
+    `mock_result` under it.)
+
+    The right payload already exists: the trace recorded what the op ACTUALLY
+    returned when the agent ran it during triage. Stamping that as the step's
+    `mock_result` makes every trace-compiled playbook safely dry-runnable by
+    construction, and the mocked output is realistic enough that downstream
+    steps wired to it still resolve.
+
+    Only containment (state-changing) steps are stamped -- an enrichment step
+    is safe to re-run live, and a stale mocked verdict would be worse than a
+    fresh one. Idempotent: a step that already carries a non-blank
+    `mock_result` is left alone. Emitted as a JSON **string**, the wire shape
+    the editor writes. Mutates and returns `compiled`."""
+    steps: list[dict[str, Any]] = compiled.get("steps", [])
+    by_name = {c.step_name: c for c in trace.calls}
+    for s in steps:
+        if s.get("type") != "connector":
+            continue
+        args = s.get("arguments") or s
+        if not _is_containment_op(args.get("operation")):
+            continue
+        existing = args.get("mock_result")
+        if isinstance(existing, str) and existing.strip():
+            continue
+        sname = s.get("name")
+        call = by_name.get(sname) if isinstance(sname, str) else None
+        if call is None:
+            continue
+        try:
+            payload = json.dumps(call.observed_output)
+        except (TypeError, ValueError):
+            continue                          # unserializable -> no claim made
+        args["mock_result"] = payload
+    return compiled
+
+
+def unmocked_containment_steps(doc: dict[str, Any]) -> list[str]:
+    """Names of containment steps in a playbook doc that carry no
+    `mock_result` -- i.e. the steps that would run FOR REAL under a
+    `useMockOutput=true` "dry run". Empty list means the doc is safe to
+    dry-run. Accepts a `compile_trace` result, an assembled source doc
+    (`playbooks: [...]`), or wire-form JSON (`workflows: [...]`)."""
+    pools: list[list[dict[str, Any]]] = []
+    if isinstance(doc.get("steps"), list):
+        pools.append(doc["steps"])
+    for key in ("playbooks", "workflows"):
+        for w in (doc.get(key) or []):
+            if isinstance(w, dict) and isinstance(w.get("steps"), list):
+                pools.append(w["steps"])
+    unmocked: list[str] = []
+    for steps in pools:
+        for s in steps:
+            if s.get("type") != "connector":
+                continue
+            args = s.get("arguments") or s
+            if not _is_containment_op(args.get("operation")):
+                continue
+            mr = args.get("mock_result")
+            if not (isinstance(mr, str) and mr.strip()):
+                unmocked.append(s.get("name") or "<unnamed>")
+    return unmocked
+
+
+def compile_trace(
+    trace: SkillTrace, *, start_step: str = "Start"
+) -> dict[str, Any]:
+    """Compile a SkillTrace into a list of candidate YAML source-form steps
+    chained in trace order, with value-match wiring applied.
+
+    Returns `{"steps": [...], "wiring": {step_name: {param: ref}}, "gaps":
+    {step_name: [param,...]}}`. The caller assembles these into a playbook
+    doc, then runs the §4 verify loop before push.
+    """
+    steps: list[dict[str, Any]] = []
+    wiring: dict[str, dict[str, str]] = {}
+    gaps: dict[str, list[str]] = {}
+    pruned: dict[str, list[str]] = {}
+
+    rules_for = _rules_lookup()
+    calls = trace.calls
+    for i, call in enumerate(calls):
+        skill = get_skill(call.skill_id)
+        if skill is None:
+            continue
+        wired, unwired = wire_inputs(call.resolved_inputs, calls[:i])
+        unwired = [p for p in unwired
+                   if not _is_fixed_choice(rules_for, call.resolved_inputs, p)]
+        step = skill.compile(call.resolved_inputs, wired, call.step_name)
+        # Drop params the recorded discriminator values make invisible, BEFORE
+        # wiring/gaps are reported -- a pruned param is not a gap, it is a
+        # field FSR would never have sent.
+        dropped = prune_hidden_params(step, rules_for)
+        if dropped:
+            pruned[call.step_name] = dropped
+            for name in dropped:
+                wired.pop(name, None)
+                if name in unwired:
+                    unwired.remove(name)
+        # Chain linearly in trace order (decision/branch rewires are the
+        # caller's job; this is the dependency-ordered backbone).
+        nxt = calls[i + 1].step_name if i + 1 < len(calls) else None
+        if nxt:
+            step["next"] = nxt
+        steps.append(step)
+        if wired:
+            wiring[call.step_name] = wired
+        if unwired:
+            gaps[call.step_name] = unwired
+
+    # Point the trigger at the first real step.
+    first = calls[0].step_name if calls else None
+    return {
+        "steps": steps,
+        "wiring": wiring,
+        "gaps": gaps,
+        "pruned": pruned,
+        "start_step": start_step,
+        "first_step": first,
+        # The catalog lookup this compile already opened. compile_and_verify
+        # re-emits the steps and has to re-prune them, and building a SECOND
+        # Resolver there is not free: it warms a connector-config cache that
+        # makes the emitter fill in a default `config` for steps whose trace
+        # recorded none, changing emitted YAML that has nothing to do with
+        # pruning. Hand the existing lookup over instead.
+        "_rules_for": rules_for,
+    }
+
+
+def assemble_playbook(
+    compiled: dict[str, Any],
+    *,
+    name: str = "Triage Playbook",
+    collection: str = "00 - FSR Studio",
+    trigger: str = "start",
+    module: str | None = None,
+    start_type: str = "start",
+) -> dict[str, Any]:
+    """Wrap the compiled steps into a full playbook doc (a `start` trigger
+    that points at the first real step, then the value-matched steps).
+
+    When `module` is given (the module the investigation ran on -- e.g.
+    ``alerts`` / ``incidents``), the start trigger is bound to that module
+    so it resolves to a manual Execute-menu trigger (``cybersponse.action``)
+    on the module's record listing, NOT a designer-only Referenced trigger
+    (``cybersponse.abstract_trigger``, the bare-`start` default). Playbooks
+    authored from a triage session should run from the record they triage."""
+    start = compiled.get("start_step", "Start")
+    first = compiled.get("first_step")
+    steps: list[dict[str, Any]] = []
+    if first:
+        # `start_type` is the YAML start step type: `start` (manual / referenced)
+        # or a record-event trigger (`start_on_create|update|delete`).
+        start_step: dict[str, Any] = {"type": start_type, "name": start, "next": first}
+        if module:
+            start_step["module"] = module
+        steps.append(start_step)
+    steps.extend(compiled.get("steps", []))
+    return {
+        "collection": collection,
+        "playbooks": [{
+            "name": name,
+            "trigger": trigger,
+            # Ship enabled: a playbook compiled from a triage session is meant to
+            # run the next time the pattern shows up, so it imports as Active
+            # (isActive=true) rather than a disabled draft the analyst has to
+            # remember to toggle on.
+            "is_active": True,
+            "steps": steps,
+        }],
+    }
+
+
+def to_yaml(doc: dict[str, Any]) -> str:
+    """Canonical YAML emission (matches the decompiler's dumper)."""
+    import yaml
+    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+
+
+def render_context(trace: SkillTrace, upto: int | None = None) -> dict[str, Any]:
+    """Build a `vars.steps.*` render context from captured outputs, keyed
+    exactly as runtime (honoring `ref_prefix`), for the §4 verify loop.
+    `upto` limits to the first N calls (a step only sees earlier outputs)."""
+    calls = trace.calls if upto is None else trace.calls[:upto]
+    steps_ctx: dict[str, Any] = {}
+    for call in calls:
+        payload = call.observed_output
+        if call.ref_prefix:
+            payload = {call.ref_prefix: payload}
+        steps_ctx[_jkey(call.step_name)] = payload
+    return {"vars": {"steps": steps_ctx}}
+
+
+def _source_step_of(ref: str, jkey_to_name: dict[str, str]) -> str | None:
+    """Recover the human step name a wire reads from (e.g.
+    `{{ vars.steps.Enrich_Indicator.data.x }}` -> `Enrich Indicator`).
+    Matches the `vars.steps.<jkey>` segment against actual trace step
+    names so underscores inside a real name don't get clobbered."""
+    import re
+    m = re.search(r"vars\.steps\.([A-Za-z0-9_]+)", ref or "")
+    if not m:
+        return None
+    return jkey_to_name.get(m.group(1))
+
+
+def _wiring_label(wired: dict[str, str], gaps: list[str],
+                  jkey_to_name: dict[str, str]) -> str:
+    """Plain-English wiring summary for the reviewable-draft card (contract
+    §5, 2.6.0) -- never raw jinja. Surfaces gaps as an explicit confirm-me."""
+    parts: list[str] = []
+    for param, ref in wired.items():
+        src = _source_step_of(ref, jkey_to_name)
+        parts.append(f"{param} from {src}" if src else param)
+    if parts:
+        label = "uses " + "; ".join(parts)
+        if gaps:
+            label += f" -- {', '.join(gaps)} needs confirming"
+        return label
+    if gaps:
+        return f"{', '.join(gaps)} could not be auto-wired -- confirm before run"
+    return "uses fixed values"
+
+
+def summarize_for_offer(
+    trace: SkillTrace, compiled: dict[str, Any]
+) -> dict[str, Any]:
+    """Build the contract v2.6.0 reviewable-draft fields (`ops_summary` +
+    `draft_steps`) from a compiled trace. Pure, no MCP/IO -- the
+    `emit_playbook_offer` tool calls this so per-step wiring labels and
+    verify badges are derived from the SAME deterministic compile the push
+    uses, never hand-written by the model.
+
+    `verified` is true for a step with no remaining gaps (every input was
+    auto-wired or is a fixed literal and survived the §4 verify loop);
+    false flags a step whose value fell back to a manual gap.
+    """
+    wiring = compiled.get("wiring", {})
+    gaps = compiled.get("gaps", {})
+    jkey_to_name = {_jkey(c.step_name): c.step_name for c in trace.calls}
+
+    ops_summary: list[dict[str, Any]] = []
+    draft_steps: list[dict[str, Any]] = []
+    for call in trace.calls:
+        skill = get_skill(call.skill_id)
+        if skill is None:
+            continue
+        name = call.step_name
+        step_gaps = gaps.get(name, [])
+        verified = not step_gaps
+        ri = call.resolved_inputs or {}
+        entry: dict[str, Any] = {
+            "skill_id": call.skill_id,
+            "step_type": skill.step_type,
+            "label": name,
+            "wiring_label": _wiring_label(
+                wiring.get(name, {}), step_gaps, jkey_to_name),
+            "verified": verified,
+        }
+        connector = ri.get("connector") or skill.needs.get("connector")
+        operation = ri.get("operation") or skill.needs.get("op")
+        if connector:
+            entry["connector"] = connector
+        if operation:
+            entry["operation"] = operation
+        ops_summary.append(entry)
+        draft_steps.append(
+            {"node": name, "step_type": skill.step_type, "verified": verified})
+
+    return {"ops_summary": ops_summary, "draft_steps": draft_steps}

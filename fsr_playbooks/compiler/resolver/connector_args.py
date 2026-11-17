@@ -1,0 +1,1134 @@
+"""ConnectorArgsMixin -- resolving connector and workflow reference arguments."""
+from __future__ import annotations
+
+import difflib
+import ipaddress
+import json as _json
+import re
+import sqlite3
+from collections.abc import Callable
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from ..errors import CompileError, ErrorCode
+from ..ir import Playbook, Step
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_AGENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+from ..typed_args.steps import expand_connector as _expand_connector_typed
+from ..typed_args.steps import (
+    expand_trigger_tenant_playbook as _expand_trigger_tenant_playbook_typed,
+)
+from ..typed_args.steps import (
+    expand_workflow_reference as _expand_workflow_reference_typed,
+)
+from .catalog import CatalogLookupMixin
+
+# UUID pattern for cross-collection target: detection.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+# Observed-type validators (Tier 2.3). Each returns True iff the value
+# is acceptable under that type. All accept native Python types straight
+# through and fall back to coercion attempts on strings. None of them
+# allocate beyond what Python's stdlib already costs -- they run per
+# param at compile time, so they need to stay cheap.
+
+_URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s]+$")
+# Pragmatic email regex -- RFC 5322 is too permissive to be useful as a
+# *typo* check, which is the goal here. The pattern matches the
+# overwhelming-majority "local@host.tld" shape; anything weirder is
+# unlikely to be intentional in a connector param.
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _is_ipv4(v) -> bool:
+    if not isinstance(v, str):
+        return False
+    try:
+        ipaddress.IPv4Address(v.strip())
+        return True
+    except (ipaddress.AddressValueError, ValueError):
+        return False
+
+
+def _is_url(v) -> bool:
+    return isinstance(v, str) and bool(_URL_RE.match(v.strip()))
+
+
+def _is_email(v) -> bool:
+    return isinstance(v, str) and bool(_EMAIL_RE.match(v.strip()))
+
+
+def _is_iso8601(v) -> bool:
+    """True if v parses as ISO 8601 (with or without time).
+
+    `fromisoformat` covers the standard variants that FSR connectors
+    accept. Native datetime/date objects pass through. Epoch numbers
+    are *not* accepted here -- those have their own observed_type
+    (`epoch_seconds` / `epoch_millis`); mixing them would dilute the
+    diagnostic value.
+    """
+    if isinstance(v, datetime):
+        return True
+    if not isinstance(v, str):
+        return False
+    s = v.strip()
+    if not s:
+        return False
+    try:
+        datetime.fromisoformat(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_json_object(v) -> bool:
+    """True if v is a dict (or a string that parses to a dict).
+
+    Connector params widget-typed `json` accept either form on the wire --
+    the FSR runtime json.loads strings before passing through. List-of-
+    items is handled separately via the `json_array` observed_type.
+    """
+    if isinstance(v, dict):
+        return True
+    if not isinstance(v, str):
+        return False
+    try:
+        return isinstance(_json.loads(v), dict)
+    except (_json.JSONDecodeError, TypeError):
+        return False
+
+
+def _is_json_array(v) -> bool:
+    if isinstance(v, list):
+        return True
+    if not isinstance(v, str):
+        return False
+    try:
+        return isinstance(_json.loads(v), list)
+    except (_json.JSONDecodeError, TypeError):
+        return False
+
+
+# Map observed_type → (display_name, validator, suggestion-tail). The
+# Tier 1 widget pass already covers `int` / `float` / `bool` / `picklist`
+# / `str` (str is permissive). We only register here the *additional*
+# types Tier 2 unlocks.
+_OBSERVED_VALIDATORS: dict[str, tuple[str, Callable[[Any], bool], str]] = {
+    "ipv4": ("IPv4 address", _is_ipv4,
+             "pass a dotted-quad address like '10.0.0.1'"),
+    "url":  ("URL", _is_url,
+             "pass a full URL including scheme, e.g. 'https://example.com/path'"),
+    "email": ("email address", _is_email,
+              "pass an address like 'user@example.com'"),
+    "iso8601": ("ISO 8601 timestamp", _is_iso8601,
+                "pass a timestamp like '2026-05-20T12:34:00Z' or '2026-05-20'"),
+    "json_object": ("JSON object", _is_json_object,
+                    "pass a YAML mapping or a JSON-encoded string"),
+    "json_array": ("JSON array", _is_json_array,
+                   "pass a YAML list or a JSON-encoded array string"),
+}
+
+
+def _param_target_observed_type(
+    widget_low: str, observed: str | None,
+) -> str | None:
+    """Collapse a param's widget + observed_type into the single tag
+    Tier 3 compares against. Lets us validate `{{ x | int }}` against
+    integer-widget params (which have observed_type='int') the same
+    way we'd validate text-widget params that probed as `ipv4`."""
+    if widget_low in {"integer", "intger"}:
+        return "int"
+    if widget_low in {"decimal", "numeric"}:
+        return "float"
+    if widget_low in {"checkbox", "boolean"}:
+        return "bool"
+    if widget_low in {"json", "object"}:
+        return "json_object"
+    if widget_low in {"text", "textarea", "richtext"}:
+        return observed  # may still be None for unprobed text params
+    return None
+
+
+# Pairs where Tier 3's inferred terminal type is *acceptable* for the
+# param's target type even when not byte-identical. The resolver runs
+# in "claim mismatch" mode -- silence is acceptance -- so we only need
+# to encode looseness, not strict equality.
+_COMPATIBLE_PAIRS: set[tuple[str, str]] = {
+    ("int", "float"),       # FSR float fields accept ints
+    ("int", "str"),         # str-typed params str() anything
+    ("float", "str"),
+    ("bool", "str"),
+    ("str", "ipv4"),        # Jinja `| string` can carry a valid ipv4
+    ("str", "url"),
+    ("str", "email"),
+    ("str", "iso8601"),
+    ("str", "ipv6"),
+    ("json_array", "list"),
+    ("json_object", "dict"),
+}
+
+
+def _types_compatible(inferred: str, target: str) -> bool:
+    """True iff `inferred` is acceptable for a param wanting `target`.
+
+    The exact-match case is the common one (`| int` into integer widget).
+    The `_COMPATIBLE_PAIRS` table covers the looseness FSR's runtime
+    actually accepts (numeric promotion, str-of-anything passing
+    through). When in doubt, return True -- false positives waste the
+    agent's loop budget.
+    """
+    if inferred == target:
+        return True
+    if (inferred, target) in _COMPATIBLE_PAIRS:
+        return True
+    return False
+
+
+def _coerces_to_int(v) -> bool:
+    """True if value is something the FSR runtime can pass to int().
+    Native ints (excluding bool, which is treated separately) pass; bare
+    strings pass only if int(str) succeeds. Floats are rejected -- author
+    likely meant a decimal-typed param if they wrote 1.5."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return True
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return False
+        try:
+            int(s)
+            return True
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _coerces_to_float(v) -> bool:
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        return True
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return False
+        try:
+            float(s)
+            return True
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _coerces_to_bool(v) -> bool:
+    """True if value is bool-like. FSR's checkbox params accept native
+    bools, 'true'/'false' (case-insensitive), and 0/1 ints."""
+    if isinstance(v, bool):
+        return True
+    if isinstance(v, int) and v in (0, 1):
+        return True
+    if isinstance(v, str):
+        return v.strip().lower() in {"true", "false", "yes", "no", "1", "0"}
+    return False
+
+
+class ConnectorArgsMixin:
+    """Methods for resolving connector args and checking routing."""
+
+    conn: sqlite3.Connection
+
+    # The Resolver (resolver/__init__.py) composes this mixin with
+    # CatalogLookupMixin (catalog.py) and NormalizerMixin (normalizers.py).
+    # The methods below are provided by those siblings at runtime; declared
+    # here under TYPE_CHECKING only so mypy can resolve them while checking
+    # this mixin in isolation. Keep in sync with the real definitions.
+    if TYPE_CHECKING:
+        # from CatalogLookupMixin (catalog.py)
+        def connector(self, name: str) -> sqlite3.Row | None: ...
+        def suggest_connector(self, name: str) -> str | None: ...
+        def operation(self, connector: str, op: str) -> sqlite3.Row | None: ...
+        def suggest_operation(self, connector: str, op: str) -> str | None: ...
+        def suggest_operations_topn(
+            self, connector: str, op: str, n: int = 5,
+        ) -> list[str]: ...
+        def operation_params(self, connector: str, op: str) -> list[str]: ...
+        def operation_param_enum(
+            self, connector: str, op: str, param: str,
+        ) -> tuple[str | None, list[str] | None]: ...
+        def operation_param_observed_type(
+            self, connector: str, op: str, param: str,
+        ) -> tuple[str | None, str | None]: ...
+        def resolve_config_id(
+            self, connector: str, config_name: str | None = None,
+            agent_id: str | None = None,
+        ) -> str | None: ...
+        def config_locations(self, connector: str, config_name: str) -> list[str]: ...
+        def config_agent_ids(self, connector: str, config_name: str) -> list[str]: ...
+        def config_names(self, connector: str, agent_id: str | None = None) -> list[str]: ...
+        def agents_warmed(self) -> bool: ...
+        def resolve_agent_id(self, name_or_id: str) -> str | None: ...
+        def agent_name(self, agent_id: str) -> str | None: ...
+
+        # from NormalizerMixin (normalizers.py)
+        def _check_param_visibility(
+            self, connector: str, operation: str, provided: dict,
+            path: str, errors: list[CompileError],
+        ) -> None: ...
+        def _check_conditional_required(
+            self, connector: str, operation: str, provided: dict,
+            path: str, errors: list[CompileError],
+        ) -> None: ...
+
+    def _resolve_connector_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        a = step.arguments
+        # Envelope-scalar type-validation via the typed-args layer
+        # (`typed_args.steps.expand_connector`, model `ConnectorArgs`). Runs
+        # before the required-field checks below so a present-but-wrong-typed
+        # `connector`/`operation` (e.g. `connector: 123`) is a clean BAD_VALUE
+        # rather than a confusing MISSING_FIELD. Validation-only -- it never
+        # mutates `a`; the catalog checks below (missing connector/op -> the
+        # precise MISSING_FIELD message, unknown op/param, enum, visibility,
+        # required, auto-lift) own the richer runtime messages. `params` stays
+        # Any (per-op catalog); the model types the static envelope only.
+        if isinstance(a, dict):
+            _expand_connector_typed(a, path, errors)
+        connector = a.get("connector")
+        operation = a.get("operation")
+        if not connector:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message="connector step requires arguments.connector",
+                path=f"{path}.arguments.connector",
+            ))
+            return
+        if not operation:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message="connector step requires arguments.operation",
+                path=f"{path}.arguments.operation",
+            ))
+            return
+
+        # A present-but-wrong-TYPED connector/operation (e.g. `connector: 123`)
+        # was already flagged BAD_VALUE by the typed-args layer above. Don't
+        # feed the non-str value into the catalog lookup -- difflib's
+        # get_close_matches chokes on a non-str needle and would crash the
+        # whole compile. The catalog path can't add anything useful here, so
+        # bail (the BAD_VALUE already tells the author what to fix).
+        if not isinstance(connector, str) or not isinstance(operation, str):
+            return
+
+        crow = self.connector(connector)
+        if crow is None:
+            sug = self.suggest_connector(connector)
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_CONNECTOR,
+                message=f"unknown connector: {connector!r}",
+                path=f"{path}.arguments.connector",
+                near=sug,
+                suggestion=f"did you mean {sug!r}?" if sug else None,
+            ))
+            return
+
+        orow = self.operation(connector, operation)
+        if orow is None:
+            sug = self.suggest_operation(connector, operation)
+            if sug:
+                suggestion = f"did you mean {sug!r}?"
+            else:
+                topn = self.suggest_operations_topn(connector, operation)
+                suggestion = (
+                    f"closest ops: {', '.join(repr(o) for o in topn)}"
+                    if topn else
+                    f"run `fsrpb find op {connector} <keyword>` to list operations"
+                )
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_OPERATION,
+                message=f"unknown operation {operation!r} on connector {connector!r}",
+                path=f"{path}.arguments.operation",
+                near=sug,
+                suggestion=suggestion,
+            ))
+            return
+
+        # Check params against operation_params.
+        # When the store has zero rows for this op (catalog connector not
+        # installed on the probe instance), skip validation and emit a
+        # warning so the playbook still compiles.
+        valid_params = set(self.operation_params(connector, operation))
+        # Auto-lift flat args: agent often writes connector params at the
+        # `arguments:` top level instead of under `arguments.params:`.
+        # Lift any top-level key that matches a known op param into the
+        # params dict (with a warning so the rule sticks). Reserved
+        # canonical keys are left where they are.
+        _CONNECTOR_RESERVED = {
+            "connector", "operation", "operationTitle", "version", "config",
+            # `agent` binds the step to a FortiSOAR Agent for agent-routed
+            # connectors (fortigate, edge gear). Reserved so a hand-authored
+            # `arguments.agent` passes through to the wire step verbatim
+            # instead of being auto-lifted into params or flagged unknown.
+            "agent",
+            "params", "step_variables", "pickFromTenant", "name",
+            # Friendly spelling of wire `name`, consumed further down.
+            "display_name",
+            "mock_result", "useMockOutput",
+            # Generic step-level skip gate. FSR evaluates it at runtime;
+            # falsy → step is bypassed. Whitelisted here so the resolver
+            # doesn't auto-lift it into params or flag it as unknown.
+            "condition",
+            # Connector-step wire field: whether the connector configuration is
+            # chosen dynamically at runtime (the UI's "select config at runtime"
+            # toggle). FSR writes it on the wire step beside `config`; reserved
+            # so a hand-authored value passes through verbatim instead of being
+            # misread as a connector op param. Seen at step level in real
+            # exported playbook JSON.
+            "dynamicallySelected",
+        }
+        if valid_params:
+            existing_params = a.get("params") if isinstance(a.get("params"), dict) else None
+            for k in list(a.keys()):
+                if k in _CONNECTOR_RESERVED:
+                    continue
+                if k in valid_params:
+                    if existing_params is None:
+                        existing_params = {}
+                        a["params"] = existing_params
+                    if k in existing_params and existing_params[k] != a[k]:
+                        # setdefault kept the params value and threw the
+                        # step-level one away without a word.
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(f"param {k!r} is set twice with different "
+                                     f"values -- under params: and at step "
+                                     f"level; only the params: value is used"),
+                            path=f"{path}.arguments.{k}",
+                            suggestion=f"keep one: params.{k}",
+                        ))
+                    existing_params.setdefault(k, a.pop(k))
+            # A key that is neither a param of this op nor a step argument
+            # stays beside `params` on the wire, where FSR ignores it: the
+            # playbook compiles green and runs without it. Live, an enhance
+            # turn left a filter value at step level and nothing said so.
+            stray = sorted(set(a) - _CONNECTOR_RESERVED
+                           - CatalogLookupMixin._UNIVERSAL_STEP_KEYS)
+            for k in stray:
+                near = difflib.get_close_matches(k, sorted(valid_params), n=1)
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=(f"{k!r} is not a param of {connector}.{operation} "
+                             f"and not a step argument; FSR ignores it at "
+                             f"runtime"),
+                    path=f"{path}.arguments.{k}",
+                    near=near[0] if near else None,
+                    suggestion=(f"did you mean params.{near[0]}?" if near else
+                                f"params of {operation}: "
+                                f"{', '.join(sorted(valid_params))}"),
+                ))
+        provided = a.get("params") or {}
+        if not isinstance(provided, dict):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="arguments.params must be a mapping",
+                path=f"{path}.arguments.params",
+            ))
+            return
+        if not valid_params:
+            # Two sub-cases:
+            #   1. Op genuinely takes no params (e.g. cyops_utilities.no_op,
+            #      auto-injected by the compiler for `stop`/`end`). User
+            #      passed nothing → silent.
+            #   2. User passed params we can't verify because the param
+            #      probe didn't capture this op. Emit the warning so they
+            #      know something might be wrong.
+            if provided:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_PARAM,
+                    message=(
+                        f"no param schema in store for {connector}.{operation} -- "
+                        f"params passed through unvalidated"
+                    ),
+                    path=f"{path}.arguments.params",
+                    near=None,
+                    suggestion="run `fsrpb run-op` or re-ingest the connector to populate the schema",
+                    severity="warning",
+                ))
+        else:
+            for p_name in provided:
+                if p_name not in valid_params:
+                    m = difflib.get_close_matches(p_name, list(valid_params), n=1, cutoff=0.6)
+                    sug = m[0] if m else None
+                    if sug:
+                        suggestion = f"did you mean {sug!r}?"
+                    else:
+                        # Lexical match failed; just list the valid params.
+                        # Param sets are small (median ~4) so this is cheap.
+                        listed = ", ".join(repr(p) for p in sorted(valid_params))
+                        suggestion = f"valid params: {listed}"
+                    errors.append(CompileError(
+                        code=ErrorCode.UNKNOWN_PARAM,
+                        message=f"unknown param {p_name!r} on {connector}.{operation}",
+                        path=f"{path}.arguments.params.{p_name}",
+                        near=sug,
+                        suggestion=suggestion,
+                    ))
+            # Conditional-visibility check: a known param may still be
+            # invalid in the current arg set (e.g. block_ip_new's
+            # ip_block_policy is only valid when method='Policy Based').
+            self._check_param_visibility(
+                connector, operation, provided, path, errors,
+            )
+            # Conditional-required completeness: the chosen (or defaulted)
+            # branch may activate required children the author omitted.
+            self._check_conditional_required(
+                connector, operation, provided, path, errors,
+            )
+            # Picklist enum validation. Only fires on literal string
+            # values; Jinja expressions are skipped (we can't resolve
+            # their value statically).
+            for p_name, p_val in provided.items():
+                if p_name not in valid_params:
+                    continue
+                _ptype, allowed = self.operation_param_enum(
+                    connector, operation, p_name)
+                if allowed is None:
+                    continue
+                # Multiselect accepts a list of strings; select accepts a
+                # single string. Both forms get the same enum check.
+                vals = p_val if isinstance(p_val, list) else [p_val]
+                for v in vals:
+                    if not isinstance(v, str):
+                        continue
+                    if "{{" in v or "{%" in v:
+                        continue  # Jinja-templated; defer to runtime
+                    if v in allowed:
+                        continue
+                    # Case-insensitive match → likely a casing typo.
+                    case_match = next(
+                        (a for a in allowed if a.lower() == v.lower()), None)
+                    if case_match:
+                        msg = (f"param {p_name!r} on "
+                               f"{connector}.{operation}: value {v!r} "
+                               f"not in enum (values are case-sensitive)"
+                               f". Did you mean {case_match!r}?")
+                        suggestion = f"replace with {case_match!r}"
+                    else:
+                        near = difflib.get_close_matches(
+                            v, allowed, n=3, cutoff=0.4)
+                        head = ", ".join(repr(o) for o in allowed[:10])
+                        if near:
+                            msg = (f"param {p_name!r} on "
+                                   f"{connector}.{operation}: value "
+                                   f"{v!r} not in enum. Did you mean: "
+                                   f"{', '.join(repr(n) for n in near)}?")
+                            suggestion = f"replace with {near[0]!r}"
+                        else:
+                            msg = (f"param {p_name!r} on "
+                                   f"{connector}.{operation}: value "
+                                   f"{v!r} not in enum. Allowed: {head}"
+                                   + (" …" if len(allowed) > 10 else ""))
+                            suggestion = (
+                                f"use one of: {head}"
+                                + (" …" if len(allowed) > 10 else ""))
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=msg,
+                        path=f"{path}.arguments.params.{p_name}",
+                        suggestion=suggestion,
+                        check="param_type",
+                    ))
+            # Scalar-type validation: integer / decimal / boolean.
+            # Same skip-Jinja rule as enum. We only flag literal values
+            # that *clearly* can't coerce; the FSR runtime does its own
+            # string → target-type coercion for genuinely-numeric and
+            # genuinely-boolean strings, so we tolerate them.
+            for p_name, p_val in provided.items():
+                if p_name not in valid_params:
+                    continue
+                ptype, _ = self.operation_param_enum(
+                    connector, operation, p_name)
+                if ptype is None:
+                    continue
+                ptype_low = ptype.lower()
+                # Tier 3 first slice: when the value is a *pure* Jinja
+                # block (one `{{ … }}` with no surrounding text) and the
+                # terminal filter has a declared output type, we can
+                # validate the chain's terminal type against the param's
+                # target type without resolving the expression. Skip the
+                # static literal checks below either way for Jinja values
+                # -- those are still resolved at runtime.
+                if isinstance(p_val, str) and (
+                        "{{" in p_val or "{%" in p_val):
+                    if "{%" not in p_val:
+                        from ..jinja_typing import (
+                            extract_pure_jinja,
+                            infer_terminal_observed_type,
+                            validate_chain,
+                        )
+                        # Tier 3.1: chain-internal validation. Catches
+                        # bugs like `| int | upper` where the agent
+                        # mixed up the filter order -- the integer
+                        # output can't feed `upper`'s string input.
+                        expr_inner = extract_pure_jinja(p_val)
+                        if expr_inner is not None:
+                            bad = validate_chain(expr_inner, self.conn)
+                            if bad is not None:
+                                prod, cons, want = bad
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=(
+                                        f"param {p_name!r} on "
+                                        f"{connector}.{operation}: "
+                                        f"Jinja filter {cons!r} expects "
+                                        f"{want!r} but the preceding "
+                                        f"filter {prod!r} produces a "
+                                        "different type"),
+                                    path=f"{path}.arguments.params.{p_name}",
+                                    suggestion=(
+                                        "reorder the filter chain so "
+                                        f"{cons!r} sees the type it "
+                                        "needs, or drop one of them"),
+                                    check="param_type",
+                                ))
+                        inferred = infer_terminal_observed_type(p_val, self.conn)
+                        if inferred is not None:
+                            target = _param_target_observed_type(
+                                ptype_low,
+                                self.operation_param_observed_type(
+                                    connector, operation, p_name)[0],
+                            )
+                            if target is not None and not _types_compatible(
+                                    inferred, target):
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=(
+                                        f"param {p_name!r} on "
+                                        f"{connector}.{operation} expects "
+                                        f"{target!r} but the Jinja filter "
+                                        f"chain produces {inferred!r}"),
+                                    path=f"{path}.arguments.params.{p_name}",
+                                    suggestion=(
+                                        "drop the trailing filter or "
+                                        "replace it with one that yields "
+                                        f"{target!r}"),
+                                    check="param_type",
+                                ))
+                    continue
+                # Numeric: integer / decimal / numeric / "intger" (typo).
+                if ptype_low in {"integer", "intger"}:
+                    if isinstance(p_val, bool) or not _coerces_to_int(p_val):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} is type 'integer'"
+                                f" but got {p_val!r} "
+                                f"({type(p_val).__name__}) which does "
+                                f"not coerce to int"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion=("pass an integer literal, an "
+                                        "integer-shaped string, or a "
+                                        "Jinja expression that yields "
+                                        "an int"),
+                            check="param_type",
+                        ))
+                elif ptype_low in {"decimal", "numeric"}:
+                    if isinstance(p_val, bool) or not _coerces_to_float(p_val):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} is type "
+                                f"{ptype!r} but got {p_val!r} "
+                                f"({type(p_val).__name__}) which does "
+                                f"not coerce to a number"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion="pass a number or numeric string",
+                            check="param_type",
+                        ))
+                # Tier 2.3: observed_type validators for types Tier 1's
+                # widget pass doesn't cover (ipv4 / url / email /
+                # iso8601 / json_object / json_array). Only fires on
+                # `text`-widget params that the type probe lifted --
+                # numeric/bool/picklist widgets are already handled
+                # above.
+                elif ptype_low in {"text", "textarea", "richtext"}:
+                    obs, _coerces = self.operation_param_observed_type(
+                        connector, operation, p_name)
+                    spec = _OBSERVED_VALIDATORS.get(obs or "")
+                    if spec is not None and not spec[1](p_val):
+                        display, _, sug_tail = spec
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} expects an "
+                                f"{display} but got {p_val!r} "
+                                f"({type(p_val).__name__})"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion=sug_tail,
+                            check="param_type",
+                        ))
+                # Boolean: checkbox / boolean.
+                elif ptype_low in {"checkbox", "boolean"}:
+                    if not _coerces_to_bool(p_val):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"param {p_name!r} on "
+                                f"{connector}.{operation} is type "
+                                f"{ptype!r} but got {p_val!r} "
+                                f"({type(p_val).__name__}) which does "
+                                f"not coerce to a boolean"),
+                            path=f"{path}.arguments.params.{p_name}",
+                            suggestion=("pass true / false (or 'true' / "
+                                        "'false' as a string)"),
+                            check="param_type",
+                        ))
+
+        # Stamp the connector version onto the step (FSR JSON requires it).
+        if "version" not in a and crow["version"]:
+            a["version"] = crow["version"]
+        # `display_name:` is the friendly spelling of wire `arguments.name`.
+        # The decompiler renames it on the way out because wire `name` (the
+        # connector's display label) collides with the IR step field `name`
+        # (the canvas node name) -- see `_hoist_args`. This is the inverse, and
+        # it was missing: `display_name` rode through to the wire as a key FSR
+        # does not read, while `name` was re-stamped from the catalog below --
+        # so a custom label survived export and was silently dropped on
+        # re-import. `display_name` is ours, not FSR's: of 2,185 Connectors
+        # steps in the shipped-pack corpus, 2,183 carry `name` and none carry a
+        # meaningful `display_name`.
+        display_name = a.pop("display_name", None)
+        if display_name is not None and "name" not in a:
+            a["name"] = display_name
+        # The UI's connector-step header reads `arguments.name` (display
+        # title) and `arguments.operationTitle`. Without them the canvas
+        # shows "UNDEFINED <version>". The exporter writes them; we mirror.
+        if "name" not in a and crow["label"]:
+            a["name"] = crow["label"]
+        if "operationTitle" not in a and orow["title"]:
+            a["operationTitle"] = orow["title"]
+        # FSR canonical default for step_variables on connector steps is
+        # an empty list (observed in live exports).
+        if "step_variables" not in a:
+            a["step_variables"] = []
+        # Tenant/agent picker -- false unless the playbook author wires a
+        # multi-tenant config.
+        if "pickFromTenant" not in a:
+            a["pickFromTenant"] = False
+        # FSR connector steps MUST carry a `config` key. Absent it, the
+        # runtime fails the step with `INTEGRATION-12: Could not find a
+        # connector configuration matching the given configuration id or name
+        # None`. Trace-built steps carry the config id run_op resolved at
+        # execution time (set in skills._compile_run_connector_action from the
+        # recorded trace), which is what agent-bound connectors require. For
+        # hand-authored steps that omit it (or explicitly pass `config: ""` to
+        # mean "use the default"), fill the connector's default config UUID from
+        # the warmed `connector_configs` catalog table -- so the step opens in
+        # the SOAR UI with a concrete configuration pinned and the playbook's
+        # step state doesn't change on save. When the catalog has no config
+        # for the connector (unwarmed slim DB, or the connector isn't configured
+        # on the box), fall back to the `""` sentinel ("use the connector's
+        # default config") -- the original behavior -- so a portable/library
+        # playbook compiled offline stays config-free.
+        # Where the step runs: `on_remote:` / `agent:` name a remote agent. The
+        # wire wants the agent's hex `agentId`; YAML keeps the readable name.
+        explicit_agent = bool(a.get("agent"))
+        agent_id = self._resolve_step_agent(a, path, errors)
+        # `config:` in YAML is the config NAME; the wire wants the UUID of that
+        # config ON THE AGENT the step runs on (an agent-bound config cannot run
+        # on the hub and vice versa -- the step hangs or fails INTEGRATION-12).
+        cfg = a.get("config")
+        # No `on_remote:` -- the config name alone says where the step runs.
+        # Only on one agent: run there. On the hub and elsewhere: the hub, with
+        # a warning. On several agents and not the hub: ambiguous, an error.
+        if (not explicit_agent and isinstance(cfg, str) and cfg
+                and not _UUID_RE.match(cfg) and "{{" not in cfg):
+            homes = self.config_agent_ids(connector, cfg)
+            remote = [h for h in homes if h]
+            names = [self.agent_name(h) or h for h in remote]
+            if remote and "" not in homes and len(remote) == 1:
+                agent_id = remote[0]
+                a["agent"] = agent_id
+            elif remote and "" in homes:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE, severity="warning",
+                    message=(f"{connector} config {cfg!r} exists on the hub and on "
+                             f"{', '.join(names)}; using the hub's"),
+                    path=f"{path}.arguments.config",
+                    suggestion=f"set on_remote: {names[0]} to run it on that agent",
+                ))
+            elif len(remote) > 1:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"{connector} config {cfg!r} exists on several agents "
+                             f"({', '.join(names)}) and not on the hub"),
+                    path=f"{path}.arguments.config",
+                    suggestion=f"set on_remote: to one of {', '.join(names)}",
+                ))
+                return
+        if isinstance(cfg, str) and cfg and not _UUID_RE.match(cfg) and "{{" not in cfg:
+            cid = self.resolve_config_id(connector, cfg, agent_id)
+            if cid:
+                a["config"] = cid
+            elif self.agents_warmed():
+                where = self.config_locations(connector, cfg)
+                here = self.agent_name(agent_id) if agent_id else "self (the hub)"
+                avail = self.config_names(connector, agent_id)
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"{connector} config {cfg!r} does not exist on {here}"
+                             + (f"; it exists on: {', '.join(where)}" if where else "")),
+                    path=f"{path}.arguments.config",
+                    suggestion=(
+                        f"set on_remote: {where[0]}" if where and where[0] != "self"
+                         else "drop on_remote to run on the hub" if where else
+                         (f"configs there: {', '.join(avail)}" if avail
+                          else "create the config there first")),
+                ))
+        if not a.get("config"):
+            cid = self.resolve_config_id(connector, None, agent_id)
+            a["config"] = cid if cid else ""
+
+    def _resolve_step_agent(self, a: dict, path: str, errors: list) -> str:
+        """Turn the step's `agent` (name or id) into the wire `agentId`.
+
+        Returns the agent id the step runs on (`''` = the hub). An agent name
+        that does not resolve is always an error (warmed or not): the hub routes
+        by agentId only, so a name on the wire fails "No agent found" (404) or
+        never returns. A hex agentId passes through when it is not in the catalog.
+        """
+        agent = a.get("agent")
+        if not isinstance(agent, str) or not agent or agent == "Pick From Record Ownership" \
+                or "{{" in agent:
+            return ""
+        aid = self.resolve_agent_id(agent)
+        if aid is None:
+            if not _AGENT_ID_RE.match(agent):
+                # Warmed (compiling FOR a box): an unknown name is an error.
+                # Unwarmed (an offline, portable compile -- library playbooks
+                # name agents that exist only on the target): a loud warning,
+                # since the name will fail on the hub unless recompiled there.
+                warmed = self.agents_warmed()
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="error" if warmed else "warning",
+                    message=(f"unknown agent {agent!r} (not on the warmed box)" if warmed
+                             else f"agent {agent!r} is not resolved (no agents in this "
+                                  "catalog): the hub routes by agentId only, so this step "
+                                  "fails 'No agent found' unless compiled against its box"),
+                    path=f"{path}.arguments.agent",
+                    suggestion=(None if warmed else
+                                "compile against the target box's catalog (fsrpb warmup / "
+                                "--instance), or give the agent's hex agentId"),
+                ))
+            return agent if _AGENT_ID_RE.match(agent) else ""
+        if aid == "":
+            a.pop("agent", None)  # the hub's own agent: run locally
+            return ""
+        a["agent"] = aid
+        return aid
+
+    def _resolve_workflow_reference_args(
+        self, step: Step, path: str, errors: list[CompileError],
+        pb_by_name: dict[str, Playbook],
+    ) -> None:
+        """Validate workflow_reference (call-another-playbook) step arguments.
+
+        Two ways to express the target in YAML:
+          - `target: <playbook_name>`  -- looked up in same collection;
+            emitter rewrites to /api/3/workflows/<uuid> via deterministic
+            UUID synthesis.
+          - `workflowReference: /api/3/workflows/<uuid>` -- pass-through for
+            cross-collection references (we can't validate further).
+
+        Caller's `key: value` keys are validated against the
+        target playbook's `parameters: [...]` list when target is local.
+        """
+        a = step.arguments
+        # Envelope-scalar type-validation via the typed-args layer
+        # (`expand_workflow_reference`, model `WorkflowReferenceArgs`). Runs
+        # before the required-field check so a wrong-typed `target` (e.g. 123)
+        # is a clean BAD_VALUE rather than a confusing MISSING_FIELD.
+        # `target`/`workflowReference` are declared Optional in the model so
+        # pydantic's generic "Field required" does NOT shadow the
+        # MISSING_FIELD emitted below (the manual_input / connector lesson).
+        if isinstance(a, dict):
+            _expand_workflow_reference_typed(a, path, errors)
+
+        # Phase G: child-playbook input parameters are step-level keys
+        # (e.g. `hostname: fsr-1`), not nested under `arguments.arguments`.
+        # Separate envelope keys from child-input keys and build the
+        # `arguments` sub-dict the wire format expects.
+        _WR_ENVELOPE_KEYS = {
+            "target", "workflowReference", "apply_async",
+            "pass_parent_env", "pass_input_record", "step_variables",
+            "for_each", "when", "mock_result", "do_until",
+            "child_args",
+        }
+        # When workflowReference (IRI) is used, `target` is NOT a local
+        # playbook-name reference -- it's a child-playbook input parameter
+        # (e.g. the `target` parameter of "> api proxy encapsulation to
+        # device" which holds a list of device names).  Remove it from the
+        # envelope-key set so it flows through as a child argument.
+        ref_iri = a.get("workflowReference") if isinstance(a, dict) else None
+        if ref_iri:
+            _WR_ENVELOPE_KEYS = _WR_ENVELOPE_KEYS - {"target"}
+        if isinstance(a, dict) and "arguments" not in a:
+            # Two authoring surfaces, one wire channel.
+            #
+            #   child_args: {k: v}   explicit, and the ONLY way to pass a param
+            #                        whose name collides with a step IR/sugar key
+            #                        (`type`, `name`, `description`, `title`, ...)
+            #                        -- the parser consumes those at step level.
+            #   k: v                 hoisted, the legacy surface; still accepted.
+            #
+            # Live-verified wire contract: when a step carries BOTH a nested
+            # `arguments` map and hoisted top-level keys, the runtime reads the
+            # NESTED map and ignores the hoisted ones entirely; a declared
+            # parameter absent from it arrives as "" rather than failing. So the
+            # nested map must be complete, and the hoisted copies are removed
+            # below -- emitting both is what let a missing param hide behind a
+            # step that looked correctly parameterised in the designer.
+            explicit = a.pop("child_args", None)
+            if explicit is not None and not isinstance(explicit, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "`child_args:` must be a mapping of the child "
+                        f"playbook's parameters, got {type(explicit).__name__}"
+                    ),
+                    path=f"{path}.child_args",
+                ))
+                explicit = None
+            hoisted = {k: v for k, v in a.items()
+                       if k not in _WR_ENVELOPE_KEYS}
+            if explicit:
+                dupes = sorted(set(hoisted) & set(explicit))
+                for k in dupes:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"child parameter {k!r} is given both at step level "
+                            "and under `child_args:` -- keep one (prefer "
+                            "`child_args:`)"
+                        ),
+                        path=f"{path}.child_args.{k}",
+                    ))
+            child_args = {**hoisted, **(explicit or {})}
+            if child_args:
+                # Emit the nested map ONLY -- the shape FortiSOAR's own editor
+                # produces (an exported step carries envelope keys plus
+                # `arguments`, never hoisted child duplicates).
+                for k in hoisted:
+                    a.pop(k, None)
+                a["arguments"] = child_args
+
+        target_name = a.get("target")
+        ref_iri = a.get("workflowReference")
+
+        if not target_name and not ref_iri:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message="workflow_reference step needs either 'target' (local playbook name) or 'workflowReference' (IRI)",
+                path=f"{path}.arguments",
+            ))
+            return
+
+        provided_args = a.get("arguments") or {}
+        if not isinstance(provided_args, dict):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="workflow_reference.arguments must be a mapping",
+                path=f"{path}.arguments.arguments",
+            ))
+            return
+
+        if target_name:
+            # Guard: target must be a string (playbook name) to look up.
+            # If it's a list/dict (e.g. a child-playbook parameter that
+            # happens to be named `target`), skip the local lookup --
+            # workflowReference (IRI) handles cross-collection refs.
+            if not isinstance(target_name, str):
+                if ref_iri:
+                    # target is a child parameter, not a playbook name;
+                    # workflowReference is the actual reference.  Already
+                    # moved to child_args above.  Nothing more to validate.
+                    return
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=f"target must be a string (playbook name), got {type(target_name).__name__}",
+                    path=f"{path}.arguments.target",
+                ))
+                return
+            target_pb = pb_by_name.get(target_name)
+            if target_pb is None:
+                # Check if target is a UUID -- cross-collection reference.
+                # Accept it and let the emitter expand to /api/3/workflows/<uuid>.
+                # Parameter validation is skipped (can't introspect the target
+                # playbook's parameters from another collection offline).
+                if _UUID_RE.match(str(target_name)):
+                    # Cross-collection UUID reference -- can't introspect the
+                    # target playbook's parameters offline; accept and let
+                    # the emitter expand to /api/3/workflows/<uuid>.
+                    return
+                sug = difflib.get_close_matches(target_name, list(pb_by_name), n=1, cutoff=0.6)
+                errors.append(CompileError(
+                    code=ErrorCode.WORKFLOW_REFERENCE_UNRESOLVABLE,
+                    # Analyst sim: told only "not found in this collection",
+                    # the model retried the same name three times. `target:`
+                    # resolves within THIS YAML; a playbook that already
+                    # exists on the box is called by its id.
+                    message=(
+                        f"target playbook {target_name!r} is not in this YAML. "
+                        "`target:` names a playbook defined in the same YAML. To "
+                        "call a playbook that already exists on FortiSOAR, look "
+                        "it up with find(kind='playbook', query=<name>) -- rows "
+                        "with on_this_box: true carry its uuid and parameters -- "
+                        "and set `workflowReference: /api/3/workflows/<uuid>` "
+                        "instead of `target:`. If this edit is creating that "
+                        "playbook, keep its edit_playbook {op: add_playbook} in "
+                        "the same operations list -- every call starts again "
+                        "from the open playbook, so an earlier call's "
+                        "add_playbook is not there."),
+                    path=f"{path}.arguments.target",
+                    near=sug[0] if sug else None,
+                    suggestion=f"did you mean {sug[0]!r}?" if sug else None,
+                ))
+                return
+            valid = set(target_pb.parameters)
+            # Declared but not supplied. The platform does NOT fail this: the
+            # child's `parameters:` list is a strict allow-list, and a declared
+            # parameter the caller omits arrives as "" -- a silent wrong value,
+            # not a crash. That is exactly how a dropped param stays invisible
+            # until something downstream misbehaves, so surface it here.
+            missing = sorted(valid - set(provided_args))
+            if missing:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    severity="warning",
+                    message=(
+                        f"target playbook {target_name!r} declares "
+                        f"{missing} but the call does not supply "
+                        f"{'them' if len(missing) > 1 else 'it'}; the child "
+                        'receives "" for each. Pass under `child_args:` '
+                        "(required for names that collide with step keys, "
+                        "e.g. `type`)."
+                    ),
+                    path=f"{path}.child_args",
+                ))
+            for k in provided_args:
+                if k not in valid:
+                    sug = difflib.get_close_matches(k, list(valid), n=1, cutoff=0.6) if valid else []
+                    errors.append(CompileError(
+                        code=ErrorCode.UNKNOWN_PARAM,
+                        message=f"target playbook {target_name!r} has no parameter {k!r}; declared: {sorted(valid) or '[]'}",
+                        path=f"{path}.arguments.arguments.{k}",
+                        near=sug[0] if sug else None,
+                        suggestion=f"did you mean {sug[0]!r}?" if sug else None,
+                    ))
+
+    def _resolve_trigger_tenant_playbook_args(
+        self, step: Step, path: str, errors: list[CompileError],
+    ) -> None:
+        """Validate trigger_tenant_playbook (cross-tenant call) arguments.
+
+        ``RemotePlaybookReference`` starts execution of a workflow on a
+        *peer* FortiSOAR instance -- unlike the local ``workflow_reference``,
+        which targets a same-collection playbook by name/IRI. The remote
+        handler's live signature is::
+
+            remote_workflow_reference(playbook_alias_id, tenant_id=None, ...)
+
+        so the friendly inputs are:
+
+            playbook_alias_id:   required. A playbook alias pointing to the
+                                 remote workflow to run.
+            tenant_id:           optional. The peer tenant to run it in.
+
+        The caller's ``key: value`` map is left untouched --
+        cross-tenant the target's parameters aren't reachable for validation,
+        and the handler accepts ``**kwargs`` (unknown keys are warnings, owned
+        by ``arg_validator`` against the live signature).
+
+        Envelope scalars (``playbook_alias_id``, ``tenant_id``) are type-checked
+        by the typed-args layer (``expand_trigger_tenant_playbook``, model
+        ``TriggerTenantPlaybookArgs``) before the required-field check below --
+        a present-but-wrong-typed value (e.g. ``playbook_alias_id: 123``) is a
+        clean ``BAD_VALUE``; ``playbook_alias_id`` is declared Optional in the
+        model so pydantic's generic "Field required" does NOT shadow the
+        ``MISSING_FIELD`` emitted here (the manual_input / connector lesson).
+        The live ``arg_validator`` pass independently enforces the same
+        required arg against the ``step_handlers`` signature.
+        """
+        a = step.arguments if isinstance(step.arguments, dict) else {}
+        # Envelope-scalar type-validation via the typed-args layer. Runs
+        # before the required-field check so a wrong-typed `playbook_alias_id`
+        # (e.g. 123) is a clean BAD_VALUE rather than a confusing MISSING_FIELD.
+        _expand_trigger_tenant_playbook_typed(a, path, errors)
+
+        alias = a.get("playbook_alias_id")
+        if not alias:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message=(
+                    "trigger_tenant_playbook step requires 'playbook_alias_id' "
+                    "(a playbook alias pointing to the remote workflow to run) "
+                    "-- the local-name 'target:' form can't cross tenants"
+                ),
+                path=f"{path}.arguments.playbook_alias_id",
+            ))
+            return
+
+        provided_args = a.get("arguments")
+        if provided_args is not None and not isinstance(provided_args, dict):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="trigger_tenant_playbook.arguments must be a mapping",
+                path=f"{path}.arguments.arguments",
+            ))
+
+    def _check_routing(
+        self, step: Step, seen_ids: set[str], path: str,
+        errors: list[CompileError],
+    ) -> None:
+        if step.next and step.next not in seen_ids:
+            errors.append(CompileError(
+                code=ErrorCode.UNKNOWN_NEXT_STEP,
+                message=f"step.next {step.next!r} does not match any step id",
+                path=f"{path}.next",
+            ))
+        for option, target in step.branches.items():
+            if target not in seen_ids:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_NEXT_STEP,
+                    message=f"branch target {target!r} does not match any step id",
+                    path=f"{path}.branches.{option}",
+                ))
+        for i, target in enumerate(step.unlabeled_next):
+            if target not in seen_ids:
+                errors.append(CompileError(
+                    code=ErrorCode.UNKNOWN_NEXT_STEP,
+                    message=f"unlabeled_next target {target!r} does not match any step id",
+                    path=f"{path}.unlabeled_next[{i}]",
+                ))
+
+
+def renamed_param(strays: list[str], missing: str) -> str | None:
+    """The one sent param that is a misspelling of the ``missing`` required
+    one, or None. One stray is the rename whatever its spelling (``ip`` for
+    ``ip_addresses``); among several, the one whose name prefixes the missing
+    one or vice versa. Used by the run_op preflight and the compiler alike, so
+    a step and a direct call get the same "send your 'x' value as 'y'"."""
+    pick = strays if len(strays) == 1 else [
+        s for s in strays if missing.startswith(s) or s.startswith(missing)]
+    return pick[0] if len(pick) == 1 else None

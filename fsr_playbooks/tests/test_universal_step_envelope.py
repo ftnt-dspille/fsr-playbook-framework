@@ -1,0 +1,241 @@
+"""WIRE_SHAPE_GAP_PLAN Phase 3 -- the universal step envelope.
+
+`when`, `ignore_errors`, `do_until`, `message`, `agent`, `apply_async`,
+`pickFromTenant` are valid on (nearly) every step type. Authors may write them
+as top-level step keys (instead of burying them under `arguments:`), plus three
+friendly sugars: `retry` → `do_until`, `on_remote` → `agent`/`pickFromTenant`,
+`post_comment` → `message`. The parser hoists/expands; the resolver+emitter only
+ever see the canonical wire keys.
+"""
+from __future__ import annotations
+
+from fsr_playbooks._db import PACKAGED_SLIM_DB
+from fsr_playbooks.compiler import compile_yaml
+
+
+def _emit(yaml_text: str):
+    res = compile_yaml(yaml_text, PACKAGED_SLIM_DB)
+    steps: dict[str, dict] = {}
+
+    def walk(o):
+        if isinstance(o, dict):
+            if o.get("@type") == "WorkflowStep":
+                steps[o.get("name")] = o.get("arguments") or {}
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(res.fsr_json)
+    return res, steps
+
+
+def _upd(body: str) -> str:
+    return f"""
+collection: T
+playbooks:
+  - name: P
+    steps:
+      - {{name: Start, type: start, next: Upd}}
+      - name: Upd
+        type: update_record
+{body}
+        module: incidents
+        record: "{{{{ vars.input.records[0]['@id'] }}}}"
+        resource: {{status: Closed}}
+"""
+
+
+def _errs(res):
+    return [e.message for e in res.errors if e.severity != "warning"]
+
+
+# ---- top-level hoist -------------------------------------------------------
+
+def test_top_level_envelope_keys_hoisted():
+    res, steps = _emit(_upd(
+        '        ignore_errors: true\n'
+        '        apply_async: true\n'
+        '        do_until: {condition: "{{ vars.done }}", retries: 3, delay: 5}\n'
+        '        agent: "lab-collector"\n'
+    ))
+    assert res.ok, _errs(res)
+    a = steps["Upd"]
+    assert a["ignore_errors"] is True
+    assert a["apply_async"] is True
+    assert a["do_until"] == {"condition": "{{ vars.done }}", "retries": 3, "delay": 5}
+    assert a["agent"] == "lab-collector"
+
+
+def _warns(res):
+    return [e.message for e in res.warnings]
+
+
+def test_legacy_arguments_wrapper_is_auto_hoisted():
+    """Phase G deprecated the `arguments:` wrapper, but the production model's
+    prior is full of it. Rather than hard-error and send the loop back to
+    correct it, the parser AUTO-HOISTS the wrapper to the step level (lossless,
+    the inverse of the decompiler) and emits a warning -- the same
+    mechanical-translation choice the `stop`->`end` rewrite makes. The wrapped
+    form must compile to the SAME wire as the hoisted form."""
+    wrapped, steps_w = _emit("""
+collection: T
+playbooks:
+  - name: P
+    steps:
+      - {name: Start, type: start, next: Upd}
+      - name: Upd
+        type: update_record
+        module: incidents
+        record: "{{ vars.input.records[0]['@id'] }}"
+        arguments:
+          resource: {status: Closed}
+""")
+    hoisted, steps_h = _emit("""
+collection: T
+playbooks:
+  - name: P
+    steps:
+      - {name: Start, type: start, next: Upd}
+      - name: Upd
+        type: update_record
+        module: incidents
+        record: "{{ vars.input.records[0]['@id'] }}"
+        resource: {status: Closed}
+""")
+    assert wrapped.ok, _errs(wrapped)       # no longer rejected
+    assert any("arguments:" in m for m in _warns(wrapped)), \
+        "the auto-hoist should warn that the wrapper is deprecated"
+    assert steps_w["Upd"] == steps_h["Upd"]  # identical wire either way
+
+
+def test_arguments_wrapper_conflict_keeps_the_step_level_value():
+    """A key written BOTH at the step level and inside the wrapper: the
+    author's explicit step-level value wins (the hoist never overwrites it)."""
+    res, steps = _emit("""
+collection: T
+playbooks:
+  - name: P
+    steps:
+      - {name: Start, type: start, next: Upd}
+      - name: Upd
+        type: update_record
+        module: incidents
+        record: "{{ vars.input.records[0]['@id'] }}"
+        resource: {status: Open}
+        arguments:
+          resource: {status: Closed}
+""")
+    assert res.ok, _errs(res)
+    assert steps["Upd"]["resource"] == {"status": "Open"}
+
+
+# ---- retry sugar -----------------------------------------------------------
+
+def test_retry_sugar_maps_to_do_until():
+    res, steps = _emit(_upd(
+        '        retry: {times: 3, delay: 5, until: "{{ vars.done }}"}\n'
+    ))
+    assert res.ok, _errs(res)
+    assert steps["Upd"]["do_until"] == {
+        "condition": "{{ vars.done }}", "retries": 3, "delay": 5,
+    }
+
+
+def test_retry_conflicts_with_do_until():
+    res, _ = _emit(_upd(
+        '        retry: {times: 3}\n'
+        '        do_until: {condition: "{{ x }}", retries: 1}\n'
+    ))
+    assert not res.ok
+    assert any("retry" in m and "pick one" in m for m in _errs(res))
+
+
+def test_retry_rejects_unknown_keys():
+    res, _ = _emit(_upd('        retry: {times: 3, wait: 5}\n'))
+    assert not res.ok
+    assert any("unknown keys" in m for m in _errs(res))
+
+
+# ---- on_remote sugar -------------------------------------------------------
+
+def test_on_remote_pick_from_record():
+    res, steps = _emit(_upd('        on_remote: pick_from_record\n'))
+    assert res.ok, _errs(res)
+    a = steps["Upd"]
+    assert a["agent"] == "Pick From Record Ownership"
+    assert a["pickFromTenant"] is True
+
+
+def test_on_remote_named_agent():
+    res, steps = _emit(_upd('        on_remote: lab-collector\n'))
+    assert res.ok, _errs(res)
+    a = steps["Upd"]
+    assert a["agent"] == "lab-collector"
+    assert a["pickFromTenant"] is False
+
+
+def test_on_remote_conflicts_with_agent():
+    res, _ = _emit(_upd(
+        '        on_remote: lab-collector\n'
+        '        agent: other\n'
+    ))
+    assert not res.ok
+    assert any("on_remote" in m and "pick one" in m for m in _errs(res))
+
+
+# ---- post_comment sugar ----------------------------------------------------
+
+def test_post_comment_expands_to_message_block():
+    res, steps = _emit(_upd('        post_comment: "auto-added by triage"\n'))
+    assert res.ok, _errs(res)
+    msg = steps["Upd"]["message"]
+    assert isinstance(msg, dict)
+    assert "auto-added by triage" in msg["content"]
+
+
+def test_post_comment_conflicts_with_message():
+    res, _ = _emit(_upd(
+        '        post_comment: "hi"\n'
+        '        message: {content: "there"}\n'
+    ))
+    assert not res.ok
+    assert any("post_comment" in m and "pick one" in m for m in _errs(res))
+
+
+# ---- message block: `tenant` (MSSP content) --------------------------------
+
+def test_message_block_accepts_tenant():
+    """Shipped Fortinet content addresses a comment at a tenant.
+
+    The allowlist rejected `tenant` outright, so MSSP-aware stock playbooks
+    could not compile at all -- and an agent asked to edit one could not return
+    a compiling result no matter how good its edit was. Confirmed against 400
+    stock playbooks pulled from a live appliance: `tenant` is the ONLY message
+    key real content uses outside the original allowlist, and it appears in 9
+    of them. Widened on that evidence, not on a remembered error string.
+    """
+    res, steps = _emit(_upd(
+        '        message: {content: "escalated", '
+        'tenant: "/api/3/tenants/abc-123"}\n'
+    ))
+    assert res.ok, _errs(res)
+    # Accepting the key but dropping it on the way out would trade a loud
+    # error for silent data loss, which is the worse of the two.
+    assert steps["Upd"]["message"]["tenant"] == "/api/3/tenants/abc-123"
+
+
+def test_message_block_omits_tenant_when_absent():
+    """The wire shape must not grow a key the product did not send."""
+    res, steps = _emit(_upd('        message: {content: "plain"}\n'))
+    assert res.ok, _errs(res)
+    assert "tenant" not in steps["Upd"]["message"]
+
+
+def test_message_block_still_rejects_a_genuinely_unknown_key():
+    """Widening for `tenant` must not turn the allowlist into a free-for-all."""
+    res, _ = _emit(_upd(
+        '        message: {content: "x", bogusKey: "y"}\n'))
+    assert not res.ok
+    assert any("bogusKey" in m for m in _errs(res))

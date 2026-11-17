@@ -1,0 +1,13 @@
+{
+  "connector": "cyops_utilities",
+  "operation": "get_macro_list",
+  "shape": {
+    "status": "str",
+    "message": "str",
+    "data": {
+      "__list_of__": "str",
+      "__len__": 8
+    }
+  },
+  "note": "live-captured shape; data is a flat list of macro-name strings"
+}

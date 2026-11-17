@@ -1,0 +1,185 @@
+"""Resolver -- looks up references against the SQLite reference store.
+
+The resolver is the only compiler component that touches the DB. It
+turns short YAML names into FSR-canonical identifiers (step type UUIDs,
+connector versions, handler functions) and surfaces structured errors
+with "did you mean…" suggestions.
+"""
+from __future__ import annotations
+
+import difflib
+import sqlite3
+from pathlib import Path
+
+from ..errors import CompileError, ErrorCode
+from ..ir import PRIORITY_LIST_NAME, Collection, Playbook
+from ._constants import SHORT_TYPE_TO_FSR, _looks_like_uuid
+from .catalog import CatalogLookupMixin
+from .connector_args import ConnectorArgsMixin
+from .normalizers import NormalizerMixin
+from .picklists import PicklistMixin
+from .rewriters import RewriterMixin
+
+__all__ = ["Resolver", "SHORT_TYPE_TO_FSR", "_looks_like_uuid"]
+
+
+class Resolver(
+    CatalogLookupMixin,
+    RewriterMixin,
+    PicklistMixin,
+    NormalizerMixin,
+    ConnectorArgsMixin,
+):
+    """Main resolver class combining all mixins."""
+
+    def __init__(self, db_path: Path):
+        # Open read-only via URI. Plain `sqlite3.connect()` CREATES the file
+        # when it is absent, so a wrong or unvendored path used to manufacture
+        # an empty reference store instead of failing -- after which every
+        # connector/operation lookup missed and broken YAML validated clean.
+        # The resolver only ever reads, so read-only costs nothing and turns
+        # that silent corruption into an immediate, nameable error.
+        from fsr_playbooks.reference_db import ReferenceDbError
+        raw = str(db_path)
+        # `:memory:` and explicit `file:` URIs are constructed by the caller
+        # (tests build a catalog in-process); they are not paths and must not
+        # be existence-checked or forced read-only.
+        if raw == ":memory:" or raw.startswith("file:"):
+            self.conn = sqlite3.connect(raw, uri=raw.startswith("file:"))
+        else:
+            path = Path(db_path)
+            if not path.exists():
+                raise ReferenceDbError(
+                    f"reference DB missing: {path}\n"
+                    f"Set FSR_REFERENCE_DB or vendor the store; the compiler "
+                    f"cannot resolve connectors or operations without it."
+                )
+            self.conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        self.conn.row_factory = sqlite3.Row
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def _resolve_priority(self, pb: Playbook, path: str,
+                          errors: list[CompileError]) -> None:
+        """Map a playbook's `priority:` name to its live picklist IRI.
+
+        Reads the synced `picklists` table (listName WorkflowPriority) so the
+        emitted IRI is the running instance's own system value. Unknown name →
+        warning with a 'did you mean' suggestion, priority left unset."""
+        if not pb.priority:
+            return
+        row = self.conn.execute(
+            "SELECT item_iri FROM picklists WHERE list_name=? AND item_value=?",
+            (PRIORITY_LIST_NAME, pb.priority),
+        ).fetchone()
+        if row:
+            pb.priority_iri = row[0]
+            return
+        candidates = [r[0] for r in self.conn.execute(
+            "SELECT item_value FROM picklists WHERE list_name=?",
+            (PRIORITY_LIST_NAME,),
+        ).fetchall()]
+        if not candidates:
+            # The WorkflowPriority picklist was never synced into this
+            # reference DB (zero rows) -- we have nothing to validate against.
+            # An unsynced reference table is a setup gap, not an authoring
+            # bug: leave priority unset SILENTLY rather than emit a spurious
+            # bad_value warning the author can't act on.
+            pb.priority = None
+            return
+        sug = difflib.get_close_matches(pb.priority, candidates, n=1, cutoff=0.5)
+        valid = ", ".join(sorted(candidates)) or "(none synced -- run the modules probe)"
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message=(f"unknown priority {pb.priority!r}; valid: {valid} -- "
+                     "leaving priority unset"),
+            path=f"{path}.priority",
+            near=sug[0] if sug else None,
+            suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+            severity="warning",
+        ))
+        pb.priority = None
+
+    def _resolve_owners(self, pb: Playbook, path: str,
+                        errors: list[CompileError]) -> None:
+        """Resolve owner team NAMES to ``/api/3/teams/<uuid>`` IRIs.
+
+        Authors write friendly team names (``owners: ["TeamA"]``); the compiler
+        converts them to the IRI wire shape via the warmed ``teams`` table
+        (populated by the modules probe from ``GET /api/3/teams``). Values that
+        are already IRIs pass through unchanged. No live lookup -- a missing or
+        unsynced ``teams`` table surfaces as a clear ``CompileError`` (the
+        author must warmup, or use the team IRI directly).
+        """
+        if not pb.owners:
+            return
+        # Detect whether the `teams` table exists/is populated without
+        # crashing on a stale or slim DB that never created it.
+        try:
+            n = self.conn.execute("SELECT count(*) FROM teams").fetchone()[0]
+        except sqlite3.OperationalError:
+            n = 0
+        resolved: list[str] = []
+        for owner in pb.owners:
+            # IRI passthrough -- no resolution needed (works offline).
+            if owner.startswith("/api/"):
+                resolved.append(owner)
+                continue
+            if n == 0:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(f"owner team {owner!r} can't be resolved -- the "
+                             f"`teams` reference table is unsynced. Run warmup "
+                             f"against the target SOAR, or use the team IRI "
+                             f"(`/api/3/teams/<uuid>`) directly."),
+                    path=f"{path}.owners",
+                ))
+                continue
+            row = self.conn.execute(
+                "SELECT iri FROM teams WHERE name = ?", (owner,),
+            ).fetchone()
+            if row:
+                resolved.append(row[0])
+                continue
+            candidates = [r[0] for r in self.conn.execute(
+                "SELECT name FROM teams").fetchall()]
+            sug = difflib.get_close_matches(owner, candidates, n=1, cutoff=0.5)
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=(f"unknown owner team {owner!r}; valid: "
+                         f"{', '.join(sorted(candidates))}"),
+                path=f"{path}.owners",
+                near=sug[0] if sug else None,
+                suggestion=(f"did you mean {sug[0]!r}?" if sug else None),
+            ))
+        pb.owners_iris = resolved
+
+    def resolve(self, collection: Collection) -> list[CompileError]:
+        errors: list[CompileError] = []
+        # Multi-instance guard: if a target SOAR is configured (FSR_BASE_URL)
+        # but the cached catalog was warmed from a different one, picklist IRIs
+        # and connector configs may silently mis-resolve. Surface it up front.
+        from ..._catalog_meta import instance_guard
+        instance_guard(self.conn, errors)
+        # Build name→Playbook map for in-collection workflow_reference targets.
+        pb_by_name = {pb.name: pb for pb in collection.playbooks}
+        for pi, pb in enumerate(collection.playbooks):
+            self._resolve_priority(pb, f"playbooks[{pi}]", errors)
+            self._resolve_owners(pb, f"playbooks[{pi}]", errors)
+            # Order matters: rename reserved keys first, capture the
+            # rename map, then the step-ref rewriter uses BOTH the new
+            # and old names so legacy `vars.steps.<S>.<old>` references
+            # (which the agent may have written) get translated too.
+            renames = self._auto_rename_reserved_set_var_keys(pb, pi, errors)
+            self._auto_rewrite_set_var_step_refs(pb, pi, errors, renames)
+            self._auto_rewrite_input_param_refs(pb, pi, errors)
+            self._steer_manual_input_param_refs(pb, pi, errors)
+            self._validate_input_param_refs(pb, pi, errors)
+            self._validate_input_record_refs(pb, pi, errors)
+            seen_ids = {s.id for s in pb.steps}
+            for si, step in enumerate(pb.steps):
+                path = f"playbooks[{pi}].steps[{si}]"
+                self._resolve_step(step, path, errors, pb_by_name, pb.name)
+                self._check_routing(step, seen_ids, path, errors)
+        return errors

@@ -1,0 +1,38 @@
+{
+  "name": "cg1-ipinfo",
+  "label": "CG1 IPInfo",
+  "description": "Golden eval connector: look up basic facts about an IP address.",
+  "version": "1.0.0",
+  "publisher": "Eval",
+  "cs_approved": false,
+  "category": "Threat Intelligence",
+  "configuration": {
+    "fields": [
+      {"name": "base_url", "title": "Server URL", "type": "text", "required": true},
+      {"name": "api_key", "title": "API Key", "type": "password", "required": true},
+      {"name": "verify", "title": "Verify SSL", "type": "checkbox", "required": false, "value": true}
+    ]
+  },
+  "operations": [
+    {
+      "operation": "lookup_ip",
+      "title": "Lookup IP",
+      "description": "Return reputation facts for an IP address.",
+      "category": "investigation",
+      "parameters": [
+        {"name": "ip", "title": "IP Address", "type": "text", "required": true}
+      ],
+      "output_schema": {"ip": "", "reputation": "", "asn": ""}
+    },
+    {
+      "operation": "lookup_asn",
+      "title": "Lookup ASN",
+      "description": "Return the organization behind an autonomous system number.",
+      "category": "investigation",
+      "parameters": [
+        {"name": "asn", "title": "ASN", "type": "text", "required": true}
+      ],
+      "output_schema": {"asn": "", "organization": ""}
+    }
+  ]
+}

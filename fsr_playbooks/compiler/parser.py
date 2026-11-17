@@ -1,0 +1,1371 @@
+"""YAML -> IR parser.
+
+Strict-ish: missing required fields produce CompileErrors with paths.
+We don't try to validate references here -- that's the resolver's job.
+"""
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+import yaml
+
+from .._yaml_hygiene import sanitize_yaml_text
+from .errors import CompileError, ErrorCode
+from .ir import Annotation, Collection, Playbook, Step
+from .resolver._constants import TRIGGER_TYPES
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+# Declared playbook-parameter types (STATIC_TYPE_FLOW Phase 3). Author-facing
+# vocabulary; the typed walker maps these to source Shapes. `any` is allowed
+# but stored as "untyped" (omitted from parameter_types).
+_PARAM_TYPE_VOCAB = {
+    "string", "integer", "boolean", "float", "number", "object", "json",
+    "list", "array", "datetime", "ipv4", "url", "email", "any",
+}
+
+# Top-level step keys the parser actually consumes. Anything else on a step
+# mapping is silently dropped by the parse below -- which is how a `create_record`
+# authored with `module:`/`resource:`/`data:` written as *siblings* of `type:`
+# (instead of under `arguments:`) compiles clean yet runs with empty arguments
+# and crashes at runtime (`insert_data() takes at least 2 positional arguments`).
+# The check at the bottom of the step loop flags any leftover key against this
+# set so the drop is visible before a push, not a runtime surprise.
+#
+# `branches`/`id` have their own dedicated rejections earlier in the loop;
+# `unlabeled_next` is the decompiler's lossy escape hatch -- both are listed here
+# so the generic check never double-reports or fires on decompiled YAML.
+# Step-level keys that are NOT step arguments -- they're IR Step fields or
+# sugar keys the parser transforms into arguments. Everything else at step
+# level is collected as a step argument directly (Phase G: the `arguments:`
+# wrapper is gone; all args are hoisted to the step's top level).
+_STEP_IR_KEYS = frozenset({
+    "id", "type", "name", "next", "branches", "unlabeled_next",
+    "comment", "description", "for_each", "select_fields",
+    "uuid", "top", "left",  # round-trip preservation
+})
+_STEP_SUGAR_KEYS = frozenset({
+    "post_comment", "set", "retry", "on_remote", "with",
+    "conditions", "default", "options", "inputs", "title", "is_approval", "vars",
+    # Start-step only: the Data Ingestion Wizard's configuration-form schema.
+    # Serialized to a JSON string under arguments.step_variables.
+    "configuration_schema",
+})
+
+
+def _coerce_label(v: Any) -> tuple[Any, bool]:
+    """YAML 1.1 'Norway problem': bare `yes`/`no`/`on`/`off` are parsed as
+    booleans. When such a value lands in a label position (decision
+    `display:`, manual_input option `display:`), FSR's branch lookup
+    keys off the literal string and silently fails. Coerce True→"yes",
+    False→"no" so the playbook compiles, and signal a warning to the
+    caller (return tuple second element).
+    """
+    if v is True:
+        return "yes", True
+    if v is False:
+        return "no", True
+    return v, False
+
+
+def _apply_with_binding(obj: Any, alias: str, replacement: str) -> None:
+    """Recursively replace `alias` with `replacement` in all string values
+    within a nested dict/list structure. Used by the `with:` path-binding
+    handler to rewrite Jinja expressions at compile time.
+
+    The replacement is a word-boundary regex match so `vars.info` matches
+    in `{{ vars.info.adom }}` but NOT in `{{ vars.information }}`.
+    """
+    pattern = re.compile(rf"\b{re.escape(alias)}\b")
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str):
+                obj[k] = pattern.sub(replacement, v)
+            else:
+                _apply_with_binding(v, alias, replacement)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, str):
+                obj[i] = pattern.sub(replacement, v)
+            else:
+                _apply_with_binding(v, alias, replacement)
+
+
+_norway_warnings: list[str] = []  # populated transiently by callers below
+
+
+def _rewrite_condition_keys(c: Any) -> Any:
+    """Decision conditions: surface keys are `display` / `when` / `next` /
+    `default`. Rewrite to wire keys `option` / `condition` for the resolver."""
+    if not isinstance(c, dict):
+        return c
+    out: dict[str, Any] = {}
+    for k, v in c.items():
+        if k == "display":
+            v2, fixed = _coerce_label(v)
+            if fixed:
+                _norway_warnings.append(str(v2))
+            out["option"] = v2
+        elif k == "when":
+            out["condition"] = v
+        else:
+            out[k] = v
+    return out
+
+
+def _rewrite_option_keys(o: Any) -> Any:
+    """Manual_input options: surface key is `display`. Rewrite to wire key `option`."""
+    if not isinstance(o, dict):
+        return o
+    out: dict[str, Any] = {}
+    for k, v in o.items():
+        if k == "display":
+            v2, fixed = _coerce_label(v)
+            if fixed:
+                _norway_warnings.append(str(v2))
+            out["option"] = v2
+        else:
+            out[k] = v
+    return out
+
+
+def _slugify(s: str) -> str:
+    """Lowercase, replace runs of non-alphanumerics with `_`, strip edges.
+
+    Used to derive a step `id:` from `name:` when the author omitted the
+    explicit id. Collisions surface as duplicate-id errors with a hint to
+    set `id:` explicitly.
+    """
+    out = _SLUG_RE.sub("_", s.lower()).strip("_")
+    return out or "step"
+
+
+def _parse_pb_tags(raw: Any) -> list[str]:
+    """Coerce a playbook's `tags:` (list or single string) to clean names."""
+    if isinstance(raw, list):
+        return [str(t).strip() for t in raw if str(t).strip()]
+    if raw:
+        name = str(raw).strip()
+        return [name] if name else []
+    return []
+
+
+def _parse_exported_tags(raw: Any, errors: list[CompileError]) -> list[str] | None:
+    """Coerce the collection-level `exported_tags:` (a list of tag names) used
+    by the Data Ingestion Wizard. None when absent (auto-derive); a list
+    otherwise. A non-list value is a hard error."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message="exported_tags must be a list of tag names",
+            path="exported_tags",
+        ))
+        return None
+    return [str(t).strip() for t in raw if str(t).strip()]
+
+
+def _not_a_playbook_hint(doc: dict) -> str:
+    """What to do when ``doc`` has no ``playbooks:`` list. Live, a turn sent a
+    ZTPF template (name, outputType, script) to validate_yaml, was told only
+    "at least one playbook is required", and stopped."""
+    if not doc or "playbooks" in doc:
+        return ""
+    if "steps" in doc:
+        return (" -- this looks like one playbook without the wrapper: put it "
+                "under `playbooks:` as a list item (playbooks: [{name: ..., "
+                "steps: ...}])")
+    keys = ", ".join(sorted(str(k) for k in doc)[:8])
+    return (f" -- this text has no `playbooks:` list or `steps:`, so it is not "
+            f"playbook YAML (its keys: {keys}). validate_yaml checks playbooks "
+            "only; to create or change a record such as a template, send these "
+            "fields with create_record or update_record instead")
+
+
+_SCALAR_LINE_RE = re.compile(r"^(\s*(?:- )?[\w.$@-]+:[ \t]+)(.*\S)[ \t]*$")
+
+
+def _quote_scalar_on_line(text: str, line0: int) -> str | None:
+    """Double-quote the unquoted mapping value on `line0` (0-based) whose inner
+    `: ` makes YAML read a second mapping value. Returns the new text, or None
+    when the line is not a simple `key: <unquoted scalar>` (never touch a block
+    scalar, a flow collection, an anchor, or a parent key with children)."""
+    lines = text.split("\n")
+    if not 0 <= line0 < len(lines):
+        return None
+    m = _SCALAR_LINE_RE.match(lines[line0])
+    if not m:
+        return None
+    prefix, val = m.group(1), m.group(2)
+    if val[:1] in ('"', "'", "|", ">", "{", "[", "&", "*", "#"):
+        return None
+    # Only a value whose colon actually breaks the mapping needs quoting.
+    if ": " not in val and not val.endswith(":"):
+        return None
+    esc = val.replace("\\", "\\\\").replace('"', '\\"')
+    lines[line0] = f'{prefix}"{esc}"'
+    return "\n".join(lines)
+
+
+def _autofix_yaml_footguns(text: str, errors: list[CompileError]) -> str:
+    """Return `text` with mechanically-fixable YAML foot-guns corrected, adding
+    one warning per fix to `errors`.
+
+    Stage 1 (parse recovery): an unquoted scalar value whose `: ` breaks the
+    mapping (`description: scores above 50: {{ x }}`) is quoted, using the
+    parser's own error position, and retried. Stage 2: `display: Yes` and the
+    other YAML 1.1 booleans are quoted so the branch label keys off the literal
+    string (`_fix_norway`). Both are no-ops on clean YAML."""
+    for _ in range(12):   # bound: one pass per breaking line
+        try:
+            yaml.safe_load(text)
+            break
+        except yaml.YAMLError as e:
+            if "mapping values are not allowed" not in str(
+                    getattr(e, "problem", "") or ""):
+                break
+            pm = getattr(e, "problem_mark", None)
+            if pm is None:
+                break
+            fixed = _quote_scalar_on_line(text, pm.line)
+            if fixed is None or fixed == text:
+                break
+            text = fixed
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE, severity="warning",
+                message=(f"line {pm.line + 1}: an unquoted value contains a "
+                         "colon that YAML reads as a second mapping key; "
+                         "auto-quoted the whole value."),
+                path=f"<line {pm.line + 1}>"))
+    try:
+        from fsr_playbooks.compiler.source_fixer import _fix_norway, apply_fixes
+        norway = _fix_norway(text)
+        if norway:
+            fixed = apply_fixes(text, norway)
+            if fixed != text:
+                text = fixed
+                for f in norway:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE, severity="warning",
+                        message=f"line {f.line}: {f.message}",
+                        path=f"<line {f.line}>"))
+    except Exception:  # noqa: BLE001 -- advisory; never block the parse
+        pass
+    return text
+
+
+_TRIGGER_TYPES = TRIGGER_TYPES
+
+def _insert_missing_trigger(steps: list[Step], pb_name: str,
+                            errors: list[CompileError]) -> None:
+    """A playbook with steps but no trigger step is invalid -- it has no entry
+    point. When the entry is unambiguous (exactly one step is the target of no
+    other step's `next` / branch / unlabeled route), prepend a manual `start`
+    routed to it and warn. A manual start only fills a TOTAL absence; it never
+    flips an existing trigger, so it cannot corrupt intent -- the author changes
+    it to an on-create / on-update trigger if the playbook should run
+    automatically. Ambiguous (no single entry) stays the honest NO_TRIGGER
+    error downstream.
+
+    Mechanical fix over prompt rule: the model routinely omits the required
+    trigger on a connector-less loop/decision playbook (localized live on
+    for_each_loop), which blocked the whole compile and bounced the agent loop
+    back to re-author a playbook that was otherwise complete."""
+    if not steps or any(s.type in _TRIGGER_TYPES for s in steps):
+        return
+    targets: set[str] = set()
+    for s in steps:
+        if s.next:
+            targets.add(s.next)
+        targets.update(s.branches.values())
+        targets.update(s.unlabeled_next)
+    entries = [s for s in steps if s.id not in targets]
+    if len(entries) != 1:
+        return  # ambiguous or cyclic -- let the validator report NO_TRIGGER
+    entry = entries[0]
+    used = {s.id for s in steps} | {s.name for s in steps}
+    sid = "Start"
+    n = 1
+    while sid in used:
+        n += 1
+        sid = f"Start_{n}"
+    steps.insert(0, Step(id=sid, type="start", name=sid, next=entry.id))
+    errors.append(CompileError(
+        code=ErrorCode.NO_TRIGGER, severity="warning",
+        message=(f"playbook {pb_name!r} had no trigger step; added a manual "
+                 f"'start' routed to {entry.name or entry.id!r}. Change it to "
+                 "an on-create / on-update trigger if this should run "
+                 "automatically."),
+        path=f"playbooks[{pb_name}]"))
+
+
+def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
+    errors: list[CompileError] = []
+    # Strip control chars the model may have introduced while re-emitting a
+    # playbook verbatim (see `_yaml_hygiene`). This entry point is shared by
+    # compile_yaml / validate_yaml / resolve_yaml / push_playbook, so it is the
+    # WRITE path: a stray NUL here fails a save, not just a read.
+    #
+    # Sanitize only -- deliberately NOT the grounding fallback the tool layer
+    # uses. Callers treat "does this text compile?" as a CLASSIFIER (apply_patch
+    # asks it whether `after_yaml` is a whole document or a snippet); silently
+    # substituting the open playbook would make that always succeed and
+    # mis-classify every snippet as a whole-doc patch.
+    text, _ = sanitize_yaml_text(text)
+    # Auto-fix mechanically-fixable YAML foot-guns at the source so a single
+    # typo does not fail the whole compile and bounce the agent loop back to
+    # re-author. Each applied fix is surfaced as a warning -- never silent.
+    text = _autofix_yaml_footguns(text, errors)
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        errors.append(CompileError(
+            code=ErrorCode.PARSE_ERROR,
+            message=f"YAML parse error: {e}",
+            path="",
+        ))
+        return None, errors
+
+    if not isinstance(doc, dict):
+        errors.append(CompileError(
+            code=ErrorCode.PARSE_ERROR,
+            message="top level must be a mapping (collection: ..., playbooks: [...])",
+        ))
+        return None, errors
+
+    # Push-mode detection: `collection:` = wrap (replace whole collection,
+    # default for backward compat), `into_collection:` = per_playbook
+    # (only touches listed playbooks within a shared target). Default
+    # collection for empty per-playbook YAMLs: the studio's own bucket.
+    DEFAULT_TARGET = "00 - FSR Studio"
+    has_collection = "collection" in doc
+    has_into = "into_collection" in doc
+    if has_collection and has_into:
+        errors.append(CompileError(
+            code=ErrorCode.BAD_VALUE,
+            message="set EITHER `collection:` (wrap mode) OR "
+                    "`into_collection:` (per-playbook mode), not both",
+            path="collection",
+        ))
+        return None, errors
+    if has_into:
+        name = doc.get("into_collection")
+        target_mode = "per_playbook"
+        name_path = "into_collection"
+    elif has_collection:
+        name = doc.get("collection")
+        target_mode = "wrap"
+        name_path = "collection"
+    else:
+        name = DEFAULT_TARGET
+        target_mode = "per_playbook"
+        name_path = "into_collection"
+    if not isinstance(name, str) or not name:
+        errors.append(CompileError(
+            code=ErrorCode.MISSING_FIELD,
+            message=f"{name_path} must be a non-empty string",
+            path=name_path,
+        ))
+
+    pbs_raw = doc.get("playbooks")
+    if not isinstance(pbs_raw, list) or not pbs_raw:
+        errors.append(CompileError(
+            code=ErrorCode.MISSING_FIELD,
+            message="at least one playbook is required" + _not_a_playbook_hint(doc),
+            path="playbooks",
+        ))
+        if errors:
+            return None, errors
+
+    playbooks: list[Playbook] = []
+    for i, pb_raw in enumerate(pbs_raw or []):
+        pb_path = f"playbooks[{i}]"
+        if not isinstance(pb_raw, dict):
+            errors.append(CompileError(
+                code=ErrorCode.PARSE_ERROR,
+                message="playbook entry must be a mapping",
+                path=pb_path,
+            ))
+            continue
+        if "uid" in pb_raw:
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="playbook.uid is not allowed -- identify playbooks by `name:` only",
+                path=f"{pb_path}.uid",
+            ))
+            continue
+        pb_name = pb_raw.get("name")
+        if not isinstance(pb_name, str) or not pb_name:
+            errors.append(CompileError(
+                code=ErrorCode.MISSING_FIELD,
+                message="playbook name is required",
+                path=f"{pb_path}.name",
+            ))
+            continue
+
+        # Round-trip: preserve original appliance UUID when present.
+        pb_uuid = pb_raw.get("uuid")
+
+        steps_raw = pb_raw.get("steps") or []
+        if not isinstance(steps_raw, list):
+            errors.append(CompileError(
+                code=ErrorCode.PARSE_ERROR,
+                message="steps must be a list",
+                path=f"{pb_path}.steps",
+            ))
+            continue
+
+        steps: list[Step] = []
+        seen_ids: set[str] = set()
+        for j, s_raw in enumerate(steps_raw):
+            sp = f"{pb_path}.steps[{j}]"
+            if not isinstance(s_raw, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.PARSE_ERROR,
+                    message="step entry must be a mapping",
+                    path=sp,
+                ))
+                continue
+            if "id" in s_raw:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "step.id is not allowed -- identify steps by `name:` "
+                        "only; references in `next:` use the name verbatim"
+                    ),
+                    path=f"{sp}.id",
+                ))
+                continue
+            sname = s_raw.get("name")
+            stype = s_raw.get("type")
+            sid = _slugify(sname) if isinstance(sname, str) and sname else None
+            if not sid:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message="step.name is required",
+                    path=f"{sp}.name",
+                ))
+                continue
+            if not isinstance(stype, str) or not stype:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message="step.type is required",
+                    path=f"{sp}.type",
+                ))
+                continue
+            if sid in seen_ids:
+                errors.append(CompileError(
+                    code=ErrorCode.DUPLICATE_STEP_ID,
+                    message=(
+                        f"two steps slugify to the same id ({sid!r}); "
+                        f"rename one of the colliding `name:` values"
+                    ),
+                    path=f"{sp}.name",
+                ))
+                continue
+            seen_ids.add(sid)
+
+            if stype == "stop":
+                # Auto-rewrite: `stop` and `end` map to the same FSR
+                # canonical (Connectors → cyops_utilities.no_op). Rather
+                # than hard-erroring on a near-synonym the author had
+                # every reason to expect to work, rewrite it to `end`
+                # and emit a warning. Mechanical translation > prompt
+                # rule.
+                stype = "end"
+                s_raw["type"] = "end"
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message="step type 'stop' auto-rewritten to 'end'",
+                    path=f"{sp}.type",
+                ))
+
+            # Phase G: all step args are at the step's top level -- the
+            # `arguments:` wrapper is gone. A step authored with the legacy
+            # wrapper is AUTO-HOISTED here rather than hard-errored: the hoist
+            # is lossless and well defined (the exact inverse of what the
+            # decompiler emits, so it reuses `_hoist_args`), and the production
+            # model's prior is full of the wrapper. Fixing it once, mechanically,
+            # beats a prompt rule plus a correction round in the agent loop --
+            # the same choice the `stop`->`end` auto-rewrite above makes
+            # ("Mechanical translation > prompt rule"). A key the author also
+            # wrote at the step level keeps the step-level value; a nested
+            # `arguments.arguments` (utility steps) flattens too.
+            if "arguments" in s_raw:
+                from fsr_playbooks.compiler.decompiler import _hoist_args
+                explicit = {k: v for k, v in s_raw.items() if k != "arguments"}
+                # Hoist into a separate accumulator (seeded with `type` so the
+                # child-playbook branch of `_hoist_args` can see the step kind),
+                # then fold it in so the author's EXPLICIT step-level keys win
+                # over a colliding wrapper key.
+                acc: dict = {"type": explicit.get("type")}
+                wrapper = s_raw["arguments"]
+                for _ in range(8):   # bound the finite nesting
+                    if not isinstance(wrapper, dict):
+                        break
+                    _hoist_args(acc, {"arguments": wrapper})
+                    wrapper = acc.pop("arguments", None)
+                acc.pop("type", None)
+                for k, v in acc.items():
+                    explicit.setdefault(k, v)
+                s_raw.clear()
+                s_raw.update(explicit)
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message=(
+                        "`arguments:` wrapper auto-hoisted to the step level "
+                        "(the wrapper is deprecated; write step arguments as "
+                        "top-level keys)"
+                    ),
+                    path=f"{sp}.arguments",
+                ))
+            _reserved = _STEP_IR_KEYS | _STEP_SUGAR_KEYS | {"arguments"}
+            args = {
+                k: v for k, v in s_raw.items()
+                if k not in _reserved
+            }
+            # Escape convention: keys prefixed with `arg_` that collide with
+            # structural IR keys are data arguments, not structural markers.
+            # e.g. `arg_type: foo` in YAML becomes `type: foo` in wire args.
+            # This lets authors send a connector param named `type` (or any
+            # other reserved name) without the compiler silently dropping it.
+            for k in list(args):
+                if k.startswith("arg_"):
+                    real = k[4:]  # strip "arg_" prefix
+                    if real in _reserved:
+                        args[real] = args.pop(k)
+
+            # Reject legacy nested shapes that have step-level shortcuts.
+            if stype == "decision" and "conditions" in args:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "decision: write `conditions:` at the step level "
+                        "(not under `arguments:`)"
+                    ),
+                    path=f"{sp}.arguments.conditions",
+                ))
+                continue
+            if stype == "manual_input" and "options" in args:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "manual_input: write `options:` at the step level "
+                        "(not under `arguments:`)"
+                    ),
+                    path=f"{sp}.arguments.options",
+                ))
+                continue
+            if stype == "set_variable" and "arguments" in s_raw:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "set_variable: write a top-level `vars:` mapping; "
+                        "`arguments:` is not used"
+                    ),
+                    path=f"{sp}.arguments",
+                ))
+                continue
+
+            # Step-level cross-cutting keys (mock_result, when, module,
+            # ignore_errors, etc.) are already in `args` -- Phase G collects
+            # all non-reserved step-level keys as args directly. The sugar
+            # handlers below transform friendly keys (set:, retry:, etc.)
+            # into their canonical wire equivalents in `args`.
+
+            if "set" in s_raw:
+                if "step_variables" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            "step.set: conflicts with step_variables "
+                            "(both compile to arguments.step_variables) -- pick one"
+                        ),
+                        path=f"{sp}.set",
+                    ))
+                elif not isinstance(s_raw["set"], dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.set must be a mapping of name → value",
+                        path=f"{sp}.set",
+                    ))
+                else:
+                    args["step_variables"] = dict(s_raw["set"])
+
+            # Start-step only: the Data Ingestion Wizard's configuration-form
+            # schema. Authored as a structured `configuration_schema:` list of
+            # field descriptors (select -> onchange -> per-option field lists);
+            # the wire stores it as a JSON *string* under
+            # `arguments.step_variables._configuration_schema`. We serialize
+            # here so the emitter/resolver never have to. `_configuration_schema`
+            # lives alongside the normal `input` shape, so merge rather than
+            # clobber whatever step_variables already holds.
+            if "configuration_schema" in s_raw:
+                if stype != "start":
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            "`configuration_schema:` is only valid on a "
+                            "`start` step (the Data Ingestion Wizard form)"
+                        ),
+                        path=f"{sp}.configuration_schema",
+                    ))
+                elif "step_variables" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            "step.configuration_schema conflicts with "
+                            "step_variables (both write arguments.step_variables) "
+                            "-- pick one"
+                        ),
+                        path=f"{sp}.configuration_schema",
+                    ))
+                else:
+                    cs = s_raw["configuration_schema"]
+                    if not isinstance(cs, (dict, list)):
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message="configuration_schema must be a mapping or list",
+                            path=f"{sp}.configuration_schema",
+                        ))
+                    else:
+                        sv: dict[str, Any] = {"input": {"params": []}}
+                        sv["_configuration_schema"] = json.dumps(cs)
+                        args["step_variables"] = sv
+
+            # Universal-envelope sugar -- friendly spellings of the wire keys
+            # hoisted above, translated here so the resolver/emitter only ever
+            # see the canonical shape. Each guards against colliding with the
+            # canonical key it expands to.
+            #
+            #   retry: {times, delay, until} → do_until: {retries, delay, condition}
+            #     A retry loop re-runs the step until `until` is truthy (or the
+            #     retry budget is spent). `times`→`retries`, `until`→`condition`;
+            #     `delay` passes through (seconds between attempts).
+            if "retry" in s_raw:
+                if "do_until" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=("step.retry and do_until both set -- they "
+                                 "compile to the same `do_until` block; pick one"),
+                        path=f"{sp}.retry",
+                    ))
+                elif not isinstance(s_raw["retry"], dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.retry must be a mapping (times/delay/until)",
+                        path=f"{sp}.retry",
+                    ))
+                else:
+                    rt = s_raw["retry"]
+                    unknown = set(rt) - {"times", "delay", "until", "condition",
+                                         "retries"}
+                    if unknown:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(f"step.retry has unknown keys: "
+                                     f"{sorted(unknown)}. Accepted: times, "
+                                     f"delay, until"),
+                            path=f"{sp}.retry",
+                        ))
+                    du: dict[str, Any] = {}
+                    if "until" in rt or "condition" in rt:
+                        du["condition"] = rt.get("until", rt.get("condition"))
+                    if "times" in rt or "retries" in rt:
+                        du["retries"] = rt.get("times", rt.get("retries"))
+                    if "delay" in rt:
+                        du["delay"] = rt["delay"]
+                    args["do_until"] = du
+                    # Warn if retry has no until/condition: FSR's editor
+                    # (line 34487) drops do_until when condition is empty,
+                    # and the import process does the same -- so the retry
+                    # config is silently lost. Live-verified on 8.0.0.
+                    if "condition" not in du:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                "step.retry without `until` will be "
+                                "silently dropped by FSR at import time "
+                                "(do_until.condition must be non-empty). "
+                                "Add an `until:` condition for the retry "
+                                "to take effect."
+                            ),
+                            path=f"{sp}.retry",
+                            severity="warning",
+                        ))
+
+            #   on_remote: <agent>            → agent: <agent>, pickFromTenant: false
+            #   on_remote: pick_from_record   → agent: "Pick From Record
+            #                                   Ownership", pickFromTenant: true
+            #     Routes step execution to a remote/tenant agent. The literal
+            #     "Pick From Record Ownership" is FSR's magic value for
+            #     record-ownership-based selection.
+            if "on_remote" in s_raw:
+                if "agent" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=("step.on_remote and agent both set -- they "
+                                 "compile to the same `agent`; pick one"),
+                        path=f"{sp}.on_remote",
+                    ))
+                else:
+                    rem = s_raw["on_remote"]
+                    if not isinstance(rem, str) or not rem.strip():
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=("step.on_remote must be an agent name or "
+                                     "'pick_from_record'"),
+                            path=f"{sp}.on_remote",
+                        ))
+                    elif rem.strip().lower() in ("pick_from_record",
+                                                 "pick_from_record_ownership",
+                                                 "pick from record ownership"):
+                        args["agent"] = "Pick From Record Ownership"
+                        args["pickFromTenant"] = True
+                    else:
+                        args["agent"] = rem.strip()
+                        args.setdefault("pickFromTenant", False)
+
+            #   post_comment: "text"  → message: {content: "text"}
+            #     Friendly sugar for posting a collaboration comment on the
+            #     triggering record. `message:` (the canonical block) still works.
+            if "post_comment" in s_raw:
+                if "message" in args:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=("step.post_comment and message both set -- "
+                                 "they compile to the same `message` block; "
+                                 "pick one"),
+                        path=f"{sp}.post_comment",
+                    ))
+                elif not isinstance(s_raw["post_comment"], str):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.post_comment must be a string",
+                        path=f"{sp}.post_comment",
+                    ))
+                else:
+                    args["message"] = {"content": s_raw["post_comment"]}
+
+            # Step-level shortcuts that hoist common nested shapes to the
+            # surface so authors don't have to nest under `arguments:`. The
+            # parser translates each shortcut into the canonical wire
+            # arguments the resolver/emitter already understand.
+            #
+            # decision:    step.conditions[] → arguments.conditions[]
+            #              with key renames display→option, when→condition
+            # manual_input: step.options[]   → arguments.options[]
+            #              with key rename   display→option
+            # set_variable: step.vars (dict) → arguments.arg_list[{name,value}]
+            if stype == "decision":
+                top_conds = s_raw.get("conditions")
+                if isinstance(top_conds, list):
+                    _norway_warnings.clear()
+                    args["conditions"] = [
+                        _rewrite_condition_keys(c) for c in top_conds
+                    ]
+                    for label in _norway_warnings:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            severity="warning",
+                            message=(
+                                f"decision branch label parsed as YAML "
+                                f"boolean (Norway problem) -- coerced to "
+                                f"{label!r}; quote bare yes/no/on/off in "
+                                f"`display:` to avoid this"
+                            ),
+                            path=f"{sp}.conditions",
+                        ))
+                    _norway_warnings.clear()
+                # Step-level `default: <step_id>` sugar -- synthesizes an
+                # Else default-condition row that targets that step. Pairs
+                # with the non-default conditions[] entries; surfaces in
+                # `step.branches` via the resolver's normalizer.
+                top_default = s_raw.get("default")
+                if isinstance(top_default, str) and top_default.strip():
+                    existing = args.setdefault("conditions", [])
+                    has_default = any(
+                        isinstance(c, dict) and c.get("default") is True
+                        for c in existing
+                    )
+                    if has_default:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                "decision step has both a step-level "
+                                "`default:` and a default-flagged entry in "
+                                "`conditions:` -- keep only one"
+                            ),
+                            path=f"{sp}.default",
+                        ))
+                    else:
+                        existing.append({
+                            "option": "Else",
+                            "default": True,
+                            "next": top_default.strip(),
+                        })
+            if stype == "manual_input":
+                top_opts = s_raw.get("options")
+                if isinstance(top_opts, list):
+                    _norway_warnings.clear()
+                    args["options"] = [
+                        _rewrite_option_keys(o) for o in top_opts
+                    ]
+                    for label in _norway_warnings:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            severity="warning",
+                            message=(
+                                f"manual_input option label parsed as YAML "
+                                f"boolean (Norway problem) -- coerced to "
+                                f"{label!r}; quote bare yes/no/on/off in "
+                                f"`display:` to avoid this"
+                            ),
+                            path=f"{sp}.options",
+                        ))
+                    _norway_warnings.clear()
+                # The prompt's form fields + heading are documented as
+                # step-level keys (guides/playbook-yaml-reference.md), same as
+                # `options:`. Hoist them into `arguments:` so the resolver's
+                # `_normalize_manual_input_args` (which reads `a.pop("inputs")`
+                # etc.) actually sees them -- otherwise step-level `inputs:` is
+                # silently dropped and the prompt ships with an empty form
+                # (`inputVariables: []`), `title`/`description` falling back to
+                # the step name. `is_approval` rides along too so the approval
+                # gate can be flagged next to the step (the normalizer reads it
+                # off arguments to re-point the step type -- see
+                # `_normalize_manual_input_args`). Conflict-guard mirrors the
+                # global hoist.
+                for hk in ("inputs", "title", "description", "is_approval"):
+                    if hk in s_raw:
+                        args[hk] = s_raw[hk]
+            if stype == "set_variable":
+                top_vars = s_raw.get("vars")
+                if isinstance(top_vars, dict):
+                    args["arg_list"] = [
+                        {"name": k, "value": v} for k, v in top_vars.items()
+                    ]
+                elif top_vars is not None:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="set_variable.vars must be a mapping of name → value",
+                        path=f"{sp}.vars",
+                    ))
+
+            # delete_record: `record`, `record_id`, `query`, `show_deleted`
+            # are regular step args now (collected by the general rule above).
+            # No special hoist needed.
+
+            # connector: `connector`, `operation`, `params`, `config` are
+            # regular step args now (collected by the general rule above).
+
+            if "branches" in s_raw:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=(
+                        "step-level `branches:` is not allowed -- write "
+                        "`next:` on each entry of `conditions:` (decision) "
+                        "or `options:` (manual_input)"
+                    ),
+                    path=f"{sp}.branches",
+                ))
+                continue
+            if stype == "decision" and s_raw.get("next"):
+                # Warn-and-fix: a bare step-level `next:` on a Decision is
+                # ambiguous (FSR's designer needs an explicit `default: true`
+                # row to render the else edge with a label). Rather than
+                # hard-fail the compile, let the value through -- the emitter
+                # auto-synthesizes an "Else" default condition pointing at
+                # the same target. Match the user's standing preference for
+                # mechanical translation over prompt rules.
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    severity="warning",
+                    message=(
+                        "decision step has a step-level `next:` -- auto-"
+                        "synthesizing an `Else` default condition pointing "
+                        "at that target"
+                    ),
+                    path=f"{sp}.next",
+                ))
+            branches: dict[str, str] = {}
+
+            cmt = s_raw.get("comment")
+
+            for_each = None
+            fe_raw = s_raw.get("for_each")
+            # Host step types that never legitimately carry `for_each` in
+            # the live corpus (369 hits across 11 step types -- these
+            # never appear). Looping a control-flow step would be a
+            # nonsense or unsafe construct.
+            _FOR_EACH_DISALLOWED_HOSTS = {
+                "start", "start_on_create", "start_on_update", "start_on_delete",
+                "decision", "end", "manual_input",
+            }
+            if fe_raw is not None:
+                if stype in _FOR_EACH_DISALLOWED_HOSTS:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(
+                            f"for_each is not supported on step type "
+                            f"{stype!r}. Attach for_each to a data /"
+                            f" action step instead (create_record, "
+                            f"update_record, find_record, connector, "
+                            f"workflow_reference, set_variable, delay, "
+                            f"code_snippet, send_mail). Control-flow "
+                            f"steps (start*, decision, end, manual_input)"
+                            f" cannot be iterated."
+                        ),
+                        path=f"{sp}.for_each",
+                    ))
+                    fe_raw = None
+            if fe_raw is not None:
+                if not isinstance(fe_raw, dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="for_each must be a mapping",
+                        path=f"{sp}.for_each",
+                    ))
+                else:
+                    accepted = {"item", "parallel", "condition", "__bulk",
+                                "batch_size", "break_loop",
+                                "max_parallel", "concurrency_count"}
+                    unknown = set(fe_raw.keys()) - accepted
+                    if unknown:
+                        errors.append(CompileError(
+                            code=ErrorCode.BAD_VALUE,
+                            message=(
+                                f"for_each has unknown keys: {sorted(unknown)}. "
+                                f"Accepted: {sorted(accepted)}"
+                            ),
+                            path=f"{sp}.for_each",
+                        ))
+                    item = fe_raw.get("item")
+                    if not isinstance(item, str) or not item.strip():
+                        errors.append(CompileError(
+                            code=ErrorCode.MISSING_FIELD,
+                            message="for_each.item is required (Jinja list expression, e.g. '{{ vars.records }}')",
+                            path=f"{sp}.for_each.item",
+                        ))
+                    else:
+                        for_each = {
+                            "item": item,
+                            "parallel": bool(fe_raw.get("parallel", False)),
+                            "condition": str(fe_raw.get("condition", "") or ""),
+                        }
+                        if "__bulk" in fe_raw:
+                            for_each["__bulk"] = bool(fe_raw["__bulk"])
+                        if "batch_size" in fe_raw:
+                            try:
+                                for_each["batch_size"] = int(fe_raw["batch_size"])
+                            except (TypeError, ValueError):
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message="for_each.batch_size must be an integer",
+                                    path=f"{sp}.for_each.batch_size",
+                                ))
+                        if "break_loop" in fe_raw:
+                            for_each["break_loop"] = str(fe_raw["break_loop"] or "")
+                        # Loop max-parallel cap (FSR 8.0). Author-friendly
+                        # `max_parallel: N` (alias `concurrency_count`) compiles
+                        # to the wire pair the designer emits: the
+                        # `concurrency: true` toggle + the `concurrencyCount: N`
+                        # limit. Only meaningful on a parallel loop, and the
+                        # engine's minimum is 2 (CONCURRENCY_CONFIG_MIN_INPUT).
+                        cap_key = ("max_parallel" if "max_parallel" in fe_raw
+                                   else "concurrency_count" if "concurrency_count" in fe_raw
+                                   else None)
+                        if cap_key is not None:
+                            try:
+                                cap = int(fe_raw[cap_key])
+                            except (TypeError, ValueError):
+                                errors.append(CompileError(
+                                    code=ErrorCode.BAD_VALUE,
+                                    message=f"for_each.{cap_key} must be an integer",
+                                    path=f"{sp}.for_each.{cap_key}",
+                                ))
+                            else:
+                                if not for_each["parallel"]:
+                                    errors.append(CompileError(
+                                        code=ErrorCode.BAD_VALUE,
+                                        severity="warning",
+                                        message=(
+                                            f"for_each.{cap_key} caps a *parallel* "
+                                            "loop; this loop is sequential "
+                                            "(parallel: false), so the cap is "
+                                            "ignored. Set parallel: true."
+                                        ),
+                                        path=f"{sp}.for_each.{cap_key}",
+                                    ))
+                                if cap < 2:
+                                    errors.append(CompileError(
+                                        code=ErrorCode.BAD_VALUE,
+                                        severity="warning",
+                                        message=(
+                                            f"for_each.{cap_key}={cap} is below the "
+                                            "FSR minimum of 2; the engine will "
+                                            "treat it as 2."
+                                        ),
+                                        path=f"{sp}.for_each.{cap_key}",
+                                    ))
+                                for_each["concurrency"] = True
+                                for_each["concurrencyCount"] = cap
+
+            # Loop-mode defaulting (authoring path only). The editor injects
+            # these when you build a loop in the UI, so the friendly authoring
+            # surface must produce the same wire shape. The shared emitter is a
+            # faithful serializer and no longer normalizes for_each, so that a
+            # decompiled (already-canonical) for_each round-trips byte-for-byte
+            # -- the corpus carries inconsistent bulk shapes (some bulk loops
+            # have no batch_size, some keep parallel) that no emit-time rule
+            # could reproduce. See `_clean_step_arguments` + the round-trip gate.
+            if isinstance(for_each, dict):
+                if for_each.get("__bulk"):
+                    for_each.pop("parallel", None)        # bulk implies sequential batches
+                    for_each.setdefault("batch_size", 100)  # editor default when bulk
+                else:
+                    for_each.pop("batch_size", None)      # batch_size is a bulk-only key
+
+            # Phase H1: `with:` path binding -- compile-time Jinja alias
+            # rewriting. Authors write `with: {info: "{{ vars.steps.X.data.
+            # code_output }}"}` and then use `{{ vars.info.adom }}` in the
+            # step's arguments. The parser rewrites `vars.info` → the bound
+            # expression in all string values within `args`, resolving the
+            # alias at compile time. No wire output -- purely an authoring
+            # convenience that produces the same wire as the expanded form.
+            with_raw = s_raw.get("with")
+            if with_raw is not None:
+                if not isinstance(with_raw, dict):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="step.with must be a mapping of name → Jinja expression",
+                        path=f"{sp}.with",
+                    ))
+                else:
+                    for bind_name, bind_expr in with_raw.items():
+                        if not isinstance(bind_name, str) or not re.match(
+                            r"^[A-Za-z_][A-Za-z0-9_]*$", bind_name
+                        ):
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"with: binding name {bind_name!r} must be a "
+                                    f"valid identifier (letter/underscore start)"
+                                ),
+                                path=f"{sp}.with.{bind_name}",
+                            ))
+                            continue
+                        if not isinstance(bind_expr, str):
+                            errors.append(CompileError(
+                                code=ErrorCode.BAD_VALUE,
+                                message=(
+                                    f"with: binding {bind_name!r} must be a "
+                                    f"Jinja expression string"
+                                ),
+                                path=f"{sp}.with.{bind_name}",
+                            ))
+                            continue
+                        raw_expr = bind_expr.strip()
+                        if raw_expr.startswith("{{") and raw_expr.endswith("}}"):
+                            raw_expr = raw_expr[2:-2].strip()
+                        _apply_with_binding(
+                            args, f"vars.{bind_name}", raw_expr
+                        )
+
+            # Phase G: all non-reserved step-level keys are collected as args
+            # above, so the unknown-key warning is no longer needed. Typed-args
+            # validation downstream catches genuinely unknown keys per step type.
+
+            # `next:` accepts a string (linear flow) or a list (fanout to
+            # multiple steps concurrently). A list is sugar for
+            # `unlabeled_next:` -- FSR runs all targets, and variables from
+            # all paths are available at any merge point (live-verified
+            # 2026-09-30 on 8.0.0-6034).
+            raw_next = s_raw.get("next")
+            step_next: str | None = None
+            step_unlabeled: list[str] = list(
+                [str(x) for x in s_raw["unlabeled_next"] if isinstance(x, str)]
+                if isinstance(s_raw.get("unlabeled_next"), list) else []
+            )
+            if isinstance(raw_next, str):
+                step_next = raw_next
+            elif isinstance(raw_next, list):
+                # Fanout: `next: [A, B]` → unlabeled_next
+                step_unlabeled = [
+                    str(x) for x in raw_next if isinstance(x, str)
+                ] + step_unlabeled  # explicit unlabeled_next wins for dedup
+
+            steps.append(Step(
+                id=sid,
+                type=stype,
+                name=sname or sid,
+                arguments=args,
+                next=step_next,
+                branches={str(k): str(v) for k, v in branches.items()},
+                unlabeled_next=step_unlabeled,
+                comment=cmt if isinstance(cmt, str) and cmt.strip() else None,
+                description=(s_raw["description"]
+                            if isinstance(s_raw.get("description"), str) else ""),
+                for_each=for_each,
+                select_fields=(
+                    [str(f).strip() for f in s_raw["select_fields"]
+                     if isinstance(s_raw.get("select_fields"), list) and str(f).strip()]
+                    if isinstance(s_raw.get("select_fields"), list) else None
+                ),
+                # Round-trip: preserve original UUID and position from
+                # decompiled YAML. None for hand-authored YAML (emitter
+                # generates deterministic uuid5 and auto-layouts).
+                uuid=s_raw.get("uuid") if isinstance(s_raw.get("uuid"), str) else None,
+                top=s_raw.get("top") if isinstance(s_raw.get("top"), (int, str)) else None,
+                left=s_raw.get("left") if isinstance(s_raw.get("left"), (int, str)) else None,
+            ))
+
+        # Resolve reference values against the playbook's step roster.
+        # Authors write references as the step's `name:` (canonical) or
+        # the slugified id; both work. After this pass, every reference
+        # holds the literal step.id so downstream resolver/emitter code
+        # never has to think about the duality.
+        name_to_id: dict[str, str] = {}
+        # Mirror the linter's charset substitution so `next:` references
+        # written with disallowed chars (em-dash, hyphen, etc) still
+        # resolve after the linter auto-renames the target step.
+        _bad_char_runs = re.compile(r"[^A-Za-z0-9 _]+")
+        for s in steps:
+            name_to_id.setdefault(s.name, s.id)
+            name_to_id.setdefault(s.id, s.id)
+            name_to_id.setdefault(_slugify(s.name), s.id)
+            charset_fixed = _bad_char_runs.sub("_", s.name).strip("_")
+            if charset_fixed:
+                name_to_id.setdefault(charset_fixed, s.id)
+
+        def _resolve_ref(v: Any) -> Any:
+            if isinstance(v, str) and v in name_to_id:
+                return name_to_id[v]
+            return v
+
+        for s in steps:
+            if s.next:
+                s.next = _resolve_ref(s.next)
+            s.branches = {k: _resolve_ref(v) for k, v in s.branches.items()}
+            s.unlabeled_next = [_resolve_ref(v) for v in s.unlabeled_next]
+            # Inline `next:` on decision conditions and manual_input options
+            # is promoted into step.branches by the resolver -- pre-resolve
+            # the string here so the resolver doesn't have to know names.
+            if isinstance(s.arguments, dict):
+                conds = s.arguments.get("conditions")
+                if isinstance(conds, list):
+                    for c in conds:
+                        if isinstance(c, dict) and isinstance(c.get("next"), str):
+                            c["next"] = _resolve_ref(c["next"])
+                opts = s.arguments.get("options")
+                if isinstance(opts, list):
+                    for o in opts:
+                        if isinstance(o, dict) and isinstance(o.get("next"), str):
+                            o["next"] = _resolve_ref(o["next"])
+
+        # `parameters:` accepts two shapes (STATIC_TYPE_FLOW Phase 3):
+        #   - bare list of names (untyped → each param is `any`), or
+        #   - mapping {name: type} declaring a static type per param, which
+        #     seeds `vars.input.params.<name>` in the typed walker.
+        params_in = pb_raw.get("parameters") or []
+        params_raw: list[str] = []
+        param_types: dict[str, str] = {}
+        if isinstance(params_in, dict):
+            for pname, ptype in params_in.items():
+                if not isinstance(pname, str):
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message="parameter names must be strings",
+                        path=f"{pb_path}.parameters",
+                    ))
+                    continue
+                params_raw.append(pname)
+                tnorm = str(ptype).strip().lower() if ptype is not None else ""
+                if tnorm and tnorm not in _PARAM_TYPE_VOCAB:
+                    errors.append(CompileError(
+                        code=ErrorCode.BAD_VALUE,
+                        message=(f"parameter {pname!r} has unknown type "
+                                 f"{ptype!r}; allowed: "
+                                 f"{', '.join(sorted(_PARAM_TYPE_VOCAB))}"),
+                        path=f"{pb_path}.parameters.{pname}",
+                        severity="warning",
+                    ))
+                elif tnorm and tnorm != "any":
+                    param_types[pname] = tnorm
+        elif isinstance(params_in, list) and all(
+                isinstance(p, str) for p in params_in):
+            params_raw = list(params_in)
+        else:
+            # LLM authors commonly write a rich list-of-dicts here
+            # (`- name: ip\n  type: string\n  description: …`). The rule alone
+            # cost a full authoring round-trip in live sessions, so the error
+            # carries a correct example -- and, when the entries are
+            # recoverable, the exact mapping equivalent of what was written.
+            msg = ("parameters must be a list of strings or a mapping "
+                   "{name: type} -- e.g. `parameters: [ip, reason]` or "
+                   "`parameters: {ip: string, reason: string}`")
+            if isinstance(params_in, list):
+                recovered = {
+                    str(p["name"]): str(p.get("type") or "any")
+                    for p in params_in
+                    if isinstance(p, dict) and isinstance(p.get("name"), str)
+                }
+                if recovered:
+                    pairs = ", ".join(f"{n}: {t}" for n, t in recovered.items())
+                    msg += (f". Your list-of-dicts form is not accepted; "
+                            f"write it as: parameters: {{{pairs}}}")
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message=msg,
+                path=f"{pb_path}.parameters",
+            ))
+
+        # Capture the priority NAME as-authored (normalized to Title case).
+        # Optional -- defaults to "High" so authored playbooks run at high
+        # priority unless they opt down. Validation + IRI resolution happens in
+        # the resolver against the live-synced `picklists` table (no DB here).
+        priority_raw = pb_raw.get("priority")
+        priority: str = (
+            str(priority_raw).strip().title() if priority_raw not in (None, "") else "High"
+        )
+
+        annotations: list[Annotation] = []
+        ann_raw = pb_raw.get("annotations") or []
+        if not isinstance(ann_raw, list):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="annotations must be a list",
+                path=f"{pb_path}.annotations",
+            ))
+            ann_raw = []
+        seen_ann_ids: set[str] = set()
+        for k, a_raw in enumerate(ann_raw):
+            ap = f"{pb_path}.annotations[{k}]"
+            if not isinstance(a_raw, dict):
+                errors.append(CompileError(
+                    code=ErrorCode.PARSE_ERROR,
+                    message="annotation entry must be a mapping",
+                    path=ap,
+                ))
+                continue
+            aid = a_raw.get("id")
+            if not isinstance(aid, str) or not aid:
+                errors.append(CompileError(
+                    code=ErrorCode.MISSING_FIELD,
+                    message="annotation.id is required",
+                    path=f"{ap}.id",
+                ))
+                continue
+            if aid in seen_ann_ids:
+                errors.append(CompileError(
+                    code=ErrorCode.DUPLICATE_STEP_ID,
+                    message=f"duplicate annotation id: {aid}",
+                    path=f"{ap}.id",
+                ))
+                continue
+            seen_ann_ids.add(aid)
+            kind = a_raw.get("kind", "note")
+            if kind not in ("note", "block", "custom"):
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=f"annotation.kind must be note|block|custom (got {kind!r})",
+                    path=f"{ap}.kind",
+                ))
+                continue
+            position = a_raw.get("position") or {}
+            if not isinstance(position, dict):
+                position = {}
+            contains = a_raw.get("contains") or []
+            if not isinstance(contains, list):
+                contains = []
+            annotations.append(Annotation(
+                id=aid,
+                kind=kind,
+                title=str(a_raw.get("title") or "Note"),
+                body=str(a_raw.get("body") or ""),
+                top=position.get("top"),
+                left=position.get("left"),
+                height=int(position.get("height") or 0),
+                width=int(position.get("width") or 300),
+                collapsed=bool(a_raw.get("collapsed", False)),
+                hide_in_logs=bool(a_raw.get("hide_in_logs", kind == "note")),
+                contains=[str(c) for c in contains],
+                uuid=a_raw.get("uuid") if isinstance(a_raw.get("uuid"), str) else None,
+            ))
+
+        # Owner teams + private visibility. `owners` accepts team NAMES (the
+        # author-friendly form -- "TeamA") or IRIs (`/api/3/teams/<uuid>`); the
+        # resolver converts names to IRIs via the warmed `teams` table. Coerce
+        # to a list of strings.
+        owners_raw = pb_raw.get("owners", []) or []
+        if not isinstance(owners_raw, list):
+            errors.append(CompileError(
+                code=ErrorCode.BAD_VALUE,
+                message="`owners` must be a list of team names or IRIs",
+                path=f"{pb_path}.owners",
+            ))
+            owners_raw = []
+        owners = [str(o) for o in owners_raw]
+
+        # Private visibility is DERIVED from owners, matching FSR's model: a
+        # playbook with owner teams is private to those teams; a playbook with
+        # no owners is public (any team can run it -- the SOAR default).
+        # `is_private:` is an optional explicit override; when omitted it
+        # follows `bool(owners)`. The SOAR invariant is enforced: no owners
+        # => never private, even if `is_private: true` was written (warned).
+        explicit_private = "is_private" in pb_raw
+        is_private = bool(pb_raw.get("is_private", False)) if explicit_private else bool(owners)
+        if not owners:
+            if explicit_private and is_private:
+                errors.append(CompileError(
+                    code=ErrorCode.BAD_VALUE,
+                    message=("`is_private: true` with no owners -- a private "
+                             "playbook requires owner teams; emitting PUBLIC "
+                             "(any team can run it, the SOAR default)"),
+                    path=f"{pb_path}.is_private",
+                    severity="warning",
+                ))
+            is_private = False
+
+        _insert_missing_trigger(steps, pb_name, errors)
+        playbooks.append(Playbook(
+            name=pb_name,
+            description=pb_raw.get("description", "") or "",
+            tag=pb_raw.get("tag", "") or "",
+            # Modern tag pills -> workflow.recordTags. Accept a list or a
+            # single string; coerce to a clean list of names.
+            tags=_parse_pb_tags(pb_raw.get("tags")),
+            # Defaults to active -- authors almost never want to deploy an
+            # inactive playbook, and FSR's UI creates them active by default.
+            # Set `is_active: false` explicitly to ship a disabled draft.
+            is_active=bool(pb_raw.get("is_active", True)),
+            debug=bool(pb_raw.get("debug", False)),
+            is_private=is_private,
+            owners=owners,
+            priority=priority,
+            trigger=str(pb_raw.get("trigger", "start") or "start"),
+            parameters=list(params_raw),
+            parameter_types=param_types,
+            steps=steps,
+            annotations=annotations,
+            uuid=pb_uuid,
+        ))
+
+    if any(e.severity != "warning" for e in errors):
+        return None, errors
+
+    return Collection(
+        name=name or "",
+        description=doc.get("description", "") or "",
+        visible=bool(doc.get("visible", True)),
+        playbooks=playbooks,
+        target_mode=target_mode,
+        tags=_parse_pb_tags(doc.get("tags")),
+        exported_tags=_parse_exported_tags(doc.get("exported_tags"), errors),
+        uuid=doc.get("uuid") if isinstance(doc.get("uuid"), str) else None,
+    ), errors

@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      # Pinned to match .pre-commit-config.yaml so local + CI agree.
+      # Config (target-version py310, select F/UP/I) lives in pyproject.toml.
+      #
+      # `tooling/` is linted here too, and deliberately: `make lint` has always
+      # covered it, so CI checking only fsr_playbooks meant the local gate and
+      # the CI gate disagreed -- and the local one was the stricter of the two,
+      # which is the wrong way round for a check meant to stop bad code landing.
+      # It had drifted to 115 violations by the time this was noticed.
+      #
+      # The path set matches .pre-commit-config.yaml exactly, conftest.py
+      # included -- three gates that lint different things are three chances
+      # for one of them to be the only thing standing between a violation and
+      # main.
+      - run: scripts/ci_suite.sh lint
+
+  test:
+    name: pytest (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor is 3.9 (SOAR runtime), but mcp requires >=3.10, so the test
+        # matrix starts at 3.10. ruff enforces the py39 syntax floor above.
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # hatch-vcs derives the version from the git tag, so the tags have to
+          # be here. The default shallow clone has none.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - name: Install deps
+        # The package's declared deps ([mcp] implies [llm]) + test-only tools.
+        # Verified to run the full fsr_playbooks suite with nothing else.
+        #
+        # The editable install of the package itself is load-bearing, not
+        # convenience: `__version__` is read back from installed distribution
+        # metadata, so with only the deps installed there is no metadata to
+        # read and the version stays pinned at the "0.0.0+unknown" sentinel.
+        # The suite still imported fsr_playbooks off cwd and mostly passed,
+        # which is why this hid -- but test_version_resolution.py failed on
+        # every run: version_is_known() was False, and the subprocess that
+        # imports from a tmp_path cwd could not find the package at all.
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install pyyaml "ruamel.yaml" jinja2 openai anthropic "mcp>=1.0" \
+                         httpx pytest requests-mock anyio python-dotenv
+          # The same mypy the ratchet baseline was measured on (uv.lock).
+          uv pip install mypy==2.1.0
+          uv pip install --no-deps -e packaging/fsr_playbooks
+      - name: Run tests
+        # Call the venv interpreter directly -- deterministic, avoids uv trying
+        # to sync the root project (which expects a sibling pyfsr checkout).
+        #
+        # PYTHONPATH=tooling: `probes` is mapped from tooling/ by the ROOT
+        # pyproject, and CI installs packaging/fsr_playbooks instead -- so two
+        # tests in test_open_playbook_grounding.py could only ever pass locally
+        # and failed here on every run, which is how main stayed red across the
+        # 0.6.6/0.6.7/0.6.8 releases. Adding the path rather than skipping the
+        # tests: they cover `_live_client()` degrading gracefully against a
+        # DOWN box, which is precisely the behaviour nobody exercises by hand.
+        # Costs no new dependency -- probes/_env imports only stdlib and
+        # probes.common at module scope; pyfsr is imported inside get_client(),
+        # which these tests monkeypatch and never call.
+        env:
+          PY: .venv/bin/python
+        run: scripts/ci_suite.sh tests-pkg
+      - name: Run tooling tests
+        # Part of the release gate (scripts/release.sh runs this same scripts/ci_suite.sh). Until it ran
+        # here a red tooling suite was only found at release time, on one
+        # laptop. Its own process: the two suites resolve different reference
+        # DBs and the root conftest refuses to collect both at once.
+        # python-dotenv above is for this suite only.
+        env:
+          PY: .venv/bin/python
+        run: scripts/ci_suite.sh tests-tooling
+      - name: Type check + mypy ratchet
+        # Fails on any mypy error in fsr_playbooks/compiler and on any NEW error
+        # in llm/ + mcp_server/ versus docs/typing/mypy_ratchet.json. Eight
+        # regressions reached main before this ran in CI.
+        env:
+          PY: .venv/bin/python
+        run: scripts/ci_suite.sh types
+
+  package:
+    name: build + twine check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Build wheel
+        # Relative package-dir (../..) resolves against the checked-out repo
+        # root for this in-place build off the clone.
+        run: cd packaging/fsr_playbooks && uv build --wheel --out-dir dist
+      - name: Validate metadata
+        run: uvx twine check packaging/fsr_playbooks/dist/*.whl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fsr_playbooks-wheel
+          path: packaging/fsr_playbooks/dist/*.whl

@@ -1,0 +1,46 @@
+{
+  "name": "synthetic_threat_feed",
+  "label": "Synthetic Threat Feed",
+  "version": "1.0.0",
+  "category": "Threat Intelligence",
+  "description": "Synthetic test connector locked into a fixture so the threat-feed recipe generator output is byte-stable across changes.",
+  "operations": [
+    {
+      "operation": "fetch_indicators",
+      "title": "Fetch Indicators",
+      "annotation": "fetch_indicators",
+      "category": "investigation",
+      "description": "Retrieve threat indicators from the synthetic feed.",
+      "parameters": [
+        {
+          "name": "since",
+          "title": "Since",
+          "type": "datetime",
+          "required": false,
+          "description": "Pull indicators modified after this timestamp."
+        },
+        {
+          "name": "limit",
+          "title": "Limit",
+          "type": "integer",
+          "required": false,
+          "value": 100
+        }
+      ],
+      "output_schema": {
+        "indicators": [
+          {
+            "id": "",
+            "value": "",
+            "type": "",
+            "confidence": 0,
+            "first_seen": "",
+            "last_seen": "",
+            "tags": []
+          }
+        ],
+        "next_page_token": ""
+      }
+    }
+  ]
+}

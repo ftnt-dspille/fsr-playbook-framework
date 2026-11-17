@@ -1,0 +1,19 @@
+[project]
+name = "fsrpb-studio"
+version = "0.0.1"
+description = "Web UI for FSR Playbook authoring"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sse-starlette>=2.1",
+    "anthropic>=0.40",
+    "openai>=1.50",
+    "keyring>=24",
+    "keyrings.alt>=5",
+    "python-dotenv>=1.0",
+    # The fsrpb package itself is imported by sys.path injection from ../python.
+]
+
+[tool.setuptools]
+packages = ["backend"]

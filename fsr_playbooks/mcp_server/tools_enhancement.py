@@ -1,0 +1,1725 @@
+"""verify_enhancement -- diff-aware pre-submit gate for enhance mode.
+
+Sibling of `verify_playbook`. Same shape check (delegates to it), plus a
+structural diff against `before_yaml` to flag regressions the build-mode
+gate cannot see -- dropped steps, silently-renamed steps, stripped
+annotations, behavior changes outside the user-requested edit.
+
+Why this exists: a green compile is necessary but not sufficient in
+enhance mode. A "tidy up" that drops an `annotations:` block or renames
+a step (breaking external `vars.steps.<slug>.*` consumers) compiles
+clean but is still a regression vs the prior YAML. See
+`docs/plans/AGENT_LOOP_REFINEMENT_PLAN.md` §C3.
+
+Heuristic boundary: "the user didn't ask to touch this step" is fuzzy.
+We start strict -- only literal step-name mentions in `user_message`
+mark a step as fair game -- and rely on C4's enhance eval bucket to
+tell us where to loosen.
+"""
+from __future__ import annotations
+
+import contextvars
+import json
+import re
+from typing import Any
+
+from . import _verified_yaml
+from ._shared import (
+    SCOPE_CHOICE_PAYLOAD,
+    SCOPE_MODIFY,
+    _err,
+    get_grounded_yaml,
+    get_playbook_scope,
+    get_turn_user_message,
+    mcp,
+)
+from .tools_verify import verify_playbook
+
+# Renames `edit_playbook`'s own rename_step ops performed, for the verify it
+# runs. Not a verify_enhancement argument: that is a model-facing tool, and a
+# model that could declare its renames "requested" would bypass the check.
+_OP_RENAMES: contextvars.ContextVar[dict[str, str] | None] = \
+    contextvars.ContextVar("_OP_RENAMES", default=None)
+
+# Steps `edit_playbook`'s own ops named (update/rename/re-route), for the same
+# verify. Only these may get a `<step>.*` write acknowledgement: a step that
+# merely came out different in a re-typed document was not asked for.
+_OP_TOUCHED: contextvars.ContextVar[frozenset[str] | None] = \
+    contextvars.ContextVar("_OP_TOUCHED", default=None)
+
+_TOUCHING_OPS = {"update_step": ("name",), "rename_step": ("name", "to"),
+                 "set_route": ("from",), "remove_route": ("from",)}
+
+
+def _parse(yaml_text: str):
+    """Parse → IR. Returns (Collection | None, errors). Wraps the sys.path
+    setup the verify path also does so this module can be called from the
+    MCP entry point or from web tests interchangeably."""
+    try:
+        from fsr_playbooks.compiler import parse_yaml
+    except ImportError as exc:
+        return None, [{"code": "compiler_unavailable", "message": str(exc)}]
+    coll, errs = parse_yaml(yaml_text)
+    return coll, errs
+
+
+# ---------------------------------------------------------------------------
+# IR projection -- what counts as "the same step" for regression purposes.
+# Text-diffing YAML would flag whitespace + key ordering; IR-diffing won't.
+# ---------------------------------------------------------------------------
+
+def _step_projection(s) -> dict[str, Any]:
+    """Stable projection of a Step for behavior comparison. Excludes
+    resolver-filled fields (uuids, handler) since those are derived."""
+    return {
+        "type": s.type,
+        "arguments": s.arguments or {},
+        "next": s.next,
+        "branches": dict(s.branches or {}),
+        "unlabeled_next": list(s.unlabeled_next or []),
+        "for_each": s.for_each,
+        "comment": s.comment,
+    }
+
+
+def _flow_order(pb) -> list[str]:
+    """Step names in the order an analyst reads the playbook: the trigger
+    first, then breadth-first along next / branches, then anything the walk
+    never reached in declaration order. The diff is built from name *sets*,
+    so without this the offer card listed "Start" last (live, a classroom of
+    analysts read edits bottom-up)."""
+    from ..compiler.validator import _step_outgoing, _trigger_id
+    steps = list(pb.steps or [])
+    by_id = {s.id: s for s in steps}
+    seen: list[str] = []
+    queue = [_trigger_id(pb)] if steps else []
+    while queue:
+        sid = queue.pop(0)
+        if sid is None or sid in seen or sid not in by_id:
+            continue
+        seen.append(sid)
+        queue.extend(_step_outgoing(by_id[sid]))
+    seen += [s.id for s in steps if s.id not in seen]
+    return [(by_id[i].name or i) for i in seen]
+
+
+def _annotation_projection(a) -> dict[str, Any]:
+    """Annotation comparison projection. Excludes `uuid` (emitter-filled)
+    and `auto_for_step` (derived from step.comment round-trip)."""
+    return {
+        "kind": a.kind,
+        "title": a.title,
+        "body": a.body,
+        "top": a.top,
+        "left": a.left,
+        "height": a.height,
+        "width": a.width,
+        "collapsed": a.collapsed,
+        "hide_in_logs": a.hide_in_logs,
+        "contains": list(a.contains or []),
+    }
+
+
+# ---------------------------------------------------------------------------
+# "Did the user ask to touch this step?" -- strict by design.
+# ---------------------------------------------------------------------------
+
+def _user_referenced_steps(user_message: str | None,
+                           step_names: list[str]) -> set[str] | None:
+    """Return the set of step names the user explicitly named, or None
+    if `user_message` is absent (eval harness, agent calling without
+    chat context). None means: skip the `behavior_changed_outside_diff`
+    flag -- we only emit the hard regressions."""
+    if user_message is None:
+        return None
+    msg = user_message.lower()
+    referenced: set[str] = set()
+    for name in step_names:
+        ln = (name or "").lower()
+        if not ln:
+            continue
+        if ln in msg or ln.replace(" ", "_") in msg or ln.replace(" ", "-") in msg:
+            referenced.add(name)
+    # Type-aware expansion ("rename all decision steps") happens in
+    # `_expand_by_type`, which needs the name→type map the caller owns.
+    return referenced
+
+
+_RENAME_VERBS = ("rename", "renaming", "re-name", "call it", "change the name",
+                 "change its name", "name it")
+
+
+def _asked_to_rename(user_message: str | None) -> bool:
+    """Did the analyst ask for a rename in so many words?
+
+    Deliberately literal, for the same reason `_user_referenced_steps` is:
+    the exemption this feeds REMOVES a blocking regression, so a loose match
+    would let a gratuitous rename through by accident. A rename nobody asked
+    for is the failure mode; missing an unusual phrasing only costs a warning
+    that reads as an error.
+    """
+    if not user_message:
+        return False
+    msg = user_message.lower()
+    return any(v in msg for v in _RENAME_VERBS)
+
+
+_DELETE_VERBS = ("delete", "remove", "drop the", "drop step", "get rid of",
+                 "take out", "eliminate", "strip out", "no longer need")
+
+
+def _asked_to_delete(user_message: str | None) -> bool:
+    """Did the analyst ask for a deletion in so many words?
+
+    The deletion twin of `_asked_to_rename`, and literal for the same reason:
+    the exemption it feeds REMOVES a blocking regression, so a loose match
+    would wave through a step the model dropped by accident -- which is the
+    failure mode `step_dropped` exists to catch. Missing an unusual phrasing
+    only costs a warning that reads as an error.
+
+    Like the rename exemption this is ANDed with the step actually being named
+    by the user, so "remove the IP from the block list" cannot exempt dropping
+    a step nobody mentioned.
+    """
+    if not user_message:
+        return False
+    msg = user_message.lower()
+    return any(v in msg for v in _DELETE_VERBS)
+
+
+def _expand_by_type(referenced: set[str], user_message: str,
+                    name_to_type: dict[str, str]) -> set[str]:
+    msg = (user_message or "").lower()
+    type_phrases = {
+        "decision": ("decision",),
+        "manual_input": ("manual input", "manual_input", "approval"),
+        "set_variable": ("set variable", "set_variable", "set var"),
+        "connector": ("connector step", "api call"),
+        "find_record": ("find record", "find_record", "lookup record"),
+        "update_record": ("update record", "update_record"),
+        "create_record": ("create record", "create_record"),
+        "delay": ("delay step",),
+        "code_snippet": ("code snippet", "code_snippet", "python step"),
+        "workflow_reference": ("workflow reference", "workflow_reference",
+                               "sub-playbook", "subplaybook"),
+    }
+    out = set(referenced)
+    for t, phrases in type_phrases.items():
+        if any(p in msg for p in phrases):
+            for n, st in name_to_type.items():
+                if st == t:
+                    out.add(n)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Structural diff
+# ---------------------------------------------------------------------------
+
+def _diff_collections(before, after, user_message: str | None,
+                      op_renames: dict[str, str] | None = None,
+                      ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Compare two IR Collections. Returns (regressions, diff_summary).
+
+    `op_renames` (old name -> new name) are renames an explicit `rename_step`
+    operation performed: the analyst's request in structured form, so they
+    are requested renames whatever words `user_message` used."""
+    regressions: list[dict[str, Any]] = []
+
+    # Pair playbooks by name (FSR's stable identifier within a collection).
+    before_pbs = {pb.name: pb for pb in before.playbooks}
+    after_pbs = {pb.name: pb for pb in after.playbooks}
+
+    steps_added: list[str] = []
+    steps_removed: list[str] = []
+    steps_modified: list[str] = []
+    unchanged_count = 0
+    # Per-step before/after payloads. The name lists above are a good index
+    # but a bad explanation -- the card can only render "what changed" if the
+    # projections survive the flattening.
+    changes: list[dict[str, Any]] = []
+
+    # Playbook-level diffs first.
+    for name in before_pbs.keys() - after_pbs.keys():
+        changes.append({
+            "playbook": name,
+            "step": None,
+            "kind": "playbook_removed",
+            "type": None,
+            "before": {"steps": _flow_order(before_pbs[name])},
+            "after": None,
+            "changed_fields": [],
+        })
+        regressions.append({
+            "kind": "playbook_dropped",
+            "step": None,
+            "before": name,
+            "after": None,
+            "severity": "error",
+            "message": f"playbook {name!r} was present before and is now missing",
+        })
+    for name in after_pbs.keys() - before_pbs.keys():
+        # Adding a playbook isn't a regression, so no regressions entry --
+        # but its steps are the whole change, so they belong in the diff.
+        changes.append({
+            "playbook": name,
+            "step": None,
+            "kind": "playbook_added",
+            "type": None,
+            "before": None,
+            "after": {"steps": _flow_order(after_pbs[name])},
+            "changed_fields": [],
+        })
+
+    for pb_name in before_pbs.keys() & after_pbs.keys():
+        bpb = before_pbs[pb_name]
+        apb = after_pbs[pb_name]
+
+        # Build name maps. We key by display `name` (the FSR-stable
+        # human identifier) rather than `id` (the parser's local refname,
+        # which the resolver may regenerate).
+        b_steps = {(s.name or s.id): s for s in bpb.steps}
+        a_steps = {(s.name or s.id): s for s in apb.steps}
+
+        b_names = set(b_steps.keys())
+        a_names = set(a_steps.keys())
+
+        # name_to_type for the type-aware reference heuristic
+        name_to_type = {n: s.type for n, s in b_steps.items()}
+        name_to_type.update({n: s.type for n, s in a_steps.items()})
+
+        referenced = _user_referenced_steps(user_message, list(b_names | a_names))
+        if referenced is not None and user_message is not None:
+            referenced = _expand_by_type(referenced, user_message, name_to_type)
+
+        dropped = set(b_names - a_names)
+        added = set(a_names - b_names)
+        common = b_names & a_names
+
+        # Pair renames FIRST so we don't also flag the same pair as
+        # drop+add. A step that kept its uuid is the same step whatever else
+        # changed -- live, "rename the manual task" also retitled its form in
+        # the same edit, the projections differed, and the analyst's own
+        # rename came back as `step_dropped` three times. Without uuids
+        # (hand-written YAML) a rename = same projection, different name.
+        def _uuid_of(s) -> str | None:
+            return getattr(s, "uuid", None) or None
+
+        b_uuids = [_uuid_of(s) for s in bpb.steps if _uuid_of(s)]
+        a_uuids = [_uuid_of(s) for s in apb.steps if _uuid_of(s)]
+        # A duplicated uuid identifies nothing; fall back to projections.
+        uuids_ok = (len(b_uuids) == len(set(b_uuids))
+                    and len(a_uuids) == len(set(a_uuids)))
+
+        def _same_step(dn: str, an: str) -> bool:
+            bu, au = _uuid_of(b_steps[dn]), _uuid_of(a_steps[an])
+            if uuids_ok and bu and au:
+                return bu == au
+            # Without uuids the name is the only link. An explicit rename_step
+            # says the two names are one step, whatever else the batch changed
+            # on it (an update in the same batch moves the projection).
+            if (op_renames or {}).get(dn) == an:
+                return True
+            return _step_projection(a_steps[an]) == _step_projection(b_steps[dn])
+
+        if dropped and added:
+            for dn in list(dropped):
+                for an in list(added):
+                    if _same_step(dn, an):
+                        # A rename the analyst asked for BY NAME is not
+                        # silent, and blocking it told them their own
+                        # request was a regression -- `ready_to_push` went
+                        # false and the enhancement card said so. The
+                        # consequence is still real and still surfaced; it
+                        # just stops being a blocker. The exemption is the
+                        # same `referenced` set `behavior_changed_outside_
+                        # diff` already uses, narrowed by an explicit
+                        # rename verb so an unrequested rename cannot
+                        # inherit it from a step merely being mentioned.
+                        requested = ((op_renames or {}).get(dn) == an
+                                     or (referenced is not None
+                                         and dn in referenced
+                                         and _asked_to_rename(user_message)))
+                        regressions.append({
+                            "kind": ("step_renamed_as_requested" if requested
+                                     else "step_renamed_silently"),
+                            "step": dn,
+                            "before": dn,
+                            "after": an,
+                            "severity": "warning" if requested else "error",
+                            "message": (
+                                f"step renamed {dn!r} → {an!r} as requested; "
+                                "external vars.steps.<slug>.* consumers that "
+                                "referenced the old name will need updating"
+                                if requested else
+                                f"step renamed {dn!r} → {an!r}; "
+                                "breaks external vars.steps.<slug>.* "
+                                "consumers -- confirm with the user"),
+                        })
+                        b_proj = _step_projection(b_steps[dn])
+                        a_proj = _step_projection(a_steps[an])
+                        also = sorted(k for k in b_proj if b_proj[k] != a_proj.get(k))
+                        changes.append({
+                            "playbook": pb_name,
+                            "step": dn,
+                            "kind": "renamed",
+                            "type": b_steps[dn].type,
+                            "before": {"name": dn, **(b_proj if also else {})},
+                            "after": {"name": an, **(a_proj if also else {})},
+                            "changed_fields": ["name", *also],
+                        })
+                        if also:
+                            steps_modified.append(an)
+                        dropped.discard(dn)
+                        added.discard(an)
+                        break
+
+        for n in dropped:
+            steps_removed.append(n)
+            changes.append({
+                "playbook": pb_name,
+                "step": n,
+                "kind": "removed",
+                "type": b_steps[n].type,
+                "before": _step_projection(b_steps[n]),
+                "after": None,
+                "changed_fields": [],
+            })
+            # A deletion the analyst asked for BY NAME is not a regression --
+            # it is the edit. Blocking it told them their own request was an
+            # error: live probe A3 ("delete the 'Dead End' step") came back
+            # ok=False with EVERY check green (compile clean, typed_walk clean,
+            # schema clean) and this the only finding, so the model narrated a
+            # refusal and asked how to proceed instead of delivering. The edit
+            # only reached the box because the connector's salvage fabricated a
+            # patch_proposal around the failed verification.
+            #
+            # This is the same exemption `step_renamed_as_requested` already
+            # had, and the same one the `behavior_changed_outside_diff` branch
+            # below applies -- three sibling branches, two intent-aware and this
+            # one left behind. The consequence is still surfaced (in
+            # `diff_summary.steps_removed`, in `changes`, and as a warning
+            # here); it just stops being a blocker.
+            #
+            # The write itself is still guarded: `prewrite.check_prewrite`
+            # refuses a save that drops a step unless the caller acknowledges
+            # it. That gate is fail-closed AND has an acknowledgement path.
+            # This one had neither, so two fail-closed gates in series with no
+            # way through made a deletion impossible to perform at all.
+            requested = ((referenced is not None
+                          and n in referenced
+                          and _asked_to_delete(user_message))
+                         or get_playbook_scope() == SCOPE_MODIFY)
+            regressions.append({
+                "kind": ("step_deleted_as_requested" if requested
+                         else "step_dropped"),
+                "step": n,
+                "before": b_steps[n].type,
+                "after": None,
+                "severity": "warning" if requested else "error",
+                "message": (
+                    f"step {n!r} (type={b_steps[n].type}) deleted as requested; "
+                    "anything referencing vars.steps.<slug>.* from it will "
+                    "need updating"
+                    if requested else
+                    f"step {n!r} (type={b_steps[n].type}) was present "
+                    "before and is now missing -- the analyst did not ask to "
+                    "remove it. Keep it, or ask first and end the turn: "
+                    "emit_card(card_type='choice', payload="
+                    f"{json.dumps(SCOPE_CHOICE_PAYLOAD)}). 'modify' allows "
+                    "removing steps; 'create_new' builds a separate playbook "
+                    "(playbook_offer)"),
+            })
+
+        for n in added:
+            steps_added.append(n)
+            changes.append({
+                "playbook": pb_name,
+                "step": n,
+                "kind": "added",
+                "type": a_steps[n].type,
+                "before": None,
+                "after": _step_projection(a_steps[n]),
+                "changed_fields": [],
+            })
+
+        for n in common:
+            b_proj = _step_projection(b_steps[n])
+            a_proj = _step_projection(a_steps[n])
+            if b_proj == a_proj:
+                unchanged_count += 1
+                continue
+            steps_modified.append(n)
+            changes.append({
+                "playbook": pb_name,
+                "step": n,
+                "kind": "modified",
+                "type": a_steps[n].type,
+                "before": b_proj,
+                "after": a_proj,
+                "changed_fields": sorted(
+                    k for k in b_proj if b_proj[k] != a_proj.get(k)
+                ),
+            })
+            # Only flag as a regression if the user didn't explicitly
+            # name this step. When referenced is None we skip the flag
+            # (no user_message context) but still report it in
+            # diff_summary. A step an explicit edit_playbook op targeted is
+            # the request in structured form (like `op_renames`), whatever
+            # words the model's `user_message` summary used. Analyst sim: the
+            # analyst asked for "malicious only", the model update_step'd the
+            # decision, this fired on the name not being in the summary, and
+            # it vetoed the step's ack -- every Apply refused would_drop_fields.
+            if (referenced is not None and n not in referenced
+                    and n not in (_OP_TOUCHED.get() or frozenset())):
+                regressions.append({
+                    "kind": "behavior_changed_outside_diff",
+                    "step": n,
+                    "before": b_proj,
+                    "after": a_proj,
+                    "severity": "warning",
+                    "message": (f"step {n!r} changed but was not referenced "
+                                "in the user's message; confirm this was "
+                                "intended"),
+                })
+
+        # Annotation-level diffs. Key by Annotation.id (the slug).
+        b_anns = {a.id: a for a in bpb.annotations}
+        a_anns = {a.id: a for a in apb.annotations}
+        for aid in b_anns.keys() - a_anns.keys():
+            regressions.append({
+                "kind": "annotation_stripped",
+                "step": None,
+                "before": _annotation_projection(b_anns[aid]),
+                "after": None,
+                "severity": "warning",
+                "message": (f"annotation {aid!r} ({b_anns[aid].kind}) was "
+                            "present before and is now missing"),
+            })
+        for aid in b_anns.keys() & a_anns.keys():
+            bp = _annotation_projection(b_anns[aid])
+            ap = _annotation_projection(a_anns[aid])
+            if bp == ap:
+                continue
+            # UI-metadata-only diffs are a softer regression than full
+            # body/title changes.
+            ui_keys = {"top", "left", "height", "width", "collapsed"}
+            differing = {k for k in bp if bp[k] != ap[k]}
+            if differing and differing <= ui_keys:
+                regressions.append({
+                    "kind": "ui_metadata_lost",
+                    "step": None,
+                    "before": {k: bp[k] for k in differing},
+                    "after": {k: ap[k] for k in differing},
+                    "severity": "warning",
+                    "message": (f"annotation {aid!r} UI metadata changed "
+                                f"({sorted(differing)}); confirm this was "
+                                "intended"),
+                })
+            else:
+                regressions.append({
+                    "kind": "annotation_modified",
+                    "step": None,
+                    "before": bp,
+                    "after": ap,
+                    "severity": "warning",
+                    "message": f"annotation {aid!r} body/title changed",
+                })
+
+    # Flow order, not set order: the card reads top-down like the designer.
+    # A removed step ranks by where it sat before; everything else by where
+    # it sits after. Playbook-level rows keep their place at the front.
+    rank: dict[tuple[str, str], int] = {}
+    for pb_name, pb in before_pbs.items():
+        for i, n in enumerate(_flow_order(pb)):
+            rank[(pb_name, n)] = i
+    for pb_name, pb in after_pbs.items():
+        for i, n in enumerate(_flow_order(pb)):
+            rank[(pb_name, n)] = i
+    pb_rank = {n: i for i, n in enumerate(after_pbs)}
+    for n in before_pbs:
+        pb_rank.setdefault(n, len(pb_rank))
+
+    def _change_key(c: dict[str, Any]) -> tuple:
+        if c.get("step") is None:
+            return (-1, 0, 0)
+        name = c["step"]
+        if c.get("kind") == "renamed":
+            name = (c.get("after") or {}).get("name", name)
+        return (pb_rank.get(c["playbook"], 0), 1,
+                rank.get((c["playbook"], name), 1 << 30))
+
+    changes.sort(key=_change_key)
+    any_rank = {n: r for (_pb, n), r in rank.items()}
+    for names in (steps_added, steps_removed, steps_modified):
+        names.sort(key=lambda n: any_rank.get(n, 1 << 30))
+
+    diff_summary = {
+        "steps_added": steps_added,
+        "steps_removed": steps_removed,
+        "steps_modified": steps_modified,
+        "unchanged": unchanged_count,
+        "changes": changes,
+    }
+    return regressions, diff_summary
+
+
+# ---------------------------------------------------------------------------
+# Tool entry point
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def verify_enhancement(
+    before_yaml: str | None = None,
+    after_yaml: str | None = None,
+    user_message: str | None = None,
+    live_probe: bool = False,
+) -> dict[str, Any]:
+    """The pre-submit gate for a WHOLESALE rewrite of the open playbook -- run
+    this before `emit_card(card_type='enhancement_offer', ...)`. For a targeted
+    edit (add/change/remove/re-route a few steps) use `edit_playbook` instead:
+    it applies the change to the open playbook itself, so you never re-type the
+    document. Authoring a NEW playbook from scratch has no open playbook: gate
+    that with `verify_playbook` instead.
+
+    Leave `before_yaml` out -- it defaults to the open playbook as read from
+    FortiSOAR. Copying the open playbook into the call is how steps and links go
+    missing. Pass only `after_yaml`, your complete revised playbook.
+
+    Runs `verify_playbook(after_yaml)` for the shape check, then
+    structurally diffs `before_yaml` vs `after_yaml` and reports
+    regressions the build-mode gate cannot see.
+
+    Args:
+      before_yaml: omit it. Defaults to the open playbook, and while a
+        playbook is open that copy always wins; it only counts when nothing
+        is open.
+      after_yaml: the proposed edited YAML (required).
+      user_message: the chat turn that asked for the edit. Used to mark
+        which steps were "fair game" to touch -- steps changed outside
+        the user's named scope fire a `behavior_changed_outside_diff`
+        warning. Pass None to skip that heuristic (still emits hard
+        regressions: dropped steps, renamed steps, stripped annotations).
+      live_probe: forwarded to verify_playbook.
+
+    Returns the verify_playbook contract plus:
+      - regressions: [{kind, step, before, after, severity, message}]
+      - diff_summary: {steps_added, steps_removed, steps_modified, unchanged,
+                       changes}. The first four are name lists / a count --
+                       an index. `changes` is the explanation: one entry per
+                       changed step, {playbook, step, kind, type, before,
+                       after, changed_fields}, where before/after are the IR
+                       step projections. `kind` is one of added | removed |
+                       modified | renamed | playbook_added | playbook_removed.
+
+    `ready_to_push` is False if verify_playbook would block OR if any
+    regression has severity='error'. Warning-severity regressions
+    surface but do not block.
+
+    Regression kinds:
+      - playbook_dropped       (error)
+      - step_dropped           (error) -- a step vanished and nobody asked
+      - step_deleted_as_requested (warning) -- the same disappearance, when the
+                                          analyst named that step AND used a
+                                          delete verb. Their own request must
+                                          not come back as a blocker. The save
+                                          is still guarded: `check_prewrite`
+                                          refuses a drop unless the caller
+                                          acknowledges it, and unlike this gate
+                                          it HAS an acknowledgement path.
+      - step_renamed_silently  (error) -- same shape, new name; breaks
+                                          external vars.steps.<slug>.* refs
+      - step_renamed_as_requested (warning) -- the same rename, when the
+                                          analyst named that step AND used a
+                                          rename verb. Their own request must
+                                          not come back as a blocker; the
+                                          broken-consumer consequence still
+                                          surfaces, it just does not stop
+                                          `ready_to_push`.
+      - annotation_stripped    (warning)
+      - annotation_modified    (warning)
+      - ui_metadata_lost       (warning)
+      - behavior_changed_outside_diff (warning) -- only when user_message given
+
+    When the verdict passes, the result also carries **`verified_id`** -- an
+    opaque handle to the exact `after_yaml` bytes that just cleared the gate.
+    Pass it to `emit_card(card_type='enhancement_offer', payload={verified_id: ..., summary: ...})` to apply the edit. That
+    tool takes no YAML, so the document you verified is the document that
+    lands; re-typing the playbook into chat instead is the one way to lose the
+    edit (see `_verified_yaml` for the live failure this closes).
+    """
+    # DERIVE the intent when the model did not declare it. `user_message` is an
+    # optional argument, and live on 8.0 the box model called this tool with
+    # only `before_yaml` and `after_yaml` -- so `referenced` was None and EVERY
+    # intent-aware exemption below (requested rename, requested deletion,
+    # behavior_changed_outside_diff) was unreachable. The analyst had typed
+    # "Delete the step named 'Dead End'"; the gate simply never saw it, called
+    # their deletion an error, and the model dutifully refused its own edit.
+    #
+    # Same lesson as tracker #60 (`requested_by`: declared on 0 of 4 live
+    # calls): derive intent from the analyst's own words, never depend on the
+    # model to pass it along. The chat loop binds them for the turn; an
+    # explicitly passed `user_message` still wins, so eval harnesses and direct
+    # agent calls are unchanged.
+    if user_message is None:
+        user_message = get_turn_user_message()
+
+    # The baseline is the open playbook, read from FortiSOAR -- never a copy the
+    # model typed. Same pattern as analyze_playbook's empty `yaml_text`.
+    # When a playbook IS open, FortiSOAR's copy wins over one the model typed
+    # into the call: a typed copy can only lose content. Live (tracker #131) the
+    # model passed an elided stub as before_yaml AND after_yaml, and the stub
+    # diffed clean against itself.
+    grounded = get_grounded_yaml()
+    before_overridden = bool(
+        grounded and isinstance(before_yaml, str) and before_yaml.strip()
+        and before_yaml.strip() != grounded.strip())
+    if grounded:
+        before_yaml = grounded
+    if not (isinstance(before_yaml, str) and before_yaml.strip()):
+        before_yaml = get_grounded_yaml()
+        if not before_yaml:
+            return _err(
+                "no_open_playbook",
+                "there is no open playbook to compare against. For a NEW "
+                "playbook use verify_playbook; to verify against a specific "
+                "baseline pass before_yaml.")
+    if not (isinstance(after_yaml, str) and after_yaml.strip()):
+        return _err("missing_field",
+                    "after_yaml is required: the complete revised playbook. "
+                    "For a targeted edit use edit_playbook(operations=[...]).")
+
+    # 1. Shape check on the after YAML.
+    after_result = _grandfather_preexisting(
+        verify_playbook(after_yaml, live_probe=live_probe), before_yaml)
+
+    # 2. Parse both for the diff.
+    before_coll, before_errs = _parse(before_yaml)
+    after_coll, after_errs = _parse(after_yaml)
+
+    if before_coll is None:
+        # Before YAML is unparseable -- we cannot diff. Surface this as
+        # an evidence note, return the verify_playbook result unchanged
+        # with empty diff fields. Better than refusing the call.
+        out = dict(after_result)
+        out["regressions"] = []
+        out["diff_summary"] = {"steps_added": [], "steps_removed": [],
+                               "steps_modified": [], "unchanged": 0,
+                               "changes": []}
+        out.setdefault("evidence", {})["before_unparseable"] = {
+            "errors": before_errs,
+            "note": ("before_yaml did not parse -- skipping regression diff; "
+                     "treating this as a build-mode verify of after_yaml only"),
+        }
+        return _issue_verified_id(out, after_yaml, before_yaml)
+
+    if after_coll is None:
+        # After is broken at parse time. verify_playbook already captured
+        # that in required_fixes; nothing to diff against.
+        out = dict(after_result)
+        out["regressions"] = []
+        out["diff_summary"] = {"steps_added": [], "steps_removed": [],
+                               "steps_modified": [], "unchanged": 0,
+                               "changes": []}
+        return _issue_verified_id(out, after_yaml, before_yaml)
+
+    if before_overridden:
+        after_result = dict(after_result)
+        after_result.setdefault("evidence", {})["before_yaml_ignored"] = (
+            "a playbook is open, so the baseline is FortiSOAR's copy of it, "
+            "not the before_yaml passed in")
+
+    # 3. Diff.
+    regressions, diff_summary = _diff_collections(
+        before_coll, after_coll, user_message, _OP_RENAMES.get()
+    )
+
+    # 4. Merge into the verify_playbook envelope.
+    out = dict(after_result)
+    out["regressions"] = regressions
+    out["diff_summary"] = diff_summary
+    out["warnings"] = _scope_warnings(out.get("warnings"), after_coll,
+                                      diff_summary)
+
+    # ready_to_push downgrades only on error-severity regressions.
+    if any(r.get("severity") == "error" for r in regressions):
+        out["ready_to_push"] = False
+        out["ok"] = False
+        # Surface a next-action hint so the agent's first move is obvious.
+        next_actions = list(out.get("next_actions") or [])
+        first_err = next(r for r in regressions if r.get("severity") == "error")
+        next_actions.insert(
+            0, f"{first_err['kind']}: {first_err.get('message', '')[:120]}"
+        )
+        out["next_actions"] = next_actions[:5]
+
+    return _issue_verified_id(out, after_yaml, before_yaml)
+
+
+# ---------------------------------------------------------------------------
+# Warnings, scoped to the edit.
+#
+# verify_playbook lints the WHOLE after-document, so an edit that adds one step
+# came back with every lint the analyst's playbook already had: live, ~20
+# warnings on the offer card, nearly all about steps the edit never touched,
+# worded for the compiler ("... resolves through unknown shape",
+# `playbooks[0].steps[1].arguments.resource.content`). Each warning now names
+# the step it is about (`step_name`), says whether this edit touched that step
+# (`in_change`), and carries a sentence an analyst can read (`plain`). The card
+# leads with the edit's own warnings and folds the rest into a count.
+# ---------------------------------------------------------------------------
+
+_PATH_INDEX = re.compile(r"^playbooks\[(\d+)\]\.steps\[(\d+)\]")
+_NEVER_DEFINED = re.compile(r"Jinja reference (vars\.[\w.]+) in step '[^']*': "
+                            r"'[^']*' is never defined")
+_NOT_IN_OUTPUT = re.compile(r"'([^']+)' (?:is )?not in (?:known shape of '|step ')"
+                            r"([^']+)'")
+_STEP_CLAUSE = re.compile(r" in step '[^']*'")
+
+
+def _warning_step(w: dict[str, Any], after) -> tuple[str | None, str | None]:
+    """(playbook name, step name) a warning is about, or (None, None).
+    Verifiers point at a step three ways: an index path into the document,
+    `<playbook>.<step slug>`, or a `step` slug field."""
+    pbs = list(getattr(after, "playbooks", None) or [])
+    path = str(w.get("path") or "")
+    m = _PATH_INDEX.match(path)
+    if m:
+        i, j = int(m.group(1)), int(m.group(2))
+        if i < len(pbs) and j < len(pbs[i].steps):
+            return pbs[i].name, pbs[i].steps[j].name or pbs[i].steps[j].id
+    slug = w.get("step") if isinstance(w.get("step"), str) else None
+    pb_name = None
+    if not slug and "." in path:
+        pb_name, slug = path.rsplit(".", 1)
+    for pb in pbs:
+        if pb_name is not None and pb.name != pb_name:
+            continue
+        for s in pb.steps:
+            if slug and slug in (s.id, s.name):
+                return pb.name, s.name or s.id
+    return None, None
+
+
+def _plain_warning(w: dict[str, Any], names: dict[str, str]) -> str:
+    """One sentence for the analyst. Two lint families make up nearly every
+    warning on a real playbook; anything else keeps its message, minus the
+    step slug the card already shows as a heading."""
+    msg = str(w.get("message") or "")
+    m = _NEVER_DEFINED.search(msg)
+    if m:
+        return (f"{m.group(1)} is never set before this step, so it will be "
+                "empty when the playbook runs.")
+    m = _NOT_IN_OUTPUT.search(msg)
+    if m:
+        src = names.get(m.group(2), m.group(2))
+        return f"Reads '{m.group(1)}' from step '{src}', which that step does not return."
+    if w.get("code") == "unknown_shape_downstream_reference" or "unknown shape" in msg:
+        ref = msg.split(" ", 1)[0]
+        return (f"{ref} reads a connector result whose shape is not known "
+                "yet; check it after a test run.")
+    return _STEP_CLAUSE.sub("", msg).split(" Universal output keys")[0].strip()
+
+
+def _scope_warnings(warnings, after, diff_summary: dict[str, Any]
+                    ) -> list[dict[str, Any]]:
+    touched = set(diff_summary.get("steps_added") or []) \
+        | set(diff_summary.get("steps_modified") or [])
+    names = {s.id: (s.name or s.id)
+             for pb in getattr(after, "playbooks", None) or [] for s in pb.steps}
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, str]] = set()
+    for w in warnings or []:
+        if not isinstance(w, dict):
+            w = {"message": str(w)}
+        _pb, step = _warning_step(w, after)
+        plain = _plain_warning(w, names)
+        # Two verifiers often report one reference (bad_value and
+        # bad_var_reference): the analyst should read it once.
+        if (step, plain) in seen:
+            continue
+        seen.add((step, plain))
+        # A warning no step claims (playbook-level) stays in view. One the
+        # playbook already had is never the edit's, even on a step the edit
+        # re-linked.
+        in_change = not w.get("pre_existing") and (step is None or step in touched)
+        out.append(dict(w, step_name=step, plain=plain, in_change=in_change))
+    return out
+
+
+_IN_STEP = re.compile(r"\s+in step '[^']*'")
+
+
+def _defect_signature(f: dict[str, Any]) -> tuple:
+    """A finding minus WHERE it is: the same bad reference in two steps is one
+    defect. Strips the verifier's own `in step '<id>'` locator."""
+    return (f.get("code"), _IN_STEP.sub("", str(f.get("message") or "")))
+
+
+# Errors the compiler stops on for the whole document. Apply compiles, so
+# these can never be grandfathered (`elided_document` is the verifier's own
+# check and the compiler accepts it, so it stays excusable).
+_COMPILE_FATAL = frozenset({"no_trigger", "parse_error", "duplicate_step_id",
+                            "missing_field", "unknown_step_type"})
+
+
+def _grandfather_preexisting(result: dict[str, Any],
+                             before_yaml: str) -> dict[str, Any]:
+    """A problem the analyst's playbook ALREADY had is theirs, not the edit's:
+    keep it visible as a warning instead of blocking an unrelated change. Only
+    required fixes the edit introduced stay blocking.
+
+    This began as orphan steps only (`unreachable_step`, the dropped-link
+    failure it exists to catch). Live on 8.0 the same trap held for every other
+    fix: a playbook that already referenced an undeclared
+    `vars.input.params.rec` could not take a one-step addition -- edit_playbook
+    refused four times and the turn ended with no offer, because the edit
+    faithfully carried the old error forward. The baseline is the same verifier
+    run on the before-playbook, matched on (code, message)."""
+    fixes = result.get("required_fixes") or []
+    if not fixes:
+        return result
+    try:
+        before = verify_playbook(before_yaml)
+    except Exception:  # noqa: BLE001 -- no baseline means nothing to excuse
+        return result
+    before_fixes = before.get("required_fixes") or []
+    # A structural error stops the compiler for the whole document, so it
+    # cannot be the analyst's to keep: Apply compiles. Analyst sim: an empty
+    # open playbook's `no_trigger` was excused as pre-existing, the edit
+    # verified, and Apply then failed to compile.
+    already = {(f.get("code"), f.get("message")) for f in before_fixes
+               if f.get("code") not in _COMPILE_FATAL}
+    keep = [f for f in fixes if (f.get("code"), f.get("message")) not in already]
+    # ...except the same defect the edit just fixed somewhere else. Live: a
+    # repair fixed a bad step reference in the block step and left the
+    # identical one in the next step; grandfathered as "pre-existing", the
+    # half-fix shipped as a verified offer. An instance the edit RESOLVED
+    # makes every remaining instance of it this edit's business.
+    now = {(f.get("code"), f.get("message")) for f in fixes}
+    resolved = {_defect_signature(f) for f in before_fixes
+                if (f.get("code"), f.get("message")) not in now}
+    remaining = [f for f in fixes
+                 if f not in keep and _defect_signature(f) in resolved]
+    for f in remaining:
+        keep.append(dict(f, remaining_instance=True, message=(
+                f"{f.get('message')} -- this edit fixed the same defect "
+                f"elsewhere; fix every instance")))
+    if len(keep) == len(fixes) and not any(
+            f.get("remaining_instance") for f in keep):
+        return result
+    moved = [dict(f, severity="warning", pre_existing=True)
+             for f in fixes if f not in keep and f not in remaining]
+    kept_codes = {f.get("code") for f in keep}
+    moved_codes = {f.get("code") for f in moved} - kept_codes
+    out = dict(result)
+    out["required_fixes"] = keep
+    out["warnings"] = list(result.get("warnings") or []) + moved
+    out["ok"] = out["ready_to_push"] = not keep
+    out["next_actions"] = [a for a in result.get("next_actions") or []
+                           if not any(a.startswith(f"{c}:") for c in moved_codes)]
+    return out
+
+
+def _modified_step_acks(out: dict[str, Any]) -> list[str]:
+    """`<step>.*` for steps this edit's explicit ops changed -- never for one
+    that only differs in a re-typed document, nor one whose behaviour changed
+    outside the diff."""
+    touched = _OP_TOUCHED.get() or frozenset()
+    outside = {str(r.get("step")) for r in out.get("regressions") or []
+               if r.get("kind") == "behavior_changed_outside_diff"}
+    modified = (out.get("diff_summary") or {}).get("steps_modified") or []
+    return [f"{n}.*" for n in modified if n in touched and n not in outside]
+
+
+def _parameter_names(yaml_text: str) -> set[str]:
+    from ruamel.yaml import YAML
+    try:
+        doc = YAML(typ="safe").load(yaml_text or "") or {}
+    except Exception:  # noqa: BLE001
+        return set()
+    out: set[str] = set()
+    for pb in doc.get("playbooks") or [] if isinstance(doc, dict) else []:
+        params = (pb or {}).get("parameters") if isinstance(pb, dict) else None
+        if isinstance(params, dict):
+            out.update(str(k) for k in params)
+        for p in params if isinstance(params, list) else []:
+            out.add(str(p.get("name")) if isinstance(p, dict) else str(p))
+    return out
+
+
+def _unread_dropped_parameters(before_yaml: str, after_yaml: str) -> list[str]:
+    """Parameters the edit removed that nothing in it still reads.
+
+    Live (analyst sim): the analyst agreed to drop `lead_email`, verify passed,
+    and Apply refused three times -- the write guard only took step names as
+    acknowledged drops, so removing a parameter could never be saved. One that
+    no step reads (`vars.input.params.<name>`) is safe to drop; one still read
+    would fail verify first, so it never reaches here unacknowledged."""
+    gone = _parameter_names(before_yaml) - _parameter_names(after_yaml)
+    return sorted(p for p in gone if not re.search(
+        rf"params(\.{re.escape(p)}\b|\[\s*['\"]{re.escape(p)}['\"]\s*\])",
+        after_yaml or ""))
+
+
+def _issue_verified_id(out: dict[str, Any], after_yaml: str,
+                       before_yaml: str) -> dict[str, Any]:
+    """Bind the verdict to the bytes it blessed, on the way out.
+
+    Only a PASSING verdict gets a handle: `verified_id` is a claim that these
+    exact bytes cleared the gate, so minting one for a failing verify would let
+    `emit_card(card_type='enhancement_offer')` apply a document the gate rejected. On a failure we
+    instead say -- in the envelope the model actually reads -- that the next move
+    is to fix and re-verify, not to paste YAML into chat. The live regression
+    was a model that treated a green verify as permission to free-hand the
+    document; the symmetric risk is treating a red one as advisory.
+    """
+    if not out.get("ready_to_push"):
+        out["verified_id"] = None
+        out["how_to_apply"] = (
+            "NOT ready. Fix the required_fixes/regressions above and call "
+            "verify_enhancement again. Do not present this YAML as final and "
+            "do not ask the analyst to apply it by hand."
+        )
+        return out
+
+    # Deletions this gate judged INTENTIONAL, carried forward so the write can
+    # acknowledge them. `check_prewrite` fails closed on a vanished step unless
+    # the caller names it in `acknowledged_drops` -- correctly, that is the last
+    # protection against a model silently eating a playbook. But the enhancement
+    # -offer accept path had no way to name anything, so once verification
+    # stopped blocking a requested deletion the write started blocking it
+    # instead: live A3 came back "would_drop_fields ... steps[Dead End]".
+    #
+    # The acknowledgement is DERIVED from the verdict, never model-supplied.
+    # `step_deleted_as_requested` is only emitted when the analyst named that
+    # step AND used a delete verb, so this list is the set of drops a gate
+    # already judged intentional -- the model cannot widen it by asking.
+    out["acknowledged_drops"] = sorted(
+        [str(r.get("step")) for r in (out.get("regressions") or [])
+         if r.get("kind") == "step_deleted_as_requested" and r.get("step")]
+        + _unread_dropped_parameters(before_yaml, after_yaml)
+        # A step this verified edit MODIFIED may shed fields and outgoing
+        # routes (type change, rewritten message). The diff named the step;
+        # the write guard needs the same consent for what is inside it.
+        + _modified_step_acks(out)
+    )
+
+    out["verified_id"] = _verified_yaml.remember(
+        after_yaml,
+        before_fingerprint=_verified_yaml.fingerprint(before_yaml),
+        diff_summary=out.get("diff_summary") or {},
+        warnings=out.get("warnings") or [],
+        acknowledged_drops=out["acknowledged_drops"],
+    )
+    # The COMPLETE payload, with the real id. This used to read
+    # `payload={verified_id: ...}` -- no summary -- and models copied it
+    # exactly: 4 of 10 refusals in one enhance-live run were `emit_card`
+    # bouncing that very payload for a missing `summary`.
+    out["how_to_apply"] = (
+        "Call emit_card(card_type='enhancement_offer', payload={verified_id: "
+        f"'{out['verified_id']}', summary: '<one or two plain-English lines on "
+        "what this edit changes>'}) to apply this edit. That is the ONLY way "
+        "the edit reaches the analyst's playbook. Do not re-type the YAML into "
+        "your reply -- the offer card carries the exact text verified here."
+    )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# edit_playbook -- targeted edits as OPERATIONS on the open playbook.
+#
+# Live: an agent re-typed a verified playbook to deliver an edit and dropped two
+# `next:` links; the saved playbook ran only its first search. `verified_id`
+# already stops a re-typed document from being DELIVERED, but every edit still
+# made the model re-type the whole playbook to AUTHOR it (and, before
+# `before_yaml` defaulted to the open playbook, re-type it twice). Here the
+# model names only the change; the tool applies it to the open playbook with a
+# round-trip YAML load, so every step it was not asked to touch -- links,
+# uuids, layout, comments -- is carried over untouched by construction.
+# ---------------------------------------------------------------------------
+
+_EDIT_OPS = ("add_step", "update_step", "rename_step", "remove_step",
+             "set_route", "remove_route", "add_parameter", "remove_parameter",
+             "add_playbook")
+# Step-level keys an update may not change: `name` has its own op because
+# routes point at it; `uuid` ties the step to its live record.
+_UPDATE_FORBIDDEN = frozenset({"name", "uuid"})
+# Ops that reference an existing step by `name`.
+_NAMED_OPS = frozenset({"update_step", "rename_step", "remove_step"})
+
+
+class _EditError(Exception):
+    pass
+
+
+class _MissingStep(_EditError):
+    """A reference to a step that is not in the playbook (yet) -- kept apart so
+    an op naming a step a LATER op adds can wait for it (see edit_playbook)."""
+
+    def __init__(self, ref: str, message: str):
+        super().__init__(message)
+        self.ref = ref
+
+
+def _rt_yaml():
+    from ruamel.yaml import YAML
+    y = YAML(typ="rt")
+    y.preserve_quotes = True
+    y.width = 4096
+    return y
+
+
+def _slug(name: str) -> str:
+    from fsr_playbooks.compiler.parser import _slugify
+    return _slugify(name)
+
+
+def _refs(step) -> set[str]:
+    """Every form a route may use to name this step (name or slug)."""
+    name = str(step.get("name") or "")
+    out = {name, _slug(name)}
+    if step.get("id"):
+        out.add(str(step["id"]))
+    return {r for r in out if r}
+
+
+def _route_slots(step):
+    """(container, key) for every route out of a step: `next`, each
+    decision condition / manual-input option `next`, and unlabeled fan-out."""
+    slots = []
+    if "next" in step:
+        slots.append((step, "next"))
+    for list_key in ("conditions", "options"):
+        for entry in step.get(list_key) or []:
+            if isinstance(entry, dict) and "next" in entry:
+                slots.append((entry, "next"))
+    fan = step.get("unlabeled_next")
+    if isinstance(fan, list):
+        slots.extend((fan, i) for i in range(len(fan)))
+    return slots
+
+
+def _find(steps, ref: Any):
+    if not isinstance(ref, str) or not ref.strip():
+        raise _EditError("a step reference must be the step's name")
+    ref = ref.strip()
+    for i, s in enumerate(steps):
+        if ref in _refs(s):
+            return i, s
+    if not steps:
+        # Live: every op anchored on "Start" in a playbook with no steps at all.
+        raise _MissingStep(ref, (
+            f"no step named {ref!r} -- the open playbook has no steps yet and "
+            f"nothing in this operations list adds {ref!r}. Put this first, "
+            f"with no `after`: {{op: add_step, step: {{name: {ref if ref.lower() == 'start' else 'Start'}, "
+            f"type: start, module: <module>, next: <first step>}}}}, then add "
+            f"each step `after` the one before it"))
+    names = ", ".join(repr(str(s.get("name"))) for s in steps)
+    raise _MissingStep(ref, (
+        f"no step named {ref!r} -- steps are: {names}. Each edit_playbook call "
+        "starts from the open playbook and a refused call applied nothing, so "
+        "send the whole operations list again, including the add_step/"
+        "add_playbook that create what you refer to."))
+
+
+def _branch_entry(step, option: str):
+    for list_key in ("conditions", "options"):
+        for entry in step.get(list_key) or []:
+            if not isinstance(entry, dict):
+                continue
+            labels = {str(entry.get(k)) for k in ("display", "option", "label")
+                      if entry.get(k) is not None}
+            if option in labels or (option.lower() == "default" and entry.get("default")):
+                return entry
+    from fsr_playbooks.compiler.resolver.catalog import (  # noqa: PLC0415
+        ERROR_BRANCH_HINT,
+        ERROR_HANDLER_KEYS,
+    )
+    hint = (" " + ERROR_BRANCH_HINT
+            if option in ERROR_HANDLER_KEYS or option.lower() in ("error", "failure", "failed")
+            else "")
+    raise _EditError(f"step {step.get('name')!r} has no branch {option!r}.{hint}")
+
+
+# Canvas placement for added steps. A step with no `top`/`left` falls to the
+# emitter's whole-graph auto-layout while every existing step keeps its saved
+# spot, so the two grids collide (live: a spliced step landed off to the side
+# and End sat above the steps now routed into it). Same strides as the emitter.
+_ROW = 130
+
+
+def _pos(step) -> tuple[int, int] | None:
+    try:
+        return int(step["top"]), int(step["left"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _set_pos(step, top: int, left: int) -> None:
+    step["top"], step["left"] = str(top), str(left)
+
+
+def _downstream(steps, first) -> list:
+    """Steps reachable from `first` (inclusive), following every route."""
+    seen, out, todo = set(), [], [first]
+    while todo:
+        s = todo.pop()
+        if id(s) in seen:
+            continue
+        seen.add(id(s))
+        out.append(s)
+        for box, key in _route_slots(s):
+            ref = box[key]
+            todo.extend(t for t in steps if isinstance(ref, str) and ref in _refs(t))
+    return out
+
+
+def _place_after(steps, prev, new) -> None:
+    """Put `new` one row under `prev` and push what follows down a row, so the
+    canvas reads in route order. No-op when `prev` has no saved position."""
+    anchor = _pos(prev)
+    if anchor is None or _pos(new) is not None:
+        return
+    top, left = anchor[0] + _ROW, anchor[1]
+    below = [t for t in steps if t is not prev]
+    nxt = new.get("next")
+    first = next((t for t in below if isinstance(nxt, str) and nxt in _refs(t)), None)
+    for t in _downstream(below, first) if first is not None else []:
+        p = _pos(t)
+        if p is not None and p[0] >= top:
+            _set_pos(t, p[0] + _ROW, p[1])
+    _set_pos(new, top, left)
+
+
+def _place_below_all(steps, new) -> None:
+    placed = [p for p in (_pos(s) for s in steps) if p is not None]
+    if placed and _pos(new) is None:
+        _set_pos(new, max(t for t, _ in placed) + _ROW, min(lf for _, lf in placed))
+
+
+# Each op's shape, quoted in a refusal so the model can see which key it
+# missed. Mirrors the edit_playbook docstring (the advertised contract).
+_OP_SHAPES = {
+    "add_step": "{op: add_step, step: {name, type, ...}, after: <step>, option: <branch>}",
+    "update_step": "{op: update_step, name: <step>, set: {key or dotted.key: value}, unset: [key]}",
+    "rename_step": "{op: rename_step, name: <current name>, to: <new name>}",
+    "remove_step": "{op: remove_step, name: <step>, reconnect: true}",
+    "set_route": "{op: set_route, from: <step>, to: <step>, option: <branch>}",
+    "remove_route": "{op: remove_route, from: <step>, option: <branch>}",
+    "add_parameter": "{op: add_parameter, name: <parameter>}",
+    "remove_parameter": "{op: remove_parameter, name: <parameter>}",
+    "add_playbook": "{op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [{name, type, ...}]}",
+}
+
+
+def _add_playbook(pbs: list, n: dict) -> str:
+    """Append a new playbook to the open collection.
+
+    Analyst sim: "put the blocking in its own reusable playbook and call it" --
+    no op could add a playbook, so the model put everything in one, or
+    re-typed the document and lost the open playbook (playbook_dropped)."""
+    name = str(n.get("name") or "").strip()
+    if not name:
+        raise _EditError("add_playbook needs name=<the new playbook's name>")
+    if any(str(p.get("name")) == name for p in pbs if isinstance(p, dict)):
+        raise _EditError(f"a playbook named {name!r} already exists in the collection")
+    empty = [str(p.get("name")) for p in pbs
+             if isinstance(p, dict) and not p.get("steps")]
+    if empty:
+        # Analyst sim: on an empty designer canvas, "start over" became a
+        # second playbook beside the empty open one -- which verified, then
+        # failed to compile (`no_trigger`) on Apply.
+        raise _EditError(
+            f"playbook {empty[0]!r} is open and has no steps -- build in it "
+            "instead: add_step the trigger with no `after` "
+            "({name: Start, type: start, ...}), then the rest after it. "
+            "add_playbook is for a second playbook the open one calls.")
+    steps = n.get("steps")
+    if not isinstance(steps, list) or not steps or not all(isinstance(x, dict) for x in steps):
+        raise _EditError("add_playbook needs steps=[{name, type, ...}, ...] -- its whole step list")
+    if not any(str(x.get("type") or "").startswith("start") for x in steps):
+        raise _EditError("add_playbook: the new playbook needs a trigger step first "
+                         "({name: Start, type: start, next: <first step>}) -- "
+                         "`type: start` with no module makes it callable from other playbooks")
+    params = n.get("parameters") or []
+    if not isinstance(params, list) or not all(
+            isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in params):
+        raise _EditError("add_playbook: parameters must be a list of identifiers")
+    pb: dict[str, Any] = {"name": name}
+    if params:
+        pb["parameters"] = list(params)
+    pb["steps"] = [dict(x) for x in steps]
+    pbs.append(pb)
+    return f"added playbook {name!r} ({len(steps)} steps)"
+
+
+def _normalize_op(op: dict) -> dict:
+    """Canonical `{op: <kind>, ...}` from the two unambiguous shapes models
+    send instead: the op name as the key (`{add_step: {...}}`, seen live), and
+    add_step with the step's keys inline beside `after` rather than under
+    `step`. Anything else passes through for `_apply_op` to refuse."""
+    if "op" not in op and op.get("action") in _EDIT_OPS:
+        # `action: update_step` (live: A5, refused as "unknown op None").
+        op = {"op": op["action"], **{k: v for k, v in op.items() if k != "action"}}
+    if "op" not in op and len(op) == 1:
+        (kind, body), = op.items()
+        if kind in _EDIT_OPS and isinstance(body, dict):
+            op = {"op": kind, **body}
+    if (op.get("op") in _NAMED_OPS and "name" not in op
+            and isinstance(op.get("step"), str)):
+        # `step: <name>` names the step as plainly as `name:` (live: A5's first
+        # update_step was refused for it). add_step's `step` is the new step's
+        # body, a mapping, so it never matches here.
+        op = {**{k: v for k, v in op.items() if k != "step"}, "name": op["step"]}
+    if (op.get("op") == "rename_step" and "name" not in op
+            and isinstance(op.get("from"), str)):
+        # `{from, to}` reads naturally for a rename and is unambiguous here
+        # (live: 3 of 10 refusals in one enhance-live run, 2 of them stuck).
+        op = {**{k: v for k, v in op.items() if k != "from"}, "name": op["from"]}
+    if op.get("op") == "add_step" and "step" not in op and op.get("name"):
+        step = {k: v for k, v in op.items() if k not in ("op", "after")}
+        op = {"op": "add_step", "step": step,
+              **({"after": op["after"]} if "after" in op else {})}
+    if op.get("op") == "add_step" and isinstance(op.get("step"), dict):
+        op = {**op, "step": _hoist_arguments(op["step"])}
+    if op.get("op") == "add_playbook" and isinstance(op.get("steps"), list):
+        op = {**op, "steps": [_hoist_arguments(x) if isinstance(x, dict) else x
+                              for x in op["steps"]]}
+    return op
+
+
+_YAML11_BOOLS = frozenset({"yes", "no", "on", "off", "y", "n", "true", "false"})
+
+
+def _quote_bool_like(node) -> None:
+    """Quote every string a YAML 1.1 reader would take for a boolean.
+
+    Ops arrive as JSON, so `display: "Yes"` is already a string -- but the
+    round-trip dumper (YAML 1.2) writes it bare, and the linter (YAML 1.1, as
+    FortiSOAR parses) then demands it be quoted. Live (malware build): the
+    model could not satisfy that from JSON, tried `"\"Yes\""`, and the
+    turn ended with no offer. Quoting a string never changes its value."""
+    from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+    items = (node.items() if isinstance(node, dict)
+             else enumerate(node) if isinstance(node, list) else ())
+    for k, v in list(items):
+        if isinstance(v, str) and v.strip().lower() in _YAML11_BOOLS:
+            node[k] = DoubleQuotedScalarString(v)
+        elif isinstance(v, (dict, list)):
+            _quote_bool_like(v)
+
+
+def _hoist_arguments(step: dict) -> dict:
+    """Step keys sent under an `arguments:` mapping move to the step's top
+    level, the only shape the compiler takes. Live (box model, 2 of 3 runs): a
+    workflow_reference step came as `arguments: {note: hello}`, the fix-up call
+    lost the rest of the edit, and the turn ended with no offer. A key already
+    set at the top level wins, and a colliding one stays put for the compiler
+    to report."""
+    args = step.get("arguments")
+    if not isinstance(args, dict):
+        return step
+    out = {k: v for k, v in step.items() if k != "arguments"}
+    left = {}
+    for k, v in args.items():
+        if k in out:
+            left[k] = v
+        else:
+            out[k] = v
+    if left:
+        out["arguments"] = left
+    return out
+
+
+def _set_path(step, key: str, value) -> None:
+    """`params.ip_addresses` sets ONE leaf inside `params`, keeping its
+    siblings. Live (effect probe A5): the key was written literally, as a
+    sibling `params.ip_addresses:` beside the untouched `params`, verify passed
+    it, and the offer would have "applied" with the old IP still in place.
+    No step or param key contains a dot, so the path is unambiguous."""
+    from ruamel.yaml.comments import CommentedMap
+    *parents, leaf = key.split(".")
+    box = step
+    for i, part in enumerate(parents):
+        nxt = box.get(part)
+        if nxt is None:
+            nxt = box[part] = CommentedMap()
+        elif not isinstance(nxt, dict):
+            raise _EditError(f"set {key!r}: {'.'.join(parents[:i + 1])!r} is "
+                             f"{type(nxt).__name__}, not a mapping")
+        box = nxt
+    box[leaf] = value
+
+
+def _unset_path(step, key: str) -> None:
+    *parents, leaf = key.split(".")
+    box = step
+    for part in parents:
+        box = box.get(part) if isinstance(box, dict) else None
+        if not isinstance(box, dict):
+            return
+    box.pop(leaf, None)
+
+
+def _apply_op(steps, op: dict) -> str:
+    op = _normalize_op(op)
+    kind = op.get("op")
+    if kind == "add_step":
+        new = op.get("step")
+        if not (isinstance(new, dict) and new.get("name") and new.get("type")):
+            raise _EditError("add_step needs step={name, type, ...}")
+        if any(str(new["name"]) in _refs(s) or _slug(str(new["name"])) in _refs(s)
+               for s in steps):
+            raise _EditError(f"a step named {new['name']!r} already exists")
+        from ruamel.yaml.comments import CommentedMap
+        new = CommentedMap(new)
+        after = op.get("after")
+        if after is None:
+            _place_below_all(steps, new)
+            steps.append(new)
+            return f"added {new['name']!r} (unrouted -- route to it with set_route)"
+        i, prev = _find(steps, after)
+        if any(str(box[key]) in _refs(new) for box, key in _route_slots(prev)):
+            # prev already routes here (the batch named each successor before
+            # adding it), so `after` is satisfied: place it, splice nothing.
+            _place_after(steps, prev, new)
+            steps.insert(i + 1, new)
+            return f"added {new['name']!r} after {prev.get('name')!r}"
+        if any(k in prev for k in ("conditions", "options")) and "next" not in prev:
+            # A branching step (decision / manual_input): splice into ONE branch.
+            # Live: `after` a manual_input with a single "Continue" button was
+            # refused five times; with one branch there is nothing to choose.
+            entries = [e for lk in ("conditions", "options")
+                       for e in (prev.get(lk) or []) if isinstance(e, dict)]
+            option = op.get("option")
+            if option is not None:
+                entry = _branch_entry(prev, str(option))
+            elif len(entries) == 1:
+                entry = entries[0]
+            else:
+                labels = [str(e.get("display") or e.get("option") or e.get("label")
+                              or ("default" if e.get("default") else "?"))
+                          for e in entries]
+                raise _EditError(
+                    f"{prev.get('name')!r} branches {labels}; name the branch to "
+                    f"insert into with option=<label>")
+            if entry.get("next") and "next" not in new \
+                    and str(entry["next"]) not in _refs(new):
+                new["next"] = entry["next"]
+            entry["next"] = str(new["name"])
+            _place_after(steps, prev, new)
+            steps.insert(i + 1, new)
+            label = entry.get("display") or entry.get("option") or entry.get("label")
+            return f"added {new['name']!r} after {prev.get('name')!r} [{label}]"
+        # Splice into the chain: prev -> new -> whatever prev pointed at --
+        # unless prev already pointed at new (a batch that names each step's
+        # successor before adding it): inheriting that made new route to
+        # itself, refused live as `cycle end -> end` the model never wrote.
+        if prev.get("next") and "next" not in new \
+                and str(prev["next"]) not in _refs(new):
+            new["next"] = prev["next"]
+        prev["next"] = str(new["name"])
+        _place_after(steps, prev, new)
+        steps.insert(i + 1, new)
+        return f"added {new['name']!r} after {prev.get('name')!r}"
+
+    if kind == "update_step":
+        _, step = _find(steps, op.get("name"))
+        sets = op.get("set") or {}
+        unset = op.get("unset") or []
+        if not isinstance(sets, dict) or not isinstance(unset, list):
+            raise _EditError("update_step takes set={key: value} and unset=[key]")
+        bad = sorted(_UPDATE_FORBIDDEN & {str(k).split(".")[0]
+                                          for k in (*sets, *unset)})
+        if bad:
+            raise _EditError(f"update_step cannot change {bad}; use rename_step "
+                             f"to rename")
+        if not sets and not unset:
+            raise _EditError("update_step with nothing to set or unset")
+        dropped: list[str] = []
+        for k, v in sets.items():
+            was = step.get(k) if "." not in str(k) else None
+            if isinstance(was, dict) and isinstance(v, dict):
+                dropped += [f"{k}.{x}" for x in was if x not in v]
+            _set_path(step, str(k), v)
+        for k in unset:
+            _unset_path(step, str(k))
+        msg = f"updated {step.get('name')!r}: {sorted(set(sets) | set(unset))}"
+        if dropped:
+            # Live (A5): set={params: {ip_addresses: X}} replaced params and
+            # dropped `method`; verify refused it and the turn gave up, never
+            # told the replace was the cause.
+            msg += (f" -- REPLACED the whole mapping, dropping {dropped}; to change "
+                    f"one value keep its siblings with a dotted key, e.g. "
+                    f"set: {{\"{dropped[0].rsplit('.', 1)[0]}.<key>\": value}}")
+        return msg
+
+    if kind == "rename_step":
+        _, step = _find(steps, op.get("name"))
+        to = op.get("to")
+        if not isinstance(to, str) or not to.strip():
+            raise _EditError("rename_step needs to=<new name>")
+        old_refs = _refs(step)
+        step["name"] = to.strip()
+        for s in steps:
+            for box, key in _route_slots(s):
+                if str(box[key]) in old_refs:
+                    box[key] = to.strip()
+        return f"renamed {sorted(old_refs)[0]!r} to {to.strip()!r} (routes updated)"
+
+    if kind == "remove_step":
+        i, step = _find(steps, op.get("name"))
+        old_refs = _refs(step)
+        successor = step.get("next") if op.get("reconnect", True) else None
+        for s in steps:
+            if s is step:
+                continue
+            fan = s.get("unlabeled_next")
+            if isinstance(fan, list):
+                kept = [successor if str(r) in old_refs else r for r in fan]
+                fan[:] = [r for r in kept if r]
+            for box, key in _route_slots(s):
+                if isinstance(box, list) or str(box[key]) not in old_refs:
+                    continue
+                if successor:
+                    box[key] = successor
+                else:
+                    box.pop(key)
+        steps.pop(i)
+        return (f"removed {step.get('name')!r}"
+                + (f"; its predecessors now route to {successor!r}" if successor else ""))
+
+    if kind == "set_route":
+        _, src = _find(steps, op.get("from"))
+        _, dst = _find(steps, op.get("to"))
+        option = op.get("option")
+        if option:
+            _branch_entry(src, str(option))["next"] = str(dst["name"])
+            return f"routed {src.get('name')!r} [{option}] -> {dst.get('name')!r}"
+        if any(k in src for k in ("conditions", "options")):
+            raise _EditError(f"{src.get('name')!r} branches; name the option= "
+                             f"to route")
+        src["next"] = str(dst["name"])
+        return f"routed {src.get('name')!r} -> {dst.get('name')!r}"
+
+    if kind == "remove_route":
+        _, src = _find(steps, op.get("from"))
+        option = op.get("option")
+        box = _branch_entry(src, str(option)) if option else src
+        if "next" not in box:
+            raise _EditError(f"{src.get('name')!r} has no route to remove")
+        box.pop("next")
+        return f"removed route out of {src.get('name')!r}" + (f" [{option}]" if option else "")
+
+    raise _EditError(f"unknown op {kind!r}; each operation is "
+                     f"{{op: <kind>, ...}} with kind one of {list(_EDIT_OPS)}")
+
+
+@mcp.tool()
+def edit_playbook(
+    operations: list[dict[str, Any]],
+    playbook: str | None = None,
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    """EDIT the playbook the analyst has open -- the default way to change it.
+    Name only the change; this applies it to the open playbook (read from
+    FortiSOAR), verifies the result like `verify_enhancement`, and on a pass
+    returns a `verified_id`. Deliver it with
+    `emit_card(card_type='enhancement_offer', payload={verified_id: ..., summary: ...})`.
+    You never re-type the playbook, so no step or link you did not name can go
+    missing. Each call applies to the open playbook as it is, so on a failed
+    verify fix the operations and send the WHOLE list again.
+
+    `operations` is applied in order, all or nothing. Steps are named by their
+    `name:`. An op may name a step a later op in the list adds. Each is an object with an `op`:
+      - {op: add_step, step: {name, type, ...step keys}, after: <step>, option: <branch>}
+          inserts after <step> and splices it into that step's `next` chain;
+          after a decision / manual_input, `option` names the branch to splice
+          into (not needed when it has one). Omit `after` to add it unrouted
+          (then use set_route) -- the way to add the start step to an empty
+          playbook.
+      - {op: update_step, name: <step>, set: {key: value}, unset: [key]}
+          changes step keys (params, vars, next, conditions, ...). A dotted
+          key sets one leaf and keeps its siblings:
+          set: {"params.ip_addresses": "1.2.3.4"} changes only that param;
+          set: {params: {...}} REPLACES the whole params mapping.
+      - {op: rename_step, name: <step>, to: <new name>}  -- routes follow.
+      - {op: remove_step, name: <step>, reconnect: true}
+          routes into it are re-pointed at its `next` (reconnect=false drops them).
+      - {op: set_route, from: <step>, to: <step>, option: <branch label>}
+          `option` for a decision condition / manual-input option; omit for `next`.
+      - {op: remove_route, from: <step>, option: <branch label>}
+      - {op: add_parameter, name: <parameter>}
+          declares a playbook parameter, so `vars.input.params.<name>` resolves.
+      - {op: remove_parameter, name: <parameter>}  -- once no step reads it.
+      - {op: add_playbook, name: <new playbook>, parameters: [<name>], steps: [...]}
+          adds a NEW playbook beside the open one -- a reusable child the open
+          playbook calls with a workflow_reference step (`target: <its name>`,
+          one key per parameter). Give it its whole step list, starting with
+          `{name: Start, type: start, next: ...}`. Add the reference step to the
+          open playbook in the SAME call. Apply saves the new playbook and puts
+          the open one's change on the canvas.
+
+    `playbook`: which playbook, when the open collection holds several.
+    Returns the verify_enhancement envelope plus `applied` (one line per op) and
+    `after_yaml`; on a bad operation, {ok: false, code: "bad_operation",
+    operation_index, message} and nothing is applied.
+    """
+    import io
+    import json
+
+    before = get_grounded_yaml()
+    if not before:
+        return _err("no_open_playbook",
+                    "no playbook is open to edit. For a NEW playbook author the "
+                    "YAML and use verify_playbook.")
+    if isinstance(operations, str):
+        try:
+            operations = json.loads(operations)
+        except ValueError:
+            return _err("bad_operation", "operations must be a list of objects")
+    if isinstance(operations, dict):
+        operations = [operations]
+    if not isinstance(operations, list) or not operations:
+        return _err("bad_operation", "operations must be a non-empty list")
+
+    y = _rt_yaml()
+    try:
+        doc = y.load(before)
+    except Exception as exc:  # noqa: BLE001
+        return _err("open_playbook_unreadable", f"could not read the open playbook: {exc}")
+    pbs = (doc or {}).get("playbooks") if isinstance(doc, dict) else None
+    if not isinstance(pbs, list) or not pbs:
+        return _err("open_playbook_unreadable", "the open playbook has no playbooks: list")
+    if playbook:
+        target = next((p for p in pbs if str(p.get("name")) == playbook), None)
+        if target is None:
+            return _err("bad_operation", f"no playbook named {playbook!r} is open",
+                        suggestions=[str(p.get("name")) for p in pbs])
+    elif len(pbs) == 1:
+        target = pbs[0]
+    else:
+        return _err("bad_operation", "the open collection has several playbooks; "
+                    "name one with playbook=",
+                    suggestions=[str(p.get("name")) for p in pbs])
+    steps = target.get("steps")
+    if not isinstance(steps, list):
+        return _err("open_playbook_unreadable", "the open playbook has no steps: list")
+
+    def _added_name(o: Any) -> str | None:
+        if not isinstance(o, dict):
+            return None
+        n = _normalize_op(o)
+        st = n.get("step") if n.get("op") == "add_step" else None
+        return str(st["name"]) if isinstance(st, dict) and st.get("name") else None
+
+    def _refused(i: int, op: Any, exc: Exception) -> dict[str, Any]:
+        kind = _normalize_op(op).get("op")
+        shape = _OP_SHAPES.get(kind) if isinstance(kind, str) else None
+        sent = sorted(k for k in op if k != "op") if isinstance(op, dict) else []
+        return _err("bad_operation",
+                    f"operations[{i}] ({kind}): {exc}"
+                    + (f" -- expected {shape}; got keys {sent}" if shape else ""),
+                    operation_index=i,
+                    suggestions=["nothing was applied -- fix this operation "
+                                 "and send the whole list again"])
+
+    # An op may name a step a LATER op in the same list adds (live: set_route to
+    # "Create ServiceNow incident" listed before the add_step that creates it).
+    # Such an op waits until the rest has run, then applies in order.
+    applied: list[str] = []
+    deferred: list[tuple[int, dict]] = []
+    renames: dict[str, str] = {}  # old -> new, from rename_step ops
+
+    def _apply(op: dict) -> str:
+        n = _normalize_op(op)
+        if n.get("op") == "add_playbook":
+            return _add_playbook(pbs, n)
+        if n.get("op") == "add_parameter":
+            # Playbook-level, not a step: live, a step read
+            # `vars.input.params.servicenow_caller_id`, the gate said "add it
+            # to `parameters:`", and no op could -- so the model re-typed the
+            # whole playbook through verify_enhancement to declare one name.
+            pname = n.get("name")
+            if not isinstance(pname, str) or not re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]*", pname.strip()):
+                raise _EditError("add_parameter needs name=<identifier>")
+            pname = pname.strip()
+            params = target.get("parameters")
+            if params is None:
+                target["parameters"] = params = []
+            if not isinstance(params, list):
+                raise _EditError("the playbook's parameters: is not a list")
+            have = {(p.get("name") if isinstance(p, dict) else str(p)) for p in params}
+            if pname in have:
+                return f"parameter {pname!r} already declared"
+            params.append(pname)
+            return f"declared parameter {pname!r}"
+        if n.get("op") == "remove_parameter":
+            pname = str(n.get("name") or "").strip()
+            params = target.get("parameters")
+            names = [(p.get("name") if isinstance(p, dict) else str(p))
+                     for p in (params if isinstance(params, list) else [])]
+            if pname not in names:
+                raise _EditError(f"no parameter named {pname!r} -- parameters are: "
+                                 + (", ".join(map(repr, names)) or "none"))
+            params.pop(names.index(pname))
+            return f"removed parameter {pname!r}"
+        old = None
+        if n.get("op") == "rename_step":
+            try:
+                old = str(_find(steps, n.get("name"))[1].get("name") or "") or None
+            except _EditError:
+                old = None
+        msg = _apply_op(steps, op)
+        if old:
+            new = str(n.get("to")).strip()
+            # A -> B then B -> C is one rename, A -> C.
+            first = next((k for k, v in renames.items() if v == old), old)
+            renames[first] = new
+        return msg
+
+    for i, op in enumerate(operations):
+        if not isinstance(op, dict):
+            return _err("bad_operation", f"operations[{i}] is not an object",
+                        operation_index=i)
+        try:
+            applied.append(_apply(op))
+        except _MissingStep as exc:
+            later = {_added_name(o) for o in operations[i + 1:]}
+            if exc.ref in later or _slug(exc.ref) in {_slug(n) for n in later if n}:
+                deferred.append((i, op))
+                continue
+            return _refused(i, op, exc)
+        except _EditError as exc:
+            return _refused(i, op, exc)
+    for i, op in deferred:
+        try:
+            applied.append(_apply(op))
+        except _EditError as exc:
+            return _refused(i, op, exc)
+
+    _quote_bool_like(doc)
+    buf = io.StringIO()
+    y.dump(doc, buf)
+    after = buf.getvalue()
+    touched = set()
+    for op in operations:
+        n = _normalize_op(op) if isinstance(op, dict) else {}
+        op_name = n.get("op")
+        for key in (_TOUCHING_OPS.get(op_name, ()) if isinstance(op_name, str) else ()):
+            if isinstance(n.get(key), str) and n[key].strip():
+                touched.add(n[key].strip())
+    token = _OP_RENAMES.set(renames)
+    t_token = _OP_TOUCHED.set(frozenset(touched))
+    try:
+        out = verify_enhancement(before_yaml=before, after_yaml=after,
+                                 user_message=user_message)
+    finally:
+        _OP_TOUCHED.reset(t_token)
+        _OP_RENAMES.reset(token)
+    out = dict(out)
+    out["applied"] = applied
+    out["after_yaml"] = after
+    return out

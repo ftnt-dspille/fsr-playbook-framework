@@ -1,0 +1,102 @@
+{
+  "fixture": "invest_defense_evasion_host",
+  "captured": "20260530T192043Z",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "end_turn",
+  "recall": 1.0,
+  "trace": [
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "incidents:b4a62c3b-3f60-44a5-b44d-f53a9244fa55"
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "alerts",
+        "q": "smithDesktop",
+        "limit": 25
+      },
+      "ok": null
+    },
+    {
+      "name": "search_module_records",
+      "args": {
+        "module": "incidents",
+        "q": "smithDesktop",
+        "limit": 25
+      },
+      "ok": true
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "/api/3/incidents/4a7697e3-05d9-49e0-87b3-ad5f71596982"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "/api/3/alerts/d39ecc9a-2968-42d5-948d-ce96fd76b227"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "/api/3/alerts/d2d8cc67-158b-4446-90f4-ddf52ffbe468"
+      },
+      "ok": null
+    },
+    {
+      "name": "get_record",
+      "args": {
+        "iri": "/api/3/alerts/281e9cfb-96b4-4d26-aff1-c7afe8ad9d1c"
+      },
+      "ok": true
+    },
+    {
+      "name": "find_containment_actions",
+      "args": {
+        "target_type": "host",
+        "probe": true
+      },
+      "ok": true
+    },
+    {
+      "name": "emit_choice_card",
+      "args": {
+        "id": "smithdesktop_containment_options",
+        "prompt": "smithDesktop is actively compromised (C2 exfiltration + log clearing + malware execution). Automated host containment is not available. Choose your next action:",
+        "options": [
+          {
+            "label": "\ud83d\udd34 Immediate: Escalate to T2 / SOC Manager for manual isolation",
+            "value": "escalate_t2",
+            "hint": "Contact on-call engineer to physically isolate host from network or revoke AD creds"
+          },
+          {
+            "label": "\u26a0\ufe0f Quarantine: Create remediation ticket + block user creds",
+            "value": "create_ticket",
+            "hint": "Create incident ticket for helpdesk; document need to: kill wendy.smith sessions, reset creds, block 102.220.160.21 at firewall"
+          },
+          {
+            "label": "\ud83d\udccb Acknowledge & Document: Add findings to incident",
+            "value": "acknowledge",
+            "hint": "Record triage findings in incident for later response (lower urgency, not recommended for active exfil)"
+          },
+          {
+            "label": "\ud83d\udd0d Investigate Further: Check for lateral movement",
+            "value": "investigate_lateral",
+            "hint": "Search for other compromised hosts, pivot on wendy.smith's other sessions or related IPs before containing"
+          }
+        ],
+        "multi": false,
+        "min_select": 1
+      },
+      "ok": true
+    }
+  ]
+}

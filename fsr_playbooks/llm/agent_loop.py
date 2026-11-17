@@ -1,0 +1,1226 @@
+"""The agent loop, written once.
+
+Every provider used to carry its own copy of this loop -- tool dispatch, the
+approval boundary, the repeated-error and intent-slice guards, self-repair,
+the delivery guards, the wrap-up rounds -- and the copies drifted: a guard
+fixed in one provider stayed broken in the other, and the difference then read
+as a model difference. The loop now lives here and a provider supplies only its
+wire format through a `WireTurn` (one per stream) plus a handful of methods:
+
+    precheck()                  -> error text or None
+    open_turn(system, messages, tools, turn_budget) -> WireTurn
+    rehydrate(suspended, outcomes) -> list[Message]   (resume after approval)
+    contract_stop(raw_stop)     -> the connector's stop_reason vocabulary
+    friendly_error(exc)         -> user-readable text for a failed request
+    label, model, max_output_tokens, emulation, _approval_gateway
+
+Nothing a provider supplies decides behaviour. If a rule needs to differ by
+provider, it is a wire-format fact and belongs in the WireTurn; everything else
+belongs here, where it applies to all of them.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+import time
+import uuid as _uuid
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from . import _throttle
+from . import approvals as _approvals
+from . import ask_scope as _ask_scope
+from . import redaction as _redaction
+from ._loop_helpers import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
+    EMPTY_WRAPUP_TEXT,
+    FAILED_EDIT_DIRECTIVE,
+    MAX_PARALLEL_TOOLS,
+    MAX_SELF_REPAIR_TURNS,
+    MAX_TOOL_TURNS,
+    STREAM_TIMEOUT_SECS,
+    UNVERIFIED_DRAFT_DIRECTIVE,
+    YAML_FENCE_RE,
+    BuildProgressGuard,
+    ContainmentFollowThrough,
+    CreateDeliveryGuard,
+    EnhanceDeliveryGuard,
+    FenceHold,
+    ProgressMeter,
+    PromisedActionGuard,
+    TriageDiscipline,
+    VerdictDeliveryGuard,
+    _effective_tool_name,
+    analyst_has_the_yaml,
+    budget_ask_card,
+    budget_note,
+    cap_model_content,
+    compile_errors,
+    connector_errors_for_reply,
+    drain_with_idle_timeout,
+    evidence_id_line,
+    forced_containment,
+    is_authoring_slice,
+    is_delivered_offer,
+    is_offer_attempt,
+    is_verdict_evidence,
+    latest_user_text,
+    model_view,
+    stall_directive,
+    verdict_directive,
+    verdict_repair_directive,
+    with_readable_dates,
+    wrapup_directive,
+)
+from .authorization import needs_approval
+from .guard_fires import record_guard_fire, refusal
+from .provider import (
+    ApprovalRequestEvent,
+    DoneEvent,
+    DroppedCall,
+    ErrorEvent,
+    Event,
+    Message,
+    NoticeEvent,
+    TextEvent,
+    ToolCallUsage,
+    ToolResultEvent,
+    ToolStartEvent,
+    ToolUseEvent,
+    TurnInputsEvent,
+    UsageEvent,
+)
+from .tools import _resolve_tier as _tier_for
+from .tools import dispatch
+
+log = logging.getLogger(__name__)
+
+#: Marks a tool call whose arguments the model emitted unparseably. It travels
+#: in place of the args so every dispatch site bounces it identically, instead
+#: of running the tool with `{}` -- a different call from the one the model
+#: made, and one whose tier (read out of the args) can come out lower.
+BAD_ARGS_KEY = "__bad_tool_arguments__"
+
+#: Forced enhance-delivery round: a verify passed but no offer followed. The
+#: round is pinned to `emit_card` and `verified_id` is overridden afterwards,
+#: so a forced round can only deliver the bytes the gate cleared.
+DELIVERY_DIRECTIVE = (
+    "You verified an edit to the open playbook and it is ready to apply, but "
+    "you have not delivered it. Call `emit_card(card_type='enhancement_offer', ...)` now with "
+    "verified_id {vid!r} to apply it -- a written description is NOT a "
+    "substitute for the call. Write the `summary` (in the payload) as one or two plain-English "
+    "lines describing what the edit changes."
+)
+
+BUILD_PROGRESS_DIRECTIVE = (
+    "You have researched the step types and connector operations but have not "
+    "authored anything yet -- describing what you WILL build is not building it. "
+    "Draft the full playbook YAML now and call `verify_playbook` with it, then "
+    "deliver it with `emit_card(card_type='playbook_offer', ...)`. Do not end the turn with a plan."
+)
+
+UNVERIFIED_DRAFT_FAILED_DIRECTIVE = (
+    "Your draft was checked but never verified, so it was verified for you and "
+    "the result is above: it still has required fixes. Fix them and call "
+    "`verify_playbook` with the corrected YAML; a passing verify is delivered "
+    "to the analyst as a card. If something outside the playbook blocks it, "
+    "emit_card(card_type='capability_gap', ...) naming it."
+)
+
+_CONNECTOR_REPAIR_PREFIX = (
+    "The playbook in your reply has a connector problem. Fix it and emit a "
+    "corrected fenced ```yaml block. A connector that is only unconfigured is "
+    "not a problem: keep that step and say it will not run until it is set "
+    "up.\n\nProblems:\n"
+)
+_SELF_REPAIR_PREFIX = (
+    "The YAML you just produced doesn't compile. Fix the errors and emit a "
+    "corrected fenced ```yaml block.\n\nErrors:\n"
+)
+
+
+
+def _fence_problem(yaml_text: str) -> tuple[str, str] | None:
+    """Why a playbook fence must not be saved as it stands: the repair prompt
+    to send and the problems it names. None when the fence passes. Compile
+    first, then the connector check, as the offer gate does."""
+    errors = compile_errors(yaml_text)
+    if errors:
+        return _SELF_REPAIR_PREFIX, errors
+    connectors = connector_errors_for_reply(yaml_text)
+    if connectors:
+        return _CONNECTOR_REPAIR_PREFIX, connectors
+    return None
+
+
+def _last_yaml_fence(text: str) -> re.Match[str] | None:
+    found = list(YAML_FENCE_RE.finditer(text))
+    return found[-1] if found else None
+
+
+def _plain_problems(problems: str) -> list[str]:
+    """Compiler lines without their codes, paths or suggestions."""
+    out: list[str] = []
+    for line in problems.splitlines():
+        line = line.strip().removeprefix("-").strip()
+        line = re.sub(r"^\[[a-z_]+\]\s*", "", line)
+        line = re.split(r"\s+\(path:|\s+→", line)[0].strip()
+        if line:
+            out.append(line)
+    return out
+
+
+def _neutralise_failing_fences(text: str) -> str:
+    """The text a reply delivers once the repair cap is spent. The widget saves
+    the LAST yaml fence of the turn, so a failing last fence becomes a plain
+    note naming what failed. The loop stops at the first fence that passes:
+    that one is what the analyst gets, and it is good. Earlier fences are not
+    the saved one and stay as the model wrote them."""
+    while True:
+        m = _last_yaml_fence(text)
+        problem = _fence_problem(m.group(1)) if m else None
+        if m is None or problem is None:
+            return text
+        lines = _plain_problems(problem[1]) or ["the playbook did not pass its checks"]
+        note = ("This playbook did not pass its checks, so it is not offered here. "
+                "What failed:\n" + "\n".join(f"- {line}" for line in lines) + "\n")
+        text = text[:m.start()] + note + text[m.end():]
+        record_guard_fire("turn.fence_neutralised")
+
+
+# ───────────────────────────── wire seam ─────────────────────────────
+
+
+@dataclass
+class ToolCall:
+    call_id: str
+    name: str
+    args: dict[str, Any]
+
+
+@dataclass
+class RoundUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+
+
+@dataclass
+class Round:
+    """One model round-trip, already parsed out of the wire format.
+
+    `tool_calls` holds only calls the loop may EXECUTE: a round that stopped
+    for any reason other than tool use (the output cap above all, which cuts a
+    call off mid-arguments) reports them in `dropped_calls` instead, and the
+    WireTurn keeps them out of history -- replaying a call that never ran makes
+    the next request a 400.
+    """
+    text: str
+    tool_calls: list[ToolCall]
+    stop_reason: str
+    usage: RoundUsage
+    dropped_calls: list[DroppedCall] = field(default_factory=list)
+    #: Wire-format assistant message for history; None when the reply was
+    #: empty (an empty message replayed fails the next request on both APIs).
+    assistant: Any = None
+    #: The round's reasoning text, when the provider returns any.
+    thinking: str = ""
+
+
+@dataclass
+class ToolOutcome:
+    """One tool result as history needs it: content already rendered. The
+    call's name and args ride along for wires that replay calls as text."""
+    call_id: str
+    content: str
+    is_error: bool
+    name: str = ""
+    args: dict[str, Any] = field(default_factory=dict)
+
+
+class WireTurn(Protocol):
+    """One stream's wire state: the history in the provider's own shape and
+    the requests that read it. Created per stream, so a provider instance
+    shared across turns carries no per-turn state."""
+
+    #: Tools as the caller advertised them, normalized to this wire. These
+    #: (not the request-ready copy) are what a suspended session stores.
+    plain_tools: list[dict[str, Any]]
+    allowed_names: set[str]
+
+    def before_round(self) -> None: ...
+    def history_chars(self) -> int: ...
+    def history_dicts(self) -> list[dict[str, Any]]: ...
+    def stream_round(self) -> AsyncIterator[tuple[str, Any]]: ...
+    def wrapup_round(self, max_tokens: int) -> AsyncIterator[tuple[str, Any]]: ...
+    def has_tool(self, name: str) -> bool: ...
+    async def forced_call(self, name: str) -> ToolCall | None: ...
+    def append_assistant(self, rnd: Round) -> None: ...
+    def append_user(self, text: str) -> None: ...
+    def append_tool_call(self, call: ToolCall) -> None: ...
+    def append_tool_results(self, outcomes: list[ToolOutcome], *,
+                            note: str | None = None) -> None: ...
+    def result_wire(self, outcome: ToolOutcome) -> Any: ...
+    def snapshot(self) -> list[Any]: ...
+    def usage_extra(self) -> dict[str, Any]: ...
+
+
+# ───────────────────────────── shared helpers ─────────────────────────────
+
+
+def is_error_result(result: Any) -> bool:
+    """True if a tool result is a failure. Guard redirects and deferrals are
+    steering, not errors, so they don't count (tracker #60)."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("kind") in ("guard_redirect", "guard_defer"):
+        return False
+    return result.get("ok") is False or "error" in result
+
+
+def stringify(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(with_readable_dates(result), default=str)
+    except Exception:
+        return str(result)
+
+
+def parse_tool_arguments(raw: str) -> dict[str, Any]:
+    """Arguments the model streamed as a JSON string, or a BAD_ARGS marker."""
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception as exc:  # noqa: BLE001
+        return {BAD_ARGS_KEY: f"arguments were not valid JSON ({exc})"}
+    if not isinstance(parsed, dict):
+        return {BAD_ARGS_KEY: ("arguments must be a JSON object, got "
+                               f"{type(parsed).__name__}")}
+    return parsed
+
+
+def _offer_summary(hint: str, said: str, default: str) -> str:
+    """The card's summary: the verify's own description when it gave one,
+    else the first paragraph of what the model told the analyst."""
+    if (hint or "").strip():
+        return hint.strip()
+    first = (said or "").strip().split("\n\n", 1)[0].strip()
+    return first[:400] if first else default
+
+
+def turn_inputs_event(provider: Any, *, system: str, allowed: Any,
+                      tags: dict[str, Any]) -> TurnInputsEvent:
+    """The `TurnInputsEvent` for a turn: names and sizes, never prompt text.
+
+    Intent is the host's tag, else the active turn plan's when that plan was
+    given one. `tags["prompt_slices"]` (a `{name: chars}` dict, the host's
+    breakdown of the system prompt) is popped so it does not ride every usage
+    row. Best-effort: a malformed host value yields no slices, not a failed
+    turn."""
+    intent = str(tags.get("intent") or "")
+    if not intent:
+        try:
+            from .turn_plan import active_turn_plan
+            plan = active_turn_plan()
+            if plan is not None and plan.intent_stated:
+                intent = plan.intent
+        except Exception:  # noqa: BLE001 -- telemetry never fails a turn
+            pass
+    slices: list[dict[str, Any]] = []
+    raw = tags.pop("prompt_slices", None)
+    if isinstance(raw, dict):
+        slices = [{"name": str(k), "chars": int(v)} for k, v in raw.items()
+                  if isinstance(v, int)]
+    return TurnInputsEvent(
+        model=str(getattr(provider, "model", "") or ""),
+        tools=sorted(str(n) for n in (allowed or ())),
+        intent=intent, system_chars=len(system or ""), slices=slices)
+
+
+# ───────────────────────────── the loop ─────────────────────────────
+
+
+#: Stop reason for a turn the analyst stopped (C6). The connector records it as
+#: the turn's terminal stop_reason, so the transcript shows a stopped end.
+STOPPED_BY_ANALYST = "stopped_by_analyst"
+
+
+def _stop_requested(provider: Any) -> bool:
+    """True once the host's cancel_check (carried on the turn's ask) says the
+    analyst stopped the turn. A failing check never stops a turn."""
+    req = getattr(provider, "_turn_request", None)
+    check = getattr(req, "cancel_check", None)
+    if check is None:
+        return False
+    try:
+        return bool(check())
+    except Exception:  # noqa: BLE001 -- a broken stop probe must not kill a turn
+        log.exception("cancel_check failed; treating the turn as running")
+        return False
+
+
+async def run_loop(
+    provider: Any,
+    *,
+    system: str,
+    messages: list[Message],
+    tools: list[dict[str, Any]] | None,
+    tags: dict[str, Any] | None = None,
+    case_state: Any = None,
+    max_tool_turns: int | None = None,
+) -> AsyncIterator[Event]:
+    """Drive one agent turn on `provider`. See the module docstring."""
+    problem = provider.precheck()
+    if problem:
+        yield ErrorEvent(message=problem)
+        return
+
+    from ..mcp_server._citation_validator import (
+        clear_tool_registry,
+        get_turn_evidence,
+        register_tool_result,
+        unchecked_ready_note,
+    )
+    clear_tool_registry()
+
+    tags = tags or {}
+    turn_budget = max_tool_turns or MAX_TOOL_TURNS
+    # Model-provider redaction (llm.redaction): the provider is handed masked
+    # text and answers in placeholders; the loop below only ever sees real
+    # values. `system` and `messages` stay as given (guards read the analyst's
+    # own words, a suspended turn re-enters with them); only the provider wire
+    # is masked. No redactor bound: this block does nothing.
+    redactor = _redaction.active()
+    if redactor is not None:
+        tags.setdefault("redaction", redactor.mode)
+        w: WireTurn = _redaction.RedactingTurn(  # type: ignore[assignment]  # forwards the rest via __getattr__
+            provider.open_turn(
+                system=redactor.mask_text(system),
+                messages=[redactor.mask_message(m) for m in messages],
+                tools=tools, turn_budget=turn_budget),
+            redactor)
+    else:
+        w = provider.open_turn(system=system, messages=messages,
+                               tools=tools, turn_budget=turn_budget)
+    allowed = w.allowed_names
+    # Record what the model is given, before the first round: a transcript
+    # holds what it did, and without this nothing says what it could have done.
+    # `prompt_slices` is the host's own breakdown of the system prompt; it is
+    # taken off `tags` so it does not ride every usage row.
+    yield turn_inputs_event(provider, system=system, allowed=allowed, tags=tags)
+
+    # Delivery and discipline guards. Each watches executed results and, at the
+    # end of a turn, may ask for one more round; see each class in _loop_helpers.
+    delivery = EnhanceDeliveryGuard()
+    create = CreateDeliveryGuard()
+    build = BuildProgressGuard()
+    # A host turns the verdict off for a turn that is not an investigation.
+    verdict = VerdictDeliveryGuard(enabled=tags.get("verdicts") is not False)
+    promise = PromisedActionGuard()
+    progress = ProgressMeter()
+    contain = ContainmentFollowThrough(enabled=bool(tags.get("unattended")))
+    observers = (delivery, create, build, verdict, contain, promise, progress)
+    investigation = getattr(case_state, "investigation", None) if case_state is not None else None
+    discipline = TriageDiscipline(
+        state=investigation,
+        capabilities=(getattr(case_state, "capabilities", None)
+                      if case_state is not None else None),
+        authoring=is_authoring_slice(allowed),
+        # The analyst's own words are the only reliable carrier of an explicit
+        # containment order -- see `_detect_analyst_order`.
+        user_text=latest_user_text(messages),
+    )
+    trace_id = _uuid.uuid4().hex[:8]   # telemetry correlation, not the chat id
+    # An answer-scope turn (llm.ask_scope) is a narrow question: a few lookups
+    # and a reply, no verdict, no coverage sweep.
+    answer_scope = _ask_scope.current_scope() in _ask_scope.NARROW
+    answer_cap = _ask_scope.max_tool_calls(_ask_scope.current_scope())
+    answer_calls = 0
+    turn_idx = 0
+    self_repair_turns = 0
+    dropped_calls: list[DroppedCall] = []
+
+    def guarded_dispatch(name: str, args: dict[str, Any]) -> Any:
+        # C6: the analyst stopped the turn. No tool runs after Stop, whether
+        # the call came from a model round, a sibling batch or a forced step.
+        if _stop_requested(provider):
+            # Not a guard refusal: the analyst's Stop is not a judgement the
+            # loop made about the call, so it is not recorded as a guard fire.
+            return dict(ok=False, stopped=True,
+                        error="The analyst stopped this turn. Not executed.")
+        if isinstance(args, dict) and BAD_ARGS_KEY in args:
+            return refusal("dispatch.bad_tool_arguments", {
+                "ok": False, "code": "bad_tool_arguments",
+                "message": (f"{name}: {args[BAD_ARGS_KEY]}. Re-issue the call "
+                            f"with a single valid JSON object as the arguments."),
+                "suggestions": [],
+            })
+        # Defense-in-depth for the intent tool-slice (llm/intents.py): dispatch
+        # runs ANY tool name, so refuse names the caller did not advertise.
+        if name not in allowed:
+            return refusal("dispatch.not_in_slice", {
+                "ok": False,
+                "error": (f"Tool '{name}' is not available in this session: the "
+                          f"current task intent does not permit it. Not executed."),
+            })
+        if answer_scope:
+            nonlocal answer_calls
+            answer_calls += 1
+            if answer_calls > (answer_cap or _ask_scope.ANSWER_MAX_TOOL_CALLS):
+                return refusal("dispatch.answer_scope",
+                               _ask_scope.cap_refusal(_ask_scope.current_scope()))
+        guard = discipline.evaluate(name, args)
+        if guard is not None:
+            return guard
+        result = dispatch(name, args)
+        discipline.note_result(name, args, result)
+        return result
+
+    async def wrapup(directive: str, label: str,
+                     max_tokens: int | None = None) -> AsyncIterator[Event]:
+        """One forced no-tools round. Failures are logged and swallowed; the
+        caller still emits the terminal DoneEvent, so the turn never hangs."""
+        if _stop_requested(provider):   # C6: no forced model round after Stop
+            return
+        w.append_user(directive)
+        history_chars = w.history_chars()
+        try:
+            usage = RoundUsage()
+            said = False
+            fence = FenceHold()
+            async for kind, payload in w.wrapup_round(
+                    max_tokens or provider.max_output_tokens):
+                if kind == "text":
+                    said = said or bool((payload or "").strip())
+                    shown = fence.feed(payload or "")
+                    if shown:
+                        yield TextEvent(text=shown)
+                else:
+                    usage = payload
+            # The wrap-up is the last word of the turn: no repair follows it,
+            # so a failing fence in it is neutralised rather than held back.
+            tail = _neutralise_failing_fences(fence.finish())
+            if tail:
+                yield TextEvent(text=tail)
+            if not said:
+                yield TextEvent(text=EMPTY_WRAPUP_TEXT)
+            yield UsageEvent(
+                session_id=trace_id, turn=turn_idx, model=provider.model,
+                input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+                cache_read=usage.cache_read, cache_write=usage.cache_write,
+                history_chars=history_chars, stop_reason=label,
+                self_repair_turn=self_repair_turns, tool_calls=[], tags=tags,
+                **w.usage_extra(),
+            )
+        except Exception:
+            log.exception("%s call failed", label)
+            yield ErrorEvent(message="hit max tool budget; summary failed -- see history above")
+
+    async def loop_call(name: str, args: dict[str, Any], out: list[Any],
+                        tcu: list[ToolCallUsage]) -> AsyncIterator[Event]:
+        """A call the LOOP makes, not the model: delivering what a verify
+        already blessed, or verifying a draft the model checked and left.
+        Runs through the same dispatch and observers as a model call, so the
+        transcript, the cards and the guards cannot tell the difference.
+        Appends `(call, result, outcome)` to `out`."""
+        call = ToolCall(f"loop_{_uuid.uuid4().hex[:8]}", name, args)
+        yield ToolUseEvent(name=name, arguments=args, call_id=call.call_id,
+                           tier=_tier_for(name, args))
+        t0 = time.perf_counter()
+        result = await asyncio.to_thread(guarded_dispatch, name, args)
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
+        out.append((call, result, record(call, result, dur_ms, tcu)))
+
+    def record(call: ToolCall, result: Any, duration_ms: int | None,
+               tcu: list[ToolCallUsage]) -> ToolOutcome:
+        success = not is_error_result(result)
+        register_tool_result(call.call_id, call.name, success, call.args, result)
+        view = model_view(call.name, result)
+        if redactor is not None:
+            # Structured masking: typed fields are masked by what they are, and
+            # the map learns the values so the string pass catches them elsewhere.
+            view = redactor.mask_result(view)
+        content = cap_model_content(
+            evidence_id_line(call.call_id, call.name, call.args, success)
+            + stringify(view))
+        try:
+            args_chars = len(json.dumps(call.args, default=str))
+        except Exception:
+            args_chars = 0
+        tcu.append(ToolCallUsage(name=call.name, args_chars=args_chars,
+                                 result_chars=len(content), duration_ms=duration_ms))
+        for o in observers:
+            o.note_result(call.name, call.args, result)
+        return ToolOutcome(call.call_id, content, not success, call.name, call.args)
+
+    async def force_emit_card(default_type: str, fix: Callable[[dict[str, Any]], None],
+                              out: list[Any]) -> AsyncIterator[Event]:
+        """One round pinned to `emit_card`, so a delivery is a real tool call
+        and not a sentence promising one. Appends `(call, args, result)` to
+        `out`; `fix` repairs the arguments (and may override what the model
+        sent -- only verified bytes may reach a card)."""
+        if _stop_requested(provider):   # C6: no forced model round after Stop
+            return
+        call = await w.forced_call("emit_card")
+        args = dict(call.args) if call else {}
+        if not args.get("card_type"):
+            args["card_type"] = default_type
+        if not isinstance(args.get("payload"), dict):
+            args["payload"] = {}
+        fix(args)
+        call_id = (call.call_id if call and call.call_id else _uuid.uuid4().hex[:8])
+        yield ToolUseEvent(name="emit_card", arguments=args, call_id=call_id,
+                           tier=_tier_for("emit_card", args))
+        t0 = time.perf_counter()
+        result = guarded_dispatch("emit_card", args)
+        yield ToolResultEvent(call_id=call_id, result=result,
+                              duration_ms=int((time.perf_counter() - t0) * 1000))
+        out.append((ToolCall(call_id, "emit_card", args), result))
+
+    async def _force_contain(pin: dict[str, Any]) -> AsyncIterator[Event]:
+        """Force-stage the containment the admin's policy defines (``pin``) when
+        a confident true_positive ended with nothing staged. The card flows
+        through emit_card, so shadow_decision judges it and the connector
+        enforces it like any staged action -- the policy still refuses a
+        protected / internal / unrated / rate-capped target, so this never
+        bypasses a check. It only stops a confirmed threat being left
+        uncontained because the model ended on its verdict."""
+        def _fix(a: dict[str, Any]) -> None:
+            a["card_type"] = "action"
+            a["payload"] = dict(pin)
+        record_guard_fire("turn.forced_containment")
+        out2: list[Any] = []
+        try:
+            async for ev in force_emit_card("action", _fix, out2):
+                yield ev
+        except Exception:
+            log.exception("forced containment delivery failed")
+            return
+        if out2:
+            c2, r2 = out2[0]
+            w.append_tool_call(c2)
+            w.append_tool_results([ToolOutcome(
+                c2.call_id, cap_model_content(stringify(r2)),
+                is_error_result(r2), c2.name, c2.args)])
+
+    for _turn in range(turn_budget):
+        # C6: checked between rounds, before the next model call.
+        if _stop_requested(provider):
+            log.info("turn stopped by analyst before round %d", turn_idx + 1)
+            yield DoneEvent(stop_reason=STOPPED_BY_ANALYST)
+            return
+        turn_idx += 1
+        try:
+            w.before_round()
+        except Exception:
+            log.exception("history compaction failed")   # never fails a turn
+        history_chars = w.history_chars()
+
+        rnd: Round | None = None
+        fence = FenceHold()   # a code fence waits for the end of the round
+        # A request failure is handled, not dumped raw: a transient rate limit
+        # is waited out and retried (narrated so the analyst knows why the turn
+        # paused); an exhausted balance fails fast with a message naming the fix;
+        # everything else takes the provider's friendly-error path. Retry only
+        # when NOTHING streamed this attempt -- a 429 lands at request admission,
+        # so a mid-stream failure cannot be safely replayed.
+        throttle_attempt = 0
+        while True:
+            rnd = None
+            fence = FenceHold()
+            streamed_any = False
+            try:
+                async for kind, payload in drain_with_idle_timeout(
+                        w.stream_round(), timeout=STREAM_TIMEOUT_SECS):
+                    if kind == "text":
+                        streamed_any = True
+                        shown = fence.feed(payload)   # live delta, before any fence
+                        if shown:
+                            yield TextEvent(text=shown)
+                    elif kind == "tool_start":
+                        # A tool block has started: the chip goes out now (C4).
+                        # Counts as streamed, so a retry cannot repeat it.
+                        streamed_any = True
+                        call_id, name = payload
+                        yield ToolStartEvent(name=name, call_id=call_id)
+                    else:
+                        rnd = payload
+                break
+            except asyncio.TimeoutError:
+                log.warning("%s stream timed out after %ss",
+                            provider.label, STREAM_TIMEOUT_SECS)
+                yield ErrorEvent(
+                    message=f"The request to {provider.label} timed out after "
+                            f"{STREAM_TIMEOUT_SECS}s. The API may be slow or "
+                            f"unreachable -- please try again.")
+                return
+            except Exception as exc:  # noqa: BLE001 -- classified below
+                outcome, retry_after = _throttle.classify(exc)
+                if outcome == "out_of_credit":
+                    log.warning("%s out of credit", provider.label)
+                    yield ErrorEvent(
+                        message=_throttle.out_of_credit_message(provider.label))
+                    return
+                if (outcome == "throttled" and not streamed_any
+                        and throttle_attempt < _throttle.MAX_THROTTLE_RETRIES):
+                    throttle_attempt += 1
+                    wait = _throttle.wait_for(throttle_attempt, retry_after)
+                    log.warning("%s throttled; retry %d after %.1fs",
+                                provider.label, throttle_attempt, wait)
+                    yield NoticeEvent(
+                        message=_throttle.throttle_notice(provider.label, wait),
+                        reason="throttled")
+                    await asyncio.sleep(wait)
+                    continue
+                log.exception("%s stream failed", provider.label)
+                msg = (_throttle.throttled_give_up_message(provider.label)
+                       if outcome == "throttled"
+                       else provider.friendly_error(exc))
+                yield ErrorEvent(message=msg)
+                return
+        assert rnd is not None
+        held = fence.finish()   # the round's undelivered tail, from its first fence
+        w.append_assistant(rnd)
+        dropped_calls = rnd.dropped_calls
+        tool_call_usage: list[ToolCallUsage] = []
+
+        def usage_event(stop_reason: str, *, repair_delta: int = 0,
+                        _rnd: Round = rnd, _hc: int = history_chars,
+                        _tcu: list[ToolCallUsage] = tool_call_usage) -> UsageEvent:
+            u = _rnd.usage
+            return UsageEvent(
+                session_id=trace_id, turn=turn_idx, model=provider.model,
+                input_tokens=u.input_tokens, output_tokens=u.output_tokens,
+                cache_read=u.cache_read, cache_write=u.cache_write,
+                history_chars=_hc, stop_reason=stop_reason,
+                self_repair_turn=self_repair_turns - repair_delta,
+                tool_calls=_tcu, tags=tags, dropped_calls=_rnd.dropped_calls,
+                thinking=_rnd.thinking,
+                **w.usage_extra(),
+            )
+
+        # ── terminal round: no executable tool calls ──────────────────
+        if not rnd.tool_calls:
+            # A failing last fence is repaired while the cap allows. The reply
+            # is a delivery (the widget saves the last fence), so it gets the
+            # compile check and the connector check the offer card gets.
+            if self_repair_turns < MAX_SELF_REPAIR_TURNS and held:
+                last = _last_yaml_fence(held)
+                problem = _fence_problem(last.group(1)) if last else None
+                if problem:
+                    self_repair_turns += 1
+                    record_guard_fire("turn.self_repair")
+                    w.append_user(problem[0] + problem[1])
+                    yield usage_event(rnd.stop_reason or "", repair_delta=1)
+                    continue
+            # The reply goes out. Once the cap is spent a failing fence must not
+            # stay saveable: it becomes a note naming what failed.
+            delivered = _neutralise_failing_fences(held)
+            if delivered:
+                yield TextEvent(text=delivered)
+
+            # A narrow question ends on its answer: none of the guards below
+            # (verdict, coverage, containment, build) applies, and a turn that
+            # ended without text gets one round that answers it.
+            if answer_scope:
+                if not (rnd.text or "").strip():
+                    record_guard_fire("turn.answer_scope_wrapup")
+                    yield usage_event("answer_scope_wrapup")
+                    turn_idx += 1
+                    async for ev in wrapup(_ask_scope.WRAPUP_DIRECTIVE,
+                                           "answer_scope_wrapup", 512):
+                        yield ev
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
+                yield usage_event(rnd.stop_reason or "")
+                yield DoneEvent(stop_reason=provider.contract_stop(rnd.stop_reason))
+                return
+
+            # A draft the model checked (validate/compile) and then left: the
+            # loop runs the verify itself. A pass is delivered below with no
+            # model round; a fail goes back to the model with its fixes.
+            nudge: tuple[str, str] | None = None
+            verified_by_loop = False
+            if build.unverified_draft(allowed) and build.clean_draft and "verify_playbook" in allowed:
+                build.mark_verify_forced()
+                yield usage_event("unverified_draft_verified")
+                out: list[Any] = []
+                async for ev in loop_call("verify_playbook", {"yaml_text": build.clean_draft},
+                                          out, tool_call_usage):
+                    yield ev
+                call, result, outcome = out[0]
+                verified_by_loop = bool(isinstance(result, dict) and result.get("ready_to_push"))
+                if not verified_by_loop:
+                    w.append_tool_call(call)
+                    w.append_tool_results([outcome])
+                    nudge = ("unverified_draft_failed", UNVERIFIED_DRAFT_FAILED_DIRECTIVE)
+
+            # Nudges: each appends ONE directive and lets the loop run on.
+            said = None if (nudge or verified_by_loop) else promise.outstanding(rnd.text)
+            if nudge or verified_by_loop:
+                pass
+            elif said:
+                promise.mark_forced()
+                nudge = ("promised_action_forced", promise.directive(said))
+            elif build.outstanding(allowed):
+                build.mark_forced()
+                nudge = ("build_progress_forced", BUILD_PROGRESS_DIRECTIVE)
+            elif build.unverified_draft(allowed):
+                build.mark_verify_forced()
+                nudge = ("unverified_draft_forced", UNVERIFIED_DRAFT_DIRECTIVE)
+            else:
+                nfix = delivery.failed_edit(allowed)
+                if nfix:
+                    delivery.mark_fix_forced()
+                    nudge = ("failed_edit_forced", FAILED_EDIT_DIRECTIVE.format(n=nfix))
+            if nudge:
+                yield usage_event(nudge[0])
+                turn_idx += 1
+                w.append_user(nudge[1])
+                continue
+
+            # A build turn that ended on a compile-clean fence it never verified
+            # and never offered: the loop verifies those bytes itself, so the
+            # delivery guard below can offer them. A prose nudge does not force a
+            # tool call -- a connector-less playbook (loop / decision /
+            # set_variable) whose only research is get_step_type gets authored in
+            # prose and the turn ends on a bare fence with no Create prompt. The
+            # verify result flows through the observers into CreateDeliveryGuard,
+            # exactly like the validated-draft path above. Localized live:
+            # for_each_loop on the production model delivered nothing this way.
+            if (not verified_by_loop and held
+                    and is_authoring_slice(allowed)
+                    and create.outstanding(allowed) is None
+                    and w.has_tool("verify_playbook") and w.has_tool("emit_card")):
+                _fence = _last_yaml_fence(held)
+                if _fence is not None and _fence_problem(_fence.group(1)) is None:
+                    record_guard_fire("turn.terminal_fence_verified")
+                    yield usage_event("terminal_fence_verified")
+                    _fout: list[Any] = []
+                    async for ev in loop_call(
+                            "verify_playbook", {"yaml_text": _fence.group(1)},
+                            _fout, tool_call_usage):
+                        yield ev
+
+            # Delivery. A verify passed and the turn is ending without the offer
+            # card: the loop delivers it with the bytes the verify blessed. No
+            # model round -- there is nothing left for the model to decide, and
+            # asking it to make the call only gave it another chance to narrate.
+            vid = delivery.outstanding(allowed)
+            offer: dict[str, Any] | None = None
+            if vid is not None and w.has_tool("emit_card"):
+                delivery.mark_forced()
+                yield usage_event("enhance_delivery_forced")
+                offer = {"card_type": "enhancement_offer", "payload": {
+                    "id": f"offer-{_uuid.uuid4().hex[:8]}", "verified_id": vid,
+                    "summary": _offer_summary(delivery.summary_hint, rnd.text,
+                                              "The edit is verified and ready to apply.")}}
+            elif create.outstanding(allowed) is not None and w.has_tool("emit_card"):
+                create.mark_forced()
+                yield usage_event("create_delivery_forced")
+                payload = {"id": f"offer-{_uuid.uuid4().hex[:8]}",
+                           "summary": _offer_summary(create.summary_hint, rnd.text,
+                                                     "Playbook drafted and verified.")}
+                create.apply_bytes(payload)
+                offer = {"card_type": "playbook_offer", "payload": payload}
+            if offer is not None:
+                try:
+                    async for ev in loop_call("emit_card", offer, [], tool_call_usage):
+                        yield ev
+                except Exception:
+                    log.exception("loop delivery failed")
+                yield DoneEvent(stop_reason="end_turn")
+                return
+
+            follow = contain.directive(allowed)
+            if follow:
+                contain.mark_fired()
+                yield usage_event(follow[0])
+                turn_idx += 1
+                # A confirmed true_positive must not end unattended with nothing
+                # staged. When the policy defines a block for this turn's cited
+                # malicious external target, force that card now rather than ask
+                # and risk the model ending on prose; the policy still judges it.
+                pin = (forced_containment(contain.disposition)
+                       if follow[0] == "containment_follow_through" else None)
+                if pin is not None:
+                    async for ev in _force_contain(pin):
+                        yield ev
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
+                w.append_user(follow[1])
+                continue
+
+            # Verdict: a triage turn that gathered evidence and never concluded
+            # gets one forced emit_card(verdict) round citing this turn's
+            # evidence ids, with one repair attempt.
+            if verdict.outstanding(allowed):
+                verdict.mark_forced()
+                yield usage_event("verdict_guard_forced")
+                evidence = get_turn_evidence()
+                registry = evidence.valid_ids() if evidence else {}
+                evidence_ids = [
+                    eid for eid, info in registry.items()
+                    if info.get("ok") is True and is_verdict_evidence(info.get("name") or "")
+                ]
+                if w.has_tool("emit_card"):
+                    turn_idx += 1
+                    directive = verdict_directive(evidence_ids)
+                    forced: tuple[ToolCall, Any] | None = None
+                    for _attempt in range(2):
+                        w.append_user(directive)
+                        forced_out: list[Any] = []
+                        try:
+                            async for ev in force_emit_card("verdict", lambda _a: None, forced_out):
+                                yield ev
+                        except Exception:
+                            log.exception("forced verdict delivery failed")
+                            break
+                        call, result = forced_out[0]
+                        contain.note_result("emit_card", call.args, result)
+                        if not (isinstance(result, dict) and result.get("ok") is False):
+                            forced = (call, result)
+                            break
+                        directive = verdict_repair_directive(result, call.args)
+                    follow = contain.directive(allowed) if forced is not None else None
+                    if forced is not None and follow:
+                        # The forced verdict is real history now, so the model
+                        # stages what it calls for against what it decided.
+                        call, result = forced
+                        w.append_tool_call(call)
+                        w.append_tool_results(
+                            [ToolOutcome(call.call_id, cap_model_content(stringify(result)),
+                                         is_error_result(result),
+                                         call.name, call.args)],
+                            note=follow[1])
+                        contain.mark_fired()
+                        # Marks that follow-through fired. Zero tokens: this
+                        # round's usage was reported as verdict_guard_forced.
+                        yield UsageEvent(
+                            session_id=trace_id, turn=turn_idx, model=provider.model,
+                            input_tokens=0, output_tokens=0, cache_read=0, cache_write=0,
+                            history_chars=0, stop_reason=follow[0],
+                            self_repair_turn=self_repair_turns, tool_calls=[], tags=tags,
+                            **w.usage_extra())
+                        turn_idx += 1
+                        # Same containment fallback as the non-forced path: a
+                        # confirmed true_positive with a policy-defined block for
+                        # this turn's cited malicious external target gets the
+                        # card forced now, so the policy has one to judge.
+                        pin = (forced_containment(contain.disposition)
+                               if follow[0] == "containment_follow_through" else None)
+                        if pin is not None:
+                            async for ev in _force_contain(pin):
+                                yield ev
+                            yield DoneEvent(stop_reason="end_turn")
+                            return
+                        continue
+                yield DoneEvent(stop_reason="end_turn")
+                return
+
+            # No offer, no verdict, but the turn drafted a playbook that still
+            # has unmet fixes: do not end on bare prose. Deliver a choice card
+            # naming what is left, so the analyst can say keep going or stop --
+            # the "never dead-end the analyst" rule, enforced in code.
+            if build.incomplete(allowed) and w.has_tool("emit_card"):
+                build.mark_incomplete_shown()
+                yield usage_event("build_incomplete_shown")
+                fixes = build.last_fixes[:6]
+                lines = "\n".join(f"- {m}" for m in fixes)
+                prompt = ("The playbook is not ready to save yet. "
+                          f"{len(build.last_fixes)} item(s) still need attention:\n"
+                          f"{lines}\n\nKeep working on it, or stop here?")
+                card = {"card_type": "choice", "payload": {
+                    "id": f"build-incomplete-{_uuid.uuid4().hex[:8]}",
+                    "prompt": prompt,
+                    "options": [
+                        {"label": "Keep going", "value": "continue"},
+                        {"label": "Stop here", "value": "stop"},
+                    ]}}
+                try:
+                    async for ev in loop_call("emit_card", card, [], tool_call_usage):
+                        yield ev
+                except Exception:
+                    log.exception("loop incomplete-build delivery failed")
+                yield DoneEvent(stop_reason="end_turn")
+                return
+
+            yield usage_event(rnd.stop_reason or "")
+            yield DoneEvent(stop_reason=provider.contract_stop(rnd.stop_reason))
+            return
+
+        # ── tool round: parallel up to the approval boundary ──────────
+        if held:   # prose that waited on a fence goes out before the tools run
+            # The widget saves the last fence of the whole turn, and a later
+            # round may print none, so a failing fence here is neutralised too.
+            yield TextEvent(text=_neutralise_failing_fences(held))
+        calls = rnd.tool_calls
+        tiers = [_tier_for(c.name, c.args) for c in calls]
+        approval_idx = next((i for i, t in enumerate(tiers) if needs_approval(t)), len(calls))
+        # Staging an action card ends the agent's half of the turn, which
+        # TriageDiscipline enforces -- but only for calls evaluated after the
+        # card's result is noted. Concurrent siblings would slip past it
+        # (measured: a card at call 7 followed by four more that ran), so the
+        # card closes the parallel batch and the rest go through the guard.
+        card_idx = next((i for i, c in enumerate(calls)
+                         if _effective_tool_name(c.name, c.args) == "emit_action_card"), None)
+        batch_end = approval_idx if card_idx is None else min(approval_idx, card_idx + 1)
+        # An offer card closes the batch for the same reason an action card does:
+        # the dedup guard (`offer_delivered`) refuses a SECOND offer this turn,
+        # but a sibling running concurrently would read the flag before the first
+        # offer sets it. Closing the batch at the first offer sends any further
+        # offer through the sequential guard, after the flag is set.
+        offer_idx = next((i for i, c in enumerate(calls)
+                          if is_offer_attempt(c.name, c.args)), None)
+        if offer_idx is not None:
+            batch_end = min(batch_end, offer_idx + 1)
+        parallel = calls[:batch_end]
+        outcomes: list[ToolOutcome] = []
+        delivered_offer = False
+
+        for call, tier in zip(parallel, tiers):
+            yield ToolUseEvent(name=call.name, arguments=call.args,
+                               call_id=call.call_id, tier=tier)
+        if parallel:
+            sem = asyncio.Semaphore(MAX_PARALLEL_TOOLS)
+
+            async def run_one(c: ToolCall) -> tuple[Any, int]:
+                async with sem:
+                    t0 = time.perf_counter()
+                    res = await asyncio.to_thread(guarded_dispatch, c.name, c.args)
+                    return res, int((time.perf_counter() - t0) * 1000)
+
+            # Each result streams the moment its call finishes, so a fast sibling's
+            # chip does not wait on a slow one. History is still recorded in call
+            # order below, so the next round replays exactly what the model asked.
+            tasks = {asyncio.ensure_future(run_one(c)): i for i, c in enumerate(parallel)}
+            finished: dict[int, tuple[Any, int]] = {}
+            waiting = set(tasks)
+            while waiting:
+                done, waiting = await asyncio.wait(
+                    waiting, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    i = tasks[task]
+                    result, dur_ms = task.result()
+                    finished[i] = (result, dur_ms)
+                    yield ToolResultEvent(call_id=parallel[i].call_id,
+                                          result=result, duration_ms=dur_ms)
+            for i, call in enumerate(parallel):
+                result, dur_ms = finished[i]
+                outcomes.append(record(call, result, dur_ms, tool_call_usage))
+                if is_delivered_offer(call.name, call.args, result):
+                    delivered_offer = True
+
+        pending: ApprovalRequestEvent | None = None
+        for i in range(batch_end, len(calls)):
+            call = calls[i]
+            yield ToolUseEvent(name=call.name, arguments=call.args,
+                               call_id=call.call_id, tier=_tier_for(call.name, call.args))
+            t0 = time.perf_counter()
+            result = guarded_dispatch(call.name, call.args)
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            if isinstance(result, dict) and result.get("pending_approval"):
+                pending = _suspend(provider, w, system, tags, trace_id, call, result,
+                                   outcomes, calls[i + 1:], guarded_dispatch,
+                                   get_turn_evidence)
+                break
+            yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
+            outcomes.append(record(call, result, dur_ms, tool_call_usage))
+            if is_delivered_offer(call.name, call.args, result):
+                delivered_offer = True
+
+        if pending is not None:
+            yield pending
+            yield usage_event("pending_approval")
+            yield DoneEvent(stop_reason="pending_approval")
+            return
+
+        # TurnPlan item 3: state the shrinking budget in the soft window before
+        # the cliff (the forced wrap-up round handles exhaustion).
+        note = budget_note(_turn + 1, turn_budget) if provider.emulation.task_budget else ""
+        # A user-role note: a mid-history system message is refused by
+        # OpenAI-compatible gateways ("System message must be at the beginning").
+        # I5: the coverage ledger's tail note rides the same user message.
+        _ev = get_turn_evidence()
+        _ledger = (unchecked_ready_note(_ev.valid_ids())
+                   if _ev is not None and not answer_scope else "")
+        _scope_note = (_ask_scope.budget_note(_ask_scope.current_scope(), answer_calls)
+                       if answer_scope else "")
+        _tail = " ".join(n for n in (f"[turn budget] {note}" if note else "",
+                                     _ledger, _scope_note,
+                                     _ask_scope.language_note(
+                                         latest_user_text(messages))) if n)
+        w.append_tool_results(outcomes, note=_tail or None)
+        yield usage_event(rnd.stop_reason or "tool_use")
+
+        # The model delivered a terminal offer card: the turn is done. The
+        # connector truncates the wire after a gating card, so a further round
+        # would only narrate text that is discarded -- end here instead of
+        # spending it. (Unifies the model-emitted path with the loop's own
+        # forced-delivery paths, which already return on these cards.)
+        if delivered_offer:
+            yield DoneEvent(stop_reason="end_turn")
+            return
+
+        # No progress (repetition / sustained failure): answer now rather than
+        # spending the ceiling. See ProgressMeter.
+        stall = progress.end_round()
+        if stall:
+            turn_idx += 1
+            async for ev in wrapup(stall_directive(stall), f"stalled_{stall}",
+                                   DEFAULT_MAX_OUTPUT_TOKENS):
+                yield ev
+            yield DoneEvent(stop_reason="end_turn")
+            return
+
+    # Tool-turn budget exhausted. When nothing has been delivered the model is
+    # TOLD to deliver (a "continue or deliver?" card left unanswered strands the
+    # turn with nothing); only when something is delivered is the choice real.
+    # Unattended (auto-triage, a scheduled hunt): nobody can answer the card,
+    # so the turn always wraps up and delivers. Live, a scheduled hunt ended
+    # on the ask after a capability-gap card and recorded no verdict.
+    if tags.get("unattended") or not analyst_has_the_yaml(w.history_dicts()):
+        directive, max_tok = wrapup_directive(w.history_dicts(), turn_budget)
+        record_guard_fire("turn.max_tool_turns")
+        # Zero tokens: the last round's usage was already reported.
+        yield UsageEvent(
+            session_id=trace_id, turn=turn_idx, model=provider.model,
+            input_tokens=0, output_tokens=0, cache_read=0, cache_write=0,
+            history_chars=0, stop_reason="max_tool_turns",
+            self_repair_turn=self_repair_turns, tool_calls=[], tags=tags,
+            dropped_calls=dropped_calls,
+        )
+        turn_idx += 1
+        async for ev in wrapup(directive, "max_tool_turns", max_tok):
+            yield ev
+        yield DoneEvent(stop_reason="end_turn")
+        return
+    record_guard_fire("turn.budget_ask")
+    card = budget_ask_card(turn_budget)
+    card_result = dispatch("emit_choice_card", card, _internal=True)
+    yield ToolUseEvent(name="emit_choice_card", arguments=card,
+                       call_id="_budget_ask", tier=0)
+    yield ToolResultEvent(call_id="_budget_ask", result=card_result)
+    yield DoneEvent(stop_reason="max_tool_turns")
+
+
+def _suspend(provider: Any, w: WireTurn, system: str, tags: dict[str, Any],
+             trace_id: str, call: ToolCall, result: dict[str, Any],
+             outcomes: list[ToolOutcome], rest: list[ToolCall],
+             guarded_dispatch: Callable[[str, dict[str, Any]], Any],
+             get_turn_evidence: Callable[[], Any]) -> ApprovalRequestEvent:
+    """Stash everything resume needs and return the approval event.
+
+    The snapshot already holds the assistant message with this call; the
+    outcomes are the calls that completed before the gate; `rest` are the ones
+    the turn never reached (resume answers them with placeholders, since both
+    APIs require a result for every call)."""
+    # Gated calls right behind this one share its card.
+    batch, remaining = _approvals.collect_batch(
+        [(c.call_id, c.name, c.args) for c in rest], guarded_dispatch, _tier_for)
+    evidence = get_turn_evidence()
+    tier = int(result.get("tier", 3))
+    suspended = _approvals.SuspendedSession(
+        approval_id=result["approval_id"],
+        # The CHAT session id, not the per-stream trace id: a trace id here can
+        # never join to chat_sessions, so the monitor's Pending panel showed an
+        # unresolvable session and no row could derive `waiting_approval`.
+        session_id=tags.get("session_id") or trace_id,
+        tool=call.name,
+        tool_use_id=call.call_id,
+        args=call.args,
+        tier=tier,
+        history_snapshot=w.snapshot(),
+        prior_tool_result_blocks=[w.result_wire(o) for o in outcomes],
+        remaining_tool_calls=[_approvals.SkippedToolCall(call_id=cid, name=cn, args=ca)
+                              for cid, cn, ca in remaining],
+        system=system,
+        tags=dict(tags),
+        summary=result.get("summary"),
+        # The advertised slice, as advertised -- resume re-enters with it.
+        tools=list(w.plain_tools),
+        # Citations survive resume.
+        turn_evidence_state=evidence.to_dict() if evidence else {},
+        batch=batch,
+    )
+    # Phase 3.1: HMAC-bind the session to its args so store tampering is
+    # detected on resume.
+    _approvals.bind(suspended)
+    gateway = getattr(provider, "_approval_gateway", None)
+    if gateway is not None:
+        gateway.stash(suspended)
+    else:
+        _approvals.stash(suspended)
+    return ApprovalRequestEvent(
+        approval_id=result["approval_id"],
+        tool_use_id=call.call_id,
+        tool=call.name,
+        tier=tier,
+        preview=result.get("preview") or {},
+        args_hash=result.get("args_hash", ""),
+        summary=result.get("summary"),
+        requires_step_up=bool(result.get("requires_step_up")),
+        batch=[b.card() for b in batch],
+        policy=result.get("policy"),
+    )
+
+
+async def resume_loop(provider: Any, *, suspended: _approvals.SuspendedSession,
+                      decision: str) -> AsyncIterator[Event]:
+    """Resume a turn suspended on a tier-3+ approval.
+
+    Re-dispatches the approved call (or synthesizes a denial), answers every
+    other call of the suspended assistant message, then re-enters the
+    provider's `stream()` with the rebuilt history."""
+    # Fail closed on tamper / lost secret.
+    if not _approvals.verify(suspended):
+        yield ErrorEvent(message="Approval binding check failed -- the suspended action "
+                                 "could not be verified and was not executed. Re-issue "
+                                 "the request.")
+        yield DoneEvent(stop_reason="approval_unverified")
+        return
+
+    if decision == "approve":
+        # Bypass the gate this one time (see tools.dispatch). Off-loop: live MCP
+        # tools call asyncio.run() internally, which raises on a running loop.
+        resolved = await asyncio.to_thread(
+            dispatch, suspended.tool, {**suspended.args, "_approved": True},
+            _internal=True)
+    else:
+        resolved = {"ok": False, "code": "user_denied", "reason": "User denied the action."}
+
+    # A NAMED synthetic tool_use before the result: the original lives in the
+    # prior turn's transcript, and a renderer matching by call_id within this
+    # turn would otherwise draw a nameless chip.
+    yield ToolUseEvent(name=suspended.tool, arguments=dict(suspended.args),
+                       call_id=suspended.tool_use_id, tier=suspended.tier, synthetic=True)
+    yield ToolResultEvent(call_id=suspended.tool_use_id, result=resolved)
+    # The rest of the card: the same decision, in order.
+    batch_results = await asyncio.to_thread(_approvals.resolve_batch, suspended, decision)
+    for b, res in batch_results:
+        yield ToolUseEvent(name=b.name, arguments=dict(b.args),
+                           call_id=b.call_id, tier=b.tier, synthetic=True)
+        yield ToolResultEvent(call_id=b.call_id, result=res)
+
+    outcomes = [ToolOutcome(suspended.tool_use_id, cap_model_content(stringify(resolved)),
+                            is_error_result(resolved), suspended.tool, dict(suspended.args))]
+    outcomes += [ToolOutcome(b.call_id, cap_model_content(stringify(res)), is_error_result(res),
+                             b.name, dict(b.args))
+                 for b, res in batch_results]
+    outcomes += [ToolOutcome(s.call_id, _approvals.superseded_result_json(), True,
+                             s.name, dict(s.args or {}))
+                 for s in suspended.remaining_tool_calls]
+
+    async for ev in provider.stream(
+        system=suspended.system,
+        messages=provider.rehydrate(suspended, outcomes),
+        # Old pickled sessions predate the field -- getattr, not attr.
+        tools=list(getattr(suspended, "tools", None) or []),
+        tags=suspended.tags,
+    ):
+        yield ev

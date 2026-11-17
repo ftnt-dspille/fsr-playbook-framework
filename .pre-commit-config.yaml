@@ -1,0 +1,107 @@
+# Pre-commit hooks. Install BOTH gate points:
+#   pre-commit install            # pre-commit (runs on `git commit`)
+#   pre-commit install --hook-type pre-push   # pre-push (catches --no-verify)
+# Run all hooks manually with: pre-commit run --all-files
+repos:
+  # Ruff lint (pyflakes-class errors: unused imports/vars, undefined names,
+  # PEP 604 unions at the py39 floor). Self-contained -- pre-commit fetches the
+  # pinned ruff, so it doesn't depend on a venv having ruff installed. Config
+  # (target-version, select, per-file-ignores) lives in pyproject.toml.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        # No --fix: fail fast and let the dev decide, matching the pytest hook.
+        # `tooling/` (not the pre-REORG `python/`) -- this pattern still named
+        # the deleted directory, so ruff silently skipped every tooling/ file
+        # at commit time while `make lint` checked it.
+        # Same blind spot as pytest-fast below: the repo-root conftest.py is
+        # real, load-bearing code and was linted by nothing.
+        files: '^(tooling/|fsr_playbooks/|conftest\.py)'
+        # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
+        # a `--no-verify` commit that bypassed the pre-commit gate -- the actual
+        # root cause of the 0.4.15 CI ruff break). The push-time pass is a ~1s
+        # redundant re-check for a clean flow; the safety net is the point.
+        # Requires `pre-commit install --hook-type pre-push` to be active.
+        stages: [pre-commit, pre-push]
+
+  - repo: local
+    hooks:
+      - id: hook-liveness
+        name: hook liveness (no gate that selects nothing)
+        # The meta-gate. Two hooks below were scoped to `^python/` after the
+        # REORG renamed that directory to `tooling/`; they matched zero files,
+        # so ruff and pytest silently stopped running at commit time and the
+        # output was indistinguishable from a clean pass. Asserts every `files:`
+        # / `exclude:` pattern in THIS file still selects a tracked path.
+        # always_run + pass_filenames: false -- a liveness check that could
+        # itself go dead would be the joke writing itself.
+        entry: python3 scripts/check_hook_liveness.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: infra-leak-guard
+        name: infra-leak guard (no internal hosts in tracked source)
+        # Blocks vendor subdomains, plus the lab-specific patterns in the
+        # gitignored scripts/infra_patterns.local.json, from entering
+        # the public mirror. Scans staged additions only. Uses a bare python3 --
+        # the script has no third-party deps, so it runs without the venv.
+        entry: python3 scripts/check_infra_leaks.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: shape-contract-ratchet
+        name: shape-contract diff (no new phantom arg-key reads)
+        # Fails when a consumer stage reads a Step.arguments key no producer
+        # writes -- the F3 class of silent cross-stage shape disagreement. The
+        # accepted-as-safe set lives in ACCEPTED_PHANTOM in the script; a NEW
+        # key is what trips this. Bare python3: the script is stdlib-only (ast).
+        entry: python3 tooling/typing/shape_contract_diff.py --check
+        language: system
+        pass_filenames: false
+        files: '^fsr_playbooks/compiler/'
+
+      - id: mypy
+        name: mypy (fsr_playbooks/compiler)
+        # Type-check the compiler at the configured (non-strict) level -- the
+        # same gate as `make mypy`. Runs the full configured scope (mypy needs
+        # whole-program context, so pass_filenames: false and it reads files=
+        # from pyproject [tool.mypy]). Uses the venv interpreter (fsr_playbooks
+        # + deps installed editable); run `make sync` to create it. ~3s.
+        entry: .venv/bin/python -m mypy
+        language: system
+        pass_filenames: false
+        files: '^fsr_playbooks/compiler/'
+        stages: [pre-commit, pre-push]
+
+      - id: pytest-fast
+        name: pytest (fast subset, skips corpus)
+        # Use this repo's venv interpreter, NOT a bare `python3` -- the system
+        # python lacks the project deps (jinja2/mcp) and its editable install
+        # points at a sibling checkout, so it collected the wrong repo's tests
+        # and errored. The venv has fsr_playbooks installed editable (resolves to
+        # THIS repo), so no PYTHONPATH is needed. Run `make sync` to create it.
+        # Two processes, one per suite: tooling/tests points $FSRPB_DB at its
+        # fixture catalog at import, so a combined run measured fsr_playbooks
+        # against it. The root conftest now refuses the combined run.
+        entry: bash -c '.venv/bin/python -m pytest fsr_playbooks/tests -m "not slow and not live" -q && .venv/bin/python -m pytest tooling/tests -m "not slow and not live" -q'
+        language: system
+        pass_filenames: false
+        # Only re-run when something the suite covers actually changed.
+        # fsr_playbooks/ holds the compiler + MCP tools the suite exercises, and
+        # tooling/ holds the chat-intelligence code that tooling/tests covers -- a
+        # change in either must trigger the suite (tooling/ was missing before).
+        # `conftest\.py` is the repo-root one, and it is load-bearing: it holds
+        # the guard that stops an unmarked test reaching an appliance (#113,
+        # #119). Without it in this list, deleting that guard is a commit the
+        # test hook does not even run for -- the gate that would catch the
+        # removal is disarmed by the removal itself.
+        files: '^(fsr_playbooks/|tooling/|data/schema\.sql|examples/|pytest\.ini|conftest\.py)'
+        # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
+        # a `--no-verify` commit that bypassed pre-commit -- same hole the ruff
+        # hook's pre-push stage exists for). ~14s on a code push; the safety net
+        # is the point. Requires `pre-commit install --hook-type pre-push`.
+        stages: [pre-commit, pre-push]

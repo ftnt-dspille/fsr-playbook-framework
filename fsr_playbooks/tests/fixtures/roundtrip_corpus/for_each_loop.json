@@ -1,0 +1,156 @@
+{
+  "_intent": "LOSSY CLASS #1 \u2014 a looping step; for_each must survive the round-trip",
+  "envelope": {
+    "data": [
+      {
+        "@id": "/api/3/workflow_collections/00000000-0000-0000-0000-000000000000",
+        "@type": "WorkflowCollection",
+        "createDate": 1700000000,
+        "createUser": "/api/3/people/admin",
+        "description": "",
+        "image": null,
+        "modifyDate": 1700000001,
+        "modifyUser": "/api/3/people/admin",
+        "name": "Corpus",
+        "owners": [],
+        "recordTags": [],
+        "uuid": "00000000-0000-0000-0000-000000000000",
+        "versions": [],
+        "visible": true,
+        "workflows": [
+          {
+            "@id": "/api/3/workflows/11111111-1111-1111-1111-111111111111",
+            "@type": "Workflow",
+            "aliasName": null,
+            "collection": "/api/3/workflow_collections/461fd6e9-2085-55f3-a7e4-941e0f73d8f4",
+            "createDate": 1700000000,
+            "debug": false,
+            "description": "",
+            "groups": [],
+            "isActive": true,
+            "isEditable": true,
+            "isPrivate": false,
+            "lastModifyDate": 1785240522,
+            "modifyDate": 1700000001,
+            "name": "Escalate Every Open Incident",
+            "owners": [],
+            "parameters": [],
+            "playbookOrigin": null,
+            "priority": null,
+            "recordTags": [],
+            "remoteExecutableFlag": 0,
+            "routes": [
+              {
+                "@type": "WorkflowRoute",
+                "group": null,
+                "isExecuted": false,
+                "label": null,
+                "name": "Start -> Find Open",
+                "sourceStep": "/api/3/workflow_steps/d0ec37c5-e585-5b61-b4be-a5250f15b514",
+                "targetStep": "/api/3/workflow_steps/a3a89ea4-9296-56fc-a1f1-e6d922559081",
+                "uuid": "d7c3cee5-7800-57da-8e8c-5958a980ab2a"
+              },
+              {
+                "@type": "WorkflowRoute",
+                "group": null,
+                "isExecuted": false,
+                "label": null,
+                "name": "Find Open -> Escalate Each",
+                "sourceStep": "/api/3/workflow_steps/a3a89ea4-9296-56fc-a1f1-e6d922559081",
+                "targetStep": "/api/3/workflow_steps/5fce8fe3-5ed9-508c-b140-30628d761474",
+                "uuid": "38885fe2-8a3c-57ca-ba81-965d0a952385"
+              }
+            ],
+            "singleRecordExecution": false,
+            "steps": [
+              {
+                "@id": "/api/3/workflow_steps/step-0",
+                "@type": "WorkflowStep",
+                "arguments": {
+                  "__triggerLimit": true,
+                  "fieldbasedtrigger": {
+                    "filters": [],
+                    "limit": 30,
+                    "logic": "AND",
+                    "sort": []
+                  },
+                  "resource": "incidents",
+                  "resources": [
+                    "incidents"
+                  ],
+                  "step_variables": {
+                    "input": {
+                      "records": [
+                        "{{vars.input.records[0]}}"
+                      ]
+                    }
+                  },
+                  "triggerOnReplicate": false,
+                  "triggerOnSource": true
+                },
+                "description": null,
+                "group": null,
+                "left": "200",
+                "name": "Start",
+                "status": null,
+                "stepType": {
+                  "@id": "/api/3/workflow_step_types/ea155646-3821-4542-9702-b246da430a8d",
+                  "uuid": "ea155646-3821-4542-9702-b246da430a8d"
+                },
+                "top": "120",
+                "uuid": "d0ec37c5-e585-5b61-b4be-a5250f15b514"
+              },
+              {
+                "@id": "/api/3/workflow_steps/step-1",
+                "@type": "WorkflowStep",
+                "arguments": {
+                  "module": "incidents",
+                  "query": {
+                    "filters": [],
+                    "logic": "AND"
+                  }
+                },
+                "description": null,
+                "group": null,
+                "left": "200",
+                "name": "Find Open",
+                "status": null,
+                "stepType": "/api/3/workflow_step_types/b593663d-7d13-40ce-a3a3-96dece928770",
+                "top": "250",
+                "uuid": "a3a89ea4-9296-56fc-a1f1-e6d922559081"
+              },
+              {
+                "@id": "/api/3/workflow_steps/step-2",
+                "@type": "WorkflowStep",
+                "arguments": {
+                  "for_each": {
+                    "condition": "{{ vars.item.severity != 'Low' }}",
+                    "item": "{{ vars.steps.Find_Open }}",
+                    "parallel": false
+                  },
+                  "sev": "{{ vars.item.severity }}"
+                },
+                "description": null,
+                "group": null,
+                "left": "200",
+                "name": "Escalate Each",
+                "status": null,
+                "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+                "top": "380",
+                "uuid": "5fce8fe3-5ed9-508c-b140-30628d761474"
+              }
+            ],
+            "synchronous": false,
+            "tag": "",
+            "triggerStep": "/api/3/workflow_steps/d0ec37c5-e585-5b61-b4be-a5250f15b514",
+            "uuid": "1beb0319-d97a-5fcc-8491-b72dbabc2dc4",
+            "versions": []
+          }
+        ]
+      }
+    ],
+    "exported_tags": [],
+    "macros": [],
+    "type": "workflow_collections"
+  }
+}

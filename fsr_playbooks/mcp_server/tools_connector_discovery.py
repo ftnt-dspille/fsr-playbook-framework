@@ -1,0 +1,1740 @@
+"""MCP tools: connector & playbook-run discovery.
+
+Connector-awareness tools shared by BOTH the agentic playbook-creation path and the
+SOC triage path. Per RECONCILIATION_PLAN, connector-awareness is NOT triage, so it
+stays in the public library (authoring needs to know what connectors are installed /
+configured / running and what actions a step can call); only alert/incident
+investigation (SIEM/FortiAnalyzer/FortiManager, record reads) lives in the
+connector's fsr_soc_triage. Extracted (transitive closure) from the pre-carve tools_triage.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from fsr_playbooks.llm.tool_result import no_fsr_partial
+
+from . import _shared
+from ._shared import _capability_gap_suggestion, mcp
+from .tools_execution import _fetch_runs_both, _shape_run
+
+DB_PATH = _shared.DB_PATH
+
+
+DB_PATH = _shared.DB_PATH
+
+
+@mcp.tool()
+def get_run_env(pb_execution: str) -> dict[str, Any]:
+    """Fetch the live Jinja context (`vars` + per-step results) of a past playbook execution.
+
+    The single most useful tool when building the NEXT step in a playbook
+    that consumes a prior step's output: it returns exactly what
+    `vars.steps.<step_name_underscored>.<field>` will resolve to at runtime.
+    Hits GET /api/wf/api/workflows/<pk>/?step_detail=true and rebuilds the
+    same shape FSR's widget builds (transform: `step.name.replace(" ", "_")`,
+    case preserved).
+
+    Args:
+        pb_execution: workflow PK (integer string e.g. "676747") OR task_id UUID
+
+    Returns:
+        {
+          "status": "finished" | "failed" | ...,
+          "name": "<workflow name>",
+          "vars": {
+            "<env field>": ...,
+            "steps": {
+              "<step name with spaces→_>": <step result>,
+              ...
+            }
+          }
+        }
+        or {"error": "..."} on lookup failure.
+    """
+    try:
+        from probes._env import get_client, get_config
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"could not import _env: {e!r}"}
+    cfg = get_config()
+    if not cfg.is_live():
+        return no_fsr_partial("the run environment",
+                              error="FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)")
+    client = get_client()
+
+    # Delegate to pyfsr's typed run_env(): it resolves pk / @id / task_id, hits
+    # the run endpoint with step_detail, and returns a validated RunEnv
+    # (name/env/status + steps keyed by display name). We only reshape it into
+    # this tool's `vars.steps.<underscored name>` view. Do NOT reimplement the
+    # fetch with raw session calls -- pyfsr owns the run API (typed + tested), and
+    # `get_execution()` alone returns a RunSummary without env/steps.
+    try:
+        re = client.playbooks.run_env(pb_execution)
+    except ValueError as e:
+        return {"error": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"fetch failed: {e!r}"}
+
+    steps_map = {
+        name.replace(" ", "_"): (step.result or {})
+        for name, step in (re.steps or {}).items()
+        if isinstance(name, str)
+    }
+    return {
+        "status": re.status,
+        # getattr: `RunEnv.name` is newer than the floor pyfsr; degrade to None
+        # on an older wheel (name is only used by the decompile fallback, which
+        # the model path skips by supplying yaml_text).
+        "name": getattr(re, "name", None),
+        "vars": dict(re.env or {}, steps=steps_map),
+    }
+
+
+_CONTAINMENT_VERBS: tuple[str, ...] = (
+    "block", "quarantine", "isolate", "disable", "revoke", "ban", "suspend",
+    "kill", "terminate", "contain", "deactivate", "shutdown",
+)
+
+
+_NON_ACTION_PREFIXES: tuple[str, ...] = (
+    "get_", "list_", "search_", "fetch_", "check_", "describe_", "count_",
+    "enable_", "allow_", "unblock", "unquarantine", "unisolate", "unban",
+    "unsuspend", "unrevoke", "undisable",
+)
+
+
+_TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "ip": ("ip", "address", "blacklist"),
+    "host": ("host", "endpoint", "asset", "collector"),
+    "endpoint": ("endpoint", "host", "collector"),
+    "user": ("user", "account", "identity", "credential", "password", "login"),
+    "url": ("url", "link", "uri"),
+    "domain": ("domain", "fqdn", "dns"),
+    "hash": ("hash", "file", "sample", "md5", "sha"),
+    "file": ("file", "hash", "sample"),
+    "email": ("email", "mail", "message"),
+    "process": ("process", "task", "service"),
+}
+
+
+# Bare nouns that name an endpoint only when the op also carries a response
+# verb (see `_names_target`). Kept out of `_TARGET_KEYWORDS` proper so the
+# enrichment indicator-param match is unchanged.
+_WEAK_TARGET_WORDS: dict[str, tuple[str, ...]] = {
+    "host": ("device", "agent", "machine"),
+    "endpoint": ("device", "agent", "machine"),
+}
+_RESPONSE_VERBS: tuple[str, ...] = _CONTAINMENT_VERBS + ("remediate",)
+
+
+# The model reaches for the FortiSOAR picklist *label* it just read off a record
+# ("IP Address", "Hostname", "File Hash") rather than the short key this tool's
+# docstring names. That cost a whole tool call to an `unknown_target_type` error
+# on live turns, twice. Accept the labels; they're unambiguous.
+_TARGET_ALIASES: dict[str, str] = {
+    "ip address": "ip", "ipaddress": "ip", "ip_address": "ip",
+    "ipv4": "ip", "ipv6": "ip", "ipv4 address": "ip", "ipv6 address": "ip",
+    "source ip": "ip", "destination ip": "ip",
+    "hostname": "host", "host name": "host", "computer": "host",
+    "computer name": "host", "device": "host", "machine": "host",
+    "asset": "host", "collector": "endpoint", "agent": "endpoint",
+    "username": "user", "user name": "user", "account": "user",
+    "user account": "user", "identity": "user",
+    "file hash": "hash", "filehash": "hash", "md5": "hash", "sha1": "hash",
+    "sha256": "hash", "sha 256": "hash", "checksum": "hash",
+    "filename": "file", "file name": "file", "file path": "file",
+    "domain name": "domain", "fqdn": "domain",
+    "email address": "email", "emailaddress": "email", "sender": "email",
+    "uri": "url", "link": "url",
+    "process name": "process",
+}
+
+
+def _canon_target_type(target_type: str) -> str:
+    """Normalize a caller-supplied indicator type to a `_TARGET_KEYWORDS` key.
+
+    Returns "" for empty input and passes an unrecognized value through
+    unchanged so the caller still raises `unknown_target_type` for real typos.
+    """
+    t = (target_type or "").strip().lower().replace("-", " ")
+    t = " ".join(t.split())
+    if t in _TARGET_KEYWORDS:
+        return t
+    return _TARGET_ALIASES.get(t, t)
+
+
+def _word_tokens(text: str | None) -> list[str]:
+    """`blockIPAddress` / `run_script` / "Block IP" -> lowercase words."""
+    t = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text or "")
+    t = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", t)
+    return [w for w in re.split(r"[^a-z0-9]+", t.lower()) if w]
+
+
+def _names_target(op: str | None, title: str | None,
+                  keywords: tuple[str, ...],
+                  weak: tuple[str, ...] = ()) -> bool:
+    """Does the op's name or title name the target? Matched on word prefixes,
+    never raw substrings: `"ip" in "run_script"` offered NinjaOne's Run Script
+    as IP containment, and "file" is inside "profile". A prefix still takes
+    `ipv4`, `hostname`, `files`.
+
+    `weak` words name a host only beside a response verb: `isolate_machine`
+    and `quarantine_device` are containment, `add_device` and `update_device`
+    (fortigate-cloud, ninjaone) are not, and matched bare they filled the
+    endpoint slate with management ops."""
+    words = _word_tokens(op) + _word_tokens(title)
+    if any(w.startswith(k) for w in words for k in keywords):
+        return True
+    return (any(w.startswith(k) for w in words for k in weak)
+            and any(w.startswith(v) for w in words for v in _RESPONSE_VERBS))
+
+
+_CONTAINMENT_CATEGORIES = frozenset({"containment", "remediation"})
+
+# Containment ops with more than one way to do the job, where the branches are
+# NOT equally safe to stage blind.
+#
+# The problem this solves is specific: a branch can be perfectly valid in the
+# schema and impossible to run on THIS device, because it depends on objects
+# somebody provisioned by hand. The agent cannot see that from a schema, so it
+# picks a branch on vibes, fills the required params with plausible-looking
+# placeholders, and stages a card that reads as a real containment and cannot
+# work. That is worse than staging nothing -- the analyst approves a block that
+# never happens.
+#
+# Live example, and the reason this table exists. `fortigate-firewall`
+# `block_ip_new` has two branches:
+#
+#   Quarantine Based -- needs only the IP and a TTL. Works on any FortiGate.
+#   Policy Based     -- needs a named deny POLICY and an IPv4 address GROUP that
+#                       already exist, and the connector resolves the group
+#                       THROUGH the policy name. On a firewall that had neither
+#                       (it enforced an external threat feed instead) the agent
+#                       staged `ip_block_policy: default_policy` /
+#                       `ip_group_name: default_group` -- both invented -- and
+#                       the call fails, or worse returns Success with every
+#                       result bucket empty.
+#
+# Nothing on the box tells the agent which names to use: the FortiGate connector
+# CONFIG carries `url_block_policy` and `app_block_policy` but no
+# `ip_block_policy`, so for IP blocking the policy name is an operation
+# parameter with no discoverable default.
+#
+# So prefer the branch that is self-contained. This is a PREFERENCE surfaced to
+# the agent, not a restriction: the full `params` signature still ships with the
+# action, and an analyst who asks for the policy-based path by name can still
+# get it. Keyed (connector, op) -> {params, why}.
+_PREFERRED_CONTAINMENT_PARAMS: dict[tuple[str, str], dict[str, Any]] = {
+    ("fortigate-firewall", "block_ip_new"): {
+        "params": {"method": "Quarantine Based"},
+        "why": ("Quarantine Based needs only the IP and a TTL, so it works on "
+                "any FortiGate. Policy Based requires a deny policy and an IPv4 "
+                "address group that already exist on the device, and the "
+                "connector looks the group up through the policy name -- names "
+                "this instance cannot tell you, so staging that branch means "
+                "inventing them."),
+    },
+    ("fortigate-firewall", "unblock_ip"): {
+        "params": {"method": "Quarantine Based"},
+        "why": ("Mirror the block: an IP banned via the quarantine list is "
+                "removed from the quarantine list, not from an address group."),
+    },
+    # Deprecated alias of block_ip_new -- same two branches, same trap. Listed
+    # so a box still exposing the old op gets the same steer.
+    ("fortigate-firewall", "block_ip"): {
+        "params": {"method": "Quarantine Based"},
+        "why": ("Same two branches as block_ip_new; the quarantine branch is "
+                "the one that needs no pre-provisioned firewall objects."),
+    },
+}
+
+
+def is_containment_op(op_name: str, category: str = "") -> bool:
+    """Does this op look like a state-changing response action?
+
+    The name/category half of the test `find_containment_actions` applies (it
+    additionally requires tier >= 3 and a live configured connector, which need
+    a box). Exposed on its own so the *catalog* search path can recognize a
+    containment op without duplicating the verb list -- see `find_operation`,
+    which uses it to point the agent at the configured-and-healthy answer
+    instead of letting a catalog hit become a staged card for an op this
+    instance cannot run.
+    """
+    nm = (op_name or "").lower()
+    if nm.startswith(_NON_ACTION_PREFIXES):
+        return False
+    return ((category or "").lower() in _CONTAINMENT_CATEGORIES
+            or any(v in nm for v in _CONTAINMENT_VERBS))
+
+
+_INTEL_TOKENS: tuple[str, ...] = (
+    "reputation", "ioc", "indicator", "intel", "threat", "enrich", "context",
+    "lookup", "geo", "whois", "passive", "detection", "verdict",
+)
+
+
+# Kept deliberately NARROWER than `_TARGET_KEYWORDS` in places ("address" /
+# "blacklist" are absent from `ip` on purpose -- see _is_enrichment_op), but the
+# HOST family must name the same things both lists call a host. It didn't:
+# `collector` and `agent` were in the containment keywords and missing here, so
+# FortiEDR's `get_collector_list` was invisible to find_enrichment_actions. An
+# investigation therefore could not ask the obvious question -- "does this host
+# even have an EDR agent, and what state is it in?" -- and the host's absence
+# from EDR only surfaced when the containment action failed at execution time
+# with a 400.
+_INDICATOR_TOKENS: dict[str, tuple[str, ...]] = {
+    "ip": ("ip",),
+    "host": ("host", "endpoint", "device", "machine", "asset", "agent",
+             "collector"),
+    "endpoint": ("endpoint", "host", "device", "machine", "agent",
+                 "collector"),
+    "user": ("user", "account", "identity", "credential", "login"),
+    "url": ("url", "uri"),
+    "domain": ("domain", "fqdn", "dns"),
+    "hash": ("hash", "md5", "sha", "sample"),
+    "file": ("file", "hash", "sample", "md5", "sha"),
+    "email": ("email",),
+}
+
+
+_ALL_INDICATOR_TOKENS: frozenset = frozenset(
+    t for toks in _INDICATOR_TOKENS.values() for t in toks
+)
+
+
+_ENRICHMENT_EXCLUDE_VERBS: tuple[str, ...] = (
+    "re_analyze", "reanalyze", "re_scan", "rescan", "re-scan", "upload",
+    "submit", "detonate", "create", "add_", "delete_", "remove_", "update_",
+    "set_", "post_", "put_", "scan_", "_scan",
+    # `move_collectors` reassigns collector group membership -- a mutation, and
+    # never something to present to the analyst as a read-only lookup.
+    "move_",
+)
+
+
+_ENRICHMENT_NOISE: frozenset = frozenset({
+    "execute_an_api_request", "custom_endpoint",
+    # The assistant's OWN tool-listing op. It matches the host family via the
+    # `agent` token but is self-referential plumbing, not enrichment.
+    "list_agent_tools",
+})
+
+
+_ENRICHMENT_EXCLUDE_PREFIXES: tuple[str, ...] = (
+    "get_output_schema", "get_widget", "get_feed",
+)
+
+
+_ENRICH_CONNECTOR_RANK: tuple[tuple[str, int], ...] = (
+    ("virustotal", 0), ("fortiguard", 0), ("fortinet-fortiguard", 0),
+    ("shodan", 1), ("ipqualityscore", 1), ("ip_quality", 1), ("ipqs", 1),
+    ("greynoise", 1), ("abuseipdb", 1), ("urlscan", 1),
+    ("alienvault", 9), ("otx", 9),
+)
+
+
+_ENRICH_RANK_DEFAULT = 5
+
+
+_ENRICH_PER_CONNECTOR_CAP = 3
+
+
+# Param names that carry an indicator of any type ("ioc_search(indicator)").
+_GENERIC_INDICATOR_PARAMS = frozenset({"indicator", "ioc", "observable", "artifact"})
+
+
+def _indicator_param(params: list[dict[str, Any]], target: str | None) -> str | None:
+    """The param that takes the indicator being enriched, from the op's own
+    signature: one named after the target type (`query_ip(ip)`) or a generic
+    indicator param (`ioc_search(indicator)`). None when no param can carry
+    it -- `get_threat_categories(title)`, a signal report by `slug`. Live, the
+    agent picked get_threat_categories as its FortiGuard IP lookup, read its
+    "Information not found" as FortiGuard disagreeing with VirusTotal, and
+    under-called a C2 address both sources rate malicious."""
+    if not target:
+        return None
+    kws = set(_TARGET_KEYWORDS.get(target, ())) | {target}
+    for p in params or []:
+        name = str(p.get("name") or "")
+        tokens = set(name.lower().split("_"))
+        if tokens & kws or tokens & _GENERIC_INDICATOR_PARAMS:
+            return name
+    return None
+
+
+def _enrich_connector_rank(connector: str) -> int:
+    c = (connector or "").lower()
+    for frag, rank in _ENRICH_CONNECTOR_RANK:
+        if frag in c:
+            return rank
+    return _ENRICH_RANK_DEFAULT
+
+
+def _is_enrichment_op(nm: str, title_l: str, target: str | None) -> bool:
+    """Name/title heuristic for "indicator enrichment lookup" ops, pre-tier.
+
+    An op qualifies when it isn't a write-ish/plumbing op AND either carries a
+    generic intel token (reputation/ioc/context/...) or names the requested
+    indicator. With no target type we require the intel token, so the result
+    stays bounded to clearly-intel ops. With a target type we ALSO reject ops
+    that name only a *different* indicator -- `get_domain_reputation`,
+    `get_url_reputation`, `get_file_reputation` while enriching an IP -- even
+    though they carry an intel token, because they can't take this indicator.
+    (`score` was dropped from the intel tokens and `address` from the ip
+    tokens, so EPSS scoring and firewall `get_addresses` no longer slip in.)
+    """
+    if nm in _ENRICHMENT_NOISE or nm.startswith(_ENRICHMENT_EXCLUDE_PREFIXES):
+        return False
+    if any(v in nm for v in _ENRICHMENT_EXCLUDE_VERBS):
+        return False
+    hay = nm + " " + title_l
+    generic = any(tok in hay for tok in _INTEL_TOKENS)
+    if not target:
+        return generic
+    desired = _INDICATOR_TOKENS.get(target, ())
+    names_desired = any(k in hay for k in desired)
+    other = _ALL_INDICATOR_TOKENS - set(desired)
+    if any(k in hay for k in other) and not names_desired:
+        return False  # names only a different indicator -- can't take this one
+    return generic or names_desired
+
+
+def _connectors_that_could_enrich(
+        target: str | None,
+        exclude: set[str],
+        limit: int = 4) -> list[dict[str, str]]:
+    """Across the WHOLE catalog, connectors carrying an enrichment op matching
+    the target -- minus the ones already configured. Turns an intel dead end
+    into a concrete "configure connector X" recommendation. Best-effort: []."""
+    found: dict[str, str] = {}
+    try:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                "SELECT connector_name, op_name, title FROM operations "
+                "WHERE (enabled IS NULL OR enabled NOT IN (0,'0'))"
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    for connector, op, title in rows:
+        if not connector or connector in exclude or connector in found:
+            continue
+        if _is_enrichment_op((op or "").lower(), (title or "").lower(), target):
+            found[connector] = op or ""
+        if len(found) >= limit:
+            break
+    return [{"connector": c, "op": o} for c, o in found.items()]
+
+
+def _required_params(conn: sqlite3.Connection, connector: str,
+                     op: str) -> list[dict[str, Any]]:
+    """The visible required input params for an op, so the agent can stage
+    emit_action_card without a follow-up get_op_schema round-trip."""
+    try:
+        rows = conn.execute(
+            "SELECT param_name, type, title FROM operation_params "
+            "WHERE connector_name=? AND op_name=? "
+            "AND required IN (1,'1','true','True') "
+            "AND (visible IS NULL OR visible NOT IN (0,'0','false','False')) "
+            "ORDER BY ord",
+            (connector, op),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    # Dedupe by name: an op with conditional param groups (parent-gated
+    # param-sets, e.g. block_ip_new's ip / ip_group_name) lists the same
+    # required param once per group, which would otherwise read as a noisy
+    # duplicated schema hint. First occurrence wins (preserves `ord`).
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in rows:
+        if not r[0] or r[0] in seen:
+            continue
+        seen.add(r[0])
+        out.append({"name": r[0], "type": r[1]})
+    return out
+
+
+def _param_sig(conn: sqlite3.Connection, connector: str,
+               op: str) -> list[dict[str, Any]]:
+    """Full visible param signature WITH select options + labels -- so the agent
+    picks valid param NAMES and valid select VALUES straight from the action
+    finder, instead of guessing and bouncing off bad_params. Loop loop-998b86c1
+    showed both failure modes the store could have prevented: the agent guessed
+    `ioc` (the param is `indicator`) and `method='firewall'` (the select options
+    were 'Quarantine Based'/'Policy Based'). Dedupes conditional param groups by
+    name (first occurrence wins, preserving `ord`)."""
+    try:
+        rows = conn.execute(
+            "SELECT param_name, type, title, required, options_json "
+            "FROM operation_params WHERE connector_name=? AND op_name=? "
+            "AND (visible IS NULL OR visible NOT IN (0,'0','false','False')) "
+            "ORDER BY required DESC, ord",
+            (connector, op),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for name, typ, title, required, options_json in rows:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        entry: dict[str, Any] = {"name": name}
+        if required in (1, "1", "true", "True"):
+            entry["required"] = True
+        if typ:
+            entry["type"] = typ
+        if title and title != name:
+            entry["label"] = title
+        if options_json:
+            try:
+                opts = json.loads(options_json)
+                if isinstance(opts, list) and opts:
+                    entry["options"] = [str(o) for o in opts]
+            except (ValueError, TypeError):
+                pass
+        out.append(entry)
+    return out
+
+
+def _connectors_that_could_contain(
+        keywords: tuple[str, ...] | None,
+        exclude: set[str],
+        limit: int = 4,
+        weak: tuple[str, ...] = ()) -> list[dict[str, str]]:
+    """Across the WHOLE reference catalog (not just configured connectors),
+    find connectors that carry a containment/response op matching the target --
+    minus the ones already configured. This turns a dead end into a concrete
+    "configure connector X to enable this" recommendation. Best-effort: any DB
+    hiccup returns []."""
+    found: dict[str, str] = {}  # connector -> sample op that would do the job
+    try:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                "SELECT connector_name, op_name, title, category FROM operations "
+                "WHERE (enabled IS NULL OR enabled NOT IN (0,'0'))"
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    for connector, op, title, category in rows:
+        if not connector or connector in exclude or connector in found:
+            continue
+        nm = (op or "").lower()
+        cat = (category or "").lower()
+        if nm.startswith(_NON_ACTION_PREFIXES):
+            continue
+        is_action = (cat in _CONTAINMENT_CATEGORIES
+                     or any(v in nm for v in _CONTAINMENT_VERBS))
+        if not is_action:
+            continue
+        if keywords and not _names_target(op, title, keywords, weak):
+            continue
+        found[connector] = op or ""
+        if len(found) >= limit:
+            break
+    return [{"connector": c, "op": o} for c, o in found.items()]
+
+
+# Connectors whose healthcheck outlived the deadline, by name -> when. Live on
+# On a live box one connector's healthcheck never answers; uncached, it held EVERY
+# probe to the full deadline even with the other 84 served from cache. Skipped
+# (fail open, listing status) for a short window; the run_op health cache is
+# untouched, because a hung healthcheck says nothing about the ops.
+_PROBE_STRAGGLERS: dict[str, float] = {}
+_LISTING_PROBE_DEADLINE_S = 8.0
+_STRAGGLER_SKIP_S = 10 * 60
+
+
+def _healthcheck_many(
+        client,
+        targets: Sequence[tuple[str, str] | tuple[str, str, str]],
+        deadline_s: float = 20.0,
+        timing: dict[str, Any] | None = None) -> dict[str, str]:
+    """Healthcheck many (name, version) connectors CONCURRENTLY, returning
+    {name: status}. Serial probing was the dominant latency in the live triage
+    loop (~45 configured connectors × a blocking GET each, some slow/hung
+    vendors = minutes per call, on both the eval and the analyst's screen).
+
+    Two bounds keep a hung vendor from blowing the turn:
+      • `_live_healthcheck` passes timeout=8 -- but the ON-BOX crudhub session
+        SILENTLY IGNORES that kwarg, so an unresponsive vendor healthcheck runs
+        unbounded on the box (this is what made find_enrichment_actions take
+        ~2 min in a live export: ~13 candidate connectors, cold cache).
+      • So we ALSO bound the whole fan-out by `deadline_s` wall-clock: we wait on
+        the pool with a deadline and abandon any straggler probe (its worker
+        thread is left to finish/die in the background). A connector we couldn't
+        verify in time is simply omitted from the result → the caller FAILS OPEN
+        on its listing status rather than dead-ending or hanging.
+
+    When `timing` is provided it's populated with a per-probe breakdown
+    (cache hits, live probes, timed-out connectors, slowest calls) so a slow
+    finder is self-diagnosing from its own tool result -- there was no per-op
+    timing anywhere before, so a hang like the 2-min one above was un-triageable
+    from the export alone.
+
+    Read-only independent calls, so a thread pool is safe."""
+    if not targets:
+        if timing is not None:
+            timing.update({"n": 0, "live": 0, "cached": 0, "timed_out": [],
+                           "probe_ms": 0, "slowest": []})
+        return {}
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from .tools_execution import _cached_health, _live_healthcheck, _store_health
+
+    per_probe: dict[str, dict[str, Any]] = {}
+
+    def _probe(
+            target: tuple[str, str] | tuple[str, str, str]
+    ) -> tuple[str, Any]:
+        # Returns (name, status); status is None to signal "no authoritative
+        # verdict" (probe failure / exception) -- such connectors are OMITTED
+        # from the result dict so the gate falls back to the listing status
+        # (fail open) instead of dropping a valid action on a probe hiccup.
+        name, version = target[0], target[1]
+        agent_id = target[2] if len(target) > 2 else ""
+        t0 = _time.perf_counter()
+        if _time.time() - _PROBE_STRAGGLERS.get(name, 0.0) < _STRAGGLER_SKIP_S:
+            per_probe[name] = {"ms": 0.0, "src": "straggler_skipped"}
+            return name, None
+        # Reuse the same warm health cache run_op's preflight uses (4h healthy /
+        # 5min unhealthy, pre-populated by warmup). A cache hit collapses the
+        # probe to a sqlite read; on a miss we probe once and store the verdict
+        # so the next finder/turn is free.
+        cached = _cached_health(name, version, "")
+        if cached is not None:
+            per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                               "src": "cache"}
+            return name, str(cached.get("status") or "error")
+        try:
+            hr = _live_healthcheck(client, name, version, agent_id=agent_id)
+            if hr.get("_probe_failed"):
+                # Probe hiccup, not an authoritative unhealthy verdict: don't
+                # cache it and return None so it's omitted from `out` → the
+                # gate trusts the listing status rather than dropping the op.
+                per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                                   "src": "probe_failed"}
+                return name, None
+            status = str(hr.get("status") or "error")
+            _store_health(name, version, status,
+                          hr.get("message") or hr.get("error") or "", config="")
+            per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                               "src": "live"}
+            return name, status
+        except Exception:  # noqa: BLE001
+            # A thread-level failure is also not an authoritative verdict --
+            # fail open (omit from `out`) rather than returning an "error:"
+            # string that the gate would treat as unhealthy and drop.
+            per_probe[name] = {"ms": round((_time.perf_counter() - t0) * 1000, 1),
+                               "src": "error"}
+            return name, None
+
+    out: dict[str, str] = {}
+    timed_out: list[str] = []
+    t_start = _time.perf_counter()
+    # Don't leave the pool's __exit__ to join stragglers (that would re-impose the
+    # unbounded wait we're trying to escape). Wait on futures with a shrinking
+    # deadline and walk away from whatever hasn't landed.
+    pool = ThreadPoolExecutor(max_workers=min(16, len(targets)))
+    fut_to_name = {pool.submit(_probe, t): t[0] for t in targets}
+    try:
+        for fut in as_completed(list(fut_to_name), timeout=deadline_s):
+            name, status = fut.result()
+            # status is None on a probe failure / thread error -- omit it so the
+            # caller falls back to the listing status (fail open), same as a
+            # connector whose future never landed within the deadline.
+            if status is not None:
+                out[name] = status
+    except Exception:  # noqa: BLE001 -- concurrent.futures.TimeoutError and friends
+        pass
+    finally:
+        for fut, name in fut_to_name.items():
+            if not fut.done():
+                timed_out.append(name)
+                _PROBE_STRAGGLERS[name] = _time.time()
+        # Threads with in-flight on-box probes can't be cancelled; let them drain
+        # in the background instead of blocking this turn on shutdown(wait=True).
+        pool.shutdown(wait=False)
+
+    if timing is not None:
+        slowest = sorted(per_probe.items(), key=lambda kv: kv[1]["ms"],
+                         reverse=True)[:5]
+        timing.update({
+            "n": len(targets),
+            "live": sum(1 for p in per_probe.values() if p["src"] == "live"),
+            "cached": sum(1 for p in per_probe.values() if p["src"] == "cache"),
+            "timed_out": timed_out,
+            "probe_ms": round((_time.perf_counter() - t_start) * 1000, 1),
+            "slowest": [[n, p["ms"], p["src"]] for n, p in slowest],
+        })
+    return out
+
+
+@mcp.tool()
+def find_containment_actions(target_type: str = "", probe: bool = True,
+                             limit: int = 25,
+                             requested_by: str = "") -> dict[str, Any]:
+    """Call this whenever the analyst asks you to act on a target -- block an
+    IP, isolate a host, quarantine a hash, disable a user -- and call it before
+    find_connector/find_operation, which search the whole catalog and surface
+    ops this instance cannot run. If the analyst named the target, you have
+    everything this needs; enrich the target afterwards if it helps, but do not
+    let a turn that was asked for containment end without a staged card.
+
+    Set `requested_by='analyst'` when the user EXPLICITLY ordered the action in
+    their message ("block that IP", "isolate that host"); otherwise leave it
+    unset. An explicit order is not a finding you have to earn, so an
+    analyst-ordered call is exempt from the investigation floor -- and because
+    a card cannot be built without first discovering the op, the exemption has
+    to start HERE or it can never be reached (tracker #60: scoping it to
+    `emit_action_card` alone left the agent blocked at this call and it never
+    staged anything). Do not claim `analyst` to bypass the floor.
+
+    Lists the containment/response actions that are CONFIGURED (and, with
+    probe, healthy) on this FortiSOAR instance -- optionally for one indicator
+    type.
+
+    Given a host to isolate, an IP to block, or a user to disable, one call
+    returns the destructive ops you can actually run here -- with the connector,
+    op, category, the approval tier, and the required params -- so you can go
+    straight to emit_action_card. Read-only: it discovers actions, it does not
+    run them. Every action it returns is tier 3+ and MUST be staged via
+    emit_action_card for analyst approval, never run silently.
+
+    Args:
+        target_type: indicator to contain -- one of ip/host/endpoint/user/url/
+            domain/hash/file/email/process. Empty returns every containment
+            action across configured connectors.
+        probe: healthcheck each configured connector (default True) and drop
+            the ones that aren't Available, so you don't stage an action on a
+            disconnected connector.
+        limit: max actions to return (default 25).
+
+    When an action carries `preferred_params`, START from those values and fill
+    the rest around them. They pick between branches of a multi-branch op, and
+    the branch they avoid is one that only works if somebody pre-provisioned
+    objects on the device -- names this instance cannot tell you, so choosing it
+    means inventing them and staging a containment that cannot run.
+    `preferred_params_why` says what the trade is. The full `params` signature
+    still ships, so an analyst who explicitly asks for the other branch can have
+    it; absent that, do not override a preference to look thorough.
+
+    Returns:
+        {"target_type", "actions": [{connector, op, title, category, tier,
+         requires_approval, status, required_params:[{name,type}],
+         preferred_params?:{...}, preferred_params_why?:str}],
+         "count", "probed"}. Deprecated ops sort last.
+    """
+    target = _canon_target_type(target_type)
+    keywords = _TARGET_KEYWORDS.get(target)
+    if target and keywords is None:
+        return {"ok": False, "code": "unknown_target_type",
+                "message": f"target_type {target_type!r} not recognized",
+                "valid": sorted(_TARGET_KEYWORDS)}
+    weak = _WEAK_TARGET_WORDS.get(target, ())
+
+    # 1. Configured + active connectors on the live box. NOTE: list WITHOUT
+    # probing -- healthchecking all ~45 configured connectors here is the
+    # latency trap (minutes on the live box). We narrow to the few connectors
+    # that actually carry a matching containment op via the store first, then
+    # healthcheck ONLY those (step 3).
+    listing = list_configured_connectors(probe=False, verbose=True)
+    if "error" in listing:
+        return no_fsr_partial("the matching connector actions",
+                              message=listing["error"])
+    configured: dict[str, str] = {}  # name -> listing status
+    version_of: dict[str, str] = {}  # name -> version (for the scoped probe)
+    agent_of: dict[str, str] = {}    # name -> FortiSOAR Agent id, if proxied
+    for c in listing.get("configured", []):
+        name = c.get("name")
+        if not name:
+            continue
+        configured[name] = str(c.get("status") or "")
+        if c.get("version"):
+            version_of[name] = c["version"]
+        if c.get("_agent_id"):
+            agent_of[name] = c["_agent_id"]
+    if not configured:
+        return {"ok": True, "target_type": target or None, "actions": [],
+                "count": 0, "probed": probe,
+                "message": "no configured/healthy connectors to contain with"}
+
+    # 2. Pull each connector's destructive ops from the store, classify, filter.
+    actions: list[dict[str, Any]] = []
+    _tier: Callable[[dict[str, Any]], int] | None
+    try:
+        from fsr_playbooks.llm.tools import _tier_for_run_op
+        _tier = _tier_for_run_op
+    except Exception:  # noqa: BLE001
+        _tier = None  # tier becomes best-effort
+    placeholders = ",".join("?" * len(configured))
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+        rows = conn.execute(
+            f"SELECT connector_name, op_name, title, category FROM operations "
+            f"WHERE connector_name IN ({placeholders}) "
+            f"AND (enabled IS NULL OR enabled NOT IN (0,'0')) ",
+            tuple(configured),
+        ).fetchall()
+        for connector, op, title, category in rows:
+            nm = (op or "").lower()
+            cat = (category or "").lower()
+            if nm.startswith(_NON_ACTION_PREFIXES):
+                continue
+            is_action = (cat in _CONTAINMENT_CATEGORIES
+                         or any(v in nm for v in _CONTAINMENT_VERBS))
+            if not is_action:
+                continue
+            if keywords and not _names_target(op, title, keywords, weak):
+                continue
+            # The decisive guard: a real response action is one the dispatch
+            # gate would force through approval (tier >= 3). This drops
+            # query/investigation-category false positives that merely share a
+            # verb (e.g. delete_device, get_blocked_ip) without re-listing
+            # every safe op.
+            tier = _tier({"connector": connector, "op": op}) if _tier else 4
+            if tier < 3:
+                continue
+            actions.append({
+                "connector": connector,
+                "op": op,
+                "title": title or op,
+                "category": category or "unknown",
+                "tier": tier,
+                "requires_approval": True,
+                "status": configured.get(connector),
+                "deprecated": "deprecat" in (title or "").lower(),
+                "required_params": _required_params(conn, connector, op),
+                # Full param signature WITH select options so the agent calls
+                # run_op / emit_action_card with valid names AND valid select
+                # values directly -- no guess, no bad_params round-trip.
+                "params": _param_sig(conn, connector, op),
+                # When true, run_op routes this op through the agent force-fail
+                # wrap (~30-60s). Tell the user it runs on a FortiSOAR agent and
+                # may take a moment, THEN call run_op.
+                "runs_on_agent": connector in agent_of,
+            })
+            # Steer multi-branch ops toward the branch that does not depend on
+            # hand-provisioned device objects (see _PREFERRED_CONTAINMENT_PARAMS).
+            pref = _PREFERRED_CONTAINMENT_PARAMS.get((connector, op))
+            if pref:
+                actions[-1]["preferred_params"] = dict(pref["params"])
+                actions[-1]["preferred_params_why"] = pref["why"]
+
+    # 3. Scoped healthcheck: probe ONLY the connectors that carry a candidate
+    # action (a handful), not all configured ones. Drop actions whose connector
+    # we actively probed and found unhealthy -- so we never stage on a known-
+    # disconnected connector. But FAIL OPEN: if a connector couldn't be probed
+    # (no version to scope the probe, or no live client), fall back to its
+    # listing status rather than silently dropping a valid containment action.
+    # A probe gap must never manufacture a dead end out of a configured op.
+    probe_timing: dict[str, Any] = {}
+    dropped: list[dict[str, Any]] = []
+    if probe and actions:
+        candidates = {a["connector"] for a in actions}
+        targets = [(c, version_of[c], agent_of.get(c, ""))
+                   for c in candidates if c in version_of]
+        client = _shared._live_client() if targets else None
+        health = (_healthcheck_many(client, targets, timing=probe_timing)
+                  if client is not None else {})
+        healthy_ok = {"available", "completed", "active", "connected",
+                      "ok", "success"}
+        kept = []
+        for a in actions:
+            # Probed result wins; otherwise trust the listing status we already
+            # have (probe gap → fail open, don't drop).
+            st = health.get(a["connector"], a.get("status") or "")
+            if str(st).lower() not in healthy_ok:
+                dropped.append({"connector": a["connector"], "op": a["op"],
+                                "title": a.get("title"), "status": str(st)})
+                continue
+            a["status"] = st
+            kept.append(a)
+        actions = kept
+
+    # Non-deprecated first, then by connector/op for stable ordering.
+    actions.sort(key=lambda a: (a["deprecated"], a["connector"], a["op"]))
+    out: dict[str, Any] = {"ok": True, "target_type": target or None,
+                           "actions": actions[:limit], "count": len(actions),
+                           "probed": probe}
+    if probe_timing:
+        out["_timing"] = probe_timing
+    if dropped:
+        # Live: a Disconnected FortiGate was dropped silently, the one action
+        # left was a script runner, and the agent staged it as an IP block.
+        # Never stage on a dead connector -- but say which one could do it.
+        names = sorted({d["connector"] for d in dropped})
+        out["unavailable"] = dropped[:limit]
+        out["message"] = (
+            f"{', '.join(names)} can do this but {'is' if len(names) == 1 else 'are'} "
+            f"not reachable ({dropped[0]['status'] or 'unhealthy'}). Tell the "
+            f"analyst its connection needs fixing (Settings > Connectors) before "
+            f"it can run. Do not stage a different product's operation in its "
+            f"place unless that operation itself does what was asked.")
+        if not actions:
+            return out
+    if not actions:
+        # Connectors are configured, but none can contain this (the set is
+        # intel/utility only, or nothing matches the target type). Don't dead-
+        # end the analyst: build a ready-to-emit `capability_gap` card that
+        # names which connector to configure (looked up from the full catalog),
+        # how to resume, and manual fallbacks. The agent forwards `suggested_card`
+        # straight into emit_capability_gap_card; the prompt mandates it.
+        scope = f" for target type {target!r}" if target else ""
+        miss = f"{target} containment" if target else "containment / response"
+        could = _connectors_that_could_contain(
+            keywords, set(configured), weak=_WEAK_TARGET_WORDS.get(target, ()))
+        if could:
+            connector_names = ", ".join(c["connector"] for c in could)
+            fix_steps = [
+                f"Configure one of these connectors under Settings → "
+                f"Connectors: {connector_names} (each carries a matching containment op, "
+                f"e.g. {could[0]['connector']}.{could[0]['op']}).",
+                "Save the configuration and confirm it shows as Available.",
+            ]
+        else:
+            fix_steps = [
+                "Install + configure a response connector for this target "
+                "(e.g. fortigate-firewall for IP/host blocking) under "
+                "Settings → Connectors.",
+            ]
+        out["suggested_card"] = _capability_gap_suggestion(
+            id=f"capgap_{target or 'containment'}",
+            missing=miss,
+            why=(f"no tier-3 containment operation is available on any "
+                 f"configured, healthy connector{scope}"),
+            fix_steps=fix_steps,
+            resume_value="recheck_containment",
+            tips=[
+                {"text": "Keep at least one response connector configured + "
+                         "healthy so containment can be staged automatically.",
+                 "hint": "Intel-only instances can enrich but never contain."},
+                {"text": "Grant the connector probe access so I can confirm "
+                         "it's reachable before staging an action."},
+            ],
+            alternatives=[
+                {"label": "Escalate to T2", "value": "escalate_t2"},
+                {"label": "Create remediation ticket", "value": "ticket"},
+                {"label": "Acknowledge & document", "value": "document"},
+            ],
+        )
+        out["message"] = (
+            f"No containment/response action is configured on this FortiSOAR "
+            f"instance{scope}. Don't keep searching and don't dead-end the "
+            f"analyst: call `emit_capability_gap_card` with the `suggested_card` "
+            f"payload returned here (it names which connector to configure and "
+            f"includes a resume button), and note in your verdict that automated "
+            f"containment isn't available here yet.")
+    return out
+
+
+def _mcp_reach() -> list[dict[str, Any]]:
+    """The native-MCP servers this turn can call, or [] (fail-open)."""
+    try:
+        from .materializer import turn_mcp_reach
+        return turn_mcp_reach()
+    except Exception:  # noqa: BLE001 - discovery must never fail over MCP
+        return []
+
+
+_MCP_REACH_NOTE = (
+    "These MCP servers are reachable this turn through their "
+    "mcp_<server>__<tool> tools. They are not connectors, so connector "
+    "listings do not show them; use them as evidence sources.")
+
+
+def annotate_mcp_reach(out: dict[str, Any], *, lookup_empty: bool = False) -> dict[str, Any]:
+    """Add the turn's native-MCP reach to a discovery result, in place.
+
+    Shared by the real tools and the offline harness's stand-ins, so both say
+    the same thing. `lookup_empty`: an enrichment lookup found no connector op.
+    With MCP tools in reach that is not a gap, and the message must not tell
+    the model to report one -- it did, and called a C2 beacon 'suspicious'
+    while FortiSIEM's reputation tool sat in its tool list."""
+    reach = _mcp_reach()
+    if not reach:
+        return out
+    out["native_mcp"] = reach
+    out["native_mcp_note"] = _MCP_REACH_NOTE
+    if lookup_empty:
+        out.pop("suggested_card", None)
+        out["message"] = (
+            "No connector enrichment lookup matches, but the MCP servers in "
+            "`native_mcp` are reachable this turn. Check their tools before "
+            "reporting a gap.")
+    return out
+
+
+@mcp.tool()
+def find_enrichment_actions(target_type: str = "", probe: bool = True,
+                            limit: int = 25) -> dict[str, Any]:
+    """List the read-only ENRICHMENT/intel lookups that are CONFIGURED (and,
+    with probe, healthy) on this FortiSOAR instance -- optionally for one
+    indicator type. Use this to enrich an indicator instead of guessing op
+    names or hunting connector-by-connector with find_connector/find_operation.
+
+    Given an IP, domain, URL, hash, or email to enrich, ONE call returns the
+    reputation/context/IOC ops you can actually run here -- with the connector,
+    the real op name, category, and the required params -- so you can go straight
+    to run_op on each. This is the read-side mirror of find_containment_actions:
+    every action it returns is tier <= 2 (read-only) and is meant to be RUN
+    directly via run_op and summarized, NOT staged via emit_action_card.
+
+    Fan out: the returned ops are independent, so issue their run_op calls
+    together in one turn (the widget consolidates all sources for one indicator
+    into a single enrichment card -- more sources = a richer verdict).
+
+    Args:
+        target_type: indicator to enrich -- one of ip/host/endpoint/user/url/
+            domain/hash/file/email. Empty returns every intel lookup across
+            configured connectors.
+        probe: healthcheck each candidate connector (default True) and drop the
+            ones that aren't Available, so you don't run on a dead connector.
+        limit: max actions to return (default 25).
+
+    Returns:
+        {"target_type", "actions": [{connector, op, title, category, tier,
+         requires_approval: false, status, required_params:[{name,type}],
+         runs_on_agent}], "count", "probed"}. When nothing is configured to
+        enrich this, returns a `suggested_card` for emit_capability_gap_card.
+    """
+    target = _canon_target_type(target_type)
+    keywords = _TARGET_KEYWORDS.get(target)
+    if target and keywords is None:
+        return {"ok": False, "code": "unknown_target_type",
+                "message": f"target_type {target_type!r} not recognized",
+                "valid": sorted(_TARGET_KEYWORDS)}
+
+    # 1. Configured + active connectors (no probe yet -- narrow via the store
+    # first, healthcheck only the handful that carry a matching op in step 3).
+    listing = list_configured_connectors(probe=False, verbose=True)
+    if "error" in listing:
+        return no_fsr_partial("the matching connector actions",
+                              message=listing["error"])
+    configured: dict[str, str] = {}
+    version_of: dict[str, str] = {}
+    agent_of: dict[str, str] = {}
+    for c in listing.get("configured", []):
+        name = c.get("name")
+        if not name:
+            continue
+        configured[name] = str(c.get("status") or "")
+        if c.get("version"):
+            version_of[name] = c["version"]
+        if c.get("_agent_id"):
+            agent_of[name] = c["_agent_id"]
+    if not configured:
+        return annotate_mcp_reach(
+            {"ok": True, "target_type": target or None, "actions": [],
+             "count": 0, "probed": probe,
+             "message": "no configured connectors to enrich with"},
+            lookup_empty=True)
+
+    # 2. Pull each connector's read ops from the store, classify, filter.
+    actions: list[dict[str, Any]] = []
+    _tier: Callable[[dict[str, Any]], int] | None
+    try:
+        from fsr_playbooks.llm.tools import _tier_for_run_op
+        _tier = _tier_for_run_op
+    except Exception:  # noqa: BLE001
+        _tier = None
+    placeholders = ",".join("?" * len(configured))
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+        rows = conn.execute(
+            f"SELECT connector_name, op_name, title, category FROM operations "
+            f"WHERE connector_name IN ({placeholders}) "
+            f"AND (enabled IS NULL OR enabled NOT IN (0,'0')) ",
+            tuple(configured),
+        ).fetchall()
+        for connector, op, title, category in rows:
+            nm = (op or "").lower()
+            if not _is_enrichment_op(nm, (title or "").lower(), target):
+                continue
+            # Decisive read guard (inverse of containment's tier>=3): only
+            # surface ops the dispatch gate treats as read-only (tier <= 2).
+            # Drops anything that would force approval -- we never present a
+            # mutating op as enrichment.
+            tier = _tier({"connector": connector, "op": op}) if _tier else 2
+            if tier > 2:
+                continue
+            actions.append({
+                "connector": connector,
+                "op": op,
+                "title": title or op,
+                "category": category or "unknown",
+                "tier": tier,
+                "requires_approval": False,
+                "status": configured.get(connector),
+                "deprecated": "deprecat" in (title or "").lower(),
+                "required_params": _required_params(conn, connector, op),
+                # Full param signature WITH select options so the agent calls
+                # run_op / emit_action_card with valid names AND valid select
+                # values directly -- no guess, no bad_params round-trip.
+                "params": _param_sig(conn, connector, op),
+                "runs_on_agent": connector in agent_of,
+            })
+            ip_ = _indicator_param(actions[-1]["params"], target)
+            if ip_:
+                actions[-1]["indicator_param"] = ip_
+
+    # 3. Scoped healthcheck: probe ONLY the connectors carrying a candidate op.
+    # Drop actions whose connector we actively probed and found unhealthy, but
+    # FAIL OPEN on a probe gap (no version / no live client) -- never manufacture
+    # a dead end out of a configured op.
+    probe_timing: dict[str, Any] = {}
+    if probe and actions:
+        candidates = {a["connector"] for a in actions}
+        targets = [(c, version_of[c], agent_of.get(c, ""))
+                   for c in candidates if c in version_of]
+        client = _shared._live_client() if targets else None
+        health = (_healthcheck_many(client, targets, timing=probe_timing)
+                  if client is not None else {})
+        healthy_ok = {"available", "completed", "active", "connected",
+                      "ok", "success"}
+        kept = []
+        for a in actions:
+            st = health.get(a["connector"], a.get("status") or "")
+            if str(st).lower() not in healthy_ok:
+                continue
+            a["status"] = st
+            kept.append(a)
+        actions = kept
+
+    # Rank by connector preference (high-signal TI first, AlienVault last),
+    # then name -- so the preferred sources survive the `limit` cut instead of
+    # losing to alphabetical order. Then cap per connector so one chatty
+    # connector can't crowd the slate out of the budget.
+    # An op that can take the indicator outranks one that cannot, whatever
+    # its connector: the slate is the agent's menu, and the top of it is what
+    # gets run.
+    actions.sort(key=lambda a: (a["deprecated"],
+                                bool(target) and "indicator_param" not in a,
+                                _enrich_connector_rank(a["connector"]),
+                                a["connector"], a["op"]))
+    per_connector: dict[str, int] = {}
+    capped: list[dict[str, Any]] = []
+    for a in actions:
+        n = per_connector.get(a["connector"], 0)
+        if n >= _ENRICH_PER_CONNECTOR_CAP:
+            continue
+        per_connector[a["connector"]] = n + 1
+        capped.append(a)
+    actions = capped
+    out: dict[str, Any] = {"ok": True, "target_type": target or None,
+                           "actions": actions[:limit], "count": len(actions),
+                           "probed": probe}
+    if probe_timing:
+        out["_timing"] = probe_timing
+    if not actions:
+        # No intel lookup is configured for this. Don't dead-end the analyst:
+        # build a ready-to-emit capability_gap card naming a TI connector to
+        # configure (from the full catalog), with a resume button.
+        scope = f" for target type {target!r}" if target else ""
+        miss = f"{target} enrichment" if target else "indicator enrichment"
+        could = _connectors_that_could_enrich(target, set(configured))
+        if could:
+            names = ", ".join(c["connector"] for c in could)
+            fix_steps = [
+                f"Configure one of these threat-intel connectors under "
+                f"Settings → Connectors: {names} (each carries a matching "
+                f"lookup, e.g. {could[0]['connector']}.{could[0]['op']}).",
+                "Save the configuration and confirm it shows as Available.",
+            ]
+        else:
+            fix_steps = [
+                "Install + configure a threat-intel connector for this "
+                "indicator (e.g. virustotal for IP/domain/URL/file reputation) "
+                "under Settings → Connectors.",
+            ]
+        out["suggested_card"] = _capability_gap_suggestion(
+            id=f"capgap_{target or 'enrichment'}",
+            missing=miss,
+            why=(f"no read-only enrichment operation is available on any "
+                 f"configured, healthy connector{scope}"),
+            fix_steps=fix_steps,
+            resume_value="recheck_enrichment",
+            tips=[
+                {"text": "Keep at least one threat-intel connector configured "
+                         "+ healthy so indicators can be enriched automatically.",
+                 "hint": "VirusTotal / Shodan / IP Quality Score / FortiGuard "
+                         "all cover common indicator types."},
+                {"text": "Grant the connector probe access so I can confirm "
+                         "it's reachable before running a lookup."},
+            ],
+            alternatives=[
+                {"label": "Skip enrichment", "value": "skip_enrichment"},
+                {"label": "Document & continue", "value": "document"},
+            ],
+        )
+        out["message"] = (
+            f"No read-only enrichment lookup is configured on this FortiSOAR "
+            f"instance{scope}. Don't keep searching and don't dead-end the "
+            f"analyst: call `emit_capability_gap_card` with the `suggested_card` "
+            f"payload returned here (it names which TI connector to configure "
+            f"and includes a resume button).")
+    return annotate_mcp_reach(out, lookup_empty=not actions)
+
+
+@mcp.tool()
+def list_configured_connectors(probe: bool = False,
+                               verbose: bool = False,
+                               only: set[str] | None = None) -> dict[str, Any]:
+    """List the connectors actually CONFIGURED and ACTIVE on this instance.
+    Call this BEFORE committing to a connector in a playbook: a connector
+    can appear in find(kind='connector') and still be unusable here, because without
+    a configuration it fails at runtime. Returns name + status cheaply;
+    probe=True additionally healthchecks each one concurrently, and
+    verbose=True adds label, version, and config_count. This is also THE
+    health check: a connector missing from the list is not configured, and
+    probe=True reports each one Available or Disconnected.
+
+    A connector with no configuration cannot be called -- it'll fail at runtime
+    even if it appears in `find(kind='connector')`. Use this BEFORE picking which
+    connector to put in a playbook.
+
+    Args:
+        probe: when True, also healthcheck each one (live HTTP per connector).
+            Healthchecks run CONCURRENTLY (thread pool, per-call timeout) so a
+            full probe is bounded by the slowest single vendor, not their sum.
+        verbose: when True, include label, version, and config_count.
+            Default returns only name + status to keep tool-result tokens low.
+        only: internal -- when set, healthcheck just this subset of connector
+            names (the rest keep their listing status). Lets callers that have
+            already narrowed to a handful of relevant connectors avoid probing
+            all ~45 configured ones. Not exposed to the agent.
+
+    Returns:
+        {configured: [{name, status[, version, label, config_count]}], probed: bool,
+         native_mcp?: [{server, tools}]}   -- the MCP servers in reach this turn
+        With probe=True, status is "Available", "Disconnected", or an error.
+        With probe=False, status comes from the listing endpoint
+        ("Completed" = config saved successfully).
+    """
+    try:
+        from probes._env import get_client, get_config
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"could not import _env: {e!r}"}
+    cfg = get_config()
+    if not cfg.is_live():
+        return no_fsr_partial(
+            "which connectors are configured", delivered={"configured": []},
+            message="FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)",
+            error="FSR instance not configured (FSR_BASE_URL / FSR_API_KEY missing in .env)")
+    client = get_client()
+    # The three listing reads are independent (~2-2.7s each on a live appliance, run one
+    # after another they were ~7s before any probe started), so fetch them
+    # together. Each keeps its own fail-open handling below.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .tools_execution import _agent_configured_rows, _configured_rows
+    with ThreadPoolExecutor(max_workers=3) as _pool:
+        _f_list = _pool.submit(client.connectors.list_configured)
+        # In the caller's context: the configs it may see are scoped by the
+        # analyst bound in a contextvar, which a pool thread does not inherit.
+        import contextvars as _cv
+        _f_active = _pool.submit(_cv.copy_context().run, _configured_rows, client)
+        _f_agent = _pool.submit(_agent_configured_rows, client)
+    try:
+        # Use pyfsr wrapper for configured connectors list
+        configured_objs = _f_list.result()
+        # pyfsr's list_configured() returns any connector with a config RECORD,
+        # including ones whose config is INACTIVE. run_op's preflight
+        # (_configured_rows → connector_details?configured=true&active=true) then
+        # rejects those as `connector_not_configured`, so advertising them here as
+        # "Available" is a false positive -- the agent calls them and wastes a turn
+        # on a guaranteed failure (run 9 P1: whois-rdap listed Available, then
+        # run_op rejected it). Filter through the SAME active-config source the
+        # preflight uses so the listing only shows connectors that can actually
+        # run. Fail open: if that source didn't resolve (returned nothing), keep
+        # the unfiltered pyfsr list rather than blanking the whole listing -- the
+        # preflight itself fails open on the same lookup, so we stay consistent.
+        try:
+            _active_names = {x.get("name") for x in _f_active.result()}
+            if _active_names:
+                configured_objs = [c for c in configured_objs
+                                   if c.name in _active_names]
+        except Exception:  # noqa: BLE001
+            pass  # never let the active-filter wipe the listing on a lookup error
+        rows = [
+            {
+                "name": c.name,
+                "status": c.status or "completed",
+                "version": c.version,
+                "label": c.label,
+                "config_count": len(c.configurations) if c.configurations else 0,
+            }
+            for c in configured_objs
+        ]
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"connector_details fetch failed: {e!r}"}
+
+    try:
+        already = {x.get("name") for x in rows}
+        rows += [x for x in _f_agent.result() if x.get("name") not in already]
+    except Exception:  # noqa: BLE001
+        pass
+
+    out: list[dict] = []
+    name_version: dict[str, str] = {}
+    name_agent: dict[str, str] = {}
+    for x in rows:
+        item: dict[str, Any] = {
+            "name": x.get("name"),
+            "status": x.get("status"),
+        }
+        # `version` is needed locally for the probe call regardless of verbose.
+        x_version = x.get("version")
+        if x.get("name") and x_version:
+            name_version[x["name"]] = x_version
+        if x.get("name") and x.get("_agent_id"):
+            name_agent[x["name"]] = x["_agent_id"]
+            item["_agent_id"] = x["_agent_id"]
+            # Heads-up for the agent: ops on this connector run on a FortiSOAR
+            # agent and take ~30-60s (run_op routes them through the force-fail
+            # playbook wrap). Narrate the delay to the user before calling.
+            item["runs_on_agent"] = True
+        if verbose:
+            item["version"] = x_version
+            item["label"] = x.get("label")
+            item["config_count"] = x.get("config_count")
+        out.append(item)
+
+    # When `only` is given, healthcheck just that subset (the caller already
+    # knows which connectors are relevant -- e.g. find_containment_actions has
+    # filtered to the few with a matching op). Otherwise probe all configured.
+    if probe:
+        targets = [(n, v, name_agent.get(n, "")) for n, v in name_version.items()
+                   if only is None or n in only]
+        # A listing is a lookup, not a wait: on a live appliance this call took 13s
+        # (85 connectors, the disconnected ones re-probed every 5 min, each
+        # slow to fail). Anything slower than this keeps its listing status.
+        health = _healthcheck_many(client, targets, deadline_s=_LISTING_PROBE_DEADLINE_S)
+        for item in out:
+            if item["name"] in health:
+                item["status"] = health[item["name"]]
+    # `ok: True` so the connector's result classifier doesn't read a
+    # successful payload that happens to omit `ok` as a failure (it was
+    # mislabeling this tool `(error)` despite returning valid data).
+    # Connectors configured on the box whose configurations all belong to
+    # teams this analyst is not in. Named so the agent says "not shared with
+    # you" instead of "not configured -- add one" (live: it told an analyst to
+    # create a config that already existed for other teams).
+    not_shared: list[str] = []
+    try:
+        from .caller_scope import current_caller
+        if current_caller():
+            from .tools_execution import _all_configured_rows
+            shown = {i["name"] for i in out}
+            not_shared = sorted({str(r["name"]) for r in _all_configured_rows(client)
+                                 if r.get("name") and r.get("name") not in shown})
+    except Exception:  # noqa: BLE001
+        not_shared = []
+    extra = ({"not_shared_with_you": not_shared, "not_shared_note": (
+        "configured on this box, but no configuration is shared with this "
+        "analyst's teams. You can still author playbook steps on them; those "
+        "steps (and run_op) will not run until an administrator shares a "
+        "configuration with their team. Do not tell them to add a new "
+        "configuration.")}
+        if not_shared else {})
+    return annotate_mcp_reach({
+        **extra,
+        "ok": True, "configured": out, "probed": probe, "count": len(out),
+        # This lists only connectors with a SAVED configuration. Config-less
+        # connectors (utilities such as cyops_utilities) run without one and do
+        # NOT appear here -- their absence is NOT unavailability. Author their
+        # steps with `config: ''`; use find_connector to see `config_required`.
+        "note": (
+            "Only connectors with a saved configuration are listed. Config-less "
+            "connectors (e.g. cyops_utilities and other utilities) are usable "
+            "without a config and won't appear here -- author them with "
+            "`config: ''`. Absence here does not mean a connector is unavailable."
+        ),
+    })
+
+
+def _build_run_filter_qs(*, modified_after: str | None,
+                         modified_before: str | None,
+                         tags_include: str | None,
+                         tags_exclude: str | None,
+                         user_iri: str | None) -> str:
+    """Compose the optional server-side filter querystring shared by both
+    /workflows/ and /historical-workflows/ listings.
+    """
+    import urllib.parse
+    parts: list[str] = []
+    if modified_after:
+        parts.append("modified_after=" + urllib.parse.quote(modified_after, safe=":"))
+    if modified_before:
+        parts.append("modified_before=" + urllib.parse.quote(modified_before, safe=":"))
+    if tags_include is not None:
+        # CSV like "system,testing" -- keep commas unencoded.
+        parts.append("tags_include=" + urllib.parse.quote(tags_include, safe=","))
+    if tags_exclude is not None:
+        parts.append("tags_exclude=" + urllib.parse.quote(tags_exclude, safe=","))
+    if user_iri:
+        # IRI like "/api/3/people/<uuid>" -- keep slashes.
+        parts.append("user=" + urllib.parse.quote(user_iri, safe="/"))
+    return ("&" + "&".join(parts)) if parts else ""
+
+
+@mcp.tool()
+def list_playbook_runs(playbook: str | None = None,
+                       playbook_uuid: str | None = None,
+                       limit: int = 20,
+                       include_finished: bool = False,
+                       modified_after: str | None = None,
+                       modified_before: str | None = None,
+                       tags_include: str | None = None,
+                       tags_exclude: str | None = "system",
+                       user_iri: str | None = None) -> dict[str, Any]:
+    """List RUN HISTORY for one playbook -- past executions and their status,
+    server-filtered by template_iri. Read-only history only: it does NOT
+    execute anything, so if the analyst asked you to run a playbook, that is
+    run_playbook. If they asked why a run failed, prefer
+    why_did_playbook_fail, which chains the diagnosis in one call. Defaults
+    to failures; include_finished=True for all.
+
+    Faster + more reliable than `list_playbook_runs(playbook=...)`
+    when you know which playbook you care about -- the API uses
+    template_iri to do the filter on its side, so we don't waste a fetch
+    of irrelevant rows.
+
+    Args:
+        playbook: playbook name (resolved live to uuid).
+        playbook_uuid: skip the lookup if you already have the uuid.
+        limit: max rows (default 20).
+        include_finished: include finished runs too (default failures only).
+
+    Returns:
+        {playbook_uuid, runs: [{task_id, name, status, error_message,
+         modified, pk}]}.
+    """
+    client = _shared._live_client()
+    if client is None:
+        return no_fsr_partial("the playbook runs", error="FSR instance not configured")
+    if not playbook_uuid:
+        if not playbook:
+            return {"error": "provide playbook (name) or playbook_uuid"}
+        # Resolve name → uuid using pyfsr wrapper
+        try:
+            defs = client.playbooks.list(name=playbook, limit=5)
+            if not defs:
+                return {"error": f"no playbook named {playbook!r}"}
+            playbook_uuid = defs[0].get("uuid")
+            if not playbook_uuid:
+                return {"error": f"playbook {playbook!r} has no uuid"}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"name lookup failed: {e!r}"}
+    template_iri = f"/api/3/workflows/{playbook_uuid}"
+    fetch = limit * 4 if not include_finished else limit
+    extra = _build_run_filter_qs(
+        modified_after=modified_after, modified_before=modified_before,
+        tags_include=tags_include, tags_exclude=tags_exclude,
+        user_iri=user_iri,
+    )
+    members = _fetch_runs_both(
+        client, limit=fetch,
+        extra_qs=f"&template_iri={template_iri}{extra}",
+    )
+    if not include_finished:
+        bad = {"failed", "finished_with_error", "terminated"}
+        members = [m for m in members if m.get("status") in bad]
+    runs = [_shape_run(m) for m in members[:limit]]
+    return {"playbook_uuid": playbook_uuid, "count": len(runs), "runs": runs}
+
+
+# ---------------------------------------------------------------------------
+# Acting on the FortiSOAR RECORD itself
+# ---------------------------------------------------------------------------
+#
+# `find_enrichment_actions` and `find_containment_actions` are shortcuts past
+# connector discovery for the two outward-facing halves of a turn: look the
+# indicator up, and act on the device. The third thing an analyst always wants
+# is the inward-facing one -- write what you found back onto the record -- and
+# it had no shortcut at all.
+#
+# Measured cost of that gap (fixture `invest_disk_latency_no_ti`, the RESTRAINT
+# fixture, runs 20260814T111633Z and 20260814T112533Z): the agent spent SEVEN of
+# its thirteen calls -- find_connector x3, find_operation x3, get_op_schema --
+# working out how to leave a comment, on a budget of eight. It got there in the
+# end, by hand-building a `cyops_utilities.update_cyops_resource` body. The
+# FortiSOAR-native knowledge it was missing is small, stable and already in the
+# reference store:
+#
+#   * a comment is a RECORD, in the `comments` module, whose `content` holds
+#     the text and whose per-module link field (`comments.alerts`,
+#     `comments.incidents`, …) attaches it. Not a field on the alert.
+#   * a field update is `update_cyops_resource` against the record's own IRI.
+#   * a picklist field takes an IRI, never the label -- which is why
+#     `resolve_picklist_value` has to run first.
+#
+# This tool grants NO new capability: it returns the same tier-3 ops the agent
+# could already have found the long way, and the write still has to be staged
+# through `emit_action_card` for analyst approval. It sells discovery, not
+# permission.
+
+#: intent -> how to express it as a FortiSOAR-native record op. `body` is a
+#: template; `{}` placeholders are filled by the caller.
+_RECORD_ACTIONS: tuple[dict[str, Any], ...] = (
+    {
+        "action": "comment",
+        "op": "insert_cyops_resource",
+        "summary": "Post a comment on a record (the analyst-visible "
+                   "investigation note).",
+        "collection": "/api/3/comments",
+        "body": {"content": "<the comment text; HTML is accepted>"},
+        "link_field_is_the_module": True,
+        "notes": "content is an HTML field -- plain text is fine. The link "
+                 "field is named after the TARGET module and takes a list of "
+                 "record IRIs.",
+    },
+    {
+        "action": "update_field",
+        "op": "update_cyops_resource",
+        "summary": "Change fields on the record itself (status, severity, "
+                   "owner, description).",
+        "collection": "/api/3/{module}/{uuid}",
+        "body": {"<field>": "<new value>"},
+        "notes": "A PICKLIST field (status, severity, ...) takes the "
+                 "picklist's IRI, never its label -- call "
+                 "resolve_picklist_value first, or the write is accepted and "
+                 "sets nothing.",
+    },
+    {
+        "action": "create_record",
+        "op": "insert_cyops_resource",
+        "summary": "Create a new record (an incident rolled up from alerts, "
+                   "an indicator, a task).",
+        "collection": "/api/3/{module}",
+        "body": {"<field>": "<value>"},
+        "notes": "Same picklist rule as update_field.",
+    },
+)
+
+
+def _module_exists(conn: sqlite3.Connection, module: str) -> bool:
+    # `modules.name`, not `module_name` -- that column belongs to
+    # `module_fields`. Getting it wrong raises OperationalError, which the
+    # fail-open below swallows, and the guard then accepts every module name
+    # ever typed. Caught by the test that passes a module that does not exist.
+    try:
+        row = conn.execute("SELECT 1 FROM modules WHERE name=? LIMIT 1",
+                           (module,)).fetchone()
+    except sqlite3.OperationalError:
+        return True  # store predates the table -- do not invent a refusal
+    return bool(row)
+
+
+def _comment_link_field(conn: sqlite3.Connection, module: str) -> str:
+    """The `comments.<module>` field that attaches a comment to `module`.
+
+    Read from the store rather than assumed, so a module whose link field is
+    named unexpectedly cannot produce a body that silently attaches to nothing.
+    """
+    try:
+        row = conn.execute(
+            "SELECT field_name FROM module_fields "
+            "WHERE module_name='comments' AND field_name=? LIMIT 1",
+            (module,)).fetchone()
+    except sqlite3.OperationalError:
+        return ""
+    return row[0] if row else ""
+
+
+# record action -> the host's record-write tool that does it. When the turn's
+# persona offers that tool for the module, it is the one way: its card shows
+# the analyst the record and each field's before/after, it checks picklist
+# values before the card, and an autonomy rule names it. A cyops_utilities
+# update reached the same record past all of that.
+_RECORD_TOOLS = {"update_field": "update_record", "create_record": "create_record"}
+
+
+def _persona_record_tools(module: str) -> set[str]:
+    """The record-write tools this turn can use on ``module``: the ones the
+    host offered the model this turn (``offered_tools``), when the turn's
+    write profile may write the module. Empty with no write profile. Read
+    from the turn's session state, duck-typed, so the framework needs no host
+    persona model.
+
+    The offered list, not the persona's allowlist: an empty allowlist means
+    the host's default tools, which include the record writes, so reading the
+    allowlist answered "no tool" on a box whose persona could write alerts.
+    A host that does not report its offered tools falls back to the
+    allowlist."""
+    try:
+        from fsr_playbooks.llm import session_state
+        state = session_state.current()
+    except Exception:  # noqa: BLE001
+        return set()
+    profile = state.profile
+    may_write = getattr(profile, "may_write_module", None)
+    if profile is None or not callable(may_write) or not may_write(module):
+        return set()
+    offered = getattr(state, "offered_tools", None)
+    if offered is None:
+        offered = set(getattr(profile, "tools_allow", None) or [])
+    return set(offered) & set(_RECORD_TOOLS.values())
+
+
+def _record_tool_row(spec: dict[str, Any], module: str, uuid: str) -> dict[str, Any]:
+    """A record action expressed as the record-write tool's own call."""
+    tool = _RECORD_TOOLS[spec["action"]]
+    args: dict[str, Any] = {"module": module}
+    if tool == "update_record":
+        args["uuid"] = uuid or "<uuid>"
+    args["fields"] = dict(spec["body"])
+    return {
+        "action": spec["action"],
+        "tool": tool,
+        "title": spec["summary"],
+        "tier": 3,
+        "requires_approval": True,
+        "args": args,
+        "required_params": [k for k in args],
+        "notes": (f"Call {tool} directly; it puts the change on a card for the "
+                  f"analyst to approve. A picklist field (status, severity, "
+                  f"closureReason, ...) takes the picklist item's IRI from "
+                  f"`picklist`, never its label."),
+    }
+
+
+def _run_op_tier(connector: str, op: str) -> int:
+    """The approval tier `dispatch` would put this op behind, or 4 if the tier
+    table cannot be read. Erring HIGH is the safe direction: an action listed
+    as needing approval when it does not costs a click; the reverse costs the
+    gate."""
+    try:
+        from fsr_playbooks.llm.tools import _tier_for_run_op
+    except Exception:  # noqa: BLE001
+        return 4
+    return _tier_for_run_op({"connector": connector, "op": op})
+
+
+@mcp.tool()
+def find_record_actions(action: str = "", module: str = "alerts",
+                        uuid: str = "") -> dict[str, Any]:
+    """Call this when the analyst asks you to write something back onto the
+    FortiSOAR record -- comment on it, change its status or severity, assign
+    it, or create a new record from what you found -- and call it BEFORE
+    find_connector / find_operation, which search the whole catalog and will
+    send you round the houses for knowledge this returns in one call.
+
+    Returns the ready-to-stage shape for each record action available here:
+    the connector and op, the collection IRI, and a body template with the
+    FortiSOAR-specific rules that are easy to get wrong -- a comment is a
+    record in the `comments` module linked back by a per-module field, not a
+    field on the alert; a picklist field takes the picklist IRI and never the
+    label.
+
+    Read-only: it discovers actions, it does not run them. Every action it
+    returns is tier 3+ and MUST be staged with emit_action_card for analyst
+    approval, exactly like a containment action.
+
+    Args:
+        action: one of comment / update_field / create_record. Empty returns
+            all of them.
+        module: the target module (alerts, incidents, indicators, ...).
+            Defaults to alerts.
+        uuid: the target record's uuid. When given, the collection IRI and the
+            comment link are filled in for you rather than left as templates.
+
+    When the turn's persona offers ``update_record`` / ``create_record`` for
+    the module, update_field and create_record come back as that tool's call
+    (``tool`` + ``args``) instead of a connector op: call the tool directly.
+
+    Returns:
+        {"module", "actions": [{action, connector, op, tier,
+         requires_approval, collection, body, required_params, notes}
+         or {action, tool, args, tier, requires_approval, notes}],
+         "count"}
+    """
+    module = (module or "alerts").strip().strip("/")
+    want = (action or "").strip().lower()
+    known = {a["action"] for a in _RECORD_ACTIONS}
+    if want and want not in known:
+        return {"ok": False, "code": "unknown_action",
+                "message": f"action {action!r} not recognized",
+                "valid": sorted(known)}
+
+    # Caller errors first, and OFF the box. A bad module name is answerable
+    # from the local store, so asking a live instance about it only turns a
+    # clear refusal into `no_fsr_configured` -- which reads as "this
+    # capability is missing here" rather than "you named a module that does
+    # not exist".
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as _conn:
+        if not _module_exists(_conn, module):
+            return {"ok": False, "code": "unknown_module",
+                    "message": f"no module {module!r} in the reference store",
+                    "hint": "call list_modules or describe_module first"}
+
+    persona_tools = _persona_record_tools(module)
+    tool_rows = [_record_tool_row(spec, module, uuid) for spec in _RECORD_ACTIONS
+                 if (not want or spec["action"] == want)
+                 and _RECORD_TOOLS.get(spec["action"]) in persona_tools]
+    covered = {r["action"] for r in tool_rows}
+    if want and want in covered:
+        return {"ok": True, "module": module, "actions": tool_rows,
+                "count": len(tool_rows)}
+
+    listing = list_configured_connectors(probe=False, verbose=True)
+    if "error" in listing:
+        return no_fsr_partial("the matching connector actions",
+                              message=listing["error"])
+    configured = {c.get("name") for c in listing.get("configured", [])
+                  if c.get("name")}
+    connector = "cyops_utilities"
+    if connector not in configured:
+        # Not a dead end -- say what is missing and what it costs, per the
+        # never-dead-end rule. The ops are stock FortiSOAR utilities, so this
+        # is a configuration gap, not an absent capability.
+        return {"ok": True, "module": module, "actions": tool_rows,
+                "count": len(tool_rows),
+                "message": (f"{connector} is not configured on this instance, "
+                            f"so record writes cannot be staged through it. "
+                            f"It ships with FortiSOAR -- configuring it "
+                            f"restores comment/update/create.")}
+
+    out: list[dict[str, Any]] = list(tool_rows)
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+        have_ops = {r[0] for r in conn.execute(
+            "SELECT op_name FROM operations WHERE connector_name=?",
+            (connector,)).fetchall()}
+        for spec in _RECORD_ACTIONS:
+            if want and spec["action"] != want:
+                continue
+            if spec["action"] in covered:
+                continue
+            if spec["op"] not in have_ops:
+                continue
+            body = dict(spec["body"])
+            collection = spec["collection"]
+            if spec.get("link_field_is_the_module"):
+                link = _comment_link_field(conn, module)
+                if not link:
+                    # A comment that attaches to nothing is worse than no
+                    # comment: it is written, it is returned as a success, and
+                    # no one ever sees it on the record.
+                    continue
+                body[link] = [f"/api/3/{module}/{uuid or '<uuid>'}"]
+            else:
+                collection = collection.replace("{module}", module).replace(
+                    "{uuid}", uuid or "<uuid>")
+            tier = _run_op_tier(connector, spec["op"])
+            out.append({
+                "action": spec["action"],
+                "connector": connector,
+                "op": spec["op"],
+                "title": spec["summary"],
+                "tier": tier,
+                "requires_approval": tier >= 3,
+                "collection": collection,
+                "params": {"iri": collection, "body": body},
+                "required_params": _required_params(conn, connector,
+                                                    spec["op"]),
+                "notes": spec["notes"],
+            })
+    return {"ok": True, "module": module, "actions": out, "count": len(out),
+            "stage_with": "emit_action_card"}

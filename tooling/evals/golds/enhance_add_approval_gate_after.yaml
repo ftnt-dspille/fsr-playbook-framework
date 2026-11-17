@@ -1,0 +1,46 @@
+# The correct answer to the `enhance_add_approval_gate` fixture: the analyst's
+# confirmation is INSERTED ahead of the block, and every other step keeps its
+# name and its wiring. Calibration, not a demo -- an assertion no correct edit
+# can satisfy is indistinguishable from an agent that keeps failing.
+collection: 00 - FSR Studio
+playbooks:
+- name: Suspicious IP Response
+  is_active: true
+  trigger_step_id: start
+  parameters:
+  - ip_to_investigate
+  steps:
+  - type: start
+    name: Start
+    module: alerts
+    button_label: Respond
+    next: Enrich IP
+  - type: connector
+    name: Enrich IP
+    connector: cyops_utilities
+    operation: no_op
+    params: {}
+    next: Confirm Block
+  - type: manual_input
+    name: Confirm Block
+    title: Block this IP?
+    description: Confirm before the firewall change is made.
+    options:
+    - display: Confirm
+      primary: true
+      next: Block IP
+    - display: Cancel
+      next: End
+  - type: connector
+    name: Block IP
+    connector: fortigate-firewall
+    operation: block_ip
+    params:
+    method: Quarantine Based
+    ip_addresses: '{{ vars.input.params.ip_to_investigate }}'
+    next: End
+  - type: connector
+    name: End
+    connector: cyops_utilities
+    operation: no_op
+    params: {}

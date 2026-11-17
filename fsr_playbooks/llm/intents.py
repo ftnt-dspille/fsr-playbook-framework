@@ -1,0 +1,450 @@
+"""Task-intent prompt + tool-slice resolution (single source of truth).
+
+The agentic surface runs in one of two intents:
+
+  - ``triage``  -- incident-response: investigate the record in front of the
+    analyst, pivot across modules, enrich indicators read-only, and stage any
+    mutating/containment action via ``emit_card(card_type='action')`` for approval. The
+    YAML-authoring + playbook-mutation tools are dropped.
+  - ``build``   -- playbook authoring: the full tool registry.
+
+Both the FortiSOAR connector (``operations.py``) and the local hunt/demo
+runner resolve their system prompt + tool list through here, so the prompt
+text, the dropped-tool set, and the fallbacks never drift between them. The
+prompts themselves live in ``fsr_playbooks/agent/system_prompt_{triage,build}.md``
+and are vendored wholesale into the connector by ``scripts/build.sh``.
+"""
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+from .hunt_tools import (
+    HUNT_RETIRED_TO_UNION,
+    HUNT_TOOLS,
+    PLAYBOOK_RUN_COMPANIONS,
+    RECORD_WRITE_TOOLS,
+)
+
+INTENTS = ("triage", "build")
+DEFAULT_INTENT = "build"
+
+# Build-only tools dropped from the triage slice: the YAML-authoring +
+# playbook-mutation surface. Triage keeps discovery, picklists, run_op
+# (read-only intel), get_record/search (pivoting), the HITL emit_* cards,
+# and run-history diagnostics.
+BUILD_ONLY_TOOLS = frozenset({
+    "validate_yaml", "compile_yaml", "build_playbook_from_trace",
+    "compose_playbook",
+    "analyze_playbook",
+    "verify_playbook", "verify_enhancement", "edit_playbook",
+    "emit_decision_step",
+    "search_playbooks", "get_step_type", "plan_playbook",
+    "find_jinja_filter", "find_jinja_pattern", "get_filter_examples",
+    "step_through_playbook", "dry_run_playbook",
+    "diagnose_yaml_against_pb_execution",
+    "push_playbook",
+    # NOTE: `run_playbook` is deliberately NOT here. Running an already-deployed
+    # playbook is a first-class TRIAGE action -- an analyst working an alert wants
+    # to fire the block-IP playbook, an investigation playbook, or a playbook their
+    # own team wrote and expects the chat to be able to drive. Authoring it and
+    # running it are different verbs; only authoring is build-only.
+    # It is safe in triage because it is not auto-run: `_resolve_tier` gives
+    # run_playbook tier 3 (approval card) unless a host explicitly designates a
+    # specific playbook auto-runnable via the `run_playbook.auto` resolver (tier 2).
+    # It was previously listed here AND added to TRIAGE_ONLY_TOOLS by the
+    # connector's register_triage_tools(), so BOTH slices subtracted it and no
+    # model could call it in any intent.
+    # Enhance mode's write path -- triage has no open playbook to update.
+    "emit_enhancement_offer",
+})
+
+# Tools that only make sense when an OPEN playbook exists to edit -- the enhance
+# verify+write pair. A from-scratch CREATE (build intent, no playbook mounted)
+# has nothing to enhance, yet the build slice = full registry minus TRIAGE_ONLY,
+# so it still advertises these. A drifting model can then terminate a create via
+# emit_card(card_type='enhancement_offer') instead of delivering
+# a NEW playbook via emit_card(card_type='playbook_offer'). The connector's _intent_drop_set gates
+# this set out of a no-open-playbook build; EnhanceDeliveryGuard is keyed on the
+# SAME names (asserted in a test) so the guard and the advertised slice can never
+# drift. This is a SUBSET of BUILD_ONLY_TOOLS -- dropping it never touches triage.
+ENHANCE_ONLY_TOOLS = frozenset({
+    "verify_enhancement", "edit_playbook", "emit_enhancement_offer",
+})
+
+# Triage-only tools dropped from the build slice (ROADMAP §4, three-pillar
+# plan Track C5): the live alert/incident investigation + containment-staging
+# surface. Build mode authors playbooks -- it discovers ops with
+# find_connector/find_operation/get_op_schema and offers them via
+# emit_card(card_type='playbook_offer'); it must NOT stage live containment action-cards
+# (emit_card(card_type='action')) or run connector ops directly (run_op). find_containment_actions /
+# find_enrichment_actions are connector-AWARENESS (authoring) and stay in build.
+#
+# This set is MUTABLE on purpose: the connector's
+# fsr_soc_triage.registry.register_triage_tools() re-injects the alert/incident
+# hunt tools (get_record, search_module_records, siem_*, faz_*, fmg_*) into the
+# global REGISTRY at import, and extends THIS set with those same names so the
+# build slice excludes them too -- mirroring how it already mutates SAFE_TOOLS /
+# TOOL_TIERS / REGISTRY (Option-A posture). tools_for_intent reads this global
+# at call time, so the connector's additions are visible without a code path
+# fork. Framework-standalone (no connector) keeps just the two base names.
+TRIAGE_ONLY_TOOLS: set[str] = {
+    "emit_action_card",
+    "run_op",
+    # Record reads + hunt tools: investigation, not authoring -- build mode
+    # must not pivot records/SIEM/FAZ/FMG/EDR.
+    *HUNT_TOOLS,
+    *HUNT_RETIRED_TO_UNION,
+    # Record writes: a triage-side action, never part of authoring.
+    *RECORD_WRITE_TOOLS,
+    # Resume / list-runnable: triage-side (RUN_VERB_TOOLS exempts them from
+    # both subtractions, so build keeps them too).
+    *PLAYBOOK_RUN_COMPANIONS,
+}
+
+# The "run an ALREADY-DEPLOYED playbook" verb, exempt from BOTH subtractions.
+#
+# `run_playbook` was already deliberately in both slices -- authoring a playbook
+# and running one are different verbs. But the tools that make a run USABLE were
+# split across the two sets, so neither intent held the whole verb:
+#
+#   build had run_playbook but not resume_playbook -- it could START a run it
+#   could not RESUME, so a run that paused on a manual-input step was stranded
+#   in that intent. This is the same false premise that produced the
+#   `run_not_permitted` outage ("run_playbook only surfaces via a persona's
+#   tools.allow" -- it does not; it is in the build slice, which binds no
+#   persona). That fix unblocked approval; it did not close the gap behind it.
+#
+#   triage had list_module_playbooks but not search_playbooks -- it could
+#   enumerate one module's playbooks but had no global search, so naming a
+#   playbook the analyst describes in prose ("run the block-IP one") depended on
+#   the model already knowing the name or uuid.
+#
+# Exempting a named set is the point: the two frozensets were each written for a
+# different purpose (one means "authoring", the other "live investigation"), and
+# hand-editing both to agree about a THIRD concern is how they drift apart.
+# `test_run_verb_whole_in_every_intent` asserts the invariant directly.
+#
+# Deliberately NOT here: `push_playbook` (deploying a NEW playbook is authoring,
+# not running a deployed one) and the YAML/authoring surface generally.
+RUN_VERB_TOOLS = frozenset({
+    "run_playbook", "resume_playbook",
+    "search_playbooks", "list_module_playbooks",
+})
+
+# Inline fallbacks used only when the vendored markdown can't be read (keeps
+# the agent functional even if packaging drops the .md files).
+_FALLBACK_BUILD_PROMPT = (
+    "You are a FortiSOAR playbook author. Help the user compose, validate, "
+    "and refine YAML playbooks using the tools available. Be concise. Quote "
+    "tool errors verbatim and explain the fix. The conversation may open with "
+    "a prior triage transcript plus a directive to design a re-runnable "
+    "playbook around the operations used during triage -- reproduce those "
+    "operations as parameterized steps."
+)
+_FALLBACK_TRIAGE_PROMPT = (
+    "You are a FortiSOAR incident-response assistant triaging the record in "
+    "front of you. Use find_connector -> find_operation -> get_op_schema to "
+    "locate capabilities. Call run_op directly only for read-only "
+    "intelligence; for ANY mutating/containment action (block, isolate, "
+    "quarantine, disable, add-to-group, etc.) build the call and emit it via "
+    "emit_card(card_type='action', ...) for analyst approval -- never run it "
+    "silently. When the "
+    "user explicitly ORDERED that action, pass requested_by='analyst' on the "
+    "card; otherwise leave it unset. Do not "
+    "author YAML here. Be concise; quote tool errors verbatim."
+)
+
+_PROMPT_CACHE: dict[str, str] = {}
+
+
+# --- P3: low-signal input gate --------------------------------------------
+#
+# A one-word `test` or a bare `hi` should not launch a 9-tool autonomous hunt.
+# Classify the user's message so the live caller can short-circuit the
+# auto-investigation: orient on the case + offer choices (trivial) or
+# summarize state + propose the next step (continue), instead of re-running a
+# full investigation. A real directive ("build the attack timeline") is the
+# only class that should auto-investigate.
+
+# Greetings / acks / smoke-test pings -- no investigative direction.
+_TRIVIAL_TOKENS = frozenset({
+    "hi", "hello", "hey", "yo", "sup", "hiya", "howdy",
+    "test", "testing", "ping", "pong", "ok", "okay", "k",
+    "thanks", "thank you", "ty", "thx", "cool", "nice", "great",
+    "yes", "no", "yep", "nope", "y", "n",
+})
+
+# Phrases that mean "advance from where we are" rather than start fresh.
+_CONTINUE_PHRASES = (
+    "what's next", "whats next", "what next", "what now", "what else",
+    "continue", "go on", "go ahead", "proceed", "keep going", "next step",
+    "next", "and then", "then what", "more",
+)
+
+TRIVIAL = "trivial"
+CONTINUE = "continue"
+DIRECTIVE = "directive"
+
+
+def classify_message(text: Any) -> str:
+    """Classify a user message into ``trivial`` / ``continue`` / ``directive``.
+
+    - ``trivial``   -- empty, a greeting, an ack, or a smoke-test ping. The
+      caller should orient on the case and offer choices, NOT auto-investigate.
+    - ``continue``  -- "what's next" / "keep going". Summarize established state
+      and propose the next logical step (ties into the no-repeat fix).
+    - ``directive`` -- a real investigative instruction. Auto-investigate.
+
+    Heuristic + cheap on purpose: this gates an expensive tool loop, so a false
+    ``directive`` (auto-investigate) is the safe failure -- we only suppress on
+    high-confidence trivial/continue matches.
+    """
+    if not isinstance(text, str):
+        return DIRECTIVE
+    norm = " ".join(text.strip().lower().split())
+    norm = norm.strip(" .!?,")
+    if not norm:
+        return TRIVIAL
+    if norm in _TRIVIAL_TOKENS:
+        return TRIVIAL
+    # Single very-short token that isn't a real word → treat as trivial.
+    if len(norm) <= 2 and " " not in norm:
+        return TRIVIAL
+    if norm in _CONTINUE_PHRASES:
+        return CONTINUE
+    # A short message that is *exactly* a continue phrase plus filler
+    # ("ok what's next") still reads as continue.
+    if len(norm) <= 24 and any(p in norm for p in _CONTINUE_PHRASES):
+        return CONTINUE
+    return DIRECTIVE
+
+
+def gate_directive(label: str, scenario_title: str | None = None) -> str:
+    """The system-prompt addendum for a low-signal message.
+
+    Empty string for ``directive`` (no gate -- let the agent investigate).
+    """
+    case = f" ({scenario_title})" if scenario_title else ""
+    if label == TRIVIAL:
+        return (
+            "\n\n## Low-signal input\n"
+            f"The analyst's message carries no investigative direction. Do NOT "
+            f"launch an autonomous investigation or call enrichment tools. "
+            f"Briefly orient them on the case in front of you{case} -- what it "
+            f"is and the few most useful next steps they could ask for -- then "
+            f"ask which they'd like, or invite a specific question. One short "
+            f"paragraph."
+        )
+    if label == CONTINUE:
+        return (
+            "\n\n## Continue\n"
+            "The analyst wants to advance, not restart. Do NOT re-run "
+            "enrichment or pivots you already completed earlier in this "
+            "conversation. Briefly restate what is already established, then "
+            "take or propose the next logical step (correlation, containment, "
+            "or response). If nothing remains, say so and recommend a "
+            "disposition."
+        )
+    return ""
+
+
+def resolve_intent(value: Any) -> str:
+    """Map a raw intent value to a known task intent.
+
+    Any value that isn't exactly a known intent is treated as legacy free
+    text (the pre-discriminator contract carried the user message here) and
+    defaults to ``build``."""
+    return value if value in INTENTS else DEFAULT_INTENT
+
+
+# Host-registered prompt loaders, by intent. A host that OWNS an intent's
+# prompt (the connector owns triage via fsr_soc_triage's fragment assembly)
+# registers its loader here so plan_turn/load_intent_prompt serve the host's
+# authoritative text instead of this package's vendored copy -- the same
+# host-registration pattern as register_triage_tools for the tool registry.
+# A registered loader is consulted every call (loaders cache internally);
+# any loader error falls back to the vendored copy, never fails the caller.
+_PROMPT_LOADERS: dict[str, Any] = {}
+
+
+def register_intent_prompt(intent: str, loader: Any) -> None:
+    """Register ``loader() -> str`` as the authoritative prompt source for
+    ``intent``. An empty/failing loader falls back to the vendored copy."""
+    _PROMPT_LOADERS[resolve_intent(intent)] = loader
+
+
+_COND_RE = re.compile(
+    r"<!--if ([A-Za-z0-9_,\s]+?)-->(.*?)(?:<!--else-->(.*?))?<!--endif-->",
+    re.DOTALL)
+
+
+def render_prompt_for_slice(text: str,
+                            tool_names: Iterable[str] | None = None) -> str:
+    """Resolve `<!--if tool[,tool]-->A<!--else-->B<!--endif-->` blocks against
+    the tool slice the model is actually given: A when EVERY named tool is in
+    `tool_names`, else B (or nothing). Blocks do not nest. `None` means the
+    full surface (every condition holds). This is what keeps a prompt from
+    telling the model to call a tool its slice removed."""
+    have = None if tool_names is None else set(tool_names)
+
+    def _sub(m: re.Match[str]) -> str:
+        need = [n.strip() for n in m.group(1).split(",") if n.strip()]
+        ok = have is None or all(n in have for n in need)
+        return (m.group(2) if ok else (m.group(3) or ""))
+
+    return _COND_RE.sub(_sub, text)
+
+
+def load_intent_prompt(intent: str,
+                       tool_names: Iterable[str] | None = None) -> str:
+    """The intent's system prompt rendered for `tool_names` (the slice the
+    model will see; None = full surface). See `render_prompt_for_slice`."""
+    return render_prompt_for_slice(_load_intent_prompt_raw(intent), tool_names)
+
+
+def _load_intent_prompt_raw(intent: str) -> str:
+    """Load the intent's system prompt from the vendored markdown, cached.
+    Falls back to an inline string if the file is missing/empty."""
+    intent = resolve_intent(intent)
+    loader = _PROMPT_LOADERS.get(intent)
+    if loader is not None:
+        try:
+            loaded = str(loader() or "").strip()
+            if loaded:
+                return loaded
+        except Exception:  # noqa: BLE001 -- fall back to the vendored copy
+            pass
+    if intent in _PROMPT_CACHE:
+        return _PROMPT_CACHE[intent]
+    fallback = _FALLBACK_TRIAGE_PROMPT if intent == "triage" else _FALLBACK_BUILD_PROMPT
+    text = fallback
+    try:
+        import fsr_playbooks
+        fname = ("system_prompt_triage.md" if intent == "triage"
+                 else "system_prompt_build.md")
+        p = Path(fsr_playbooks.__file__).resolve().parent / "agent" / fname
+        if p.is_file():
+            loaded = p.read_text(encoding="utf-8").strip()
+            if loaded:
+                text = loaded
+    except Exception:  # noqa: BLE001
+        pass
+    _PROMPT_CACHE[intent] = text
+    return text
+
+
+# --- Create strategy: Guided (plan->compiler) vs Freeform (free-text YAML) ---
+#
+# The build census + the Frank runs showed the failure tail lives in free-text
+# YAML authoring: the model types/validates raw YAML and spends the turn catching
+# the ways text goes wrong. `compose_playbook` (plan->compiler) is valid-by-
+# construction, but advertising it + prompting "prefer it" does NOT stop a model
+# free-writing YAML while the free-text tools stay in the slice -- the slice IS
+# the policy. So a `guided` create REMOVES the free-text authoring surface,
+# leaving compose_playbook as the only path to a deliverable. `freeform` keeps
+# today's full authoring slice (a capable model authors clean YAML in few rounds).
+# `auto` picks per the resolved model's capability.
+CREATE_STRATEGIES = ("auto", "guided", "freeform")
+DEFAULT_CREATE_STRATEGY = "auto"
+
+# The free-text YAML construction/validation surface that compose_playbook
+# replaces. Dropped from a guided create slice. compose_playbook itself,
+# discovery (find_*/get_op_schema/picklists), the run verbs, playbook search,
+# verify_playbook, and emit_card stay -- the model still plans and delivers,
+# it just cannot hand-author or re-validate raw YAML.
+FREEFORM_AUTHORING_TOOLS = frozenset({
+    "validate_yaml", "compile_yaml", "build_playbook_from_trace",
+    "analyze_playbook", "edit_playbook", "emit_decision_step",
+    "step_through_playbook", "dry_run_playbook",
+    "diagnose_yaml_against_pb_execution", "get_step_type",
+})
+
+# Auto's capability axis. There is no existing "intelligence" tier (the catalog
+# Tier is trust: tested/supported/discouraged; eco/balanced/max are Frank proxy
+# names), so this is explicit: a model is create-capable only on evidence it
+# authors clean YAML few-shot. An "incapable" substring wins over a "capable"
+# one (so `gpt-4.1-mini` -> Guided despite matching `gpt-4.1`), and an unknown/
+# empty model is NOT capable -- valid-by-construction is the default floor.
+_CREATE_CAPABLE_SUBSTRINGS = (
+    "opus", "gpt-4.1", "gpt-4o", "gpt-5", "gpt-6",
+    "claude-sonnet-4", "sonnet-4",
+)
+_CREATE_INCAPABLE_SUBSTRINGS = (
+    "mini", "nano", "haiku", "eco", "qwen", "glm", "coding-b200",
+)
+
+
+def is_create_capable_model(model: Any, provider: Any = None) -> bool:
+    """True iff `model` has demonstrated clean few-shot YAML authoring, so Auto
+    may hand it the Freeform (free-text) create path. Conservative: an unknown
+    or empty model id is NOT capable (Guided is the floor)."""
+    m = str(model or "").lower()
+    if not m:
+        return False
+    if any(s in m for s in _CREATE_INCAPABLE_SUBSTRINGS):
+        return False
+    return any(s in m for s in _CREATE_CAPABLE_SUBSTRINGS)
+
+
+def resolve_create_strategy(strategy: Any, model: Any = None,
+                            provider: Any = None) -> str:
+    """Resolve a create strategy to a concrete `guided`/`freeform`.
+
+    `auto` (and any unknown value) resolves by model capability. An explicit
+    `guided`/`freeform` is honored as-is -- the analyst's toggle overrides Auto.
+    """
+    s = str(strategy or DEFAULT_CREATE_STRATEGY).strip().lower()
+    if s not in CREATE_STRATEGIES:
+        s = DEFAULT_CREATE_STRATEGY
+    if s != "auto":
+        return s
+    return "freeform" if is_create_capable_model(model, provider) else "guided"
+
+
+def apply_create_strategy(tools: list[dict[str, Any]],
+                          strategy: str) -> list[dict[str, Any]]:
+    """Narrow a build tool slice for a RESOLVED create strategy. `guided` drops
+    the free-text YAML authoring surface; anything else (freeform) is a no-op.
+
+    Pass the output of `resolve_create_strategy` -- a raw `auto` is treated as a
+    no-op here, not silently resolved, so callers choose the capability model
+    explicitly rather than defaulting to Guided by accident."""
+    if str(strategy or "").strip().lower() != "guided":
+        return tools
+    return [t for t in tools if t["name"] not in FREEFORM_AUTHORING_TOOLS]
+
+
+def tools_for_intent(intent: str) -> list[dict[str, Any]]:
+    """The tool slice advertised to the model for this intent.
+
+    - ``triage`` -- the full registry minus the build-only (YAML-authoring +
+      playbook-mutation) tools.
+    - ``build``  -- the full registry minus the triage-only (containment-staging
+      ``emit_card(card_type='action')``, direct ``run_op``, alert/incident investigation)
+      tools, so authoring mode never stages containment action-cards.
+
+    ``RUN_VERB_TOOLS`` survives BOTH subtractions: running an already-deployed
+    playbook is a whole verb in either intent, and splitting it across the two
+    sets left build able to start a run it could not resume.
+
+    ``TRIAGE_ONLY_TOOLS`` is read at CALL time (not import time) because the
+    connector extends it during registration -- keep the subtraction here.
+    """
+    from fsr_playbooks.llm.tools import anthropic_tools
+    drop = (BUILD_ONLY_TOOLS if resolve_intent(intent) == "triage"
+            else TRIAGE_ONLY_TOOLS) - RUN_VERB_TOOLS
+    return [t for t in anthropic_tools() if t["name"] not in drop]
+
+
+__all__ = [
+    "INTENTS", "DEFAULT_INTENT", "BUILD_ONLY_TOOLS", "TRIAGE_ONLY_TOOLS",
+    "ENHANCE_ONLY_TOOLS", "RUN_VERB_TOOLS",
+    "resolve_intent", "load_intent_prompt", "render_prompt_for_slice", "tools_for_intent",
+    "classify_message", "gate_directive",
+    "TRIVIAL", "CONTINUE", "DIRECTIVE",
+    "CREATE_STRATEGIES", "DEFAULT_CREATE_STRATEGY", "FREEFORM_AUTHORING_TOOLS",
+    "is_create_capable_model", "resolve_create_strategy", "apply_create_strategy",
+]

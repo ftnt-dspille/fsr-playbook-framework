@@ -1,0 +1,2174 @@
+"""Tool registry -- wraps existing mcp_server.py functions.
+
+Phase 2 v1: read-only authoring tools only. No `run_op`, no `push`, no
+destructive actions. Live FSR calls (render_jinja, get_run_env,
+list_configured_connectors) are allowed because they're read-only and
+gated by the user's `.env`.
+
+Schema generation is deliberately small: we map Python type hints to
+the JSON Schema subset Anthropic accepts. If a tool's signature drifts
+beyond what we cover, add the case here rather than papering over it.
+"""
+from __future__ import annotations
+
+import inspect
+import logging
+import re
+import sqlite3
+import typing
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, get_args, get_origin
+
+import fsr_playbooks.mcp_server as mcp_server
+
+from .._db import default_db_path
+from .guard_fires import record_guard_fire, refusal
+from .hunt_tools import (
+    HUNT_RETIRED_TO_UNION,
+    HUNT_TOOLS,
+    PLAYBOOK_RUN_COMPANIONS,
+    RECORD_WRITE_TOOLS,
+)
+
+# Allow-list. Names match attribute names on `mcp_server`.
+SAFE_TOOLS: list[str] = [
+    # Phase 1 consolidation: the single discovery entry point. The
+    # specialized find_*/search_* names below stay registered during the
+    # migration; tool-gate arbitrates when they leave the advertised slice.
+    "find",
+    "find_connector",
+    "find_operation",
+    "get_op_schema",
+    "get_step_type",
+    "find_step_examples",
+    "find_jinja_filter",
+    "find_jinja_pattern",
+    "get_filter_examples",
+    "search_playbooks",
+    # E5: plan-then-ground, one read-only pass over the intended steps.
+    "plan_playbook",
+    "verify_playbook",
+    "verify_enhancement",
+    "edit_playbook",
+    "emit_decision_step",
+    "healthcheck_connector",
+    # Phase 1 consolidation: installed + reachable in one call. The two
+    # constituent names stay registered during the migration.
+    "connector_health",
+    # Phase 1 consolidation: the single picklist entry point. As with `find`,
+    # the specialized names below stay registered during the migration.
+    "picklist",
+    "list_picklists",
+    "picklist_for_field",
+    "resolve_picklist_value",
+    # Phase 0 -- authoring loop tools the system prompt mandates.
+    "validate_yaml",
+    "compile_yaml",
+    "analyze_playbook",
+    # Trace compiler (SKILL_BASED_PLAYBOOK §3-5) -- build a grounded playbook
+    # from the session's recorded action trace instead of hand-authoring. The
+    # build prompt mandates calling this FIRST; without it in the registry the
+    # tool is never advertised/dispatchable and the agent silently falls back
+    # to hand-authoring (losing trace grounding + staged-action coverage).
+    "build_playbook_from_trace",
+    # E6: declare a typed plan, code compiles+verifies the YAML.
+    "compose_playbook",
+    # "find_step_recipe",  # hidden -- recipes corpus not populated yet; revisit later
+    # Widget card emitters -- drive the chat UI's awaiting_* halts.
+    # Phase 1 consolidation: one emitter over the seven card tools. The
+    # specialized names below stay registered during the migration.
+    "emit_card",
+    "emit_choice_card",
+    "emit_action_card",
+    "emit_manual_input",
+    "emit_capability_gap_card",
+    "emit_playbook_offer",
+    # Enhance mode's terminal action -- applies a verified edit to the OPEN
+    # playbook. Its sibling emit_playbook_offer CREATES; this one UPDATES.
+    # Without it in the registry the enhance path has no write channel at all,
+    # and the model falls back to printing YAML at the analyst -- which is how
+    # edits silently failed to land in live sessions.
+    "emit_enhancement_offer",
+    # Phase 1.1 -- HTTP fallback authoring helper.
+    "propose_http_fallback",
+    # Phase 1.2 -- live triage (read-only FSR).
+    # NOC / FortiManager + FortiAnalyzer device diagnostics (read-only).
+    # Tier 1+ -- gated by the dispatch wrapper below. See `TOOL_TIERS`.
+    "run_op",
+    "step_through_playbook",
+    "dry_run_playbook",
+    "diagnose_yaml_against_pb_execution",
+    # Phase 1.3 -- side-effecting execution (tier-dynamic).
+    "push_playbook",
+    "run_playbook",
+    # Connector & playbook-run discovery -- shared with the SOC triage path.
+    # RECONCILIATION_PLAN: connector-awareness is authoring (knowing what
+    # connectors are installed/configured/running + what actions a step can
+    # call), NOT alert investigation, so it lives in the library. Tier 1.
+    "get_run_env",
+    "list_configured_connectors",
+    "list_playbook_runs",
+    "find_containment_actions",
+    "find_enrichment_actions",
+    # The inward-facing sibling of those two: how to write a finding back onto
+    # the FortiSOAR record (comment / update a field / create a record).
+    # Discovery only -- tier 1, read-only, and every action it returns is
+    # tier 3+ and still has to be staged through emit_action_card.
+    "find_record_actions",
+    # Troubleshooting orchestrator (S5). Given a playbook name/uuid it already
+    # holds (the designer entity block carries the open playbook's identity),
+    # this chains list_recent_failed_runs → get_run_env →
+    # diagnose_yaml_against_pb_execution in one call -- the build slice already
+    # has the last link but NO way to discover which run failed, so without
+    # this a "why did my run fail?" turn dead-ends the same way S2 did with no
+    # read channel. Read-only (renders jinja against a past run's vars); tier 1.
+    "why_did_playbook_fail",
+    # Record reads and the per-product hunt tools (tools_triage / tools_noc /
+    # tools_edr), plus the per-axis helpers they replaced (retired: dispatchable,
+    # never advertised). Triage-only, tier 1. Which connector backs a hunt
+    # family, and the record a conversation is on, come from the host through
+    # `_shared` hooks.
+    *HUNT_TOOLS,
+    *HUNT_RETIRED_TO_UNION,
+    # Record writes (tools_records). Tier 3, approval-carded, triage-only; the
+    # host's write policy decides which modules (none set: every write refused).
+    *RECORD_WRITE_TOOLS,
+    # Resume a paused run / list a module's runnable playbooks
+    # (tools_playbook_run, beside run_playbook). Tier 1.
+    *PLAYBOOK_RUN_COMPANIONS,
+]
+
+
+# --- Tier model (see docs/plans/HITL_GUARDRAILS_PLAN.md) -------------------
+#
+# Static per-tool defaults. `run_op` is overridden at call time by
+# `_resolve_tier` because its tier depends on the (connector, op) being
+# called.
+
+TOOL_TIERS: dict[str, int] = {
+    # Tier 0 -- pure local compute.
+    # `find` kind=action consults configured-connector state (a tier-1-style
+    # read at most); discovery never mutates, so tier 1 like its constituents.
+    "find": 1,
+    "find_connector": 0,
+    "find_operation": 0,
+    "get_op_schema": 0,
+    "get_step_type": 0,
+    "compose_playbook": 0,
+    "plan_playbook": 0,
+    "find_step_examples": 0,
+    "find_jinja_filter": 0,
+    "find_jinja_pattern": 0,
+    "get_filter_examples": 0,
+    "search_playbooks": 0,
+    "picklist": 0,
+    "list_picklists": 0,
+    "picklist_for_field": 0,
+    "resolve_picklist_value": 0,
+    # Tier 1 -- read-only FSR API.
+    "verify_playbook": 1,
+    "verify_enhancement": 1,
+    # Applies ops to the grounded open playbook in memory; no FSR write.
+    "edit_playbook": 1,
+    # Tier 0 -- pure local YAML render from a structured payload.
+    "emit_decision_step": 0,
+    "healthcheck_connector": 1,
+    "connector_health": 1,
+    "diagnose_yaml_against_pb_execution": 1,
+    # Phase 0 -- pure local compute (no FSR I/O).
+    "validate_yaml": 0,
+    "compile_yaml": 0,
+    "analyze_playbook": 0,
+    # Local compile from the recorded trace (offline by default; the push is a
+    # separate, tier-gated tool). Pure authoring → tier 0.
+    "build_playbook_from_trace": 0,
+    # "find_step_recipe": 0,  # hidden -- see SAFE_TOOLS
+    # Tier 0 like its constituents: emitting a card is pure local shaping; the
+    # card itself (and, for the write frontier, the read-only-turn refusal in
+    # dispatch) is the gate.
+    "emit_card": 0,
+    "emit_choice_card": 0,
+    "emit_action_card": 0,
+    "emit_manual_input": 0,
+    "emit_capability_gap_card": 0,
+    "emit_playbook_offer": 0,
+    # Tier 0: emitting the card only shapes local text. The WRITE happens on
+    # the analyst's accept, in the connector, through update_playbook's
+    # snapshot-then-PUT -- a human gate, not an agent one.
+    "emit_enhancement_offer": 0,
+    "propose_http_fallback": 0,
+    # Phase 1.2 -- read-only FSR API.
+    # Tier-dynamic. Resolved per call.
+    "run_op": -1,
+    "step_through_playbook": -1,
+    "dry_run_playbook": -1,
+    "push_playbook": -1,
+    "run_playbook": -1,
+    # Connector & playbook-run discovery -- read-only, auto-confirm.
+    "get_run_env": 1,
+    "list_configured_connectors": 1,
+    "list_playbook_runs": 1,
+    "find_containment_actions": 1,
+    "find_enrichment_actions": 1,
+    "find_record_actions": 1,
+    # Read-only troubleshooting chain (reads run env + renders jinja; no write).
+    "why_did_playbook_fail": 1,
+    # Record reads + hunt tools: read-only, auto-confirm.
+    **{name: 1 for name in (*HUNT_TOOLS, *HUNT_RETIRED_TO_UNION)},
+    # Record writes: approval-carded.
+    **{name: 3 for name in RECORD_WRITE_TOOLS},
+    # Resuming a run the analyst already authorized feeds their in-chat
+    # choice, so it is not separately carded; listing is a read.
+    **{name: 1 for name in PLAYBOOK_RUN_COMPANIONS},
+}
+
+# Op-name / category classifiers used as fallback when op_safety has no
+# row for a given (connector, op). Mirrors the heuristics from
+# `probe_op_safety` so the wrapper degrades gracefully on fresh DBs.
+_REMEDIATION_CATEGORIES = {"remediation", "containment"}
+_MANAGEMENT_CATEGORIES = {"management"}
+_SAFE_CATEGORIES = {"investigation", "query", "utilities", "enrichment", "verification"}
+
+# Keys whose values are masked to `***` in any human-facing preview / audit
+# surface (S4). Covers common credential-field spellings so a tool that names
+# its secret `passwd` / `client_credential` / `private_key` doesn't leak it into
+# an approval card. `secret` also catches `client_secret`; `api[_-]?key` catches
+# `apikey`/`api-key`; `key` is scoped to *_key / private/access/session variants
+# rather than matching every field containing "key".
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?i)("
+    r"passw(or)?d|passwd|pwd"
+    r"|token"
+    r"|api[_-]?key"
+    r"|secret"
+    r"|authorization|bearer"
+    r"|credential"
+    r"|(private|access|session|secret|signing)[_-]?key"
+    r")"
+)
+
+
+_DB_PATH = default_db_path()
+
+
+def _lookup_op_metadata(connector: str, op: str) -> tuple[str | None, str | None]:
+    """Return (safety, category) for a given op, or (None, None) if unknown.
+
+    Safety is from `op_safety.safety` ('safe' | 'unsafe' | 'unknown') when
+    present, else None. Category is from `operations.category`.
+    """
+    if not connector or not op or not _DB_PATH.exists():
+        return None, None
+    try:
+        con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            cur = con.cursor()
+            safety: str | None = None
+            try:
+                row = cur.execute(
+                    "SELECT safety FROM op_safety WHERE connector_name=? AND op_name=?",
+                    (connector, op),
+                ).fetchone()
+                if row:
+                    safety = (row[0] or "").strip().lower() or None
+            except sqlite3.OperationalError:
+                pass  # op_safety not probed yet
+            row = cur.execute(
+                "SELECT category FROM operations WHERE connector_name=? AND op_name=?",
+                (connector, op),
+            ).fetchone()
+            category = (row[0] or "").strip().lower() if row and row[0] else None
+            return safety, category
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None, None
+
+
+def _op_presence(connector: str, op: str) -> tuple[bool, bool]:
+    """Return (op_exists, connector_known) from the reference catalog.
+
+    op_exists       -- there is an `operations` row for (connector, op).
+    connector_known -- the catalog has at least one op for `connector`.
+
+    A guessed / mistyped op on a connector we *do* have a catalog for is
+    ``(False, True)``: it cannot execute (it doesn't exist), so the tier gate
+    should let it dispatch to a self-correcting ``unknown_operation`` error
+    rather than escalate it to human approval. Best-effort: any DB problem
+    returns ``(False, False)`` so the caller stays conservative (escalates).
+    """
+    if not connector or not op or not _DB_PATH.exists():
+        return False, False
+    try:
+        con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            cur = con.cursor()
+            op_row = cur.execute(
+                "SELECT 1 FROM operations WHERE connector_name=? AND op_name=? LIMIT 1",
+                (connector, op),
+            ).fetchone()
+            conn_row = cur.execute(
+                "SELECT 1 FROM operations WHERE connector_name=? LIMIT 1",
+                (connector,),
+            ).fetchone()
+            return bool(op_row), bool(conn_row)
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False, False
+
+
+# ── Pre-card validators ──────────────────────────────────────────────────────
+# A tier-3+ call is normally suspended into an approval card WITHOUT the tool
+# body ever running -- so an argument that cannot possibly work (a connector that
+# exists nowhere, a playbook name the model invented) reaches the analyst as a
+# card that *looks* legitimate and can only fail after approval. A pre-card
+# validator gets the args just before the envelope is built and may return an
+# error dict to short-circuit: the model sees an actionable, self-correctable
+# result instead, and no human is asked to approve a no-op.
+#
+# Contract: ``fn(args: dict) -> dict | None``. Return ``None`` to fall through to
+# normal carding. MUST be fail-open -- any uncertainty (transport blip, missing
+# catalog) returns ``None``, because refusing a legitimate action is worse than
+# carding a doomed one. Registered out-of-tree by the connector, which owns the
+# live clients these checks need (see `fsr_soc_triage.registry`).
+_PRECARD_VALIDATORS: dict[str, Any] = {}
+
+
+def set_precard_validator(tool_name: str, fn: Any) -> None:
+    """Register (or replace) the pre-card validator for ``tool_name``."""
+    _PRECARD_VALIDATORS[tool_name] = fn
+
+
+def _precard_error(name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    """Run ``name``'s pre-card validator, if any. Never raises -- a validator
+    that blows up must not take the dispatch down with it (it would turn a
+    runnable action into a hard error), so it degrades to normal carding."""
+    fn = _PRECARD_VALIDATORS.get(name)
+    if fn is None:
+        return None
+    try:
+        out = fn(dict(args or {}))
+    except Exception:  # noqa: BLE001 -- fail-open: fall through to the card.
+        logging.getLogger(__name__).debug(
+            "pre-card validator for '%s' raised; falling through to card", name,
+            exc_info=True)
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def _run_op_precard(args: dict[str, Any]) -> dict[str, Any] | None:
+    """Built-in pre-card validator for ``run_op`` (the original of this class)."""
+    return _run_op_absent_connector_error(
+        (args or {}).get("connector") or "", (args or {}).get("op") or "")
+
+
+def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | None:
+    """Clean `unknown_connector` bounce for a `run_op` whose connector isn't real.
+
+    The chat `dispatch`, for an uncatalogued connector, would escalate to a
+    tier-3 **approval card** the model can't act on -- so the store-presence
+    check inside ``mcp_server.tools_execution.run_op`` (which returns the
+    actionable ``unknown_connector`` error the dedicated ``siem_*/faz_*``
+    wrappers already surface) never runs. Live on 8.0: an alert hunt with no
+    SIEM configured fabricated ``run_op("fortinet-fortisiem","siem_search_host")``
+    and parked on a card instead of self-correcting.
+
+    Mirror ``tools_execution.run_op``'s resolution: look the connector up in the
+    store ``connectors`` table; if absent, confirm it truly doesn't exist (a
+    connector installed after the last warmup is absent from the catalog but
+    present on the box -- ``stale_catalog_hint`` returns a re-warmup hint, and we
+    keep the conservative path there). Only a connector that exists NOWHERE
+    yields the bounce -- and one that can't be reached can't execute anything, so
+    an error is strictly safer than a card. Returns the error dict to
+    short-circuit, or ``None`` to fall through to normal tiering.
+    """
+    if not connector or not _DB_PATH.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            row = con.execute(
+                "SELECT 1 FROM connectors WHERE name=? LIMIT 1", (connector,)
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None  # DB trouble → stay conservative (normal tiering)
+    if row is not None:
+        return None  # connector is catalogued → let normal tiering decide
+    # Absent from the catalog. Ask the box before declaring it nonexistent.
+    try:
+        from ..mcp_server import _shared
+        stale = _shared.stale_catalog_hint(connector)
+    except Exception:  # noqa: BLE001 -- never harden a tier lookup into a crash
+        stale = None
+    if stale is not None:
+        return None  # installed-after-warmup; keep the conservative path
+    return {
+        "ok": False,
+        "code": "unknown_connector",
+        "connector": connector,
+        "message": f"connector '{connector}' not found in store",
+        "suggestions": [
+            "Run `find_connector` to search the catalog for the right name.",
+            "Only connectors from `list_configured_connectors` can run -- pivot "
+            "to a configured one, or consolidate what you already have.",
+        ],
+    }
+
+
+# The one built-in validator. Connector-owned tools register their own.
+set_precard_validator("run_op", _run_op_precard)
+# Record writes: the host's write gate plus the field checks, before the card.
+for _name in RECORD_WRITE_TOOLS:
+    set_precard_validator(_name, mcp_server.tools_records.precard_validate)
+# run_playbook: an unknown / deactivated playbook, or an invented record, is
+# refused before the approval card.
+set_precard_validator("run_playbook", mcp_server.tools_playbook_run.precard_validate)
+
+
+def _op_name_is_destructive(op: str) -> bool:
+    """True when an op NAME alone marks it as a containment/response action.
+
+    Reuses the exact verb + non-action-prefix lists
+    `find_containment_actions` classifies with, so discovery and the approval
+    gate can never disagree about what counts as containment. Imported lazily:
+    `tools_connector_discovery` lives under `mcp_server`, which this module
+    imports at load time.
+    """
+    nm = (op or "").lower()
+    if not nm:
+        return False
+    try:
+        from ..mcp_server.tools_connector_discovery import (
+            _CONTAINMENT_VERBS,
+            _NON_ACTION_PREFIXES,
+        )
+    except Exception:  # noqa: BLE001 -- never harden a tier lookup into a crash
+        return False
+    if nm.startswith(_NON_ACTION_PREFIXES):
+        return False
+    return any(v in nm for v in _CONTAINMENT_VERBS)
+
+
+def _tier_for_run_op(args: dict[str, Any]) -> int:
+    """Resolve effective tier for a `run_op` call from op_safety + category.
+
+    Tier 4 -- third-party side effect (remediation / containment).
+    Tier 3 -- FSR data mutation (management).
+    Tier 2 -- read-only external (third-party query: safe + non-FSR connector).
+    Tier 1 -- read-only FSR or safely-classified op.
+    Unknowns escalate: default to tier 3 (always prompt).
+    """
+    connector = (args or {}).get("connector") or ""
+    op = (args or {}).get("op") or ""
+    safety, category = _lookup_op_metadata(connector, op)
+    if category in _REMEDIATION_CATEGORIES:
+        return 4
+    if category in _MANAGEMENT_CATEGORIES:
+        return 3
+    if safety == "unsafe":
+        # A probe-flagged destructive op MUST win over the catch-all
+        # `investigation` category below. FortiEDR's `isolate_collector` /
+        # `set_collector_state` are categorized `investigation` in the catalog
+        # but are real host-containment actions (op_safety='unsafe'). Without
+        # this ordering they auto-allow at tier 2 (no approval card) AND get
+        # dropped from find_containment_actions' tier>=3 guard -- so "isolate
+        # this host" would execute ungated and the proper op wouldn't surface.
+        return 4
+    if _op_name_is_destructive(op):
+        # The op_safety probe is the PRIMARY signal above, but it is not always
+        # populated -- on a live 8.0 box only 391 of 466 catalogued ops carried a
+        # safety verdict, and FortiEDR's `isolate_collector` was among the gaps.
+        # Category `investigation` then won and the op resolved to tier 2:
+        # `run_op` would have ISOLATED A HOST with no approval card, and
+        # find_containment_actions dropped it from the tier>=3 slice, so
+        # "isolate that host" was answered with `remediate_device` (Kill
+        # Process) instead. The op NAME carries the same information the probe
+        # was supposed to supply, so use it as the fail-safe.
+        return 4
+    if safety == "safe" or category in _SAFE_CATEGORIES:
+        # Third-party query → tier 2; FSR-internal query → tier 1.
+        # We don't have a reliable "is FSR-internal" flag; treat all
+        # external reads as tier 2 (auto-allow + log).
+        return 2
+    # Unknown / unclassified. Before escalating to approval, separate a
+    # guessed/mistyped op from a real-but-unclassified one. If the connector's
+    # catalog is known to us but this op isn't in it, the op cannot run -- it
+    # doesn't exist. Gating a non-existent op for human approval just halts the
+    # hunt and hides the `unknown_operation` error (with the real op names) that
+    # lets the agent self-correct. Let it dispatch (tier 1) so run_op bounces
+    # back the correction. A connector we have NO catalog for stays conservative
+    # (tier 3) -- it could carry a real mutating op we simply haven't probed.
+    op_exists, connector_known = _op_presence(connector, op)
+    if connector_known and not op_exists:
+        return 1
+    return 3  # unknown / unclassified → require approval
+
+
+def _tier_for_simulator(args: dict[str, Any]) -> int:
+    """`step_through_playbook` / `dry_run_playbook` inherit tier from
+    whether they're authorized to execute unsafe ops. With the default
+    `execute_unsafe_ops=False` they're tier 1; flipping it to True
+    escalates to tier 3 (per-step approval handled in Phase 5)."""
+    if args and args.get("execute_unsafe_ops"):
+        return 3
+    return 1
+
+
+# A host (the connector) can lower `run_playbook` from the default tier-3
+# approval card to tier-2 auto-run for playbooks it has explicitly designated
+# safe -- e.g. a persona whose `run_playbook.auto` allowlist names a read-only
+# validation playbook. The framework can't see connector-owned persona state, so
+# it consults this optional resolver: `fn(args) -> bool`, True ⇒ auto-run (tier
+# 2). Absent/raises/False ⇒ the safe default (tier 3, carded). Registered via
+# `set_run_playbook_auto_resolver`.
+_RUN_PLAYBOOK_AUTO_RESOLVER: Callable[[dict], bool] | None = None
+
+
+def set_run_playbook_auto_resolver(fn: Callable[[dict], bool] | None) -> None:
+    """Install (or clear with ``None``) the run_playbook auto-run resolver."""
+    global _RUN_PLAYBOOK_AUTO_RESOLVER
+    _RUN_PLAYBOOK_AUTO_RESOLVER = fn
+
+
+# ── Read-only turns and the write frontier ───────────────────────────────────
+#
+# A read-only turn (explain / find_issues chip): the write frontier is REFUSED
+# at dispatch, not just hidden from the tool list.  The advertised-list gate
+# (`_READ_ONLY_DROP_TOOLS` in the connector) is not enough -- a model that
+# hallucinates a call to `emit_enhancement_offer` reaches dispatch anyway,
+# and would card the analyst on an explain turn.  That card IS the "tier-3
+# offer" -- if approved, the enhancement runs and can delete the open playbook's
+# steps (tracker #117).  Refusing at dispatch returns a clean error the model
+# can narrate, not a card the analyst must dismiss.
+#
+# Default False (fail-open): a host that never calls `set_read_only_turn`
+# behaves exactly as before.
+# Held on SessionState (llm.session_state) as `read_only`.
+
+# Gating an edit to an EXISTING playbook, or delivering one. Kept deliberately
+# tight:
+#
+#   * not the analysis tools -- noticing a defect while explaining is the good
+#     part, and the model should still say so in prose;
+#   * not `compile_yaml` / `verify_playbook` / `build_playbook_from_trace` --
+#     those are the NEW-playbook authoring path. Authoring a playbook the
+#     analyst doesn't have yet changes nothing of theirs, and gating it would
+#     put a card in front of the ordinary build flow. Hosts scope this gate to
+#     turns with an open playbook for the same reason.
+#
+# `push_playbook` is already tier 3 unconditionally; listed for intent.
+WRITE_FRONTIER_TOOLS = frozenset({
+    "verify_enhancement", "edit_playbook",
+    "emit_enhancement_offer", "emit_playbook_offer", "push_playbook",
+})
+
+# What a read-only turn (an explain / find-issues chip, or a scheduled task
+# that may not mutate) withholds: the playbook write frontier, plus the
+# authoring, run and record-write tools. The host's advertised list and the
+# dispatch refusal both read this set (via `turn_refusal`); they used to be two
+# lists, and eight of these names were hidden from the model on a read-only
+# turn but still accepted by dispatch if it called them anyway.
+READ_ONLY_WITHHELD_TOOLS = WRITE_FRONTIER_TOOLS | frozenset({
+    "compile_yaml", "verify_playbook", "build_playbook_from_trace",
+    "run_playbook", "resume_playbook",
+    "create_record", "update_record", "delete_record",
+})
+
+# The consolidated `emit_card` routes to the specialized emitters by
+# `card_type`, so a name-keyed frontier check alone would let
+# emit_card(card_type='enhancement_offer', ...) sail through a read-only turn
+# that refuses emit_enhancement_offer outright -- the exact #117 shape, one
+# indirection deeper. These are the card_types whose constituents are in
+# WRITE_FRONTIER_TOOLS.
+_FRONTIER_CARD_TYPES = frozenset({
+    "enhancement_offer", "playbook_offer",
+})
+
+
+def _is_write_frontier(name: str, args: dict[str, Any]) -> bool:
+    """Frontier membership for the read-only-turn refusal: the tool NAME, or
+    `emit_card` carrying a frontier card_type."""
+    if name in READ_ONLY_WITHHELD_TOOLS:
+        return True
+    if name != "emit_card":
+        return False
+    ct = str((args or {}).get("card_type") or "").strip().lower()
+    return ct in _FRONTIER_CARD_TYPES
+
+
+def set_read_only_turn(read_only: bool) -> Any:
+    """Declare whether THIS turn is read-only (explain / find_issues chip).
+
+    Returns a token for ``reset_read_only_turn``.  A ContextVar because the
+    turn runs on its own thread/task."""
+    from . import session_state
+    return session_state.update(read_only=bool(read_only))
+
+
+def reset_read_only_turn(token: Any) -> None:
+    """Undo ``set_read_only_turn``. Never raises: an unusable token fails open."""
+    from . import session_state
+    session_state.reset_or(token, read_only=False)
+
+
+def _is_read_only_turn() -> bool:
+    from . import session_state
+    return bool(session_state.current().read_only)
+
+
+def _resolve_tier(name: str, args: dict[str, Any]) -> int:
+    static = TOOL_TIERS.get(name, 0)
+    if static >= 0:
+        return static
+    if name == "run_op":
+        return _tier_for_run_op(args or {})
+    if name in ("step_through_playbook", "dry_run_playbook"):
+        return _tier_for_simulator(args or {})
+    if name == "push_playbook":
+        return 3  # writes to FSR -- always require approval
+    if name == "run_playbook":
+        # Default: triggers live execution → tier 3 (approval card). A host may
+        # designate specific playbooks auto-runnable (persona `run_playbook.auto`)
+        # via the resolver; those drop to tier 2 (no card). Fail-safe on any error.
+        try:
+            if _RUN_PLAYBOOK_AUTO_RESOLVER and _RUN_PLAYBOOK_AUTO_RESOLVER(args or {}):
+                return 2
+        except Exception:  # noqa: BLE001 -- resolver must never harden into a crash.
+            pass
+        return 3
+    return 0
+
+
+# Approval previews are for human display in the widget, which renders them as
+# JSON.stringify(preview.args). Unbounded values (e.g. push_playbook's full
+# `yaml_text`, or a 60-IOC list) produce a multi-KB wall of text that makes the
+# approval popup unusable. Cap individual strings and list lengths so the
+# preview stays a readable summary, never the whole payload.
+_PREVIEW_MAX_STR = 600
+_PREVIEW_MAX_LIST = 50
+
+
+def _mask_value(v: Any) -> Any:
+    if isinstance(v, dict):
+        return {k: ("***" if _SENSITIVE_KEY_RE.search(k) else _mask_value(val)) for k, val in v.items()}
+    if isinstance(v, list):
+        return [_mask_value(x) for x in v]
+    return v
+
+
+def _truncate_value(v: Any) -> Any:
+    """Bound a (already-masked) preview value to a human-readable size."""
+    if isinstance(v, str):
+        if len(v) > _PREVIEW_MAX_STR:
+            return v[:_PREVIEW_MAX_STR] + f"… [+{len(v) - _PREVIEW_MAX_STR} chars truncated]"
+        return v
+    if isinstance(v, dict):
+        return {k: _truncate_value(val) for k, val in v.items()}
+    if isinstance(v, list):
+        capped = [_truncate_value(x) for x in v[:_PREVIEW_MAX_LIST]]
+        if len(v) > _PREVIEW_MAX_LIST:
+            capped.append(f"… [+{len(v) - _PREVIEW_MAX_LIST} more items truncated]")
+        return capped
+    return v
+
+
+def _build_preview(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    masked = _truncate_value(_mask_value(args or {}))
+    return {"tool": name, "args": masked}
+
+
+# The argument that names the SUBJECT of a call, per tool. Ordered: the first
+# key present wins. Deliberately small and explicit -- a generic "first string
+# arg" heuristic picks up ids and flags and reads worse than no summary at all.
+_APPROVAL_SUBJECT_KEYS: dict[str, tuple[str, ...]] = {
+    "run_playbook": ("playbook", "playbook_uuid"),
+    "resume_playbook": ("run_pk", "playbook"),
+    "run_op": ("op", "operation"),
+}
+_APPROVAL_VERB: dict[str, str] = {
+    "run_playbook": "Run playbook",
+    "resume_playbook": "Resume playbook run",
+}
+
+
+def _default_approval_summary(name: str, args: dict[str, Any]) -> str | None:
+    """A plain-language line for an approval card whose caller supplied no
+    `_summary`. Returns None when nothing readable can be derived -- a bad
+    summary is worse than none, because the host renders it as the card's
+    subject.
+
+    `run_op` is excluded on purpose: its host card already heads with
+    `connector.operation`, so a derived line would just repeat it.
+    """
+    if not isinstance(args, dict) or name == "run_op":
+        return None
+    subject = ""
+    for key in _APPROVAL_SUBJECT_KEYS.get(name, ()):
+        val = args.get(key)
+        if isinstance(val, (str, int)) and str(val).strip():
+            subject = str(val).strip()
+            break
+    if not subject:
+        return None
+    verb = _APPROVAL_VERB.get(name)
+    return f"{verb}: {subject}" if verb else f"{name}: {subject}"
+
+
+# Tier policy, grants, the eval policy and the audit log live in
+# `authorization`; re-exported here for existing callers.
+from .authorization import (  # noqa: E402,F401
+    AUDIT_LOG,
+    HUMAN,
+    _approval_floor,
+    _args_hash,
+    authorize,
+    clear_audit_log,
+    clear_session_grants,
+    grant_tool_approval,
+    needs_approval,
+    set_eval_policy,
+    set_readonly_auto_approve,
+    snapshot_audit_log,
+)
+from .authorization import record_audit as _record_audit  # noqa: E402,F401
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    fn: Callable[..., Any]
+    tier: int = 0
+    confirm_mode: str = "auto"  # auto | log | approve | step_up
+
+
+# `types.UnionType` is the runtime type of `X | Y`; it does not exist on the
+# 3.9 SOAR runtime, where such an annotation can only ever arrive as a string
+# (resolved by `_eval_annotation` into a `typing.Union`). Sentinel object, not
+# None, so the identity check below can never accidentally match.
+_UNION_TYPE = getattr(__import__("types"), "UnionType", object())
+
+
+def _union_to_json(members: list[Any]) -> dict[str, Any]:
+    """A union of distinct types as one JSON type list: `dict | list` is
+    `{"type": ["object", "array"]}`. These used to be advertised with no type
+    at all, so the arg gate passed anything and the type check lived in a
+    second, pydantic copy of the signature. `items` is kept from the one array
+    member when there is one. A member with no JSON form (Any, an unknown
+    class) leaves the whole union loose, as before."""
+    types: list[str] = []
+    items: Any = None
+    arrays = 0
+    for m in members:
+        sch = _py_type_to_json(m)
+        t = sch.get("type")
+        if not isinstance(t, str):
+            return {}
+        if t not in types:
+            types.append(t)
+        if t == "array":
+            arrays += 1
+            items = sch.get("items")
+    out: dict[str, Any] = {"type": types}
+    if arrays == 1 and items:
+        out["items"] = items
+    return out
+
+
+def _py_type_to_json(tp: Any) -> dict[str, Any]:
+    """Map a Python annotation to a minimal JSON Schema fragment."""
+    if tp is inspect.Parameter.empty or tp is Any:
+        return {}
+    origin = get_origin(tp)
+    args = get_args(tp)
+
+    # `typing.Optional[str]` and the PEP 604 `str | None` are the same type to
+    # a reader but NOT to `get_origin`: the latter yields `types.UnionType`
+    # (3.10+), which this branch used to miss entirely -- so every `X | None`
+    # parameter fell through and was advertised to the model with no type.
+    if origin is typing.Literal:
+        # The allowed values ARE the contract: `by: Literal["ip", "host"]`
+        # advertised as a bare string let `by="id"` through to the body.
+        kinds = {type(a) for a in args}
+        jt = {str: "string", int: "integer", bool: "boolean"}.get(
+            kinds.pop()) if len(kinds) == 1 else None
+        return {"type": jt, "enum": list(args)} if jt else {"enum": list(args)}
+    if origin is typing.Union or origin is _UNION_TYPE or (origin is None and args):
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return _py_type_to_json(non_none[0])
+        return _union_to_json(non_none)
+    # JSON has no set/tuple: both cross the wire as an array, and the tool's
+    # own signature converts on the way in. Omitting them advertised
+    # `set[str]` parameters with no type at all.
+    if origin in (list, list, set, set, frozenset, tuple, tuple):
+        inner = args[0] if args else Any
+        return {"type": "array", "items": _py_type_to_json(inner) or {}}
+    if origin in (dict, dict):
+        return {"type": "object"}
+    if tp is str:
+        return {"type": "string"}
+    if tp is int:
+        return {"type": "integer"}
+    if tp is float:
+        return {"type": "number"}
+    if tp is bool:
+        return {"type": "boolean"}
+    if tp in (list, set, frozenset, tuple):
+        return {"type": "array"}
+    if tp is dict:
+        return {"type": "object"}
+    return {}
+
+
+# Hand-written input_schema overrides for tools whose shape is too nested
+# for the auto-from-signature builder. Anthropic enforces these on the
+# wire, so e.g. emit_decision_step physically cannot receive a condition
+# missing `when:` or a default_branch without `next:`. Keep these in
+# sync with the runtime checks inside the tool itself -- the override is
+# the wire contract; the runtime check covers non-LLM callers.
+TOOL_SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
+    # Item shape advertised so the FIRST call is right. Live (effect probes
+    # A5/A6): with `operations: list[object]` models spelled the op key
+    # `action` and `type` (3 of 5 first calls refused as "unknown op None").
+    # Mirrors tools_enhancement._OP_SHAPES / the edit_playbook docstring.
+    "edit_playbook": {
+        "type": "object",
+        "required": ["operations"],
+        "properties": {
+            "operations": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Applied in order, all or nothing.",
+                "items": {
+                    "type": "object",
+                    "required": ["op"],
+                    "properties": {
+                        "op": {"type": "string",
+                               "enum": ["add_step", "update_step", "rename_step",
+                                        "remove_step", "set_route", "remove_route",
+                                        "add_parameter", "remove_parameter", "add_playbook"]},
+                        "name": {"type": "string",
+                                 "description": "The step this op acts on "
+                                                "(update/rename/remove); "
+                                                "add_parameter: the parameter; "
+                                                "add_playbook: the new playbook."},
+                        "steps": {"type": "array", "items": {"type": "object"},
+                                  "description": "add_playbook: the new "
+                                                 "playbook's whole step list, "
+                                                 "trigger first."},
+                        "parameters": {"type": "array", "items": {"type": "string"},
+                                       "description": "add_playbook: its input "
+                                                      "parameters."},
+                        "step": {"type": ["object", "string"],
+                                 "description": "add_step: the new step "
+                                                "{name, type, ...step keys}. "
+                                                "Elsewhere a string is read "
+                                                "as `name`."},
+                        "after": {"type": "string",
+                                  "description": "add_step: insert after this "
+                                                 "step. Omit to add it unrouted "
+                                                 "(then set_route) -- the way to "
+                                                 "add the start step to an empty "
+                                                 "playbook."},
+                        "option": {"type": "string",
+                                   "description": "Branch label of a decision / "
+                                                  "manual_input. add_step: "
+                                                  "required when `after` has "
+                                                  "several branches; not needed "
+                                                  "when it has one. set_route / "
+                                                  "remove_route: the branch."},
+                        "set": {"type": "object",
+                                "description": "update_step: keys to set. A dotted "
+                                               "key (\"params.ip_addresses\") sets "
+                                               "one value and keeps its siblings; "
+                                               "a plain key replaces the whole value."},
+                        "unset": {"type": "array", "items": {"type": "string"}},
+                        "to": {"type": "string",
+                               "description": "rename_step: the new name; "
+                                              "set_route: the target step."},
+                        "from": {"type": "string",
+                                 "description": "set_route / remove_route: the "
+                                                "source step."},
+                        "reconnect": {"type": "boolean"},
+                    },
+                },
+            },
+            "playbook": {"type": "string",
+                         "description": "Which playbook, when the open "
+                                        "collection holds several."},
+            "user_message": {"type": "string"},
+        },
+    },
+    # The consolidated discovery tool: the wire enforces the kind vocabulary
+    # so a guessed kind fails at the schema, not as a burned turn.
+    "find": {
+        "type": "object",
+        "required": ["kind"],
+        "additionalProperties": False,
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": ["connector", "operation", "action", "example",
+                         "recipe", "api", "jinja", "playbook",
+                         "step", "jinja_block", "filter_usage", "field"],
+                "description": "Catalog to search; see the tool description "
+                               "for when each applies.",
+            },
+            "query": {"type": "string",
+                      "description": "Plain-language search terms."},
+            "connector": {"type": "string",
+                          "description": "Required for kind=operation; "
+                                         "scopes kind=example to one "
+                                         "connector's ops."},
+            "target_type": {"type": "string",
+                            "description": "kind=action: ip/host/endpoint/"
+                                           "user/url/domain/hash/file/email."},
+            "action_type": {"type": "string",
+                            "enum": ["containment", "enrichment", "record"],
+                            "description": "kind=action: restrict to one "
+                                           "family."},
+            "module": {"type": "string",
+                       "description": "kind=field: the module whose fields "
+                                      "to list; kind=action record writes: "
+                                      "target module (alerts, incidents, ...)."},
+            "limit": {"type": "integer", "default": 10, "minimum": 1,
+                      "maximum": 15},
+        },
+    },
+    # The consolidated card emitter: the wire enforces the card_type
+    # vocabulary; the payload's per-type contract is enforced at runtime by
+    # the specialized emitter it routes to (whose overrides below remain the
+    # per-card wire contracts during the migration).
+    "emit_card": {
+        "type": "object",
+        "required": ["card_type", "payload"],
+        "additionalProperties": False,
+        "properties": {
+            "card_type": {
+                "type": "string",
+                "enum": ["choice", "action", "manual_input", "capability_gap",
+                         "playbook_offer", "enhancement_offer", "verdict"],
+                "description": "Which card to render; see the tool "
+                               "description for when each applies.",
+            },
+            "payload": {
+                "type": "object",
+                "description": "The chosen card's fields -- identical to the "
+                               "matching emit_<card_type> tool's "
+                               "arguments (e.g. choice: id, prompt, options).",
+            },
+        },
+    },
+    "emit_choice_card": {
+        "type": "object",
+        "required": ["id", "prompt", "options"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1,
+                   "description": "Stable choice id; echoed on resume."},
+            "prompt": {"type": "string", "minLength": 1},
+            "multi": {"type": "boolean", "default": False},
+            "min_select": {"type": "integer", "minimum": 0, "default": 1},
+            "max_select": {"type": ["integer", "null"], "default": None},
+            "allow_text": {"type": "boolean", "default": False,
+                           "description": "Also accept a typed free-text "
+                                          "answer besides the options."},
+            "options": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1},
+                        "value": {"type": "string", "minLength": 1,
+                                  "description": "Machine-readable; echoed back on resume."},
+                        "hint": {"type": "string"},
+                    },
+                },
+            },
+        },
+    },
+    "emit_capability_gap_card": {
+        "type": "object",
+        "required": ["id", "missing", "why", "fix_steps", "resume"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1,
+                   "description": "Stable card id; echoed on resume."},
+            "missing": {"type": "string", "minLength": 1,
+                        "description": "Capability the investigation needs, "
+                                       "in plain English (e.g. 'IP containment')."},
+            "why": {"type": "string", "minLength": 1,
+                    "description": "One line on why it's unavailable here."},
+            "fix_steps": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Ordered concrete steps to enable the capability.",
+                "items": {"type": "string", "minLength": 1},
+            },
+            "resume": {
+                "type": "object",
+                "required": ["label", "value"],
+                "additionalProperties": False,
+                "description": "Re-check button. On click the widget resumes "
+                               "the turn echoing `value`; the agent re-runs the "
+                               "blocked discovery and continues.",
+                "properties": {
+                    "label": {"type": "string", "minLength": 1},
+                    "value": {"type": "string", "minLength": 1,
+                              "description": "Machine-readable; echoed on resume."},
+                },
+            },
+            "tips": {
+                "type": "array",
+                "description": "Automation/UX recommendations.",
+                "items": {
+                    "type": "object",
+                    "required": ["text"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1},
+                        "hint": {"type": "string"},
+                    },
+                },
+            },
+            "alternatives": {
+                "type": "array",
+                "description": "Manual fallbacks (resume semantics like a "
+                               "choice_card option).",
+                "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1},
+                        "value": {"type": "string", "minLength": 1},
+                        "hint": {"type": "string"},
+                    },
+                },
+            },
+            "docs_url": {"type": "string"},
+        },
+    },
+    "emit_action_card": {
+        "type": "object",
+        "required": ["id", "connector", "operation", "summary",
+                     "args", "editable_fields"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "connector": {"type": "string", "minLength": 1,
+                          "description": "Connector name (e.g. fortinet-fortigate)."},
+            "operation": {"type": "string", "minLength": 1},
+            "summary": {"type": "string", "minLength": 1,
+                        "description": "One-line plain-English summary of what will run."},
+            "args": {"type": "object",
+                     "description": "Operation arguments; widget shows them."},
+            "editable_fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Args keys the user is allowed to edit before confirm.",
+            },
+            "requested_by": {
+                "type": "string",
+                "enum": ["analyst", "agent"],
+                "description": (
+                    "Who initiated this containment. Set `analyst` ONLY when the "
+                    "user explicitly asked for this action in their message (e.g. "
+                    "'isolate that host', 'block that IP'); set `agent` (the "
+                    "default) when YOU decided containment was warranted. An "
+                    "explicit order is not a finding you have to earn -- an "
+                    "`analyst` card stages immediately so the approver decides, "
+                    "while an `agent` card must clear the investigation floor "
+                    "first. Do not claim `analyst` to bypass the floor."
+                ),
+            },
+            "config": {
+                "type": "string",
+                "description": (
+                    "Connector configuration to run on, by name or id. Pass it "
+                    "when the analyst names one, or when only a FortiSOAR-agent "
+                    "configuration can reach the target. Omit it to use the "
+                    "default; the analyst can switch before approving."
+                ),
+            },
+        },
+    },
+    "emit_manual_input": {
+        "type": "object",
+        "required": ["id", "workflow_run_iri", "question", "fields"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "workflow_run_iri": {"type": "string", "minLength": 1,
+                                 "description": "IRI of the paused workflow run."},
+            "question": {"type": "string", "minLength": 1},
+            "fields": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["name", "label"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1},
+                        "label": {"type": "string", "minLength": 1},
+                        "default": {"type": "string"},
+                    },
+                },
+            },
+        },
+    },
+    "emit_decision_step": {
+        "type": "object",
+        "required": ["name", "conditions", "default_branch"],
+        "additionalProperties": False,
+        "properties": {
+            "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9 _]+$",
+                "description": ("Step display name. Title Case; letters, "
+                                "digits, spaces, and underscores only."),
+            },
+            "conditions": {
+                "type": "array",
+                "minItems": 1,
+                "description": ("Ordered non-default branches. Evaluated "
+                                "top-down; the default_branch is the else."),
+                "items": {
+                    "type": "object",
+                    "required": ["display", "when", "next"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "display": {"type": "string"},
+                        "when": {
+                            "type": "string",
+                            "description": ("Jinja expression returning "
+                                            "truthy/falsy. Do not wrap "
+                                            "in {{ }} -- the tool does that."),
+                        },
+                        "next": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9 _]+$",
+                            "description": "Target step name (verbatim).",
+                        },
+                    },
+                },
+            },
+            "default_branch": {
+                "type": "object",
+                "required": ["display", "next"],
+                "additionalProperties": False,
+                "description": ("The else branch. `default: true` is "
+                                "added by the tool; do NOT pass it here."),
+                "properties": {
+                    "display": {"type": "string"},
+                    "next": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9 _]+$",
+                    },
+                },
+            },
+        },
+    },
+    "emit_playbook_offer": {
+        "type": "object",
+        "required": ["id", "summary"],
+        "additionalProperties": False,
+        "properties": {
+            "id": {"type": "string", "minLength": 1,
+                   "description": "Stable card id; echoed back on accept/decline."},
+            "summary": {"type": "string", "minLength": 1,
+                        "description": "The body text the analyst reads."},
+            "title_suggestion": {"type": "string", "default": None,
+                                 "description": "Optional pre-filled playbook name."},
+            "editable_title": {"type": "boolean", "default": True},
+            "yaml": {
+                "type": "string", "default": None,
+                "description": (
+                    "DO NOT pass this in a triage session. In triage the "
+                    "draft is compiled automatically from the recorded ops "
+                    "you ran this session -- pass only id + summary. This "
+                    "field is for the build/authoring path only, where the "
+                    "agent has hand-authored validated YAML and the "
+                    "compiler has no trace to build from."
+                ),
+            },
+        },
+    },
+    "emit_verdict": {
+        "type": "object",
+        "required": ["disposition", "severity", "confidence", "summary", "findings"],
+        "additionalProperties": False,
+        "properties": {
+            "disposition": {
+                "type": "string",
+                "enum": ["true_positive", "false_positive", "benign", "suspicious", "needs_more_info"],
+                "description": (
+                    "Investigation outcome. true_positive = real malicious activity "
+                    "(e.g. traffic to an address threat intel rates malicious; doubt "
+                    "goes in confidence); suspicious = leans malicious but weak or "
+                    "conflicting evidence; false_positive = the detection was wrong; "
+                    "benign = real but harmless; needs_more_info = cannot conclude."
+                ),
+            },
+            "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low", "info"],
+                "description": "Risk level if true_positive.",
+            },
+            "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Confidence in verdict (0.0-1.0).",
+            },
+            "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600,
+                "description": "Plain-English verdict summary (≤600 chars).",
+            },
+            "findings": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Supporting evidence claims + tool_use_ids.",
+                "items": {
+                    "type": "object",
+                    "required": ["claim", "evidence"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "claim": {"type": "string", "minLength": 1,
+                                  "description": "Plain-English finding."},
+                        "evidence": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string", "minLength": 1,
+                                      "description": "evidence id, e.g. call_ab12"},
+                            "description": (
+                                "The evidence ids of the tool results that support "
+                                "this finding -- the id shown as [evidence id: ...] "
+                                "at the top of each result. Not a description."),
+                        },
+                    },
+                },
+            },
+            "unknowns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Open questions; required if confidence < 0.8.",
+            },
+            "recommended_actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["label"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1,
+                                  "description": "Action description."},
+                        "tool": {"type": "string",
+                                 "description": "Optional tool name."},
+                        "args": {"type": "object",
+                                 "description": "Optional tool arguments."},
+                    },
+                },
+                "description": "Optional next steps.",
+            },
+            "id": {
+                "type": "string",
+                "description": "Optional card id; generated if absent.",
+            },
+        },
+    },
+}
+
+
+
+def _field_brief(name: str, prop: dict[str, Any], required: bool) -> str:
+    """One payload field, as the model needs it: name, required mark, and the
+    shape it keeps getting wrong (enum values, number range, list items)."""
+    star = "*" if required else ""
+    if prop.get("enum"):
+        return f"{name}{star} ({'|'.join(str(v) for v in prop['enum'])})"
+    t = prop.get("type")
+    if t == "number" or t == "integer":
+        lo, hi = prop.get("minimum"), prop.get("maximum")
+        rng = f" {lo}-{hi}" if lo is not None and hi is not None else ""
+        return f"{name}{star} ({t}{rng})"
+    if t == "array":
+        items = prop.get("items") or {}
+        if items.get("type") == "object" and items.get("properties"):
+            req = set(items.get("required") or [])
+            inner = ", ".join(
+                _field_brief(k, v, k in req)
+                for k, v in items["properties"].items())
+            return f"{name}{star} [{{{inner}}}]"
+        # A list of strings with a meaning beyond "string": say it. The
+        # verdict's evidence read `[string]`, and the box model filled it with
+        # sentences describing the evidence -- refused on nearly every
+        # triage -- when it must hold the ids the results are labelled with.
+        it = (items.get("description") if items.get("type") == "string" else None) or items.get("type")
+        return f"{name}{star} [{it}]" if it else f"{name}{star} [..]"
+    return f"{name}{star}"
+
+
+def _card_payload_brief() -> str:
+    """The `emit_card.payload` description, generated from each card's own
+    schema in this dict -- the payload IS the constituent emitter's arguments.
+
+    The payload used to be described as "identical to the matching
+    emit_<card_type> tool's arguments", but those tools are not advertised,
+    so the model guessed: session health showed verdicts sent with
+    `title`/`details` for `claim`, confidence as "low", evidence as objects,
+    `likely_malicious` for a disposition -- each costing a refused round
+    trip. Advertising only: the emitters keep their own every-problem
+    refusals (validating here too was tried and reverted, W2).
+    """
+    routes = getattr(getattr(mcp_server, "tools_emit", None), "CARD_TYPES", {})
+    lines = []
+    for card, tool in routes.items():
+        sch = TOOL_SCHEMA_OVERRIDES.get(tool) or {}
+        props = sch.get("properties") or {}
+        req = set(sch.get("required") or [])
+        if props:
+            fields = ", ".join(_field_brief(k, v, k in req)
+                               for k, v in props.items())
+        else:
+            # No hand-written schema: the emitter's signature is the contract.
+            fn = getattr(mcp_server, tool, None)
+            if fn is None:
+                continue
+            params = inspect.signature(fn).parameters.values()
+            fields = ", ".join(
+                p.name + ("*" if p.default is inspect.Parameter.empty else "")
+                for p in params if p.kind is not p.VAR_KEYWORD)
+        lines.append(f"{card}: {fields}")
+    return ("The chosen card's fields (* = required):\n" + "\n".join(lines)
+            if lines else "The chosen card's fields.")
+
+
+TOOL_SCHEMA_OVERRIDES["emit_card"]["properties"]["payload"]["description"] = (
+    _card_payload_brief())
+
+# Record writes: `fields` is open-ended per module, so the auto-builder's bare
+# `object` is replaced with one that says how links and picklists are written.
+TOOL_SCHEMA_OVERRIDES["create_record"] = {
+    "type": "object",
+    "required": ["module", "fields"],
+    "additionalProperties": False,
+    "properties": {
+        "module": {"type": "string", "minLength": 1,
+                   "description": "Bare module name to create in (e.g. ztpf_templates)."},
+        "fields": {"type": "object", "minProperties": 1,
+                   "additionalProperties": True,
+                   "description": "field -> value for the new record. A link to "
+                                  "another record (or a picklist) is its IRI "
+                                  "string, e.g. \"/api/3/<module>/<uuid>\"; a "
+                                  "to-many link is a list of IRI strings."},
+    },
+}
+TOOL_SCHEMA_OVERRIDES["update_record"] = {
+    "type": "object",
+    "required": ["module", "uuid", "fields"],
+    "additionalProperties": False,
+    "properties": {
+        "module": {"type": "string", "minLength": 1},
+        "uuid": {"type": "string", "minLength": 1,
+                 "description": "Record UUID (not the sequential id)."},
+        "fields": {"type": "object", "minProperties": 1,
+                   "additionalProperties": True,
+                   "description": "field -> new value; omitted fields unchanged. "
+                                  "Links and picklists are IRI strings "
+                                  "(\"/api/3/<module>/<uuid>\")."},
+    },
+}
+
+# compose_playbook: the plan's step shapes. Its description is cut to two
+# sentences by the cap, so without this the model was sent `steps: array of
+# object` and learned every key from a rejected call.
+def _compose_schema() -> dict[str, Any]:
+    from ..mcp_server.tools_compose import steps_schema
+    return {
+        "type": "object",
+        "required": ["steps"],
+        "properties": {
+            "steps": steps_schema(),
+            "name": {"type": "string", "default": "New Playbook"},
+            "module": {"type": "string", "default": "",
+                       "description": "The trigger module (alerts, "
+                                      "incidents, ...)."},
+            "guard_containment": {"type": "boolean", "default": True},
+        },
+    }
+
+
+TOOL_SCHEMA_OVERRIDES["compose_playbook"] = _compose_schema()
+
+# Playbook runs: precise wire schemas (the auto-builder would emit bare
+# `object`s for `inputs`).
+TOOL_SCHEMA_OVERRIDES["run_playbook"] = {
+    "type": "object",
+    "required": ["playbook"],
+    "additionalProperties": False,
+    "properties": {
+        "playbook": {"type": "string", "minLength": 1,
+                     "description": "playbook name or uuid to trigger (from "
+                                    "list_module_playbooks or search_playbooks)."},
+        "record": {"type": "string",
+                   "description": "optional selected-record IRI passed to the "
+                                  "trigger, e.g. /api/3/ztpf_devices/<uuid>."},
+        "inputs": {"type": "object", "additionalProperties": True,
+                   "description": "optional manual-input field values."},
+        "follow": {"type": "boolean",
+                   "description": "wait for the run to finish (default true)."},
+        "timeout": {"type": "integer",
+                    "description": "seconds to wait when follow=true (default 180)."},
+    },
+}
+TOOL_SCHEMA_OVERRIDES["resume_playbook"] = {
+    "type": "object",
+    "required": ["run"],
+    "additionalProperties": False,
+    "properties": {
+        "run": {"type": "string", "minLength": 1,
+                "description": "the paused run's pk (the run_pk returned by "
+                               "run_playbook's awaiting_input result), or its "
+                               "@id /wf/api/workflows/<pk>/."},
+        "decision": {"type": "string",
+                     "description": "response option to pick: 'approve' "
+                                    "(default, primary option), 'reject' (first "
+                                    "non-primary), or an exact option label "
+                                    "e.g. 'Ok'/'Cancel'."},
+        "inputs": {"type": "object", "additionalProperties": True,
+                   "description": "values for the paused step's fields, keyed "
+                                  "by field name from the awaiting form "
+                                  "(awaiting.fields[].name). Omit for a "
+                                  "button-only/approval step."},
+        "follow": {"type": "boolean",
+                   "description": "read back the run status after resuming "
+                                  "(default true)."},
+        "timeout": {"type": "integer",
+                    "description": "reserved for follow polling (default 180)."},
+    },
+}
+
+
+def _resolved_hints(fn: Callable[..., Any]) -> dict[str, Any]:
+    """Real type objects for `fn`'s parameters, defeating PEP 563.
+
+    Most tool modules carry `from __future__ import annotations`, which makes
+    `inspect.signature()` hand back annotations as *strings* -- `'bool'`, not
+    `bool`. `_py_type_to_json` matches on type identity, so every one of those
+    fell through to `{}` and the tool advertised a parameter with a default and
+    **no type**. 32 of 39 tools shipped schemas that told the model nothing
+    about any argument's type.
+
+    That is not cosmetic: it is the upstream cause of the stringly-typed
+    arguments `coerce_scalar_args` now also defends against. A model told only
+    `{"limit": {"default": 25}}` has no contract to honour, so `"25"` is a
+    perfectly reasonable thing for it to send -- and `probe="False"` (truthy!)
+    silently inverted a flag.
+
+    Returns `{}` if the hints cannot be resolved (e.g. a `TYPE_CHECKING`-only
+    import), so `_build_schema` falls back to the raw annotations and the tool
+    still registers -- degrading to exactly the previous behaviour rather than
+    failing to load.
+    """
+    try:
+        return typing.get_type_hints(fn)
+    except Exception:
+        return {}
+
+
+# Plumbing the model must not set: `db_path` repoints a tool at another store;
+# `trace_json` is for tests/batch tooling -- a model cannot author a SkillTrace
+# (live: 2 of 18 build_playbook_from_trace calls sent their own summary, which
+# parses to zero calls). Direct Python callers still pass them.
+_INTERNAL_PARAMS = frozenset({"db_path", "trace_json"})
+
+
+# `Args:` sections are dropped from the description (the schema was meant to
+# carry them) but the auto-built schema only has types, so a parameter's call
+# contract in the docstring never reached the model. A tool listed here has
+# those parameters' `Args:` entries sent as their schema `description`, built
+# from the docstring itself so the two cannot drift. Opt-in and per parameter:
+# each entry is backed by a failed real call (session store), not by length.
+ARGS_IN_SCHEMA: dict[str, tuple[str, ...]] = {
+    # Real failures: `module` sent with no uuid / record_id / iri.
+    "get_record": ("iri", "module", "uuid", "record_id"),
+    # Real failures: `sort` sent as a single {field, direction} object.
+    "search_module_records": ("filters", "sort"),
+    # 19 of 45 real calls copied the open playbook into `before_yaml`.
+    "verify_enhancement": ("before_yaml", "after_yaml"),
+}
+
+_ARG_ENTRY = re.compile(r"^(\s+)(\w+)\s*:\s*(.*)$")
+
+
+def docstring_arg_docs(doc: str) -> dict[str, str]:
+    """`{param: text}` from a docstring's `Args:` section, whitespace folded
+    and ``double backticks`` made single. Empty when there is no section."""
+    lines = doc.splitlines()
+    try:
+        start = next(i for i, ln in enumerate(lines)
+                     if re.match(r"^Args\s*:\s*$", ln)) + 1
+    except StopIteration:
+        return {}
+    out: dict[str, list[str]] = {}
+    indent: int | None = None
+    cur: str | None = None
+    for ln in lines[start:]:
+        if ln.strip() and not ln[0].isspace():
+            break  # next section (Returns: ...)
+        m = _ARG_ENTRY.match(ln)
+        if m and (indent is None or len(m.group(1)) == indent):
+            indent = len(m.group(1))
+            cur = m.group(2)
+            out[cur] = [m.group(3)]
+        elif cur is not None and ln.strip():
+            out[cur].append(ln.strip())
+    return {k: re.sub(r"\s+", " ", " ".join(v)).replace("``", "`").strip()
+            for k, v in out.items()}
+
+
+def _build_schema(fn: Callable[..., Any],
+                  described: tuple[str, ...] = ()) -> dict[str, Any]:
+    sig = inspect.signature(fn)
+    hints = _resolved_hints(fn)
+    docs = (docstring_arg_docs(inspect.getdoc(fn) or "") if described else {})
+    props: dict[str, Any] = {}
+    required: list[str] = []
+    for name, p in sig.parameters.items():
+        # Plumbing, not a model argument: a model that sends db_path points
+        # the tool at a different reference store. Not advertised, and the arg
+        # gate refuses anything the schema does not advertise.
+        if name in _INTERNAL_PARAMS:
+            continue
+        schema = _py_type_to_json(hints.get(name, p.annotation))
+        if p.default is inspect.Parameter.empty:
+            required.append(name)
+        else:
+            schema = {**schema, "default": p.default} if schema else {"default": p.default}
+        if name in described and docs.get(name):
+            schema = {**schema, "description": docs[name]}
+        props[name] = schema or {}
+    return {"type": "object", "properties": props, "required": required}
+
+
+DESCRIPTION_CAP = 1200
+
+# Sections that document the *call*, not when to make it. The parameter names,
+# types and defaults are already in `input_schema`, so repeating them in the
+# description is pure token cost.
+_MACHINE_SECTION = re.compile(
+    r"(?m)^(?:Args|Arguments|Params|Parameters|Returns|Return|Raises|Yields|"
+    r"Examples?|Usage)\s*:\s*$"
+)
+
+
+def tool_description(doc: str, cap: int = DESCRIPTION_CAP) -> str:
+    """Reduce a docstring to the guidance the model needs to *choose* the tool.
+
+    This used to be `doc.split("\\n\\n", 1)[0]` -- first paragraph only. Every
+    "call me when", every "NOT for", and every safety contract written below a
+    blank line was maintained for years and never sent, which is how
+    `run_op` shipped its destructive-op `confirm=True` rules to nobody. Keep
+    whole paragraphs, drop the Args/Returns boilerplate that `input_schema`
+    already carries, and stop at `cap` on a paragraph boundary so one
+    essay-length docstring can't crowd out the other 38 tools.
+    """
+    body = _MACHINE_SECTION.split(doc.strip(), 1)[0].strip()
+    if len(body) <= cap:
+        return body
+    kept: list[str] = []
+    used = 0
+    for para in body.split("\n\n"):
+        if kept and used + len(para) + 2 > cap:
+            break
+        kept.append(para)
+        used += len(para) + 2
+    # A single opening paragraph over the cap is still better truncated than
+    # dropped -- it is the one part we know the model reads.
+    return "\n\n".join(kept)[:cap]
+
+
+def _resolve(name: str) -> Callable[..., Any]:
+    fn = getattr(mcp_server, name, None)
+    if fn is None or not callable(fn):
+        raise KeyError(f"unknown tool: {name}")
+    return fn
+
+
+def _tier_line(name: str, tier: int) -> str:
+    """One sentence declaring a tool's approval behavior, appended to every
+    advertised description (assessment Phase 1.4): the model should know
+    BEFORE calling whether a tool auto-runs, suspends for approval, or is
+    resolved per call -- today it learns by burning turns. Derived from
+    TOOL_TIERS so it can never drift from what dispatch actually does."""
+    if tier < 0:
+        if name in ("step_through_playbook", "dry_run_playbook"):
+            return ("Approval: auto-runs; asks the analyst first only if "
+                    "execute_unsafe_ops=True.")
+        if name == "push_playbook":
+            # -1 in TOOL_TIERS, but _resolve_tier hardcodes 3: it writes.
+            return ("Approval: always suspends for analyst approval before "
+                    "running.")
+        if name == "run_playbook":
+            return ("Approval: suspends for analyst approval unless the host "
+                    "has designated this playbook auto-runnable.")
+        return ("Approval: resolved per call -- reads auto-run; FSR writes and "
+                "containment/remediation suspend for analyst approval first.")
+    if tier >= 4:
+        return ("Approval: always suspends for analyst step-up approval "
+                "before running.")
+    if tier >= 3:
+        return "Approval: always suspends for analyst approval before running."
+    return "Approval: auto-runs, no analyst approval needed."
+
+
+def build_registry() -> dict[str, ToolSpec]:
+    out: dict[str, ToolSpec] = {}
+    for name in SAFE_TOOLS:
+        fn = _resolve(name)
+        desc = inspect.getdoc(fn) or f"{name} (no docstring)"
+        short = tool_description(desc)
+        static_tier = TOOL_TIERS.get(name, 0)
+        confirm_mode = "auto" if static_tier in (0, 1) else ("approve" if static_tier in (2, 3) else "step_up")
+        if static_tier < 0:
+            confirm_mode = "dynamic"
+        # Appended AFTER the cap so the declaration can never be the paragraph
+        # that gets dropped.
+        short = f"{short}\n\n{_tier_line(name, static_tier)}"
+        out[name] = ToolSpec(
+            name=name,
+            description=short,
+            input_schema=(TOOL_SCHEMA_OVERRIDES.get(name)
+                          or _build_schema(fn, ARGS_IN_SCHEMA.get(name, ()))),
+            fn=fn,
+            tier=static_tier,
+            confirm_mode=confirm_mode,
+        )
+    return out
+
+
+REGISTRY = build_registry()
+
+
+def _ensure_mcp_materialized() -> None:
+    """Lazy hook: materialize FortiSOAR native-MCP-gateway tools into REGISTRY
+    before the tool list is sent to the LLM. No-op unless the connector called
+    ``materializer.configure(mcp_allowlist=...)`` at session setup; default
+    empty allow-list → nothing materialized. See
+    :mod:`fsr_playbooks.mcp_server.materializer`."""
+    try:
+        from ..mcp_server import materializer
+    except ImportError:
+        return
+    materializer.ensure_initialized()
+
+
+# Retired tool name → the ADVERTISED tool that subsumes it. Retired names STAY
+# in REGISTRY -- dispatch, approval resumes, old sessions and non-LLM callers
+# keep working -- but are not advertised, so the model reasons over one entry
+# point per capability. The union is what a persona allowlist naming the old
+# tool is granted instead (the connector reads this map), so a retirement never
+# silently drops a capability a persona was configured with.
+RETIRED_TO_UNION: dict[str, str] = {
+    # Phase 1 → find(kind=...)
+    "find_connector": "find", "find_operation": "find",
+    "find_jinja_filter": "find", "search_playbooks": "find",
+    "find_containment_actions": "find", "find_enrichment_actions": "find",
+    "find_record_actions": "find",
+    # → picklist(...)
+    "list_picklists": "picklist", "picklist_for_field": "picklist",
+    "resolve_picklist_value": "picklist",
+    # → emit_card(card_type=...) -- retired once Phase 2's dispatch-level gates
+    # landed (turn_plan.gate_refusal + the read-only-turn refusal keyed on
+    # emit_card's card_type): the union can no longer reach a card family the
+    # turn's state doesn't afford.
+    "emit_choice_card": "emit_card", "emit_action_card": "emit_card",
+    "emit_manual_input": "emit_card", "emit_capability_gap_card": "emit_card",
+    "emit_playbook_offer": "emit_card", "emit_enhancement_offer": "emit_card",
+    # B3a (2026-09). Every name below was called 0-2 times in 287 live
+    # sessions on a live appliance while its schema rode on every turn (41 tools, ~40k
+    # chars, identical for triage and build).
+    # connector health: one tool answers configured + healthy for all or one.
+    "healthcheck_connector": "list_configured_connectors",
+    "connector_health": "list_configured_connectors",
+    # validation: validate ⊂ compile ⊂ verify; step_through is what
+    # analyze_playbook wraps. dry_run pushes and RUNS the playbook's real side
+    # effects with no approval -- off the default surface for that alone.
+    "compile_yaml": "validate_yaml",
+    "step_through_playbook": "analyze_playbook",
+    "dry_run_playbook": "analyze_playbook",
+    # run diagnosis: why_did_playbook_fail chains both.
+    "diagnose_yaml_against_pb_execution": "why_did_playbook_fail",
+    "get_run_env": "why_did_playbook_fail",
+    # corpus searches → find(kind=step|jinja_block|filter_usage|api).
+    "find_step_examples": "find", "find_jinja_pattern": "find",
+    "get_filter_examples": "find", "propose_http_fallback": "find",
+    # authoring: decision shape is enforced by validate/verify.
+    "emit_decision_step": "validate_yaml",
+    # delivery: push_playbook writes to the live box without asking; the
+    # build turn's terminal action is the playbook_offer card, whose accept
+    # the CONNECTOR pushes.
+    "push_playbook": "emit_card",
+    **HUNT_RETIRED_TO_UNION,
+}
+CONSOLIDATED_AWAY = frozenset(RETIRED_TO_UNION)
+
+# Retirements registered by a host (the connector retires its own merged hunt
+# helpers here). Kept apart from the literal above so the framework's set is
+# reviewable on its own.
+_HOST_RETIRED: dict[str, str] = {}
+
+
+def retire_tools(mapping: dict[str, str]) -> None:
+    """Take host-registered tools off the advertised surface, each naming the
+    advertised tool that subsumes it. Idempotent."""
+    _HOST_RETIRED.update({str(k): str(v) for k, v in (mapping or {}).items()})
+
+
+def retired_to_union() -> dict[str, str]:
+    """Every retired name → its union, framework and host retirements."""
+    return {**RETIRED_TO_UNION, **_HOST_RETIRED}
+
+
+# Tools a host registered but withholds from the in-product model: dispatchable
+# (resumes, the MCP server, the CLI), not offered in the LLM tool list. A host
+# adding tools to every turn changes what the on-box assistant reasons over, so
+# it offers them only after evaluating them (the agentic toolkit's workflows).
+_HOST_WITHHELD: set[str] = set()
+
+
+def withhold_from_model(names: Any, withheld: bool = True) -> None:
+    """Withhold (or offer again) host-registered tools from the LLM tool list."""
+    for n in names:
+        (_HOST_WITHHELD.add if withheld else _HOST_WITHHELD.discard)(str(n))
+
+
+def _advertised(name: str) -> bool:
+    if name in _HOST_WITHHELD:
+        return False
+    return name not in CONSOLIDATED_AWAY and name not in _HOST_RETIRED
+
+
+def anthropic_tools() -> list[dict[str, Any]]:
+    """Anthropic's tool-use schema shape."""
+    _ensure_mcp_materialized()
+    return [
+        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+        for t in REGISTRY.values() if _advertised(t.name)
+    ]
+
+
+def openai_tools() -> list[dict[str, Any]]:
+    """OpenAI / LM Studio function-calling schema shape. Same registry,
+    different envelope: `{type:"function", function:{name, description, parameters}}`."""
+    _ensure_mcp_materialized()
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.input_schema,
+            },
+        }
+        for t in REGISTRY.values() if _advertised(t.name)
+    ]
+
+
+def _finalize_tool_output(name: str, result: Any) -> Any:
+    """Route a tool fn's return through the P4 envelope contract (fail-open by
+    default; strict under ``FSRPB_STRICT_TOOL_OUTPUT``). Dispatch-created
+    envelopes (error dicts, pending_approval) don't pass through here -- the
+    contract governs *tool* outputs, and those are already well-formed dicts."""
+    from .tool_result import validate_tool_output
+    return validate_tool_output(name, result)
+
+
+# Authoring tools whose sole/primary artifact is `yaml_text`. Used by the
+# run-vs-author redirect in dispatch(): calling one with a `playbook` NAME but
+# no YAML means the model meant to RUN, not author (see the guard below).
+_AUTHORING_YAML_TOOLS = frozenset({
+    "verify_playbook", "validate_yaml", "compile_yaml",
+})
+
+
+_INVOKE_FAILURE = "_invoke_failure"
+
+
+def _leaf_exception(exc: BaseException) -> BaseException:
+    """Innermost real error of an ExceptionGroup ("unhandled errors in a
+    TaskGroup") or ``__cause__`` chain, so the model sees the cause, not the
+    wrapper."""
+    for _ in range(20):
+        subs = getattr(exc, "exceptions", None)
+        if subs:
+            exc = subs[0]
+        elif exc.__cause__ is not None:
+            exc = exc.__cause__
+        else:
+            break
+    return exc
+
+
+def _invoke(spec: ToolSpec, name: str, raw_args: dict[str, Any]) -> Any:
+    """Call the tool, telling a bad CALL apart from a failing TOOL.
+
+    The old `except TypeError: "bad arguments for X"` also caught TypeErrors
+    raised deep inside a tool body, so a tool bug reached the model as "your
+    arguments are wrong" and it went off rewriting correct arguments. Bind the
+    signature first: a bind failure is the caller's; anything raised after is
+    the tool's own (`tool_error`), and surfaces as a tool result, not a 500.
+    """
+    from . import arg_gate
+    bad = arg_gate.bind_error(name, spec.fn, raw_args)
+    if bad is not None:
+        bad[_INVOKE_FAILURE] = True
+        return bad
+    try:
+        return spec.fn(**raw_args)
+    except Exception as e:  # noqa: BLE001 -- surface to the LLM, not a 500
+        logging.getLogger(__name__).exception("tool %s raised", name)
+        e = _leaf_exception(e)  # type: ignore[assignment]  # an ExceptionGroup/cause chain hides the real error
+        return {"ok": False, "code": "tool_error", "tool": name,
+                "error": f"{name} failed internally ({type(e).__name__}: {e}). "
+                         "This is a tool fault, not your arguments -- do not "
+                         "retry the same call; work around it or tell the "
+                         "analyst.",
+                _INVOKE_FAILURE: True}
+
+
+def _is_invoke_failure(result: Any) -> bool:
+    if isinstance(result, dict) and result.pop(_INVOKE_FAILURE, False):
+        return True
+    return False
+
+
+# --- dispatch ---------------------------------------------------------------
+#
+# A call goes through a fixed sequence:
+#
+#   1. look the tool up (materializing native-MCP tools on a miss);
+#   2. accept the arguments: reject a wire-supplied `_approved`, take the
+#      internal `_approved` / model `_summary` sentinels off;
+#   3. the stages in `_DISPATCH_STAGES`, in order -- each either fixes the
+#      arguments in place or returns a result that ends the call;
+#   4. `authorization.authorize`: run, card, or deny;
+#   5. card: the approval envelope; run: invoke, audit, finalize.
+#
+# A new rule is a new stage with its own test, not another branch in dispatch.
+
+
+@dataclass
+class _Call:
+    name: str
+    spec: ToolSpec
+    args: dict[str, Any]
+    internal: bool
+    session_id: str | None
+    #: Who approved it, for a re-dispatch of an approved call.
+    approved_by: str | None
+    #: The model's optional plain-language line for the approval card.
+    summary: str | None
+
+
+def _lookup(name: str) -> ToolSpec | None:
+    spec = REGISTRY.get(name)
+    if spec is None:
+        # Native-MCP tools are materialized lazily, and the hooks that do it
+        # are the tool-list builders. The approval-resume path never builds a
+        # list -- it calls dispatch() directly -- so an approved MCP action
+        # (e.g. `mcp_soc__block_indicator`) came back "unknown tool" and never
+        # ran. Materialize on the miss (cheap once initialized) and look again.
+        _ensure_mcp_materialized()
+        spec = REGISTRY.get(name)
+    return spec
+
+
+def _accept(name: str, spec: ToolSpec, arguments: dict[str, Any] | None, *,
+            internal: bool, session_id: str | None,
+            approved_by: str | None) -> _Call | dict[str, Any]:
+    args = dict(arguments or {})
+    # `_approved` bypasses the approval gate and may ONLY be set by the resume
+    # path (post human-approval), which dispatches with `_internal=True`. On a
+    # normal dispatch it came from the model's arguments or a tampered wire
+    # frame: a gate-bypass attempt (S1). Reject it loudly rather than honor it.
+    if "_approved" in args and not internal:
+        logging.getLogger(__name__).error(
+            "rejected wire-supplied _approved on tool '%s' (tier-gate bypass attempt)",
+            name)
+        return refusal("tools.reserved_key_rejected", {
+            "ok": False,
+            "code": "reserved_key_rejected",
+            "error": ("The '_approved' flag is internal-only and cannot be supplied "
+                      "in tool arguments. The action was NOT executed."),
+        })
+    approved = bool(args.pop("_approved", False)) if internal else False
+    summary = args.pop("_summary", None)
+    return _Call(name=name, spec=spec, args=args, internal=internal,
+                 session_id=session_id,
+                 approved_by=(approved_by or HUMAN) if approved else None,
+                 summary=summary)
+
+
+def turn_refusal(name: str, args: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Whether THIS turn refuses the call, from what the host bound for it:
+    a read-only turn withholds `READ_ONLY_WITHHELD_TOOLS`; the turn plan
+    refuses what the page state does not afford (patching a playbook that is
+    not open, connector calls on a playbook turn). None: not refused.
+
+    The one predicate behind both the dispatch refusal and `advertised_for_turn`,
+    so the model is never shown a tool its call would be refused.
+    """
+    args = args or {}
+    if _is_read_only_turn() and _is_write_frontier(name, args):
+        # Refused rather than carded: a card here is an offer the analyst
+        # never asked for, which, approved, could delete the open
+        # playbook's steps (tracker #117).
+        return {
+            "ok": False,
+            "code": "read_only_turn",
+            "error": ("This is a read-only turn (explain / find issues). "
+                      "Write and offer tools are not available. Describe what "
+                      "you found in prose; the analyst can ask for a change "
+                      "if they want one."),
+        }
+    from . import ask_scope
+    _scope = ask_scope.current_scope()
+    if _scope in ask_scope.NARROW:
+        refused = ask_scope.answer_refusal(name, args, _scope)
+        if refused is not None:
+            return refused
+    from .turn_plan import active_turn_plan
+    plan = active_turn_plan()
+    return plan.gate_refusal(name, args) if plan is not None else None
+
+
+def _tool_name(tool: dict[str, Any]) -> str:
+    fn = tool.get("function")
+    return str((fn or {}).get("name") if isinstance(fn, dict) else tool.get("name") or "")
+
+
+def advertised_for_turn(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`tools` minus every tool this turn refuses whatever its arguments.
+    `emit_card` stays: whether it is refused depends on its card_type.
+    Accepts Anthropic- or OpenAI-shaped tool dicts."""
+    return [t for t in tools
+            if _tool_name(t) == "emit_card" or turn_refusal(_tool_name(t), {}) is None]
+
+
+#: The refusal `code` `turn_refusal` can return -> the mechanism recorded when
+#: a dispatch is refused with it. Recorded HERE, at the dispatch stage, and not
+#: in `turn_refusal`: `advertised_for_turn` calls that to filter the tool list,
+#: which is not a refusal of anything. A code missing from this map is a
+#: refusal that fires unrecorded; `test_guard_sites_are_recorded` closes it.
+TURN_REFUSAL_MECHANISM = {
+    "read_only_turn": "tools.read_only_turn",
+    "not_a_playbook_tool": "tools.not_a_playbook_tool",
+    "state_unresolved": "tools.state_unresolved",
+    "not_afforded": "tools.not_afforded",
+    "answer_scope": "tools.answer_scope",
+}
+
+
+def _refuse_for_turn(c: _Call) -> Any:
+    """`turn_refusal`, for a call the model made. A host's own re-dispatch of
+    an approved call is not refused."""
+    out = None if c.internal else turn_refusal(c.name, c.args)
+    if isinstance(out, dict):
+        mech = TURN_REFUSAL_MECHANISM.get(str(out.get("code")))
+        if mech:
+            record_guard_fire(mech)
+    return out
+
+
+def _fold_emit_card_payload(c: _Call) -> Any:
+    """emit_card takes (card_type, payload), but models put the card's fields
+    at the top level (emit_card(card_type='playbook_offer', id=..., ...)).
+    Each bounce cost a model round. Fold stray keys into `payload` when there
+    is no payload dict; a missing/unknown card_type still errors."""
+    if c.name != "emit_card":
+        return None
+    extras = {k: v for k, v in c.args.items()
+              if k not in ("card_type", "payload") and not k.startswith("_")}
+    if extras and not isinstance(c.args.get("payload"), dict):
+        c.args["payload"] = extras
+        for k in extras:
+            c.args.pop(k, None)
+    return None
+
+
+def _coerce_args(c: _Call) -> Any:
+    """Lossless shape fixes, before the gate AND before the tool runs:
+    structured arguments sent as JSON strings (run_op params='{...}'), and
+    scalars sent as strings by providers that stringify everything. Before
+    tier resolution too, so the approval card previews -- and its hash binds --
+    the values that will execute: coercing later would let a human approve
+    `probe="False"` and the tool then run with probe=True."""
+    from .tool_models import coerce_scalar_args
+    c.args = coerce_scalar_args(getattr(c.spec, "input_schema", None), c.args)
+    return None
+
+
+def _check_args(c: _Call) -> Any:
+    """One argument gate for every tool (`arg_gate`: unknown keys, required
+    keys, types/enums/nested shape against input_schema), then the tool's
+    cross-field rule if it has one. Before authorization, so a call that
+    cannot run never raises a card. `null` means "not given"."""
+    from . import arg_gate
+    from .tool_models import CROSS_FIELD_RULES
+    c.args = arg_gate.normalize_nulls(c.spec.input_schema, c.spec.fn, c.args)
+    refusal_ = arg_gate.check(c.name, c.spec.input_schema, c.spec.fn, c.args)
+    if refusal_ is not None:
+        return refusal("tools.invalid_tool_args", refusal_)
+    rule = CROSS_FIELD_RULES.get(c.name)
+    why = rule(c.args) if rule is not None else None
+    if why is None:
+        return None
+    return refusal("tools.invalid_tool_args", {
+        "ok": False, "code": arg_gate.CODE, "tool": c.name,
+        "error": f"invalid arguments for {c.name} -- the call was NOT run. {why}",
+        "problems": [why],
+        "suggestions": [f"resend {c.name} with the arguments fixed"],
+    })
+
+
+def _default_live_probe(c: _Call) -> Any:
+    """verify_playbook grounds op output shapes from a real execution of the
+    op_safety=='safe' steps only (run_op refuses anything else without
+    confirm=True, which the probe never sets). On by default so the model
+    needn't know; an explicit live_probe still wins. verify_enhancement too:
+    the connector-config name check is gated on live_probe, so an edit that
+    pinned a config name the box doesn't have (case or spacing off) went
+    through the edit path unchecked and only failed at run time."""
+    if (c.name in ("verify_playbook", "verify_enhancement")
+            and "live_probe" not in c.args):
+        c.args["live_probe"] = True
+    return None
+
+
+#: In order. The refusal first (they read the arguments as the model sent them),
+#: then shape fixes, then the gate, then defaults.
+_DISPATCH_STAGES: tuple[Callable[[_Call], Any], ...] = (
+    _refuse_for_turn,
+    _fold_emit_card_payload,
+    _coerce_args,
+    _check_args,
+    _default_live_probe,
+)
+
+
+def _approval_envelope(c: _Call, tier: int) -> dict[str, Any]:
+    """The card for a call that needs approval."""
+    name, args, summary = c.name, c.args, c.summary
+    # An argument that cannot possibly work (a run_op on a connector that
+    # exists nowhere, a run_playbook on an invented name) bounces a clean,
+    # self-correctable error instead of a misleading card. Only here, after
+    # grants/policy: a granted call still runs and surfaces its own error.
+    precard = _precard_error(name, args)
+    if precard is not None:
+        _record_audit(name, args, tier, str(precard.get("code") or "precard_rejected"))
+        return precard
+
+    if not summary:
+        # Most calls arrive without the model's optional `_summary`, and a card
+        # headed by the bare tool name says nothing about WHAT will run.
+        summary = _default_approval_summary(name, args)
+    envelope: dict[str, Any] = {
+        "pending_approval": True,
+        "approval_id": uuid.uuid4().hex,
+        "tier": tier,
+        "tool": name,
+        "preview": _build_preview(name, args),
+        "args_hash": _args_hash(name, args),
+        "summary": summary,
+        "requires_step_up": tier >= 4,
+    }
+    # Autonomy policy, SHADOW: the call still suspends; the decision rides
+    # the envelope and the audit log.
+    from .autonomy import shadow_decision
+    if name == "run_op":
+        pcall = {"tool": name, "connector": args.get("connector"),
+                 "op": args.get("op"), "args": args.get("params") or {}}
+    else:
+        pcall = {"tool": name, "module": args.get("module"), "args": args}
+    policy = shadow_decision(pcall)
+    if policy is not None:
+        envelope["policy"] = policy
+    _record_audit(name, args, tier, "pending", result_preview=envelope)
+    if policy is not None:
+        _record_audit(name, args, tier, f"shadow:{policy['rule']}:{policy['outcome']}",
+                      result_preview=policy)
+    return envelope
+
+
+def _after_invoke(spec: ToolSpec, c: _Call, decision: Any, result: Any) -> Any:
+    """Audit, retry, finalize and shape one invoked result (dispatch's tail).
+
+    I4: a transient fault on a read-only call is repeated once; every fault
+    class gets a hint the model can act on (see fault_class).
+    """
+    if _is_invoke_failure(result):
+        return result
+    _record_audit(c.name, c.args, decision.tier, decision.label, actor=decision.actor)
+    from . import fault_class
+
+    def _again() -> Any:
+        out = _invoke(spec, c.name, c.args)
+        _is_invoke_failure(out)  # a tool_error is never transient; drop the marker
+        return out
+
+    result, retried = fault_class.retry_transient(result, _again, tier=decision.tier)
+    result = _finalize_tool_output(c.name, result)
+    cls = fault_class.classify_fault(result)
+    if cls is not None:
+        result = fault_class.shape_fault(result, cls, retried=retried)
+    return result
+
+
+def dispatch(
+    name: str, arguments: dict[str, Any], *, _internal: bool = False,
+    session_id: str | None = None, approved_by: str | None = None,
+) -> Any:
+    """Run one tool call through the gate (see the sequence above).
+
+    A call that needs approval returns a `{pending_approval: true, ...}`
+    envelope without running; the host shows the card and, on approve,
+    re-dispatches with `_approved` in the arguments, `_internal=True`, and
+    `approved_by` naming who approved ("human" when omitted;
+    "system:autonomy" for an autonomy rule acting unattended).
+    """
+    spec = _lookup(name)
+    if spec is None:
+        return {"error": f"unknown tool: {name}"}
+    c = _accept(name, spec, arguments, internal=_internal,
+                session_id=session_id, approved_by=approved_by)
+    if not isinstance(c, _Call):
+        return c
+    for stage in _DISPATCH_STAGES:
+        out = stage(c)
+        if out is not None:
+            return out
+
+    decision = authorize(c.name, c.args, approved_by=c.approved_by,
+                         session_id=c.session_id)
+    if decision.outcome == "deny":
+        _record_audit(c.name, c.args, decision.tier, decision.label, actor=decision.actor)
+        return {"ok": False, "code": "user_denied", "reason": decision.reason}
+    if decision.outcome == "card":
+        return _approval_envelope(c, decision.tier)
+
+    return _after_invoke(spec, c, decision, _invoke(spec, c.name, c.args))
