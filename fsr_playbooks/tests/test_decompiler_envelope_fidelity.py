@@ -1094,3 +1094,29 @@ playbooks:
     )
     warns = [e.message for e in res.errors if e.severity == "warning"]
     assert any("declares ['type']" in m for m in warns), warns
+
+
+def _wf_flag(res):
+    wf = res.fsr_json["data"][0]["workflows"][0] if "data" in res.fsr_json else res.fsr_json["workflows"][0]
+    return wf["remoteExecutableFlag"]
+
+
+def test_remote_executable_compiles_and_round_trips():
+    """`remote_executable: true` is the multi-tenancy flag a master needs before its
+    Trigger Tenant Playbook step can run the pushed copy on a tenant."""
+    src = (
+        "collection: RX Probe\n"
+        "playbooks:\n"
+        "  - name: Probe\n"
+        "    remote_executable: true\n"
+        "    steps:\n"
+        "      - {name: Start, type: start, next: Done}\n"
+        "      - {name: Done, type: end}\n"
+    )
+    r1 = compile_yaml(src, PACKAGED_SLIM_DB)
+    assert r1.ok, [e.message for e in r1.errors]
+    assert _wf_flag(r1) == 1
+    r2 = compile_yaml(decompile_to_yaml(r1.fsr_json, PACKAGED_SLIM_DB), PACKAGED_SLIM_DB)
+    assert r2.ok and _wf_flag(r2) == 1
+    plain = compile_yaml(src.replace("    remote_executable: true\n", ""), PACKAGED_SLIM_DB)
+    assert _wf_flag(plain) == 0

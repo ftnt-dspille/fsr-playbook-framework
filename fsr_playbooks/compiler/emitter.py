@@ -485,7 +485,7 @@ def emit(collection: Collection) -> dict[str, Any]:
             "isActive": pb.is_active,
             "debug": pb.debug,
             "singleRecordExecution": False,
-            "remoteExecutableFlag": 0,
+            "remoteExecutableFlag": 1 if pb.remote_executable else 0,
             "parameters": list(pb.parameters),
             "synchronous": False,
             # wf-engine reads this when materializing workflow_wfmetadata.wf_modified;

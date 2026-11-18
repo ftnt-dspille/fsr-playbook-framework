@@ -41,6 +41,7 @@ playbooks:
     description: optional
     tag: optional
     is_active: true                    # default true; set false for a disabled playbook
+    remote_executable: false           # multi-tenancy: true lets a master run the pushed tenant copy (trigger_tenant_playbook)
     owners: [TeamA, TeamB]            # restrict who can run it (optional)
     parameters:                       # names (+ optional types) for the
       hostname: string                # compiler's type checks ONLY -- runtime

@@ -1345,6 +1345,7 @@ def parse_yaml(text: str) -> tuple[Collection | None, list[CompileError]]:
             # Set `is_active: false` explicitly to ship a disabled draft.
             is_active=bool(pb_raw.get("is_active", True)),
             debug=bool(pb_raw.get("debug", False)),
+            remote_executable=bool(pb_raw.get("remote_executable", False)),
             is_private=is_private,
             owners=owners,
             priority=priority,

@@ -115,6 +115,11 @@ class Playbook:
     # production but on for new visual-editor drafts so authors see
     # their step output without flipping a knob.
     debug: bool = False
+    # Multi-tenancy: FSR's `remoteExecutableFlag`. A playbook pushed from a master
+    # to its tenants can only be run from the master's `trigger_tenant_playbook`
+    # (RemotePlaybookReference) step when this is true. Authored as
+    # `remote_executable: true` in YAML.
+    remote_executable: bool = False
     # Playbook visibility. FSR's `isPrivate` flag: when true the playbook is
     # hidden from the UI catalog and -- per the documented ownership model --
     # only executable by users/API keys whose owner teams intersect the
