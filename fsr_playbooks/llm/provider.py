@@ -131,6 +131,10 @@ class TurnInputsEvent:
     intent: str = ""
     system_chars: int = 0
     slices: list[dict[str, Any]] = field(default_factory=list)
+    #: The turn's declared ask scope and reply language ("" when unscoped or
+    #: undeclared): a stored session must show why a turn ran as it did.
+    scope: str = ""
+    language: str = ""
     kind: Literal["turn_inputs"] = "turn_inputs"
 
 

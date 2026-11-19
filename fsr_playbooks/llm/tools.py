@@ -1948,7 +1948,7 @@ def turn_refusal(name: str, args: dict[str, Any] | None) -> dict[str, Any] | Non
         }
     from . import ask_scope
     _scope = ask_scope.current_scope()
-    if _scope in ask_scope.NARROW:
+    if _scope in ask_scope.CAPPED:
         refused = ask_scope.answer_refusal(name, args, _scope)
         if refused is not None:
             return refused

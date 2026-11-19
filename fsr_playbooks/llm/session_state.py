@@ -63,6 +63,9 @@ class SessionState:
     #: The turn's ask scope (llm.ask_scope): "answer" narrows the turn to a
     #: lookup and a reply. None leaves the turn unscoped.
     ask_scope: str | None = None
+    #: The language the model said the typed ask is written in (llm.ask_scope);
+    #: the round tail names it so the reply does not drift.
+    reply_language: str | None = None
 
 
 _STATE: ContextVar[SessionState] = ContextVar("_session_state", default=SessionState())

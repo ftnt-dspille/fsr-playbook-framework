@@ -272,6 +272,17 @@ class WireTurn(Protocol):
 # ───────────────────────────── shared helpers ─────────────────────────────
 
 
+def _with_language(directive: str) -> str:
+    """A forced directive, with the declared reply language named after it.
+    The forced verdict round is where live replies drifted (a Spanish and a
+    Russian verdict on English asks), and the generic note inside each
+    directive asks the model to infer a language it then guessed."""
+    lang = _ask_scope.current_language()
+    if not lang:
+        return directive
+    return f"{directive}\n{_ask_scope.language_note(None, lang)}"
+
+
 def is_error_result(result: Any) -> bool:
     """True if a tool result is a failure. Guard redirects and deferrals are
     steering, not errors, so they don't count (tracker #60)."""
@@ -338,7 +349,9 @@ def turn_inputs_event(provider: Any, *, system: str, allowed: Any,
     return TurnInputsEvent(
         model=str(getattr(provider, "model", "") or ""),
         tools=sorted(str(n) for n in (allowed or ())),
-        intent=intent, system_chars=len(system or ""), slices=slices)
+        intent=intent, system_chars=len(system or ""), slices=slices,
+        scope=str(_ask_scope.current_scope() or ""),
+        language=_ask_scope.current_language())
 
 
 # ───────────────────────────── the loop ─────────────────────────────
@@ -437,7 +450,8 @@ async def run_loop(
     trace_id = _uuid.uuid4().hex[:8]   # telemetry correlation, not the chat id
     # An answer-scope turn (llm.ask_scope) is a narrow question: a few lookups
     # and a reply, no verdict, no coverage sweep.
-    answer_scope = _ask_scope.current_scope() in _ask_scope.NARROW
+    # An act turn is capped the same way: it stages the action and stops.
+    answer_scope = _ask_scope.current_scope() in _ask_scope.CAPPED
     answer_cap = _ask_scope.max_tool_calls(_ask_scope.current_scope())
     answer_calls = 0
     turn_idx = 0
@@ -486,7 +500,7 @@ async def run_loop(
         caller still emits the terminal DoneEvent, so the turn never hangs."""
         if _stop_requested(provider):   # C6: no forced model round after Stop
             return
-        w.append_user(directive)
+        w.append_user(_with_language(directive))
         history_chars = w.history_chars()
         try:
             usage = RoundUsage()
@@ -715,7 +729,7 @@ async def run_loop(
                 if problem:
                     self_repair_turns += 1
                     record_guard_fire("turn.self_repair")
-                    w.append_user(problem[0] + problem[1])
+                    w.append_user(_with_language(problem[0] + problem[1]))
                     yield usage_event(rnd.stop_reason or "", repair_delta=1)
                     continue
             # The reply goes out. Once the cap is spent a failing fence must not
@@ -781,7 +795,7 @@ async def run_loop(
             if nudge:
                 yield usage_event(nudge[0])
                 turn_idx += 1
-                w.append_user(nudge[1])
+                w.append_user(_with_language(nudge[1]))
                 continue
 
             # A build turn that ended on a compile-clean fence it never verified
@@ -853,7 +867,7 @@ async def run_loop(
                         yield ev
                     yield DoneEvent(stop_reason="end_turn")
                     return
-                w.append_user(follow[1])
+                w.append_user(_with_language(follow[1]))
                 continue
 
             # Verdict: a triage turn that gathered evidence and never concluded
@@ -873,7 +887,7 @@ async def run_loop(
                     directive = verdict_directive(evidence_ids)
                     forced: tuple[ToolCall, Any] | None = None
                     for _attempt in range(2):
-                        w.append_user(directive)
+                        w.append_user(_with_language(directive))
                         forced_out: list[Any] = []
                         try:
                             async for ev in force_emit_card("verdict", lambda _a: None, forced_out):
@@ -1054,7 +1068,8 @@ async def run_loop(
         _tail = " ".join(n for n in (f"[turn budget] {note}" if note else "",
                                      _ledger, _scope_note,
                                      _ask_scope.language_note(
-                                         latest_user_text(messages))) if n)
+                                         latest_user_text(messages),
+                                         _ask_scope.current_language())) if n)
         w.append_tool_results(outcomes, note=_tail or None)
         yield usage_event(rnd.stop_reason or "tool_use")
 

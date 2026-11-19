@@ -126,7 +126,8 @@ def guards_fired(transcript: Any) -> list[str]:
 
 def turn_inputs(transcript: Any) -> dict | None:
     """What the model was given this turn, from the `turn_inputs` frame the loop
-    emits first: `{model, tools, intent, system_chars, slices}` (names and
+    emits first: `{model, tools, intent, system_chars, slices, scope,
+    language}` (names and
     sizes, no prompt text). None when the transcript has none -- a transcript
     stored before the event existed -- which is "unknown", not "nothing was
     offered". With several (a stitched multi-turn transcript) the LAST wins,
@@ -141,6 +142,9 @@ def turn_inputs(transcript: Any) -> dict | None:
         "intent": str(f.get("intent") or ""),
         "system_chars": int(f.get("system_chars") or 0),
         "slices": [x for x in (f.get("slices") or []) if isinstance(x, dict)],
+        # "" on an unscoped turn, and on a transcript stored before the field.
+        "scope": str(f.get("scope") or ""),
+        "language": str(f.get("language") or ""),
     }
 
 
