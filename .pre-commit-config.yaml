@@ -71,7 +71,9 @@ repos:
         # whole-program context, so pass_filenames: false and it reads files=
         # from pyproject [tool.mypy]). Uses the venv interpreter (fsr_playbooks
         # + deps installed editable); run `make sync` to create it. ~3s.
-        entry: .venv/bin/python -m mypy
+        # Through the pass cache: a push re-runs it only when the pushed tree
+        # did not already pass it at commit (scripts/hook_pass_cache.sh).
+        entry: scripts/hook_pass_cache.sh mypy -- .venv/bin/python -m mypy
         language: system
         pass_filenames: false
         files: '^fsr_playbooks/compiler/'
@@ -87,7 +89,11 @@ repos:
         # Two processes, one per suite: tooling/tests points $FSRPB_DB at its
         # fixture catalog at import, so a combined run measured fsr_playbooks
         # against it. The root conftest now refuses the combined run.
-        entry: bash -c '.venv/bin/python -m pytest fsr_playbooks/tests -m "not slow and not live" -q && .venv/bin/python -m pytest tooling/tests -m "not slow and not live" -q'
+        # Through the pass cache (scripts/hook_pass_cache.sh): the pre-push run
+        # is skipped when the pushed commit's tree already passed this exact
+        # suite at commit, and runs as before for anything else (--no-verify
+        # commits, a dirty or untracked-file commit, a different tree).
+        entry: scripts/hook_pass_cache.sh pytest-fast -- bash -c '.venv/bin/python -m pytest fsr_playbooks/tests -m "not slow and not live" -q && .venv/bin/python -m pytest tooling/tests -m "not slow and not live" -q'
         language: system
         pass_filenames: false
         # Only re-run when something the suite covers actually changed.
@@ -102,6 +108,7 @@ repos:
         files: '^(fsr_playbooks/|tooling/|data/schema\.sql|examples/|pytest\.ini|conftest\.py)'
         # Run at BOTH pre-commit (catches a normal commit) AND pre-push (catches
         # a `--no-verify` commit that bypassed pre-commit -- same hole the ruff
-        # hook's pre-push stage exists for). ~14s on a code push; the safety net
-        # is the point. Requires `pre-commit install --hook-type pre-push`.
+        # hook's pre-push stage exists for). The safety net is the point; the
+        # pass cache only skips it for content that already passed.
+        # Requires `pre-commit install --hook-type pre-push`.
         stages: [pre-commit, pre-push]
