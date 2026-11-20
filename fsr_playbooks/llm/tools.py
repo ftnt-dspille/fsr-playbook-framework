@@ -2018,12 +2018,9 @@ def verdict_first_refusal(name: str, args: dict[str, Any] | None) -> dict[str, A
         ev = get_turn_evidence()
     except Exception:  # noqa: BLE001
         return None
-    if ev is None or ev.verdicts() or getattr(ev, "_verdict_first_refused", False):
+    if ev is None or ev.verdicts() or ev.verdict_first_refused():
         return None
-    try:
-        ev._verdict_first_refused = True
-    except Exception:  # noqa: BLE001
-        return None
+    ev.note_verdict_first_refusal()
     return {"ok": False, "code": "verdict_first", "error": _VERDICT_FIRST_REFUSAL}
 
 

@@ -361,7 +361,10 @@ def emit_action_card(
         # A select can't be prefilled (the param validator refuses "" for
         # it), so it and a required param stay OUT of args and in
         # editable_fields: the analyst picks or types it on the card.
-        healed, removable, selects, required = [], [], {}, []
+        healed: list[str] = []
+        removable: list[str] = []
+        selects: dict[str, Any] = {}
+        required: list[str] = []
         for f in bad:
             fact = (known or {}).get(f)
             if known is None or (fact and not fact["options"]

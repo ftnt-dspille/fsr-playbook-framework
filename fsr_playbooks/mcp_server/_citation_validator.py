@@ -41,9 +41,17 @@ class TurnEvidence:
         self._thin_refusals = 0
         # A needs_more_info verdict on complete evidence is refused once.
         self._undecided_refusals = 0
+        # A staged action before any verdict is refused once per turn.
+        self._verdict_first_refused = False
 
     def thin_refusals(self) -> int:
         return self._thin_refusals
+
+    def verdict_first_refused(self) -> bool:
+        return self._verdict_first_refused
+
+    def note_verdict_first_refusal(self) -> None:
+        self._verdict_first_refused = True
 
     def undecided_refusals(self) -> int:
         return self._undecided_refusals
@@ -90,7 +98,8 @@ class TurnEvidence:
         return {"_registry": dict(self._registry),
                 "_verdicts": list(self._verdicts),
                 "_thin_refusals": self._thin_refusals,
-                "_undecided_refusals": self._undecided_refusals}
+                "_undecided_refusals": self._undecided_refusals,
+                "_verdict_first_refused": self._verdict_first_refused}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TurnEvidence:
@@ -100,6 +109,7 @@ class TurnEvidence:
         obj._verdicts = list(data.get("_verdicts") or [])
         obj._thin_refusals = int(data.get("_thin_refusals") or 0)
         obj._undecided_refusals = int(data.get("_undecided_refusals") or 0)
+        obj._verdict_first_refused = bool(data.get("_verdict_first_refused"))
         return obj
 
 
