@@ -102,7 +102,7 @@ def test_a_disabled_policy_decides_nothing():
 @pytest.mark.parametrize("case, kwargs, needle", [
     ("no verdict", {"verdicts": []}, "no verdict"),
     ("wrong disposition", {"verdicts": [_verdict(disposition="suspicious")]}, "suspicious"),
-    ("the model doubts its own verdict", {"verdicts": [_verdict(confidence=0.4)]}, "below 0.9"),
+    ("confidence 0.85", {"verdicts": [_verdict(confidence=0.85)]}, "below 0.9"),
     ("internal ip", {"call": _block(INT), "registry": _registry(INT)}, "internal"),
     ("protected ip", {"call": _block("198.51.100.1"), "registry": _registry("198.51.100.1")},
      "protected"),
@@ -396,10 +396,3 @@ def test_a_failed_call_records_no_finding(turn):
     cv.register_tool_result("tu9", "run_op", False,
                             {"connector": "virustotal", "op": "query_ip"}, _MAL_RESULT)
     assert "finding" not in turn.valid_ids()["tu9"]
-
-
-def test_a_malicious_rating_about_the_target_meets_the_confidence_floor():
-    """The rated lookup about the target is the evidence; a 0.85 self-report
-    is not a reason to refuse a block the evidence supports."""
-    d = _eval(verdicts=[_verdict(confidence=0.85)])
-    assert d["outcome"] == "would_act", d["failed"]
