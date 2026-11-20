@@ -12,6 +12,7 @@ import json
 import re
 from typing import Any
 
+from . import ask_scope as _ask_scope
 from .ask_scope import REPLY_LANGUAGE_NOTE
 
 # Per-turn OUTPUT-token ceiling, shared by every provider loop.
@@ -1054,7 +1055,12 @@ class TriageDiscipline:
         # -- and the order is refused one step later than before. Turn-scoped on
         # purpose: this instance is rebuilt per turn, so a declared order never
         # outlives the message that gave it.
-        if _is_analyst_ordered(name, args):
+        # An act turn IS the analyst's order: the declaration labelled the ask
+        # "stage this action". Read at call time (the scope is bound per turn).
+        # Live, "make it 6 hours" (the duration a staged block asked for)
+        # names no target, so the keyword check missed it and the re-staged
+        # card was deferred behind a three-call hunt.
+        if _is_analyst_ordered(name, args) or _ask_scope.current_scope() == _ask_scope.ACT:
             self._analyst_ordered = True
         if (name in _CONTAINMENT_STAGING_TOOLS
                 and not (self._authoring and name == "find_containment_actions")

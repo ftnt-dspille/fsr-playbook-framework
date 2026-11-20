@@ -45,7 +45,9 @@ def test_the_first_event_is_what_the_model_was_given():
     assert first.model == "fake-model"
     assert first.tools == ["emit_card", "get_record", "run_op"]   # sorted names
     assert first.intent == "triage"
-    assert first.system_chars == 123
+    # The model is given the host's prompt plus the runtime-notes section.
+    from fsr_playbooks.llm import ask_scope
+    assert first.system_chars == 123 + len(ask_scope.system_addendum(None))
     assert first.slices == [{"name": "base", "chars": 100},
                             {"name": "rules", "chars": 20}]
     assert sum(isinstance(e, TurnInputsEvent) for e in evs) == 1
