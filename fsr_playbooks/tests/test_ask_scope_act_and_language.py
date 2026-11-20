@@ -189,3 +189,20 @@ def test_the_forced_verdict_directive_names_the_declared_language():
 def test_no_declared_language_leaves_directives_unchanged():
     from fsr_playbooks.llm import agent_loop
     assert agent_loop._with_language("do x") == "do x"
+
+
+_ANSWER = '{"scope": "answer", "reason": "asked for the name field", "language": "English"}'
+
+
+def test_answer_without_a_record_in_hand_is_a_lookup():
+    """answer tells the turn no tool is needed. With no record in hand the
+    model invented the alert's name instead of reading it (live, 3 of 4)."""
+    sc, how, _, _ = asyncio.run(ask_scope.resolve_scope_and_language(
+        _Declaring(_ANSWER), "Look up the alert /api/3/alerts/abc and tell me its name"))
+    assert (sc, how) == (ask_scope.LOOKUP, "declared_answer_without_record")
+
+
+def test_answer_with_a_record_in_hand_stays_answer():
+    sc, how, _, _ = asyncio.run(ask_scope.resolve_scope_and_language(
+        _Declaring(_ANSWER), "what is this alert's name", record="/api/3/alerts/abc"))
+    assert (sc, how) == (ask_scope.ANSWER, "declared")

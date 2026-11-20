@@ -387,6 +387,13 @@ async def resolve_scope_and_language(provider: Any, text: Any, *,
         previous=previous, prior_language=prior_language)
     if quick_action:
         return None, "quick_action", "", lang
+    if sc == ANSWER and not str(record or "").strip():
+        # answer means the fact is a field of the record in hand, so the turn
+        # is told no tool is needed. With no record in hand there is nothing
+        # to answer from: live, "look up alert /api/3/alerts/<id> and tell me
+        # its name" was declared answer on a page with no record, and the
+        # model invented a different name on 3 of 4 runs without a call.
+        return LOOKUP, "declared_answer_without_record", reason, lang
     return (sc, "declared", reason, lang) if sc else (None, "default", "", lang)
 
 

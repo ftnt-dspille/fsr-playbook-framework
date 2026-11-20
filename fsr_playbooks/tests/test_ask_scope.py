@@ -54,7 +54,10 @@ _DECLARED = [
 
 @pytest.mark.parametrize("text,said,expected", _DECLARED, ids=[d[0][:40] for d in _DECLARED])
 def test_the_model_declares_the_scope_of_every_typed_ask(text, said, expected):
-    got, how, _ = asyncio.run(ask_scope.resolve_scope(_Declaring(said), text))
+    # A record in hand, as on an alert page: answer without one becomes lookup
+    # (test_ask_scope_act_and_language::test_answer_without_a_record_in_hand_is_a_lookup).
+    got, how, _ = asyncio.run(ask_scope.resolve_scope(_Declaring(said), text,
+                                                      record="alerts: Burst of requests"))
     assert (got, how) == (expected, "declared")
 
 
