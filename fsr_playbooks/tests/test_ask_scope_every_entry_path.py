@@ -154,3 +154,27 @@ def test_the_turn_system_prompt_carries_the_language_and_the_notes_section(lang)
     system = sent[0][0]["content"]
     assert system.startswith("s\n\n## Notes from this assistant's runtime")
     assert f"in {lang}," in system
+
+
+# --- an act turn is the analyst's order -------------------------------------
+
+def _stage(scope, text):
+    from fsr_playbooks.llm._loop_helpers import TriageDiscipline
+    token = ask_scope.bind_scope(scope)
+    try:
+        return TriageDiscipline(user_text=text).evaluate(
+            "emit_action_card", {"connector": "fortigate-firewall",
+                                 "operation": "block_ip_new", "args": {}})
+    finally:
+        ask_scope.reset_scope(token)
+
+
+def test_an_act_follow_up_naming_no_target_is_not_deferred_behind_a_hunt():
+    # Live: "make it 6 hours" re-staged the block and was deferred 3 times.
+    assert _stage("act", "make it 6 hours") is None
+
+
+@pytest.mark.parametrize("scope", [None, "investigate", "lookup"])
+def test_containment_off_an_act_turn_still_needs_the_hunt(scope):
+    got = _stage(scope, "make it 6 hours")
+    assert got and got.get("deferred") is True
