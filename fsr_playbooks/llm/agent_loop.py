@@ -93,6 +93,16 @@ from .provider import (
     TurnInputsEvent,
     UsageEvent,
 )
+from .task_spec import (
+    CONTAIN as _SPEC_CONTAIN,
+)
+from .task_spec import (
+    RequestedActionPostcondition,
+    close_stage_directive,
+    contain_stage_directive,
+    parse_task_spec,
+    split_subject,
+)
 from .tools import _resolve_tier as _tier_for
 from .tools import dispatch
 
@@ -439,7 +449,10 @@ async def run_loop(
     promise = PromisedActionGuard()
     progress = ProgressMeter()
     contain = ContainmentFollowThrough(enabled=bool(tags.get("unattended")))
-    observers = (delivery, create, build, verdict, contain, promise, progress)
+    # TaskSpec (Phase 1): the action the analyst asked this turn to end in,
+    # parsed from their own words. Code, not the model, decides it is staged.
+    post = RequestedActionPostcondition(parse_task_spec(latest_user_text(messages)))
+    observers = (delivery, create, build, verdict, contain, promise, progress, post)
     investigation = getattr(case_state, "investigation", None) if case_state is not None else None
     discipline = TriageDiscipline(
         state=investigation,
@@ -624,6 +637,68 @@ async def run_loop(
             w.append_tool_results([ToolOutcome(
                 c2.call_id, cap_model_content(stringify(r2)),
                 is_error_result(r2), c2.name, c2.args)])
+
+    async def _stage_requested(out: list[str]) -> AsyncIterator[Event]:
+        """Stage the action the analyst requested, now that the delivered
+        verdict meets its condition and nothing is staged. Appends the outcome
+        to ``out``: "pending" (suspended on approval), "done" (a card was
+        forced; end the turn), "continue" (history grew; run another round),
+        or nothing (it cannot be built here, so the turn goes on as before).
+        The staged call goes through guarded_dispatch, so the approval tier
+        and the autonomy policy judge it like any model-made call."""
+        action = post.due()
+        if action is None:
+            return
+        post.mark_fired()
+        disp = post.disposition or ""
+        if action == _SPEC_CONTAIN:
+            pin = forced_containment(disp)
+            if pin is not None:
+                async for ev in _force_contain(pin):
+                    yield ev
+                out.append("done")
+                return
+            w.append_user(_with_language(contain_stage_directive(disp)))
+            out.append("continue")
+            return
+        from . import session_state as _ss
+        subj = split_subject(_ss.current().autonomy_subject)
+        if subj is None or not w.has_tool("update_record") or _stop_requested(provider):
+            return
+        module, rec_uuid = subj
+        w.append_user(_with_language(close_stage_directive(disp, module, rec_uuid)))
+        try:
+            forced = await w.forced_call("update_record")
+        except Exception:
+            log.exception("requested close: forced update_record failed")
+            out.append("continue")
+            return
+        raw = dict(forced.args) if forced else {}
+        fields = dict(raw["fields"]) if isinstance(raw.get("fields"), dict) else {}
+        # The record and the close are the request's, not the model's: only
+        # the closure values it judged are taken from its call.
+        fields["status"] = "Closed"
+        args = {"module": module, "uuid": rec_uuid, "fields": fields}
+        call = ToolCall((forced.call_id if forced and forced.call_id
+                         else _uuid.uuid4().hex[:8]), "update_record", args)
+        yield ToolUseEvent(name=call.name, arguments=args, call_id=call.call_id,
+                           tier=_tier_for(call.name, args))
+        t0 = time.perf_counter()
+        result = guarded_dispatch(call.name, args)
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        w.append_tool_call(call)
+        if isinstance(result, dict) and result.get("pending_approval"):
+            yield _suspend(provider, w, system, tags, trace_id, call, result,
+                           [], [], guarded_dispatch, get_turn_evidence)
+            out.append("pending")
+            return
+        yield ToolResultEvent(call_id=call.call_id, result=result, duration_ms=dur_ms)
+        w.append_tool_results([ToolOutcome(
+            call.call_id, cap_model_content(stringify(result)),
+            is_error_result(result), call.name, args)])
+        for o in observers:
+            o.note_result(call.name, args, result)
+        out.append("continue")
 
     for _turn in range(turn_budget):
         # C6: checked between rounds, before the next model call.
@@ -854,6 +929,22 @@ async def run_loop(
                 yield DoneEvent(stop_reason="end_turn")
                 return
 
+            if post.due() is not None:
+                yield usage_event("requested_action_staged")
+                staged: list[str] = []
+                async for ev in _stage_requested(staged):
+                    yield ev
+                if staged and staged[0] == "pending":
+                    yield usage_event("pending_approval")
+                    yield DoneEvent(stop_reason="pending_approval")
+                    return
+                if staged and staged[0] == "done":
+                    yield DoneEvent(stop_reason="end_turn")
+                    return
+                if staged:
+                    turn_idx += 1
+                    continue
+
             follow = contain.directive(allowed)
             if follow:
                 contain.mark_fired()
@@ -900,10 +991,44 @@ async def run_loop(
                             break
                         call, result = forced_out[0]
                         contain.note_result("emit_card", call.args, result)
+                        post.note_result("emit_card", call.args, result)
                         if not (isinstance(result, dict) and result.get("ok") is False):
                             forced = (call, result)
                             break
                         directive = verdict_repair_directive(result, call.args)
+                    if forced is not None and post.due() is not None:
+                        # The forced verdict meets the analyst's condition:
+                        # it becomes answered history, then code stages the
+                        # requested action against it.
+                        call, result = forced
+                        w.append_tool_call(call)
+                        w.append_tool_results([ToolOutcome(
+                            call.call_id, cap_model_content(stringify(result)),
+                            is_error_result(result), call.name, call.args)])
+                        staged2: list[str] = []
+                        async for ev in _stage_requested(staged2):
+                            yield ev
+                        if staged2 and staged2[0] == "pending":
+                            yield usage_event("pending_approval")
+                            yield DoneEvent(stop_reason="pending_approval")
+                            return
+                        if staged2 and staged2[0] == "continue":
+                            turn_idx += 1
+                            continue
+                        if staged2:
+                            yield DoneEvent(stop_reason="end_turn")
+                            return
+                        # Nothing could be built here; the forced verdict is
+                        # already answered history, so the old follow-through
+                        # (unattended) is a plain directive on top of it.
+                        follow = contain.directive(allowed)
+                        if follow:
+                            contain.mark_fired()
+                            turn_idx += 1
+                            w.append_user(_with_language(follow[1]))
+                            continue
+                        yield DoneEvent(stop_reason="end_turn")
+                        return
                     follow = contain.directive(allowed) if forced is not None else None
                     if forced is not None and follow:
                         # The forced verdict is real history now, so the model

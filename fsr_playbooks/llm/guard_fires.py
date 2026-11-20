@@ -85,6 +85,7 @@ MECHANISMS: dict[str, Mechanism] = dict([
     _m("turn.fence_neutralised", LOOP_ACTION, "a failing fence replaced by a note"),
     _m("turn.terminal_fence_verified", LOOP_ACTION, "loop verifies a clean unverified fence"),
     _m("turn.forced_containment", LOOP_ACTION, "loop forces the policy-defined block card"),
+    _m("RequestedActionPostcondition", LOOP_ACTION, "analyst-requested action staged by code once the verdict meets its condition"),
     _m("turn.max_tool_turns", CAP, "tool-round budget spent; forced wrap-up"),
     _m("turn.answer_scope_wrapup", LOOP_ACTION, "narrow question ended without text; one answer round"),
     _m("turn.budget_ask", CAP, "tool-round budget spent; continue-or-stop card"),

@@ -35,6 +35,7 @@ from fsr_playbooks.llm import agent_loop, guard_fires, tools, turn_plan
 from fsr_playbooks.llm.anthropic_provider import AnthropicProvider
 from fsr_playbooks.llm.guard_fires import MECHANISMS, snapshot_guard_fires
 from fsr_playbooks.llm.provider import Message
+from fsr_playbooks.llm.task_spec import RequestedActionPostcondition, TaskSpec
 
 LLM = Path(guard_fires.__file__).parent
 RECORDERS = {"record_guard_fire", "refusal"}
@@ -239,6 +240,7 @@ LOOP_MARKERS = {
     "pending_approval": None,              # the approval gate, not a guard
     "max_tool_turns": "turn.max_tool_turns",           # wrap-up label
     "answer_scope_wrapup": "turn.answer_scope_wrapup",
+    "requested_action_staged": "RequestedActionPostcondition",
 }
 
 
@@ -533,6 +535,8 @@ DRIVERS = {
     "VerdictDeliveryGuard": _direct(lh.VerdictDeliveryGuard().mark_forced),
     "ContainmentFollowThrough": _direct(lh.ContainmentFollowThrough().mark_fired),
     "PromisedActionGuard": _direct(lh.PromisedActionGuard().mark_forced),
+    "RequestedActionPostcondition": _direct(
+        RequestedActionPostcondition(TaskSpec()).mark_fired),
     "ProgressMeter.flail": _progress_flail,
     "dispatch.bad_tool_arguments": _fire_bad_args,
     "dispatch.not_in_slice": _fire_not_in_slice,
