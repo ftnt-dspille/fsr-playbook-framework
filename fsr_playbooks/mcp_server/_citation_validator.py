@@ -39,9 +39,17 @@ class TurnEvidence:
         # Committed verdicts refused because every cited source was thin. The
         # first is the coverage round; after it the disposition is capped.
         self._thin_refusals = 0
+        # A needs_more_info verdict on complete evidence is refused once.
+        self._undecided_refusals = 0
 
     def thin_refusals(self) -> int:
         return self._thin_refusals
+
+    def undecided_refusals(self) -> int:
+        return self._undecided_refusals
+
+    def note_undecided_refusal(self) -> None:
+        self._undecided_refusals += 1
 
     def note_thin_refusal(self) -> None:
         self._thin_refusals += 1
@@ -81,7 +89,8 @@ class TurnEvidence:
         """Serialize for suspended-session storage."""
         return {"_registry": dict(self._registry),
                 "_verdicts": list(self._verdicts),
-                "_thin_refusals": self._thin_refusals}
+                "_thin_refusals": self._thin_refusals,
+                "_undecided_refusals": self._undecided_refusals}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TurnEvidence:
@@ -90,6 +99,7 @@ class TurnEvidence:
         obj._registry = data.get("_registry", {})
         obj._verdicts = list(data.get("_verdicts") or [])
         obj._thin_refusals = int(data.get("_thin_refusals") or 0)
+        obj._undecided_refusals = int(data.get("_undecided_refusals") or 0)
         return obj
 
 

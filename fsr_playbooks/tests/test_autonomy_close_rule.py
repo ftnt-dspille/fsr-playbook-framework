@@ -62,8 +62,11 @@ def _close(uuid=ALERT.rsplit("/", 1)[-1], status=CLOSED_IRI, **extra):
             "args": {"module": "alerts", "uuid": uuid, "fields": fields}}
 
 
-def _read(ok=True, name="get_record"):
-    return {"r1": {"name": name, "ok": ok, "args": {"module": "alerts", "uuid": "x"}}}
+def _read(ok=True, name="get_record", uuid="x", thin=None):
+    entry = {"name": name, "ok": ok, "args": {"module": "alerts", "uuid": uuid}}
+    if thin is not None:
+        entry["thin"] = thin
+    return {"r1": entry}
 
 
 def _verdict(disposition="false_positive", confidence=0.97, evidence=("r1",)):
@@ -104,7 +107,12 @@ def test_another_module_is_not_covered():
     ("sets status to Open", {"call": _close(status=OPEN_IRI)}, "status would be set"),
     ("an unresolvable status", {"call": _close(status="/api/3/picklists/nope")}, "status would be set"),
     ("true positive", {"verdicts": [_verdict(disposition="true_positive")]}, "true_positive"),
-    ("confidence 0.9", {"verdicts": [_verdict(confidence=0.9)]}, "below 0.95"),
+    ("confidence 0.9 resting only on a read of the alert itself",
+     {"verdicts": [_verdict(confidence=0.9)], "registry": _read(uuid=ALERT.rsplit("/", 1)[-1])},
+     "below 0.95"),
+    ("confidence 0.9 resting on an empty read",
+     {"verdicts": [_verdict(confidence=0.9)], "registry": _read(thin=True)}, "below 0.95"),
+    ("the model doubts its own verdict", {"verdicts": [_verdict(confidence=0.4)]}, "below 0.95"),
     ("uncited verdict -- record text cannot stand in for a lookup",
      {"verdicts": [_verdict(evidence=())]}, "cites no successful lookup"),
     ("cited lookup failed", {"registry": _read(ok=False)}, "cites no successful lookup"),
@@ -141,3 +149,11 @@ def test_the_host_can_bind_the_subject_after_the_policy():
         assert d["outcome"] == "would_act", d["failed"]
     finally:
         set_turn_policy(None)
+
+
+def test_independent_evidence_meets_the_floor_the_self_report_missed():
+    """The model reports 0.85 and 0.95 for the same evidence on different runs.
+    A cited, non-empty read of something other than the alert grounds the
+    verdict, so a self-report under the floor (but not a doubt) still acts."""
+    d = _eval(verdicts=[_verdict(confidence=0.85)])
+    assert d["outcome"] == "would_act", d["failed"]

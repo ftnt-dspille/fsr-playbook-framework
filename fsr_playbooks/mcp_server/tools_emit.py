@@ -1956,6 +1956,35 @@ def emit_verdict(
             if unchecked:
                 unknowns_list.append(
                     "not checked, though available: " + ", ".join(unchecked))
+    # Undecided on complete evidence. needs_more_info is right when something
+    # is missing; when every ready source was queried, the cited evidence came
+    # back with data, and no missing or failed source would decide it, it is
+    # a hedge, and the analyst asked for a call. Below 0.5 confidence the
+    # model genuinely cannot lean either way, and that answer stands.
+    # Refused once (doubt belongs in confidence and unknowns); a second
+    # needs_more_info is accepted as the model's considered answer.
+    if (evidence_ctx is not None and disposition == "needs_more_info"
+            and ids_valid and cited and evidence_ctx.undecided_refusals() == 0
+            and numeric and confidence >= 0.5):
+        from ._citation_validator import unchecked_ready_sources  # noqa: PLC0415
+        registry = evidence_ctx.valid_ids()
+        substantive = [c for c in cited
+                       if (registry.get(c) or {}).get("ok") is True
+                       and (registry.get(c) or {}).get("thin") is not True]
+        from ._citation_validator import what_would_help  # noqa: PLC0415
+        gap = what_would_help("needs_more_info", list(unknowns_list), registry)
+        if substantive and not unchecked_ready_sources(registry) and not gap:
+            evidence_ctx.note_undecided_refusal()
+            return _err(
+                "verdict_undecided",
+                "every ready source was queried this turn and the evidence you "
+                "cited came back with data, so the evidence is as complete as "
+                "this turn can make it. Commit to the disposition it supports "
+                "(true_positive, false_positive, benign or suspicious) and put "
+                "any doubt in confidence and unknowns. If the evidence really "
+                "does not support any call, send needs_more_info again and "
+                "say in unknowns what would decide it.",
+                suggestions=[verdict_contract()])
     # Generate id if missing
     if not id or not isinstance(id, str):
         import uuid  # noqa: PLC0415

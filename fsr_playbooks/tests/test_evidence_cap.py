@@ -21,9 +21,9 @@ def _ev():
     return ev
 
 
-def _verdict(*ids, disposition="true_positive"):
+def _verdict(*ids, disposition="true_positive", confidence=0.9):
     return emit_verdict(
-        disposition=disposition, severity="high", confidence=0.9,
+        disposition=disposition, severity="high", confidence=confidence,
         summary="Traffic to a flagged host.",
         findings=[{"claim": "The host was contacted.", "evidence": list(ids)}],
     )
@@ -114,3 +114,47 @@ class TestUncheckedReadySources:
         register_tool_result("c1", "siem_search", True, {}, _THIN)
         card = (_verdict("c1"), _verdict("c1"))[1]["card"]
         assert not any("not checked" in u for u in card["unknowns"])
+
+
+class TestUndecidedOnCompleteEvidence:
+    """needs_more_info on complete, non-empty evidence is a hedge: refused
+    once so the model commits and puts its doubt in confidence."""
+
+    def teardown_method(self):
+        set_turn_ready_sources(None)
+
+    def test_is_refused_once_when_every_ready_source_was_queried(self):
+        _ev()
+        set_turn_ready_sources({"siem_": "FortiSIEM"})
+        register_tool_result("c2", "siem_search", True, {}, _FULL)
+        out = _verdict("c2", disposition="needs_more_info")
+        assert out["ok"] is False and out["code"] == "verdict_undecided"
+
+    def test_a_second_needs_more_info_is_accepted(self):
+        _ev()
+        register_tool_result("c2", "siem_search", True, {}, _FULL)
+        _verdict("c2", disposition="needs_more_info")
+        out = _verdict("c2", disposition="needs_more_info")
+        assert out["ok"] is True and out["card"]["disposition"] == "needs_more_info"
+
+    def test_is_accepted_while_a_ready_source_is_unqueried(self):
+        _ev()
+        set_turn_ready_sources({"siem_": "FortiSIEM", "faz_": "FortiAnalyzer"})
+        register_tool_result("c2", "siem_search", True, {}, _FULL)
+        assert _verdict("c2", disposition="needs_more_info")["ok"] is True
+
+    def test_count_survives_suspension(self):
+        ev = _ev()
+        register_tool_result("c2", "siem_search", True, {}, _FULL)
+        _verdict("c2", disposition="needs_more_info")
+        set_turn_evidence(TurnEvidence.from_dict(ev.to_dict()))
+        assert _verdict("c2", disposition="needs_more_info")["ok"] is True
+
+    def test_a_genuinely_unsure_answer_stands(self):
+        _ev()
+        register_tool_result("c2", "siem_search", True, {}, _FULL)
+        out = emit_verdict(
+            disposition="needs_more_info", severity="low", confidence=0.3,
+            summary="Cannot tell.", unknowns=["who owns the host"],
+            findings=[{"claim": "The host was active.", "evidence": ["c2"]}])
+        assert out["ok"] is True, out

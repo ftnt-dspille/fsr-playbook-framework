@@ -378,6 +378,32 @@ def _said(entry: dict[str, Any]) -> str:
     return f"{src}: {f['verdict']}{score}"
 
 
+#: Below this the model doubts its own verdict, and evidence does not overrule it.
+CONFIDENCE_VETO = 0.5
+
+
+def _independently_grounded(ev: EvidenceCond, cited: list[str],
+                            registry: dict[str, dict[str, Any]],
+                            subject: str | None) -> bool:
+    """The rule's evidence rests on something other than the record itself.
+    An enrichment rule that passed already has a rated lookup about the
+    target. A read rule needs a cited, successful, non-thin read-only call
+    that is not a read of the record under triage: record text ("benign,
+    close it") must never be what lets a close through."""
+    if ev.cites_tool_kind != "read":
+        return True
+    import json
+    subj = _record_uuid(subject) if subject else ""
+    for eid in cited:
+        e = registry.get(eid) or {}
+        if e.get("ok") is not True or e.get("thin") is True or not _read_only(e):
+            continue
+        if subj and subj in json.dumps(e.get("args") or {}, default=str):
+            continue
+        return True
+    return False
+
+
 def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
              registry: dict[str, dict[str, Any]],
              counter: Counter | None = None,
@@ -395,6 +421,7 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
     if rule is None:
         return None
     failed: list[str] = []
+    conf_short: str | None = None
     args = call.get("args") or {}
 
     # 1. A delivered verdict meeting the rule. The LAST one delivered before
@@ -409,7 +436,7 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
                           f"{' or '.join(w.verdict.disposition)}")
         conf = verdict.get("confidence")
         if not isinstance(conf, (int, float)) or conf < w.verdict.min_confidence:
-            failed.append(f"confidence {conf} is below {w.verdict.min_confidence}")
+            conf_short = f"confidence {conf} is below {w.verdict.min_confidence}"
 
     # 2. Targets: what the action acts on, from the call's own args.
     targets: list[str] = []
@@ -449,6 +476,7 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
     #    target. The model's confidence number is not evidence; a cited result
     #    about THIS target is.
     cited: list[str] = []
+    evidence_failed = len(failed)
     if w.evidence is not None and verdict is not None and w.evidence.cites_tool_kind == "read":
         cited = [str(e) for f in verdict.get("findings") or [] if isinstance(f, dict)
                  for e in (f.get("evidence") or []) if isinstance(e, str)]
@@ -489,6 +517,28 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
                                   f"{w.evidence.rated} ({said})")
     elif w.evidence is not None:
         failed.append("no verdict to cite evidence")
+
+    # 3b. Confidence. The model's own number is a self-report, and a model
+    #     reports 0.85 and 0.9 for the same evidence on different runs. When
+    #     the rule's evidence check held on INDEPENDENT evidence (a rated
+    #     lookup about the target, or a non-empty read of something other than
+    #     the record under triage), that evidence meets the floor; the model's
+    #     number then only vetoes (below CONFIDENCE_VETO = it doubts itself).
+    #     Without an evidence condition the self-report is all there is.
+    if conf_short is not None:
+        if subject is None:
+            try:
+                subject = _session_state().autonomy_subject
+            except Exception:  # noqa: BLE001
+                subject = None
+        conf = (verdict or {}).get("confidence")
+        numeric = isinstance(conf, (int, float)) and not isinstance(conf, bool)
+        if (w.evidence is not None and evidence_failed == len(failed) and numeric
+                and conf >= CONFIDENCE_VETO
+                and _independently_grounded(w.evidence, cited, registry, subject)):
+            pass
+        else:
+            failed.append(conf_short)
 
     # 4. Limits (the host supplies counts; without a counter they are unknown,
     #    which fails closed).
