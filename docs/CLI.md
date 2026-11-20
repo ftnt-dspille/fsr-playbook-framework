@@ -540,6 +540,38 @@ Transforms (applied in order, all are safe on already-migrated files):
 | `path` | file or directory to migrate | -- |
 | `--dry-run` | show what would change without writing | -- |
 
+### `mock-from-run`
+
+Writes a successful past run's step outputs into a playbook YAML as step-level
+`mock_result:`, so mock mode returns real captured data and downstream
+`vars.steps.<X>.data...` refs keep resolving. The run is read through pyfsr from
+the `--instance` registry alias (never `.env`). Only steps that executed and
+succeeded are mocked; the default targets are `connector` and `code_snippet`
+steps. Record-mutating and logic steps are skipped unless named with `--steps`.
+Each captured value is the stored result verbatim (the `{data, status, message}`
+envelope included). After mocking, every template in the playbook is rendered
+offline against the mocked outputs, and refs that come out empty are reported.
+
+Nothing it writes sets `useMockOutput`. Turning mock mode on stays a deliberate
+run-time choice. Engine behaviour on FortiSOAR 8.0.1 (live-verified with a
+connector step and a code_snippet step):
+
+| Flag | Honored? |
+|---|---|
+| run-level `useMockOutput: true` as a top-level key of the `notrigger` trigger body (pyfsr `playbooks.trigger(name, env={"useMockOutput": True})`) | yes, for connector and code_snippet steps |
+| per-step `useMockOutput: true` under the step (compiled into `arguments`) | no; the step runs live |
+
+| arg | help | meta |
+| --- | --- | --- |
+| `input` | playbook YAML file to mock | -- |
+| `--run` | a finished run's task_id or pk, or `latest` (newest finished run of the playbook with a successful connector/code_snippet step) | required |
+| `--instance` | pyfsr instance alias the run lives on | required |
+| `--playbook` | playbook name when the YAML holds several | -- |
+| `--out` | write the mocked YAML here (default: stdout; the report goes to stderr) | -- |
+| `--steps` | mock exactly these steps, any type, record-mutating included | -- |
+| `--max-items` | truncate every list in a captured output to N items; each truncation is reported and noted in the YAML | default `20` |
+| `--redact` | replace e-mail, IPv4, bearer tokens and secret-named keys (public-repo hygiene) | -- |
+
 ### `picklist`
 
 #### `picklist for-field`

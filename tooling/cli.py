@@ -2131,6 +2131,80 @@ def cmd_env(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mock_from_run(args: argparse.Namespace) -> int:
+    """Write a successful past run's step outputs into the YAML as mock_result.
+
+    Reads the run through pyfsr (the --instance registry alias), maps each
+    executed connector / code_snippet step to its YAML step by name, and sets
+    the step's ``mock_result:`` to the stored result verbatim, so downstream
+    ``.data`` refs keep resolving in mock mode. Then renders every template in
+    the playbook against the mocked outputs and reports refs that come out
+    empty. See tooling/mock_from_run.py for the rules.
+    """
+    import mock_from_run as mfr
+
+    src = Path(args.input)
+    if not src.is_file():
+        print(f"no such YAML file: {args.input}", file=sys.stderr)
+        return 2
+    text = src.read_text()
+    try:
+        pb_name = mfr.pick_playbook(text, args.playbook)
+        yaml_steps = mfr._yaml_steps(text, pb_name)
+        only = None
+        if args.steps:
+            only = {s.strip() for s in args.steps.split(",") if s.strip()}
+        client = _instance_client(args.instance)
+        if args.run == "latest":
+            run = mfr.fetch_latest(client, pb_name, mfr.usable_for(yaml_steps))
+        else:
+            run = mfr.fetch_run(client, args.run, pb_name)
+        plan = mfr.build_plan(text, pb_name, run, only=only,
+                              max_items=args.max_items, redact=args.redact)
+        mocked_text = mfr.write_mocks(text, pb_name, plan.mocks)
+        checked, opaque, findings = mfr.render_check(mocked_text, pb_name, run, plan.mocks)
+    except mfr.MockFromRunError as e:
+        print(f"mock-from-run: {e}", file=sys.stderr)
+        return 1
+
+    print(f"playbook {pb_name!r} <- run {run.pk} (task {run.task_id or '-'}, "
+          f"status {run.status}, {len(run.steps)} step records)", file=sys.stderr)
+    for d in plan.decisions:
+        mark = "+" if d.action == "mock" else "-"
+        print(f"  {mark} {d.step} [{d.type}] {d.reason}", file=sys.stderr)
+    print(f"mocked {len(plan.mocks)} step(s)", file=sys.stderr)
+    for name, mv in plan.mocks.items():
+        for note in mv.truncated:
+            print(f"  ! truncated {name}: {note}", file=sys.stderr)
+        if mv.replaced_existing:
+            print(f"  ! replaced an existing mock_result on {name}", file=sys.stderr)
+    if args.redact:
+        print(f"redacted {plan.redacted} value(s) (e-mail, IPv4, bearer, secret keys)",
+              file=sys.stderr)
+    elif plan.sensitive_seen:
+        hits = ", ".join(f"{k}={v}" for k, v in sorted(plan.sensitive_seen.items()))
+        print(f"note: captured output holds sensitive-looking values ({hits}); "
+              "pass --redact before committing this YAML", file=sys.stderr)
+
+    print(f"render check: {checked} template(s) against the mocks, "
+          f"{opaque} opaque read(s) not checked", file=sys.stderr)
+    if not findings:
+        print("  ok: every downstream ref resolves against the mocked outputs", file=sys.stderr)
+    for f in findings:
+        if f.unrendered:
+            print(f"  ? {f.step} @ {f.location}: did not render ({f.unrendered})", file=sys.stderr)
+        else:
+            print(f"  ! {f.step} @ {f.location}: renders empty: {', '.join(f.empty)}"
+                  f"\n      {f.template}", file=sys.stderr)
+
+    if args.out:
+        Path(args.out).write_text(mocked_text)
+        print(f"wrote {args.out}", file=sys.stderr)
+    else:
+        sys.stdout.write(mocked_text)
+    return 0
+
+
 # FSR injects these into every Jinja context; they are not authored data
 # and only clutter the summary.
 _SYSTEM_ENV_VARS = frozenset({
@@ -5284,6 +5358,31 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--summary", action="store_true",
                     help="print a one-line-per-key index instead of full JSON")
     sp.set_defaults(func=cmd_env)
+
+    sp = sub.add_parser(
+        "mock-from-run",
+        help="write a successful past run's step outputs into YAML as mock_result",
+    )
+    sp.add_argument("input", help="playbook YAML file to mock")
+    sp.add_argument("--run", required=True, metavar="TASK_ID|latest",
+                    help="a finished run's task_id or pk, or 'latest' (newest finished run "
+                         "of the playbook with a successful connector/code_snippet step)")
+    sp.add_argument("--instance", required=True, metavar="ALIAS",
+                    help="pyfsr instance alias the run lives on (registry, not .env)")
+    sp.add_argument("--playbook", metavar="NAME",
+                    help="playbook name when the YAML holds several")
+    sp.add_argument("--out", metavar="FILE",
+                    help="write the mocked YAML here (default: stdout)")
+    sp.add_argument("--steps", metavar="A,B",
+                    help="mock exactly these steps (any type, record-mutating included); "
+                         "default is every executed connector/code_snippet step")
+    sp.add_argument("--max-items", type=int, default=20, metavar="N",
+                    help="truncate every list in a captured output to N items (default 20; "
+                         "each truncation is reported and noted in the YAML)")
+    sp.add_argument("--redact", action="store_true",
+                    help="replace e-mail, IPv4, bearer tokens and secret-named keys "
+                         "in the captured output (public-repo hygiene)")
+    sp.set_defaults(func=cmd_mock_from_run)
 
     sp = sub.add_parser("health", help="list configured connectors; --probe to live-check")
     sp.add_argument("connector", nargs="?",
