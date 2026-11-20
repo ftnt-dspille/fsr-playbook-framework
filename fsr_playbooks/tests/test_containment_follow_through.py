@@ -1,5 +1,5 @@
-"""Unattended triage: a true_positive with nothing staged is asked, in-turn, for
-its containment.
+"""Unattended triage: a true_positive with nothing staged gets its containment
+staged in-turn (the TaskSpec post-condition; this replaced ContainmentFollowThrough).
 
 On a live appliance, the box model ended 5 of 5 confirmed C2 auto-triage turns on the
 verdict card (or on the forced one), so no block was ever proposed and the
@@ -25,12 +25,17 @@ from test_verdict_forced_on_full_surface import (
     _prose,
 )
 
-from fsr_playbooks.llm._loop_helpers import (
-    UNATTENDED_CONTAIN_DIRECTIVE,
-    ContainmentFollowThrough,
-)
 from fsr_playbooks.llm.openai_provider import OpenAIProvider
 from fsr_playbooks.llm.provider import Message, UsageEvent
+from fsr_playbooks.llm.task_spec import (
+    CLOSE,
+    CONTAIN,
+    POLICY,
+    UNATTENDED,
+    TaskSpec,
+    contain_stage_directive,
+    specs_for_turn,
+)
 
 _ALLOWED = {"run_op", "emit_card", "get_record"}
 
@@ -85,54 +90,15 @@ def _run(rounds, *, unattended=True, forced=None, tools=_TOOLS):
 
 def _fired(events):
     return sum(1 for e in events if isinstance(e, UsageEvent)
-               and e.stop_reason == "containment_follow_through")
+               and e.stop_reason == "requested_action_staged")
+
+
+_ASK = contain_stage_directive(TaskSpec(CONTAIN, frozenset({"true_positive"}),
+                                        source=UNATTENDED), "true_positive")
 
 
 def _staged_block(disp):
     return any(c.args[0] == "run_op" for c in disp.call_args_list)
-
-
-# --- the guard on its own ---------------------------------------------------
-
-def test_a_delivered_true_positive_is_outstanding_once():
-    g = ContainmentFollowThrough(enabled=True)
-    g.note_result("emit_card", _verdict("true_positive"), {"ok": True})
-    assert g.outstanding(_ALLOWED)
-    g.mark_fired()
-    assert not g.outstanding(_ALLOWED)
-
-
-def test_it_is_inert_unless_unattended():
-    g = ContainmentFollowThrough(enabled=False)
-    g.note_result("emit_card", _verdict("true_positive"), {"ok": True})
-    assert not g.outstanding(_ALLOWED)
-
-
-def test_only_a_true_positive_asks():
-    for d in ("false_positive", "benign", "suspicious", "needs_more_info"):
-        g = ContainmentFollowThrough(enabled=True)
-        g.note_result("emit_card", _verdict(d), {"ok": True})
-        assert not g.outstanding(_ALLOWED), d
-
-
-def test_a_refused_verdict_is_not_delivered():
-    g = ContainmentFollowThrough(enabled=True)
-    g.note_result("emit_card", _verdict("true_positive"),
-                  {"ok": False, "code": "invalid_evidence_ids"})
-    assert not g.outstanding(_ALLOWED)
-
-
-def test_the_last_delivered_verdict_wins():
-    g = ContainmentFollowThrough(enabled=True)
-    g.note_result("emit_card", _verdict("true_positive"), {"ok": True})
-    g.note_result("emit_card", _verdict("false_positive"), {"ok": True})
-    assert not g.outstanding(_ALLOWED)
-
-
-def test_no_staging_tool_no_ask():
-    g = ContainmentFollowThrough(enabled=True)
-    g.note_result("emit_card", _verdict("true_positive"), {"ok": True})
-    assert not g.outstanding({"get_record"})
 
 
 # --- the OpenAI loop --------------------------------------------------------
@@ -141,7 +107,7 @@ def test_a_true_positive_that_stops_is_asked_and_stages_the_block():
     events, disp, sent = _run([_hunt_round(), _verdict_round(), _prose(),
                                _block_round(), _prose()])
     assert _fired(events) == 1
-    assert sent[3][-1] == {"role": "user", "content": UNATTENDED_CONTAIN_DIRECTIVE}
+    assert sent[3][-1] == {"role": "user", "content": _ASK}
     assert _staged_block(disp)
 
 
@@ -170,7 +136,7 @@ def test_a_forced_true_positive_is_asked_with_the_verdict_in_history():
     events, disp, sent = _run([_hunt_round(), _prose(), _block_round(), _prose()])
     assert _fired(events) == 1
     after = sent[2]
-    assert after[-1] == {"role": "user", "content": UNATTENDED_CONTAIN_DIRECTIVE}
+    assert after[-1] == {"role": "user", "content": _ASK}
     # The forced verdict is answered history, not a dangling directive.
     assert after[-2]["role"] == "tool" and after[-2]["tool_call_id"] == "c_forced"
     assert after[-3]["tool_calls"][0]["function"]["name"] == "emit_card"
@@ -231,7 +197,7 @@ def test_anthropic_forced_true_positive_is_asked_in_turn():
     last = msgs[-1]["content"]
     assert any(isinstance(b, dict) and b.get("type") == "tool_result"
                and b.get("tool_use_id") == "c_forced" for b in last)
-    assert any(isinstance(b, dict) and b.get("text") == UNATTENDED_CONTAIN_DIRECTIVE
+    assert any(isinstance(b, dict) and b.get("text") == _ASK
                for b in last)
 
 
@@ -250,7 +216,7 @@ def test_an_empty_reply_after_the_verdict_is_not_replayed():
         for m in msgs:
             if m.get("role") == "assistant":
                 assert m.get("content") or m.get("tool_calls"), m
-    assert sent[3][-1] == {"role": "user", "content": UNATTENDED_CONTAIN_DIRECTIVE}
+    assert sent[3][-1] == {"role": "user", "content": _ASK}
     assert _staged_block(disp)
 
 
@@ -302,11 +268,10 @@ def _close_policy(*, enabled=True, min_confidence=0.9):
 
 @contextmanager
 def _policy(policy):
-    tok = session_state.update(autonomy_policy=policy)
-    try:
+    # A fresh state for the block: a subject or policy set inside never
+    # reaches the next test.
+    with session_state.bound(session_state.SessionState(autonomy_policy=policy)):
         yield
-    finally:
-        session_state.reset(tok)
 
 
 def _fp(disposition="false_positive", confidence=0.95):
@@ -314,48 +279,42 @@ def _fp(disposition="false_positive", confidence=0.95):
             "payload": {"disposition": disposition, "confidence": confidence}}
 
 
-def test_a_false_positive_under_a_close_rule_is_asked_to_stage_the_close():
-    g = ContainmentFollowThrough(enabled=True)
-    g.note_result("emit_card", _fp(), {"ok": True})
-    with _policy(_close_policy()):
-        reason, text = g.directive(_CLOSE_ALLOWED)
-    assert reason == "close_follow_through"
-    assert "update_record" in text and "module alerts" in text
-    # Every field the rule lists, not "only these": live, a close that set
-    # status alone left the alert Closed with no closure reason.
-    assert "setting each of these fields and no others: " \
-        "status (to Closed), closureReason, closureNotes" in text
+def _specs(policy, unattended=True):
+    return specs_for_turn("triage this", unattended=unattended, policy=policy)
 
 
-def test_benign_is_asked_too():
-    g = ContainmentFollowThrough(enabled=True)
-    g.note_result("emit_card", _fp("benign"), {"ok": True})
-    with _policy(_close_policy()):
-        assert g.outstanding(_CLOSE_ALLOWED)
+def test_unattended_requests_containment_and_the_policy_close():
+    specs = _specs(_close_policy())
+    assert [(s.requested_action, s.source) for s in specs] == [
+        (CONTAIN, UNATTENDED), (CLOSE, POLICY)]
+    close = specs[1]
+    assert set(close.condition) == {"false_positive", "benign"}
+    assert close.min_confidence == 0.9
+    assert close.fields == ("status", "closureReason", "closureNotes")
 
 
-def test_no_close_is_asked_without_a_rule_that_would_take_it():
+def test_the_close_request_holds_only_at_the_rules_bar():
+    close = _specs(_close_policy())[1]
     cases = {
-        "no policy": (None, _fp(), _CLOSE_ALLOWED),
-        "switched off": (_close_policy(enabled=False), _fp(), _CLOSE_ALLOWED),
-        "below the bar": (_close_policy(), _fp(confidence=0.7), _CLOSE_ALLOWED),
-        "no confidence": (_close_policy(), {"card_type": "verdict", "payload": {
-            "disposition": "false_positive"}}, _CLOSE_ALLOWED),
-        "not a close verdict": (_close_policy(), _fp("suspicious"), _CLOSE_ALLOWED),
-        "write tool not offered": (_close_policy(), _fp(), _ALLOWED),
+        "false_positive at 0.95": ("false_positive", 0.95, True),
+        "benign at 0.9": ("benign", 0.9, True),
+        "below the bar": ("false_positive", 0.7, False),
+        "no confidence": ("false_positive", None, False),
+        "not a close verdict": ("suspicious", 0.99, False),
+        "a threat": ("true_positive", 0.99, False),
     }
-    for why, (policy, verdict, allowed) in cases.items():
-        g = ContainmentFollowThrough(enabled=True)
-        g.note_result("emit_card", verdict, {"ok": True})
-        with _policy(policy):
-            assert not g.outstanding(allowed), why
+    for why, (d, c, want) in cases.items():
+        assert close.wants(d, c) is want, why
 
 
-def test_an_attended_false_positive_is_never_asked_to_close():
-    g = ContainmentFollowThrough(enabled=False)
-    g.note_result("emit_card", _fp(), {"ok": True})
-    with _policy(_close_policy()):
-        assert not g.outstanding(_CLOSE_ALLOWED)
+def test_no_close_is_requested_without_an_enabled_close_rule():
+    for why, policy in {"no policy": None,
+                        "switched off": _close_policy(enabled=False)}.items():
+        assert [s.requested_action for s in _specs(policy)] == [CONTAIN], why
+
+
+def test_an_attended_turn_requests_nothing_unasked():
+    assert _specs(_close_policy(), unattended=False) == ()
 
 
 def _fp_round():
@@ -376,16 +335,44 @@ _CLOSE_TOOLS = _TOOLS + [{"type": "function", "function": {
     "parameters": {"type": "object", "properties": {}}}}]
 
 
-def test_the_loop_asks_a_false_positive_to_stage_the_close_in_turn():
+def _forced_close(fields):
+    fn = MagicMock()
+    fn.name = "update_record"
+    fn.arguments = json.dumps({"module": "x", "uuid": "y", "fields": fields})
+    call = MagicMock(id="c_close", function=fn)
+    return MagicMock(choices=[MagicMock(message=MagicMock(tool_calls=[call]))])
+
+
+def test_the_loop_stages_the_policy_close_with_only_the_rules_fields():
+    from fsr_playbooks.llm.autonomy import set_turn_subject
     with _policy(_close_policy()):
-        events, disp, sent = _run([_hunt_round(), _fp_round(), _prose(),
-                                   _close_round(), _prose()], tools=_CLOSE_TOOLS)
-    reasons = [e.stop_reason for e in events if isinstance(e, UsageEvent)]
-    assert reasons.count("close_follow_through") == 1
-    assert "containment_follow_through" not in reasons
-    ask = sent[3][-1]
-    assert ask["role"] == "user" and "update_record" in ask["content"]
-    assert any(c.args[0] == "update_record" for c in disp.call_args_list)
+        set_turn_subject("/api/3/alerts/a1")
+        events, disp, sent = _run(
+            [_hunt_round(), _fp_round(), _prose(), _prose()], tools=_CLOSE_TOOLS,
+            forced=_forced_close({"closureReason": "False Positive",
+                                  "closureNotes": "known scanner",
+                                  "severity": "Low", "status": "Open"}))
+    assert _fired(events) == 1
+    closes = [c.args[1] for c in disp.call_args_list if c.args[0] == "update_record"]
+    # The record is the turn's, status is the close, severity is dropped.
+    assert closes == [{"module": "alerts", "uuid": "a1", "fields": {
+        "closureReason": "False Positive", "closureNotes": "known scanner",
+        "status": "Closed"}}]
+    asks = [m for m in sent[-1] if m.get("role") == "user"
+            and "status (to Closed), closureReason, closureNotes" in str(m.get("content"))]
+    assert len(asks) == 1
+
+
+def test_the_loop_stages_no_close_below_the_bar():
+    from fsr_playbooks.llm.autonomy import set_turn_subject
+    low = [_delta_chunk(tool_calls=[_tc(index=0, id="v1", name="emit_card",
+                                        args=json.dumps(_fp(confidence=0.7)))]),
+           _delta_chunk(finish="tool_calls"), _usage_chunk()]
+    with _policy(_close_policy()):
+        set_turn_subject("/api/3/alerts/a1")
+        events, disp, sent = _run([_hunt_round(), low, _prose()], tools=_CLOSE_TOOLS)
+    assert _fired(events) == 0 and len(sent) == 3
+    assert not any(c.args[0] == "update_record" for c in disp.call_args_list)
 
 
 def test_the_loop_ends_a_false_positive_with_no_close_rule():

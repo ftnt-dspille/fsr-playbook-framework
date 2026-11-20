@@ -60,7 +60,6 @@ MECHANISMS: dict[str, Mechanism] = dict([
     _m("BuildProgressGuard.incomplete", ROUND_END, "incomplete-draft notice shown"),
     _m("BuildProgressGuard.unverified_draft", ROUND_END, "draft left unverified"),
     _m("VerdictDeliveryGuard", ROUND_END, "triage gathered evidence, never concluded"),
-    _m("ContainmentFollowThrough", ROUND_END, "unattended true positive, nothing staged"),
     _m("PromisedActionGuard", ROUND_END, "model wrote a fabricated call marker"),
     # -- stall detectors (ProgressMeter). The wrap-up they force is the same event.
     _m("ProgressMeter.flail", STALL, "rounds that only fail"),

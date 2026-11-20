@@ -45,7 +45,6 @@ from ._loop_helpers import (
     UNVERIFIED_DRAFT_DIRECTIVE,
     YAML_FENCE_RE,
     BuildProgressGuard,
-    ContainmentFollowThrough,
     CreateDeliveryGuard,
     EnhanceDeliveryGuard,
     FenceHold,
@@ -100,7 +99,7 @@ from .task_spec import (
     RequestedActionPostcondition,
     close_stage_directive,
     contain_stage_directive,
-    parse_task_spec,
+    specs_for_turn,
     split_subject,
 )
 from .tools import _resolve_tier as _tier_for
@@ -448,11 +447,14 @@ async def run_loop(
     verdict = VerdictDeliveryGuard(enabled=tags.get("verdicts") is not False)
     promise = PromisedActionGuard()
     progress = ProgressMeter()
-    contain = ContainmentFollowThrough(enabled=bool(tags.get("unattended")))
-    # TaskSpec (Phase 1): the action the analyst asked this turn to end in,
-    # parsed from their own words. Code, not the model, decides it is staged.
-    post = RequestedActionPostcondition(parse_task_spec(latest_user_text(messages)))
-    observers = (delivery, create, build, verdict, contain, promise, progress, post)
+    # TaskSpec (Phase 1): what this turn was asked to end in -- the analyst's
+    # own words, and unattended, the triage contract and the admin's close
+    # rule. Code, not the model, decides a met request is staged.
+    from . import session_state as _ss_turn
+    post = RequestedActionPostcondition(specs_for_turn(
+        latest_user_text(messages), unattended=bool(tags.get("unattended")),
+        policy=_ss_turn.current().autonomy_policy))
+    observers = (delivery, create, build, verdict, promise, progress, post)
     investigation = getattr(case_state, "investigation", None) if case_state is not None else None
     discipline = TriageDiscipline(
         state=investigation,
@@ -638,35 +640,66 @@ async def run_loop(
                 c2.call_id, cap_model_content(stringify(r2)),
                 is_error_result(r2), c2.name, c2.args)])
 
-    async def _stage_requested(out: list[str]) -> AsyncIterator[Event]:
-        """Stage the action the analyst requested, now that the delivered
-        verdict meets its condition and nothing is staged. Appends the outcome
-        to ``out``: "pending" (suspended on approval), "done" (a card was
-        forced; end the turn), "continue" (history grew; run another round),
-        or nothing (it cannot be built here, so the turn goes on as before).
-        The staged call goes through guarded_dispatch, so the approval tier
-        and the autonomy policy judge it like any model-made call."""
-        action = post.due()
-        if action is None:
+    def _marker(stop_reason: str) -> UsageEvent:
+        """A zero-token usage row naming what happened, for a round whose
+        usage was already reported under another reason."""
+        return UsageEvent(
+            session_id=trace_id, turn=turn_idx, model=provider.model,
+            input_tokens=0, output_tokens=0, cache_read=0, cache_write=0,
+            history_chars=0, stop_reason=stop_reason,
+            self_repair_turn=self_repair_turns, tool_calls=[], tags=tags,
+            **w.usage_extra())
+
+    async def _stage_requested(out: list[str],
+                               answered: tuple[ToolCall, Any] | None = None,
+                               ) -> AsyncIterator[Event]:
+        """Stage the request the delivered verdict meets, with nothing staged
+        yet. ``answered`` is a forced verdict not yet in history: it goes in
+        first, carrying this step's directive in the same message (Anthropic
+        has no mid-history system role, and two user turns in a row are not
+        portable). Appends to ``out``: "pending" (suspended on approval),
+        "done" (a card was forced; end the turn), "continue" (history grew;
+        run another round), or nothing (it cannot be staged here). Every
+        staged call goes through guarded_dispatch, so the approval tier and
+        the autonomy policy judge it like a model-made call."""
+        spec = post.due()
+        if spec is None:
             return
         post.mark_fired()
         disp = post.disposition or ""
-        if action == _SPEC_CONTAIN:
+        pending = [answered] if answered is not None else []
+
+        def say(text: str | None) -> None:
+            if pending:
+                c, r = pending.pop()
+                w.append_tool_call(c)
+                w.append_tool_results([ToolOutcome(
+                    c.call_id, cap_model_content(stringify(r)), is_error_result(r),
+                    c.name, c.args)], note=_with_language(text) if text else None)
+            elif text:
+                w.append_user(_with_language(text))
+
+        if spec.requested_action == _SPEC_CONTAIN:
             pin = forced_containment(disp)
             if pin is not None:
+                say(None)
                 async for ev in _force_contain(pin):
                     yield ev
                 out.append("done")
                 return
-            w.append_user(_with_language(contain_stage_directive(disp)))
+            if "run_op" not in allowed and "emit_card" not in allowed:
+                say(None)
+                return
+            say(contain_stage_directive(spec, disp))
             out.append("continue")
             return
         from . import session_state as _ss
         subj = split_subject(_ss.current().autonomy_subject)
         if subj is None or not w.has_tool("update_record") or _stop_requested(provider):
+            say(None)
             return
         module, rec_uuid = subj
-        w.append_user(_with_language(close_stage_directive(disp, module, rec_uuid)))
+        say(close_stage_directive(spec, disp, module, rec_uuid))
         try:
             forced = await w.forced_call("update_record")
         except Exception:
@@ -675,6 +708,9 @@ async def run_loop(
             return
         raw = dict(forced.args) if forced else {}
         fields = dict(raw["fields"]) if isinstance(raw.get("fields"), dict) else {}
+        if spec.fields:
+            # A policy close changes only what its rule lets it change.
+            fields = {k: v for k, v in fields.items() if k in spec.fields}
         # The record and the close are the request's, not the model's: only
         # the closure values it judged are taken from its call.
         fields["status"] = "Closed"
@@ -935,7 +971,7 @@ async def run_loop(
                 async for ev in _stage_requested(staged):
                     yield ev
                 if staged and staged[0] == "pending":
-                    yield usage_event("pending_approval")
+                    yield _marker("pending_approval")
                     yield DoneEvent(stop_reason="pending_approval")
                     return
                 if staged and staged[0] == "done":
@@ -944,25 +980,6 @@ async def run_loop(
                 if staged:
                     turn_idx += 1
                     continue
-
-            follow = contain.directive(allowed)
-            if follow:
-                contain.mark_fired()
-                yield usage_event(follow[0])
-                turn_idx += 1
-                # A confirmed true_positive must not end unattended with nothing
-                # staged. When the policy defines a block for this turn's cited
-                # malicious external target, force that card now rather than ask
-                # and risk the model ending on prose; the policy still judges it.
-                pin = (forced_containment(contain.disposition)
-                       if follow[0] == "containment_follow_through" else None)
-                if pin is not None:
-                    async for ev in _force_contain(pin):
-                        yield ev
-                    yield DoneEvent(stop_reason="end_turn")
-                    return
-                w.append_user(_with_language(follow[1]))
-                continue
 
             # Verdict: a triage turn that gathered evidence and never concluded
             # gets one forced emit_card(verdict) round citing this turn's
@@ -990,78 +1007,25 @@ async def run_loop(
                             log.exception("forced verdict delivery failed")
                             break
                         call, result = forced_out[0]
-                        contain.note_result("emit_card", call.args, result)
                         post.note_result("emit_card", call.args, result)
                         if not (isinstance(result, dict) and result.get("ok") is False):
                             forced = (call, result)
                             break
                         directive = verdict_repair_directive(result, call.args)
                     if forced is not None and post.due() is not None:
-                        # The forced verdict meets the analyst's condition:
-                        # it becomes answered history, then code stages the
-                        # requested action against it.
-                        call, result = forced
-                        w.append_tool_call(call)
-                        w.append_tool_results([ToolOutcome(
-                            call.call_id, cap_model_content(stringify(result)),
-                            is_error_result(result), call.name, call.args)])
+                        # The forced verdict meets a request: code stages it
+                        # against that verdict, in the same turn.
+                        yield _marker("requested_action_staged")
                         staged2: list[str] = []
-                        async for ev in _stage_requested(staged2):
+                        async for ev in _stage_requested(staged2, answered=forced):
                             yield ev
                         if staged2 and staged2[0] == "pending":
-                            yield usage_event("pending_approval")
+                            yield _marker("pending_approval")
                             yield DoneEvent(stop_reason="pending_approval")
                             return
                         if staged2 and staged2[0] == "continue":
                             turn_idx += 1
                             continue
-                        if staged2:
-                            yield DoneEvent(stop_reason="end_turn")
-                            return
-                        # Nothing could be built here; the forced verdict is
-                        # already answered history, so the old follow-through
-                        # (unattended) is a plain directive on top of it.
-                        follow = contain.directive(allowed)
-                        if follow:
-                            contain.mark_fired()
-                            turn_idx += 1
-                            w.append_user(_with_language(follow[1]))
-                            continue
-                        yield DoneEvent(stop_reason="end_turn")
-                        return
-                    follow = contain.directive(allowed) if forced is not None else None
-                    if forced is not None and follow:
-                        # The forced verdict is real history now, so the model
-                        # stages what it calls for against what it decided.
-                        call, result = forced
-                        w.append_tool_call(call)
-                        w.append_tool_results(
-                            [ToolOutcome(call.call_id, cap_model_content(stringify(result)),
-                                         is_error_result(result),
-                                         call.name, call.args)],
-                            note=follow[1])
-                        contain.mark_fired()
-                        # Marks that follow-through fired. Zero tokens: this
-                        # round's usage was reported as verdict_guard_forced.
-                        yield UsageEvent(
-                            session_id=trace_id, turn=turn_idx, model=provider.model,
-                            input_tokens=0, output_tokens=0, cache_read=0, cache_write=0,
-                            history_chars=0, stop_reason=follow[0],
-                            self_repair_turn=self_repair_turns, tool_calls=[], tags=tags,
-                            **w.usage_extra())
-                        turn_idx += 1
-                        # Same containment fallback as the non-forced path: a
-                        # confirmed true_positive with a policy-defined block for
-                        # this turn's cited malicious external target gets the
-                        # card forced now, so the policy has one to judge.
-                        pin = (forced_containment(contain.disposition)
-                               if follow[0] == "containment_follow_through" else None)
-                        if pin is not None:
-                            async for ev in _force_contain(pin):
-                                yield ev
-                            yield DoneEvent(stop_reason="end_turn")
-                            return
-                        continue
                 yield DoneEvent(stop_reason="end_turn")
                 return
 

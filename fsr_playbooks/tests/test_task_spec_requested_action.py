@@ -113,7 +113,7 @@ def test_due_once_after_a_delivered_matching_verdict():
     p = RequestedActionPostcondition(parse_task_spec(CLOSE_ASK))
     assert p.due() is None
     p.note_result("emit_card", _verdict_args("false_positive"), {"ok": True})
-    assert p.due() == CLOSE
+    assert p.due().requested_action == CLOSE
     p.mark_fired()
     assert p.due() is None
 

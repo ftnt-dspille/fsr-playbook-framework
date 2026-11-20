@@ -33,6 +33,13 @@ NONE = "none"
 CLOSE = "close"
 CONTAIN = "contain"
 
+# Where a request came from. The analyst's words win; with no analyst
+# watching, the request is the unattended triage contract (contain a confirmed
+# threat) and the admin's autonomy policy (close what its close rule closes).
+ANALYST = "analyst"
+UNATTENDED = "unattended"
+POLICY = "policy"
+
 _FP = frozenset({"false_positive", "benign"})
 _TP = frozenset({"true_positive"})
 
@@ -65,19 +72,31 @@ _NOT_A_REQUEST_RE = re.compile(
 
 @dataclass(frozen=True)
 class TaskSpec:
-    """What the analyst asked this turn to end in."""
+    """What this turn was asked to end in."""
 
     requested_action: str = NONE
     condition: frozenset[str] = frozenset()
+    #: The verdict's confidence must reach this (a policy rule's bar). 0 = any.
+    min_confidence: float = 0.0
+    source: str = ANALYST
+    #: For a policy close: the fields the rule lets the write change, and the
+    #: rule itself (its values go into the directive). Empty = not restricted.
+    fields: tuple[str, ...] = ()
+    rule: Any = None
 
-    def wants(self, disposition: str | None) -> bool:
+    def wants(self, disposition: str | None, confidence: float | None = None) -> bool:
         """True when the delivered verdict meets the request's condition."""
-        return (self.requested_action != NONE and bool(disposition)
-                and str(disposition).strip().lower() in self.condition)
+        if self.requested_action == NONE or not disposition:
+            return False
+        if str(disposition).strip().lower() not in self.condition:
+            return False
+        if self.min_confidence > 0:
+            return confidence is not None and confidence >= self.min_confidence
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         return {"requested_action": self.requested_action,
-                "condition": sorted(self.condition)}
+                "condition": sorted(self.condition), "source": self.source}
 
 
 def _condition_in(text: str) -> frozenset[str]:
@@ -116,8 +135,50 @@ def parse_task_spec(user_text: str | None) -> TaskSpec:
     return TaskSpec()
 
 
-def close_stage_directive(disposition: str, module: str, uuid: str) -> str:
+def specs_for_turn(user_text: str | None, *, unattended: bool = False,
+                   policy: Any = None) -> tuple[TaskSpec, ...]:
+    """Every request this turn carries, the analyst's first. Unattended, the
+    turn also asks for containment of a true_positive, and for the close the
+    admin's enabled policy would take on a false positive at its bar."""
+    out: list[TaskSpec] = []
+    asked = parse_task_spec(user_text)
+    if asked.requested_action != NONE:
+        out.append(asked)
+    if not unattended:
+        return tuple(out)
+    out.append(TaskSpec(CONTAIN, _TP, source=UNATTENDED))
+    if policy is not None and getattr(policy, "enabled", False):
+        for rule in getattr(policy, "rules", ()) or ():
+            act = rule.action
+            v = getattr(rule.when, "verdict", None)
+            if act.tool != "update_record" or v is None:
+                continue
+            cond = frozenset(str(d).lower() for d in v.disposition) & _FP
+            if cond:
+                out.append(TaskSpec(CLOSE, cond, min_confidence=float(v.min_confidence or 0),
+                                    source=POLICY, fields=tuple(act.fields or ()), rule=rule))
+                break
+    return tuple(out)
+
+
+def _field_list(spec: TaskSpec) -> str:
+    values = (getattr(spec.rule.action, "values", None) or {}) if spec.rule is not None else {}
+    parts = []
+    for f in spec.fields:
+        allowed = values.get(f)
+        parts.append(f"{f} (to {' or '.join(allowed)})" if allowed else f)
+    return ", ".join(parts)
+
+
+def close_stage_directive(spec: TaskSpec, disposition: str, module: str, uuid: str) -> str:
     """The instruction sent with the pinned update_record round."""
+    if spec.source == POLICY:
+        return (
+            f"Your verdict is {disposition} and nothing is staged. No analyst is "
+            "watching this triage, and the admin's policy closes records like "
+            f"this one. Stage the close now with update_record on module {module}, "
+            f"uuid {uuid}, setting each of these fields and no others: "
+            f"{_field_list(spec)}. Write the closure values from your verdict.")
     return (
         f"The analyst asked for this record to be closed if the verdict is a "
         f"false positive or benign. Your verdict is {disposition}, so stage that "
@@ -127,17 +188,21 @@ def close_stage_directive(disposition: str, module: str, uuid: str) -> str:
         "to the analyst for approval; it does not run on its own.")
 
 
-def contain_stage_directive(disposition: str) -> str:
-    """The ask when the containment the analyst requested cannot be built in
-    code (no policy rule names the connector and operation)."""
+def contain_stage_directive(spec: TaskSpec, disposition: str) -> str:
+    """The ask when the requested containment cannot be built in code (no
+    policy rule names the connector and operation)."""
+    who = ("No analyst is watching this triage, so containment you do not "
+           "stage now is never proposed." if spec.source != ANALYST else
+           "The analyst asked for containment if this is a real threat.")
     return (
-        f"The analyst asked for containment if this is a real threat. Your "
-        f"verdict is {disposition} and nothing is staged. Stage the containment "
-        "now, using the evidence you already have; do not re-investigate. Find "
-        "the action with find(kind='action', action_type='containment') for the "
-        "target, then stage it with emit_card(card_type='action') using the "
-        "connector and operation that returns; never invent a connector name. "
-        "If no containment applies, say why in one sentence.")
+        f"Your verdict is {disposition} and nothing is staged. {who} Stage the "
+        "containment this threat calls for now (for example a block of the "
+        "malicious external address), using the evidence you already have; do "
+        "not re-investigate. Find the action first with "
+        "find(kind='action', action_type='containment') for the target, then "
+        "stage it with emit_card(card_type='action') using the connector and "
+        "operation that returns; never invent a connector name. If no "
+        "containment applies, say why in one sentence.")
 
 
 def split_subject(iri: str | None) -> tuple[str, str] | None:
@@ -152,9 +217,10 @@ class RequestedActionPostcondition:
     """Watches a turn's executed results for the post-condition. Observer
     interface matches the loop's other guards (``note_result``)."""
 
-    def __init__(self, spec: TaskSpec) -> None:
-        self.spec = spec
+    def __init__(self, specs: TaskSpec | tuple[TaskSpec, ...] | list[TaskSpec]) -> None:
+        self.specs = (specs,) if isinstance(specs, TaskSpec) else tuple(specs)
         self._disposition: str | None = None
+        self._confidence: float | None = None
         self._staged = False
         self._fired = False
 
@@ -168,7 +234,14 @@ class RequestedActionPostcondition:
                 card = result.get("card") if isinstance(result.get("card"), dict) else {}
                 payload = a.get("payload") if isinstance(a.get("payload"), dict) else {}
                 d = str(card.get("disposition") or payload.get("disposition") or "")
-                self._disposition = d.strip().lower() or self._disposition
+                if d.strip():
+                    # The last delivered verdict wins, confidence with it.
+                    self._disposition = d.strip().lower()
+                    conf = card.get("confidence", payload.get("confidence"))
+                    try:
+                        self._confidence = float(conf) if conf is not None else None
+                    except (TypeError, ValueError):
+                        self._confidence = None
             elif ct == "action":
                 self._staged = True
         elif name in ("emit_action_card", "update_record", "run_op") or \
@@ -179,11 +252,13 @@ class RequestedActionPostcondition:
     def disposition(self) -> str | None:
         return self._disposition
 
-    def due(self) -> str | None:
-        """The action the loop must stage now, or None."""
-        if self._fired or self._staged or not self.spec.wants(self._disposition):
+    def due(self) -> TaskSpec | None:
+        """The request the loop must stage now (the first one the delivered
+        verdict meets), or None."""
+        if self._fired or self._staged:
             return None
-        return self.spec.requested_action
+        return next((s for s in self.specs
+                     if s.wants(self._disposition, self._confidence)), None)
 
     def mark_fired(self) -> None:
         self._fired = True

@@ -402,15 +402,14 @@ def _fire_terminal_fence_verified(mp):
 
 
 def _fire_forced_containment(mp):
+    # Unattended, a delivered true_positive with nothing staged: the turn's
+    # containment request is met, and the policy supplies the block (pinned).
     mp.setattr(agent_loop, "forced_containment", lambda d: {"x": 1})
-    ct = lh.ContainmentFollowThrough(enabled=True)
-    mp.setattr(lh.ContainmentFollowThrough, "directive",
-               lambda self, allowed: ("containment_follow_through", "stage it"))
-    mp.setattr(lh.ContainmentFollowThrough, "mark_fired", lambda self: None)
-    del ct
-    verdict = {"card_type": "verdict", "payload": {"id": "v"}}
+    verdict = {"card_type": "verdict",
+               "payload": {"id": "v", "disposition": "true_positive"}}
     _loop(mp, [_Final([_use("a", "emit_card", verdict)]), _Final([_say("done")]),
-               _Final([_use("f", "emit_card", {"card_type": "action", "payload": {}})])])
+               _Final([_use("f", "emit_card", {"card_type": "action", "payload": {}})])],
+          tags={"unattended": True})
 
 
 def _triage(**kw) -> lh.TriageDiscipline:
@@ -533,7 +532,6 @@ DRIVERS = {
     "BuildProgressGuard.incomplete": _direct(lh.BuildProgressGuard().mark_incomplete_shown),
     "BuildProgressGuard.unverified_draft": _direct(lh.BuildProgressGuard().mark_verify_forced),
     "VerdictDeliveryGuard": _direct(lh.VerdictDeliveryGuard().mark_forced),
-    "ContainmentFollowThrough": _direct(lh.ContainmentFollowThrough().mark_fired),
     "PromisedActionGuard": _direct(lh.PromisedActionGuard().mark_forced),
     "RequestedActionPostcondition": _direct(
         RequestedActionPostcondition(TaskSpec()).mark_fired),
