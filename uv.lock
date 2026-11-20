@@ -997,7 +997,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = ">=7.6.9" },
-    { name = "fsr-playbooks", marker = "extra == 'playbooks'", specifier = ">=0.10.3,<0.11" },
+    { name = "fsr-playbooks", marker = "extra == 'playbooks'", specifier = ">=0.12.1,<0.13" },
     { name = "furo", marker = "extra == 'docs'", specifier = ">=2024.8.6" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2,<3" },
     { name = "mcp", marker = "extra == 'test'", specifier = ">=2,<3" },
