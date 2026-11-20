@@ -186,7 +186,8 @@ def test_every_turn_refusal_code_has_a_mechanism():
     codes = (_codes(_function(_tree("tools.py"), "turn_refusal"))
              | _codes(_function(_tree("turn_plan.py"), "TurnPlan.gate_refusal"))
              | _codes(_function(_tree("turn_plan.py"), "_playbook_side_refusal"))
-             | _codes(_function(_tree("ask_scope.py"), "answer_refusal")))
+             | _codes(_function(_tree("ask_scope.py"), "answer_refusal"))
+             | _codes(_function(_tree("tools.py"), "verdict_first_refusal")))
     assert codes == set(tools.TURN_REFUSAL_MECHANISM), (
         f"refusal codes {sorted(codes)} vs recorded {sorted(tools.TURN_REFUSAL_MECHANISM)}")
     assert set(tools.TURN_REFUSAL_MECHANISM.values()) <= set(MECHANISMS)
@@ -483,6 +484,19 @@ def _fire_tools_answer_scope(_mp):
         ask_scope.reset_scope(token)
 
 
+def _fire_tools_verdict_first(_mp):
+    from fsr_playbooks.llm import ask_scope
+    from fsr_playbooks.mcp_server import _citation_validator as cv
+    token = ask_scope.bind_scope("investigate")
+    cv.set_turn_evidence(cv.TurnEvidence())
+    try:
+        tools.dispatch("update_record", {"module": "alerts", "uuid": "x",
+                                         "fields": {"status": "Closed"}})
+    finally:
+        cv.set_turn_evidence(None)
+        ask_scope.reset_scope(token)
+
+
 def _fire_dispatch_answer_scope(mp):
     n = ["get_record"] * 7
     turns = [_Final([_use(f"c{i}", "get_record", {"i": i})]) for i in range(len(n))]
@@ -531,6 +545,7 @@ DRIVERS = {
     "tools.not_afforded": _fire_tools_not_afforded,
     "tools.invalid_tool_args": _fire_tools_invalid_args,
     "tools.answer_scope": _fire_tools_answer_scope,
+    "tools.verdict_first": _fire_tools_verdict_first,
     "dispatch.answer_scope": _fire_dispatch_answer_scope,
     "turn.answer_scope_wrapup": _fire_answer_scope_wrapup,
     "turn.self_repair": _fire_self_repair,

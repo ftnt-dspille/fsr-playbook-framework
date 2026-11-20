@@ -78,6 +78,7 @@ MECHANISMS: dict[str, Mechanism] = dict([
     _m("tools.state_unresolved", DISPATCH_REFUSAL, "turn plan could not be derived"),
     _m("tools.not_afforded", DISPATCH_REFUSAL, "open-playbook frontier / create-new"),
     _m("tools.answer_scope", DISPATCH_REFUSAL, "hunt, write or verdict on a narrow question"),
+    _m("tools.verdict_first", DISPATCH_REFUSAL, "write or action staged before the investigation's verdict"),
     _m("tools.invalid_tool_args", DISPATCH_REFUSAL, "argument gate or cross-field rule"),
     # -- loop-level forced wrap-ups, caps, loop-run actions
     _m("turn.self_repair", LOOP_ACTION, "last yaml fence failed its checks; one repair round"),

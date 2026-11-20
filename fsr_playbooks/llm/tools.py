@@ -1981,13 +1981,57 @@ TURN_REFUSAL_MECHANISM = {
     "state_unresolved": "tools.state_unresolved",
     "not_afforded": "tools.not_afforded",
     "answer_scope": "tools.answer_scope",
+    "verdict_first": "tools.verdict_first",
 }
+
+
+#: Calls that stage a change resting on the investigation's conclusion.
+_VERDICT_FIRST_WRITES = frozenset({"update_record"})
+
+_VERDICT_FIRST_REFUSAL = (
+    "Deliver the verdict first. This turn is an investigation, and the change "
+    "you are staging rests on its conclusion: call "
+    "emit_card(card_type='verdict') with the disposition, confidence and the "
+    "evidence you read, then stage this call again. An autonomy policy only "
+    "counts a verdict delivered before the action.")
+
+
+def verdict_first_refusal(name: str, args: dict[str, Any] | None) -> dict[str, Any] | None:
+    """In a declared investigation, a record write or an action card staged
+    before any verdict is refused ONCE per turn with the instruction to deliver
+    the verdict first. Dispatch-only: it depends on what the turn has
+    delivered so far, so it never filters the advertised tools. A second
+    attempt goes through (a model that will not card a verdict is not
+    deadlocked)."""
+    from . import ask_scope
+    if ask_scope.current_scope() != ask_scope.INVESTIGATE:
+        return None
+    args = args or {}
+    staging = name in _VERDICT_FIRST_WRITES or (
+        name == "emit_card"
+        and str(args.get("card_type") or "").strip().lower() == "action")
+    if not staging:
+        return None
+    try:
+        from ..mcp_server._citation_validator import get_turn_evidence
+        ev = get_turn_evidence()
+    except Exception:  # noqa: BLE001
+        return None
+    if ev is None or ev.verdicts() or getattr(ev, "_verdict_first_refused", False):
+        return None
+    try:
+        ev._verdict_first_refused = True
+    except Exception:  # noqa: BLE001
+        return None
+    return {"ok": False, "code": "verdict_first", "error": _VERDICT_FIRST_REFUSAL}
 
 
 def _refuse_for_turn(c: _Call) -> Any:
     """`turn_refusal`, for a call the model made. A host's own re-dispatch of
     an approved call is not refused."""
     out = None if c.internal else turn_refusal(c.name, c.args)
+    if out is None and not c.internal:
+        out = verdict_first_refusal(c.name, c.args)
     if isinstance(out, dict):
         mech = TURN_REFUSAL_MECHANISM.get(str(out.get("code")))
         if mech:
