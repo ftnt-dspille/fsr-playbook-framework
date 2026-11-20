@@ -20,8 +20,12 @@ The handling is therefore split by what the operation actually accepts:
                         the field already stated the intent; asking the model
                         to restate it is a toll on the approval gate, paid
                         once per card on every containment.
-  select             -> error naming the real options, or drop the field
-  required           -> error; a blank cannot stand in for a real value
+  select, required   -> STAGE it, left out of args: the card carries the
+                        field schema, the widget renders the select with its
+                        options and keeps Approve disabled until it is filled.
+                        Refusing it sent the model to ask in prose live ("I
+                        need duration and time_to_live"), and the analyst's
+                        answer then re-ran the whole hunt.
   not a param at all -> error; adding it to args can only fail
 """
 from __future__ import annotations
@@ -51,16 +55,26 @@ def _needs_catalogued_op():
         pytest.skip("reference store has no params for this op")
 
 
-def test_select_field_is_not_told_to_prefill_blank() -> None:
-    """The livelock in one assertion: '' is what the select rejects."""
+def test_a_select_is_left_for_the_analyst_on_the_card() -> None:
+    """No blank (the select refuses ""), no error: the analyst picks it."""
     out = _emit(["ngfw_mode"], dict(BASE_ARGS))
+    assert out["ok"] is True, out
+    assert "ngfw_mode" in out["card"]["editable_fields"]
+    assert "ngfw_mode" not in out["card"]["args"]
+
+
+def test_a_required_field_is_left_for_the_analyst_on_the_card() -> None:
+    args = {k: v for k, v in BASE_ARGS.items() if k != "time_to_live"}
+    out = _emit(["time_to_live"], args)
+    assert out["ok"] is True, out
+    assert "time_to_live" in out["card"]["editable_fields"]
+    assert "time_to_live" not in out["card"]["args"]
+
+
+def test_a_required_field_not_offered_on_the_card_is_still_refused() -> None:
+    args = {k: v for k, v in BASE_ARGS.items() if k != "time_to_live"}
+    out = _emit([], args)
     assert out["ok"] is False
-    msg = out["message"]
-    assert "ngfw_mode" in msg and "select" in msg
-    # It must name the real options instead of prescribing a blank.
-    assert "Profile Based" in msg and "Policy Based" in msg
-    assert 'prefilled ("" for blank)' not in msg.split("select")[1], (
-        f"still advising a blank for a select: {msg}")
 
 
 def test_unknown_field_is_told_to_drop_not_add() -> None:
@@ -91,26 +105,18 @@ def test_healing_does_not_mutate_the_caller_s_args() -> None:
     assert "vdom" not in caller_args
 
 
-def test_a_mixed_card_reports_only_what_the_model_must_fix() -> None:
-    """Heal the blanks, ask about the rest -- and don't re-list the healed."""
+def test_a_mixed_card_heals_the_blank_and_leaves_the_select() -> None:
     out = _emit(["vdom", "ngfw_mode"], dict(BASE_ARGS))
-    assert out["ok"] is False
-    assert "ngfw_mode" in out["message"]
-    assert "vdom" not in out["message"], (
-        f"re-asking about a field it could have filled: {out['message']}")
-
-
-def test_the_remedy_actually_terminates() -> None:
-    """Follow the message's own instruction; the next call must pass.
-
-    A message that is merely more specific is worth nothing if applying it
-    still bounces -- that was the whole defect.
-    """
-    first = _emit(["vdom", "ngfw_mode"], dict(BASE_ARGS))
-    assert first["ok"] is False
-    # ngfw_mode: drop it (one of the two offered remedies). vdom then heals.
-    out = _emit(["vdom"], dict(BASE_ARGS))
     assert out["ok"] is True, out
+    assert out["card"]["args"]["vdom"] == ""
+    assert "ngfw_mode" not in out["card"]["args"]
+
+
+def test_an_unknown_field_mixed_in_names_only_that_field() -> None:
+    out = _emit(["vdom", "ngfw_mode", "not_a_real_param"], dict(BASE_ARGS))
+    assert out["ok"] is False
+    assert "not_a_real_param" in out["message"]
+    assert "vdom" not in out["message"] and "ngfw_mode" not in out["message"]
 
 
 def test_editable_fields_written_as_args_paths_mean_the_args_keys() -> None:

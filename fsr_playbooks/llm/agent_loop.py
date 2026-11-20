@@ -402,6 +402,9 @@ async def run_loop(
 
     tags = tags or {}
     turn_budget = max_tool_turns or MAX_TOOL_TURNS
+    # The reply language and the standing of the round-tail notes, said once
+    # where a model trusts instructions (see ask_scope.system_addendum).
+    system = system + _ask_scope.system_addendum(_ask_scope.current_language())
     # Model-provider redaction (llm.redaction): the provider is handed masked
     # text and answers in placeholders; the loop below only ever sees real
     # values. `system` and `messages` stay as given (guards read the analyst's
@@ -1062,7 +1065,8 @@ async def run_loop(
         # I5: the coverage ledger's tail note rides the same user message.
         _ev = get_turn_evidence()
         _ledger = (unchecked_ready_note(_ev.valid_ids())
-                   if _ev is not None and not answer_scope else "")
+                   if _ev is not None and _ask_scope.wants_coverage_note(
+                       _ask_scope.current_scope(), tags.get("intent")) else "")
         _scope_note = (_ask_scope.budget_note(_ask_scope.current_scope(), answer_calls)
                        if answer_scope else "")
         _tail = " ".join(n for n in (f"[turn budget] {note}" if note else "",

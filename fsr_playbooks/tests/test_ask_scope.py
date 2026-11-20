@@ -72,9 +72,11 @@ def test_no_typed_ask_is_unscoped_without_calling_the_model(text):
     assert asyncio.run(ask_scope.resolve_scope(_Broken(), text)) == (None, "default", "")
 
 
-def test_a_quick_action_chip_is_unscoped_without_calling_the_model():
+def test_a_quick_action_chip_is_unscoped():
+    # The chip keeps its own flow. It is still declared, for its language
+    # only (test_ask_scope_every_entry_path), so a failed call is harmless.
     assert asyncio.run(ask_scope.resolve_scope(
-        _Broken(), "what is this", quick_action="explain")) == (None, "default", "")
+        _Broken(), "what is this", quick_action="explain")) == (None, "quick_action", "")
 
 
 @pytest.mark.parametrize("text", ["triage this", "what is this alert's name",

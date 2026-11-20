@@ -322,6 +322,7 @@ def emit_action_card(
         return _err("bad_editable_fields",
                     "editable_fields must be a list of strings")
     bad = [f for f in editable_fields if f not in args]
+    pending: dict[str, Any] = {}   # left for the analyst to fill on the card
     if bad:
         # Say what to DO, not just what is wrong. The model's intent when it
         # lists a field it did not fill is "let the analyst supply this one",
@@ -349,6 +350,17 @@ def emit_action_card(
         # where honouring the field is impossible (not a param at all).
         from ._shared import op_param_facts
         known = op_param_facts(connector, operation)
+        #
+        # A select or a required param left blank is healed the same way: the
+        # card carries the operation's field schema (the host enriches it from
+        # the same reference DB), so the widget renders the select with its
+        # options and keeps Approve disabled until every visible required
+        # field is filled. Refusing it instead sent the model to ask in prose
+        # ("I need duration and time_to_live"), live; the analyst's "6 hours"
+        # then arrived as a new ask and re-ran the whole hunt.
+        # A select can't be prefilled (the param validator refuses "" for
+        # it), so it and a required param stay OUT of args and in
+        # editable_fields: the analyst picks or types it on the card.
         healed, removable, selects, required = [], [], {}, []
         for f in bad:
             fact = (known or {}).get(f)
@@ -357,10 +369,8 @@ def emit_action_card(
                 healed.append(f)
             elif fact is None:
                 removable.append(f)
-            elif fact["options"]:
-                selects[f] = fact["options"]
             else:
-                required.append(f)
+                pending[f] = fact
         parts = []
         for f, opts in selects.items():
             parts.append(
@@ -397,7 +407,12 @@ def emit_action_card(
     # for a connector whose params aren't catalogued yet (the live half of the
     # a live session / mail_egress param-flail gap).
     from .tools_execution import validate_op_grounded
-    op_err = validate_op_grounded(connector, operation, params=args)
+    # The analyst-filled fields are validated as if filled (a stand-in the
+    # card never carries), so a select or required param left to the card
+    # passes the same checks a complete call does.
+    _checked = {**args, **{f: (fact["options"][0] if fact.get("options") else "pending")
+                           for f, fact in pending.items()}}
+    op_err = validate_op_grounded(connector, operation, params=_checked)
     if op_err is not None:
         return op_err
     # Offline param validation (decisive when params ARE catalogued -- select
@@ -405,7 +420,7 @@ def emit_action_card(
     # case; this covers the synced one. Don't render a card whose args are
     # incomplete/invalid -- the analyst would approve it only for it to fail
     # post-approval at execute.
-    param_err = _validate_op_params(connector, operation, args)
+    param_err = _validate_op_params(connector, operation, _checked)
     if param_err is not None:
         return param_err
     # Configured-ness check: emit_action_card is triage-only, so a live box is
