@@ -557,6 +557,26 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
     }
 
 
+def align_call_args(call: Call) -> dict[str, Any] | None:
+    """The call's args with `fields` renamed to the covering rule's names, or
+    None when nothing changes. The policy judges a call through
+    `align_fields`; this makes the write say what was judged (a literal
+    `closeReason` would otherwise still be refused as an unknown field at
+    write time). Only a call some rule matches is touched."""
+    policy = get_turn_policy()
+    args = call.get("args") or {}
+    if policy is None or not policy.enabled or not isinstance(args.get("fields"), dict):
+        return None
+    rule = next((r for r in policy.rules if r.action.fields is not None
+                 and _rule_matches(r, call)), None)
+    if rule is None:
+        return None
+    aligned = align_fields(args["fields"], rule.action.fields)
+    if aligned == args["fields"] and list(aligned) == list(args["fields"]):
+        return None
+    return {**args, "fields": aligned}
+
+
 def shadow_decision(call: Call) -> dict[str, Any] | None:
     """Evaluate the turn's policy against ``call`` using the turn's evidence.
     None when there is no policy, no rule covers the call, or anything fails

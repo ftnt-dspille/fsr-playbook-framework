@@ -201,6 +201,7 @@ STAGES = {
     "_refuse_for_turn": "tools.* by code (TURN_REFUSAL_MECHANISM)",
     "_fold_emit_card_payload": None,       # fixes arguments in place, never refuses
     "_coerce_args": None,                  # lossless shape fix
+    "_align_policy_fields": None,          # renames fields to the rule's, never refuses
     "_check_args": "tools.invalid_tool_args",
     "_default_live_probe": None,           # fills a default
 }

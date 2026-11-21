@@ -253,3 +253,19 @@ def test_a_model_that_stages_the_close_itself_is_not_doubled():
            _delta_chunk(finish="tool_calls"), _usage_chunk()]
     _, disp, _ = _run([_hunt_round(), _verdict_round("false_positive"), own])
     assert len(_update_calls(disp)) == 1
+
+
+# --- a policy close: the model's spelling is mapped onto the rule's --------
+
+def test_a_policy_close_keeps_a_renamed_field_and_drops_the_rest():
+    """The model wrote `closeReason`; the rule says `closureReason`. The staged
+    call carries the rule's name, and a field the rule does not list is dropped."""
+    from fsr_playbooks.llm import task_spec as ts
+    spec = TaskSpec(CLOSE, frozenset(FP), source=ts.POLICY,
+                    fields=("status", "closureReason"))
+    forced = _forced_update({"closeReason": "False Positive", "severity": "high"})
+    with patch.object(RequestedActionPostcondition, "due", return_value=spec):
+        _, disp, _ = _run([_hunt_round(), _verdict_round("false_positive"), _prose()],
+                          forced=forced)
+    assert _update_calls(disp) == [{"module": "alerts", "uuid": ALERT_UUID, "fields": {
+        "closureReason": "False Positive", "status": "Closed"}}]

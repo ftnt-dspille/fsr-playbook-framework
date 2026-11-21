@@ -2065,6 +2065,23 @@ def _coerce_args(c: _Call) -> Any:
     return None
 
 
+def _align_policy_fields(c: _Call) -> Any:
+    """A record write the autonomy policy covers goes out under the rule's
+    field names (closeReason -> closureReason), the names it was judged by.
+    Before the gate, so the approval card and its hash bind the aligned args."""
+    if c.name != "update_record":
+        return None
+    try:
+        from .autonomy import align_call_args
+        new = align_call_args({"tool": c.name, "module": c.args.get("module"),
+                               "args": c.args})
+    except Exception:  # noqa: BLE001  a policy bug must never block a write
+        return None
+    if new is not None:
+        c.args = new
+    return None
+
+
 def _check_args(c: _Call) -> Any:
     """One argument gate for every tool (`arg_gate`: unknown keys, required
     keys, types/enums/nested shape against input_schema), then the tool's
@@ -2108,6 +2125,7 @@ _DISPATCH_STAGES: tuple[Callable[[_Call], Any], ...] = (
     _refuse_for_turn,
     _fold_emit_card_payload,
     _coerce_args,
+    _align_policy_fields,
     _check_args,
     _default_live_probe,
 )

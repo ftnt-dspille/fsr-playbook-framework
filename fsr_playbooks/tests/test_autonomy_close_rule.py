@@ -170,3 +170,39 @@ def test_align_fields_renames_only_to_a_declared_field_and_keeps_the_rest():
 
 def test_an_unrelated_field_still_means_no_rule_covers_the_call():
     assert _eval(call=_close_with("severity")) is None
+
+
+# The call itself is rewritten to the names the policy judged, so the write
+# does not meet its own unknown_field check on a literal `closeReason`.
+def test_align_call_args_renames_fields_only_when_a_rule_covers_the_call():
+    set_turn_policy(_pol(), subject=ALERT)
+    try:
+        new = autonomy.align_call_args(_close_with("closeReason"))
+        assert new["fields"] == {"status": CLOSED_IRI, "closureReason": "False Positive"}
+        assert new["uuid"] == ALERT.rsplit("/", 1)[-1] and new["module"] == "alerts"
+        assert autonomy.align_call_args(_close()) is None          # already aligned
+        assert autonomy.align_call_args(_close_with("severity")) is None  # no rule covers it
+    finally:
+        set_turn_policy(None)
+    assert autonomy.align_call_args(_close_with("closeReason")) is None  # no policy
+
+
+def test_dispatch_writes_the_aligned_field_name():
+    from unittest.mock import patch
+
+    from fsr_playbooks.llm import tools as T
+    seen = {}
+
+    def _invoke(spec, name, args):
+        seen.update(args)
+        return {"ok": True}
+
+    set_turn_policy(_pol(), subject=ALERT)
+    try:
+        with patch.object(T, "_invoke", _invoke), \
+             patch.object(T, "_finalize_tool_output", side_effect=lambda n, r: r):
+            out = T.dispatch("update_record", {**_close_with("closeReason")["args"], "_approved": True},
+                       _internal=True, approved_by="system:autonomy")
+    finally:
+        set_turn_policy(None)
+    assert seen.get("fields") == {"status": CLOSED_IRI, "closureReason": "False Positive"}, out
