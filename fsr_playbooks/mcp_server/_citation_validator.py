@@ -281,6 +281,18 @@ def what_would_help(disposition: str, unknowns: list[str],
                  ready_connectors=_turn_ready_connectors.get())
 
 
+# Only an executed operation queries a connector. A discovery call (find,
+# get_op_schema) also carries a `connector` arg but reads the catalog, so it must
+# not silence the "ready, not yet queried" note or land in sources_checked.
+_QUERY_TOOLS = frozenset({"run_op", "run_connector_operation"})
+
+
+def _queried_connectors(registry: dict[str, dict[str, Any]]) -> set[str]:
+    return {str(((e or {}).get("args") or {}).get("connector") or "")
+            for e in registry.values()
+            if str((e or {}).get("name") or "") in _QUERY_TOOLS}
+
+
 def _ready_source_split(registry: dict[str, dict[str, Any]]) -> tuple[list[str], list[str]]:
     """(checked, unchecked) labels of this turn's ready sources, by whether the
     turn's registry holds a call under that source's tool prefix (log sources)
@@ -291,16 +303,14 @@ def _ready_source_split(registry: dict[str, dict[str, Any]]) -> tuple[list[str],
                if any(n.startswith(prefix) for n in called)}
     unchecked = {label for prefix, label in sources.items()
                  if not any(n.startswith(prefix) for n in called)}
-    queried = {str(((e or {}).get("args") or {}).get("connector") or "")
-               for e in registry.values()}
+    queried = _queried_connectors(registry)
     for connector, meta in (_turn_ready_connectors.get() or {}).items():
         (checked if connector in queried else unchecked).add(meta["label"])
     return sorted(checked), sorted(unchecked)
 
 
 def _unchecked_kinds(registry: dict[str, dict[str, Any]]) -> set[str]:
-    queried = {str(((e or {}).get("args") or {}).get("connector") or "")
-               for e in registry.values()}
+    queried = _queried_connectors(registry)
     return {m["kind"] for c, m in (_turn_ready_connectors.get() or {}).items()
             if c not in queried}
 

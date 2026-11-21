@@ -390,6 +390,69 @@ def _synonym_queries(q: str) -> list[tuple[str, tuple[str, str]]]:
     return deduped
 
 
+_OP_QUERY_NOISE = frozenset({"the", "and", "for", "with", "from", "that", "this",
+                             "all", "any", "into", "using", "use"})
+_READ_OP_PREFIXES = ("get", "list", "search", "fetch", "query", "find", "read",
+                     "lookup", "describe", "show", "retrieve", "advance_search",
+                     "check", "view", "count", "export")
+
+
+def _op_query_tokens(q: str) -> list[str]:
+    """The words of a multi-word ``q`` worth searching, each with its singular
+    form ("tickets" also tries "ticket"), in order, deduplicated. Empty for a
+    one-word query: the whole-string match already covers that."""
+    if len(q.split()) < 2:
+        return []
+    words = [w for w in re.split(r"[^a-z0-9]+", q.lower())
+             if len(w) > 2 and w not in _OP_QUERY_NOISE]
+    out: list[str] = []
+    for w in words:
+        for form in ((w, w[:-1]) if w.endswith("s") and len(w) > 3 else (w,)):
+            if form not in out:
+                out.append(form)
+    return out
+
+
+def _op_token_rows(conn: Any, cols: str, connector: str, tokens: list[str],
+                   limit: int) -> list[dict[str, Any]]:
+    """Ops matching ANY token, best first: a token in the op name or title
+    scores 2, in the description 1, summed over tokens. A phrase-only match
+    ("search tickets by keyword incident change" as one substring) found
+    nothing on a connector whose ops are advance_search / fetch_incidents."""
+    if not tokens:
+        return []
+    score = " + ".join(
+        "(CASE WHEN op_name LIKE '%'||?||'%' OR title LIKE '%'||?||'%' THEN 2"
+        " WHEN description LIKE '%'||?||'%' THEN 1 ELSE 0 END)" for _ in tokens)
+    where = " OR ".join(
+        "(op_name LIKE '%'||?||'%' OR title LIKE '%'||?||'%'"
+        " OR description LIKE '%'||?||'%')" for _ in tokens)
+    per = [t for t in tokens for _ in range(3)]
+    return _rows(
+        conn,
+        f"""SELECT {cols}
+           FROM operations
+           WHERE connector_name = ? AND ({where})
+           ORDER BY ({score}) DESC, op_name LIMIT ?""",
+        (connector, *per, *per, limit),
+    )
+
+
+def _read_op_rows(conn: Any, cols: str, connector: str,
+                  limit: int) -> list[dict[str, Any]]:
+    """The connector's read-shaped ops (get/list/search/fetch/...), for a query
+    that matched nothing: an empty answer sends the model to give up on a
+    connector it could have queried."""
+    clause = " OR ".join("op_name LIKE ?||'%'" for _ in _READ_OP_PREFIXES)
+    return _rows(
+        conn,
+        f"""SELECT {cols} FROM operations
+           WHERE connector_name = ? AND ({clause})
+           ORDER BY op_name LIMIT ?""",
+        (connector, *_READ_OP_PREFIXES, limit),
+    )
+
+
 @mcp.tool()
 def find_operation(connector: str, q: str = "", limit: int = 10,
                    verbose: bool = False,
@@ -402,7 +465,9 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
     hits it suggests near-matching ops, so do not guess op names in a loop.
 
     Pass `connector` as the connector name (from find_connector).
-    `q` is an optional substring filter on op name, title, or description.
+    `q` is an optional substring filter on op name, title, or description. A
+    multi-word `q` that is not a phrase of any op is searched word by word
+    (best match first); when nothing matches, the connector's read ops are listed.
 
     Default response is terse (op_name + title only). Pass `verbose=True`
     for descriptions. Returns `{matches, suggestion?}`. On zero hits,
@@ -453,6 +518,14 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
         # before giving up, and SAY which term matched so the model learns the
         # product's vocabulary instead of looping or capitulating.
         synonym_note: str | None = None
+        token_note: str | None = None
+        if q and not rows:
+            tokens = _op_query_tokens(q)
+            rows = _op_token_rows(conn, cols, connector, tokens, limit)
+            if rows:
+                token_note = (f"no operation holds {q!r} as one phrase on "
+                              f"{connector!r}; these match its words {tokens}, "
+                              f"best match first.")
         if q and not rows:
             for alt_q, (theirs, ours) in _synonym_queries(q):
                 alt_rows = _rows(
@@ -474,6 +547,15 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                         f"for '{ours}' is '{theirs}'."
                     )
                     break
+        listing_note: str | None = None
+        if q and not rows:
+            rows = _read_op_rows(conn, cols, connector, limit)
+            if rows:
+                listing_note = (
+                    f"no operation on {connector!r} matches {q!r}; these are its "
+                    f"read operations (get/list/search/fetch). Pick one and read "
+                    f"its params with get_op_schema, or search again with one "
+                    f"keyword.")
         op_failed: list[str] = []
         if rows:
             keys = [f"{connector}:{r['op_name']}" for r in rows]
@@ -508,6 +590,10 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
         out: dict[str, Any] = {"matches": rows}
         if synonym_note:
             out["synonym_note"] = synonym_note
+        if token_note:
+            out["token_note"] = token_note
+        if listing_note:
+            out["listing_note"] = listing_note
         if contain_hits:
             out["containment_redirect"] = (
                 f"{sorted(contain_hits)} are state-changing response actions. "

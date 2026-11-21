@@ -187,6 +187,29 @@ class TestConnectorLedger:
         assert checked_ready_sources(ev.valid_ids()) == ["ServiceNow"]
         assert unchecked_ready_note(ev.valid_ids()) == ""
 
+    def test_discovery_calls_do_not_count_as_querying_the_connector(self):
+        # Live: find(kind=operation) came back empty for ServiceNow; the bare
+        # `connector` arg then marked it queried and silenced the nudge.
+        ev = _ev()
+        set_turn_ready_connectors(SNOW)
+        register_tool_result("c0", "run_op", True,
+                             {"connector": "virustotal", "op": "query_ip"}, _FULL)
+        register_tool_result("c1", "find", True,
+                             {"kind": "operation", "connector": "servicenow",
+                              "query": "incident"}, _FULL)
+        register_tool_result("c2", "get_op_schema", True,
+                             {"connector": "servicenow", "op": "advance_search"}, _FULL)
+        assert unchecked_ready_sources(ev.valid_ids()) == ["ServiceNow"]
+        assert checked_ready_sources(ev.valid_ids()) == []
+        assert "ServiceNow" in unchecked_ready_note(ev.valid_ids())
+
+    def test_run_connector_operation_counts_as_querying(self):
+        ev = _ev()
+        set_turn_ready_connectors(SNOW)
+        register_tool_result("c1", "run_connector_operation", True,
+                             {"connector": "servicenow", "op": "advance_search"}, _FULL)
+        assert checked_ready_sources(ev.valid_ids()) == ["ServiceNow"]
+
     def test_not_listed_when_not_configured(self):
         ev = _ev()
         set_turn_ready_connectors(None)

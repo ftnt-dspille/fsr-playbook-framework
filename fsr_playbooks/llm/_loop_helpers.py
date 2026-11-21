@@ -2212,10 +2212,46 @@ def verdict_directive(evidence_ids: list[str]) -> str:
     )
 
 
+_VERDICT_FIELDS = ("disposition", "severity", "confidence", "summary", "findings",
+                   "unknowns", "recommended_actions", "id")
+
+
+def lift_flat_verdict_args(args: dict[str, Any]) -> None:
+    """Fold verdict fields sent beside ``card_type`` into ``payload``.
+
+    The schema has one shape (``payload={...}``), but a model in the forced
+    verdict round sometimes sends ``emit_card(card_type='verdict', disposition=
+    ..., summary=...)`` with the fields flat (live: an empty payload, then flat
+    args, and no verdict was delivered). Tolerated here, at dispatch, so the
+    slip costs nothing; a key already in ``payload`` wins, and the flat copies
+    are removed so the card sees one shape."""
+    payload = args.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    for k in _VERDICT_FIELDS:
+        if k in args:
+            v = args.pop(k)
+            payload.setdefault(k, v)
+    args["payload"] = payload
+
+
 def verdict_repair_directive(result: Any, args: Any) -> str:
     """One repair attempt after the validator refused a forced verdict: the
-    refusal is shown to the model verbatim, never silently remapped."""
+    refusal is shown to the model verbatim, never silently remapped. An empty
+    payload names the required fields and the whole contract, since "invalid
+    payload" gives the model nothing to fix."""
     msg = (result or {}).get("message") if isinstance(result, dict) else None
+    payload = args.get("payload") if isinstance(args, dict) else None
+    if not payload:
+        import inspect  # noqa: PLC0415
+
+        from ..mcp_server.tools_emit import emit_verdict, verdict_contract
+        required = [k for k, p in inspect.signature(emit_verdict).parameters.items()
+                    if p.default is inspect.Parameter.empty]
+        return ("Your verdict card was refused: its payload was empty. Put the "
+                f"fields inside `payload`; required: {', '.join(required)}. "
+                "Call `emit_card(card_type='verdict', payload={...})` again with "
+                f"{verdict_contract()}.")
     try:
         sent = json.dumps(args, default=str)[:1500]
     except Exception:  # noqa: BLE001

@@ -67,6 +67,7 @@ from ._loop_helpers import (
     is_offer_attempt,
     is_verdict_evidence,
     latest_user_text,
+    lift_flat_verdict_args,
     model_view,
     stall_directive,
     verdict_directive,
@@ -1005,7 +1006,7 @@ async def run_loop(
                         w.append_user(_with_language(directive))
                         forced_out: list[Any] = []
                         try:
-                            async for ev in force_emit_card("verdict", lambda _a: None, forced_out):
+                            async for ev in force_emit_card("verdict", lift_flat_verdict_args, forced_out):
                                 yield ev
                         except Exception:
                             log.exception("forced verdict delivery failed")

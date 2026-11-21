@@ -218,13 +218,21 @@ def _connector_status(name: str) -> dict[str, Any] | None:
     caches run_op's preflight reads (configured rows: 2 min; health: warmup /
     last probe). Lets a build pick a connector without the slow
     list_configured_connectors(probe=True) call (13s live). None when there is
-    no live instance or the lookup fails: say nothing rather than guess."""
+    no live instance, the lookup fails or it lists no connectors at all: say
+    nothing rather than guess."""
     try:
         from probes._env import get_client, get_config
         if not get_config().is_live():
             return None
         from .tools_execution import _cached_health, _configured_rows
         rows = _configured_rows(get_client())
+        if not rows:
+            # An empty answer is "the lookup returned nothing" (non-200, cold
+            # cache, a replayed box), not "nothing is configured": the connector
+            # listing fails open on the same case. Claiming configured:false
+            # contradicted list_configured_connectors and turned the agent away
+            # from a connector it could query.
+            return None
         row = next((r for r in rows if r.get("name") == name), None)
         if row is None:
             return {"configured": False}
