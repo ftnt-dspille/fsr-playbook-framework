@@ -141,3 +141,32 @@ def test_the_host_can_bind_the_subject_after_the_policy():
         assert d["outcome"] == "would_act", d["failed"]
     finally:
         set_turn_policy(None)
+
+
+# Live: the model wrote `closeReason`; the rule (and the module) say
+# `closureReason`, so no rule covered the close and it was not auto-approved.
+def _close_with(reason_key):
+    return {"tool": "update_record", "module": "alerts",
+            "args": {"module": "alerts", "uuid": ALERT.rsplit("/", 1)[-1],
+                     "fields": {"status": CLOSED_IRI, reason_key: "False Positive"}}}
+
+
+@pytest.mark.parametrize("key", ["closeReason", "closurereason", "closure_reason"])
+def test_a_models_spelling_of_a_rule_field_still_matches_the_rule(key):
+    d = _eval(call=_close_with(key))
+    assert d is not None, "no rule covered the call"
+    assert d["outcome"] == "would_act", d["failed"]
+
+
+def test_align_fields_renames_only_to_a_declared_field_and_keeps_the_rest():
+    declared = ["status", "closureReason"]
+    assert autonomy.align_fields({"closeReason": "x", "status": "y"}, declared) == {
+        "closureReason": "x", "status": "y"}
+    # unrelated and ambiguous keys are kept as written, never dropped
+    assert autonomy.align_fields({"severity": "low"}, declared) == {"severity": "low"}
+    assert autonomy.align_fields({"closeReason": "x"}, ["closureReason", "closureReasons"]) == {
+        "closeReason": "x"}
+
+
+def test_an_unrelated_field_still_means_no_rule_covers_the_call():
+    assert _eval(call=_close_with("severity")) is None

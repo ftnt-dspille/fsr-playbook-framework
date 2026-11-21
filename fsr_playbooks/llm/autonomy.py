@@ -173,13 +173,51 @@ _IP_ARG_KEYS = ("ip_addresses", "ip", "ip_address", "indicator", "value", "ips")
 _ID_ARGS = frozenset({"module", "uuid", "record", "iri"})
 
 
-def _changed_fields(call: Call) -> dict[str, Any]:
+def align_fields(fields: dict[str, Any], declared: Any) -> dict[str, Any]:
+    """Rename the keys of ``fields`` to the rule's declared field names.
+
+    A model writes `closeReason` where the module (and so the rule) says
+    `closureReason`; compared literally, no rule covers the call. A key is
+    renamed only when it names exactly one declared field: same name ignoring
+    case and separators, or else a single clearly closest declared name. An
+    ambiguous or unrelated key is kept as written (never dropped), so it still
+    fails the rule's field check."""
+    names = [d for d in (declared or ()) if isinstance(d, str)]
+    if not names:
+        return dict(fields)
+    import difflib
+
+    def norm(x: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", x.casefold())
+
+    out: dict[str, Any] = {}
+    for k, v in fields.items():
+        new = k
+        if isinstance(k, str) and k not in names:
+            same = [d for d in names if norm(d) == norm(k)]
+            if len(same) == 1:
+                new = same[0]
+            elif not same:
+                scored = sorted(((difflib.SequenceMatcher(None, norm(k), norm(d)).ratio(), d)
+                                 for d in names), reverse=True)
+                if scored and scored[0][0] >= 0.85 and (
+                        len(scored) == 1 or scored[1][0] < scored[0][0] - 0.1):
+                    new = scored[0][1]
+        if new in out and new != k:
+            new = k  # two keys aligning to one field: keep both visible
+        out[new] = v
+    return out
+
+
+def _changed_fields(call: Call, declared: Any = None) -> dict[str, Any]:
     """field -> new value the call writes. `update_record` carries them under
     `fields`; matching on the call's own arg names saw one field called
-    "fields", so no field-scoped rule could ever match a record update."""
+    "fields", so no field-scoped rule could ever match a record update.
+    ``declared`` (a rule's field names) maps the model's spellings onto them."""
     args = call.get("args") or {}
     if isinstance(args.get("fields"), dict):
-        return dict(args["fields"])
+        got = dict(args["fields"])
+        return align_fields(got, declared) if declared else got
     return {k: v for k, v in args.items() if k not in _ID_ARGS}
 
 
@@ -195,7 +233,7 @@ def _rule_matches(rule: Rule, call: Call) -> bool:
         if a.module and call.get("module") != a.module:
             return False
         if a.fields is not None:
-            changed = set(_changed_fields(call))
+            changed = set(_changed_fields(call, a.fields))
             if not changed or not changed <= set(a.fields):
                 return False
         return True
@@ -438,7 +476,7 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
 
     # 2b. Values: a field the rule pins may only be set to what it lists.
     if rule.action.values:
-        written = _changed_fields(call)
+        written = _changed_fields(call, rule.action.fields)
         module = call.get("module") or rule.action.module or ""
         for field, allowed in rule.action.values.items():
             if field in written and not _value_allowed(module, field, written[field], allowed):

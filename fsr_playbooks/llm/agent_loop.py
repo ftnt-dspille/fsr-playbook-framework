@@ -694,6 +694,7 @@ async def run_loop(
             out.append("continue")
             return
         from . import session_state as _ss
+        from .autonomy import align_fields
         subj = split_subject(_ss.current().autonomy_subject)
         if subj is None or not w.has_tool("update_record") or _stop_requested(provider):
             say(None)
@@ -710,7 +711,10 @@ async def run_loop(
         fields = dict(raw["fields"]) if isinstance(raw.get("fields"), dict) else {}
         if spec.fields:
             # A policy close changes only what its rule lets it change.
-            fields = {k: v for k, v in fields.items() if k in spec.fields}
+            # Its spellings are mapped onto the rule's first (closeReason ->
+            # closureReason), so a renamed field is kept, not dropped.
+            fields = {k: v for k, v in align_fields(fields, spec.fields).items()
+                      if k in spec.fields}
         # The record and the close are the request's, not the model's: only
         # the closure values it judged are taken from its call.
         fields["status"] = "Closed"
