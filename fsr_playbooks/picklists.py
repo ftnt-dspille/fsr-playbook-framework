@@ -251,6 +251,33 @@ def picklist_name_for(conn: sqlite3.Connection, module: str, field: str,
     return best_name if best_score >= 0.5 else None
 
 
+def label_for_iri(conn: sqlite3.Connection, iri: str, client=None) -> str | None:
+    """Reverse of `resolve_iri`: `/api/3/picklists/<uuid>` -> its itemValue.
+
+    Needs no module/field mapping: the IRI names the item. The reference store
+    answers first, then one live GET of the item. None when neither can
+    (callers treat that as unresolved and fail closed)."""
+    if not (isinstance(iri, str) and _PICKLIST_IRI_RE.match(iri)):
+        return None
+    try:
+        row = conn.execute("SELECT item_value FROM picklists WHERE item_iri=? "
+                           "LIMIT 1", (iri,)).fetchone()
+    except sqlite3.Error:
+        row = None
+    if row and row[0]:
+        return str(row[0])
+    if client is None:
+        return None
+    try:
+        r = client.session.get(client.base_url + iri, verify=client.verify_ssl)
+        if r.status_code != 200:
+            return None
+        val = r.json().get("itemValue")
+    except Exception:  # noqa: BLE001 -- a network blip is "unresolved"
+        return None
+    return str(val) if val else None
+
+
 def resolve_iri(conn: sqlite3.Connection, value: str, picklist_name: str,
                 client=None) -> dict:
     """Friendly value -> `/api/3/picklists/<uuid>`.

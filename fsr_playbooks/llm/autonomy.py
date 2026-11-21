@@ -256,6 +256,17 @@ def _picklist_iri(module: str, field: str, label: str) -> str | None:
     return iri if isinstance(iri, str) and iri.startswith("/api/3/") else None
 
 
+# IRI -> itemValue label or None. Swappable for tests.
+def _picklist_label(iri: str) -> str | None:
+    try:
+        from .. import picklists as _pl
+        from ..mcp_server import _shared
+        with _shared._db() as conn:
+            return _pl.label_for_iri(conn, iri, _shared._live_client())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _value_allowed(module: str, field: str, value: Any, allowed: list[str]) -> bool:
     """`value` is one of `allowed`, written as a label or the picklist IRI it
     resolves to. Unresolvable means not allowed (fails closed)."""
@@ -264,8 +275,13 @@ def _value_allowed(module: str, field: str, value: Any, allowed: list[str]) -> b
     if v in allowed:
         return True
     if v.startswith("/api/3/"):
-        return any(_picklist_iri(module, field, a) == v for a in allowed
-                   if not a.startswith("/api/3/"))
+        labels = [a for a in allowed if not a.startswith("/api/3/")]
+        if any(_picklist_iri(module, field, a) == v for a in labels):
+            return True
+        # The field-to-picklist map can be missing (unwarmed catalog), which
+        # hides the IRI's meaning. The IRI names its own item: read its label.
+        label = _picklist_label(v)
+        return label is not None and label in labels
     return False
 
 
