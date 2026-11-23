@@ -248,3 +248,39 @@ def test_the_card_carries_the_premise_beside_the_score(turn):
 
 def test_event_facts_unaffected_by_premise_wiring():
     assert event_facts({"srcIpAddr": "100.64.0.1", "destIpAddr": "100.64.0.2"})
+
+
+# ---- near-miss neighbour (2g) ---------------------------------------------------
+
+NEIGHBOUR = "sec-host-020"
+NEIGHBOUR_IP = "100.64.9.140"
+NEIGHBOUR_ASSET = {"data": [{"name": NEIGHBOUR, "ipAddress": NEIGHBOUR_IP,
+                             "description": f"Sanctioned bulk syncs to {IP}."}]}
+
+
+def neighbour_card():
+    s = (f"{HOST} ({HOST_IP}) beaconing to {IP}; the near-miss host {NEIGHBOUR} "
+         f"({NEIGHBOUR_IP}) is approved for syncs to {IP} but is not the alert host")
+    return {"id": "v", "disposition": "true_positive", "confidence": 0.9, "summary": s,
+            "findings": [{"claim": s, "evidence": ["a"]}]}
+
+
+def test_an_approved_neighbour_the_verdict_mentions_does_not_contradict():
+    reg = {"v": vt(), "alert": alert_read(), "n": asset_read(NEIGHBOUR_ASSET)}
+    p = check(neighbour_card(), reg)
+    assert p["status"] == "unread"
+    assert p["contradicted_by"] == [] and p["records"] == []
+    assert NEIGHBOUR not in p["subject"] and NEIGHBOUR_IP not in p["subject"]
+
+
+def test_the_alert_hosts_own_approval_still_contradicts_beside_a_mentioned_neighbour():
+    reg = {"v": vt(), "alert": alert_read(), "n": asset_read(NEIGHBOUR_ASSET),
+           "chg": change_read()}
+    assert check(neighbour_card(), reg)["status"] == "contradicted"
+
+
+def test_a_verdict_named_host_is_the_subject_only_when_nothing_else_names_one():
+    bare = {"data": [{"name": "x", "description": "nothing"}]}
+    reg = {"v": vt(), "alert": entry("get_record", {"iri": f"/api/3/alerts/{RECORD}"}, bare),
+           "a": asset_read(SANDBOX_ASSET)}
+    assert check(card(), reg)["status"] == "contradicted"

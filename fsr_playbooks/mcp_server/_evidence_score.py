@@ -773,20 +773,30 @@ def _names_subject(names: Iterable[str], nets: Iterable[str], subject: set[str])
 def _subject_names(card: dict[str, Any], registry: dict[str, dict[str, Any]],
                    record_subject: str, known_names: Iterable[str]) -> set[str]:
     """Host names and internal addresses of the subject: the alert as the turn
-    read it, as the host bound it, and the internal addresses the verdict names."""
+    read it and as the host bound it. Only when neither names one do the internal
+    addresses and host names the verdict itself names stand in."""
     names: set[str] = set(known_names)
     for e in registry.values():
         if isinstance(e, dict) and e.get("ok") is True and _reads_record(e, record_subject):
             names |= set((e.get("premise") or {}).get("names") or [])
-    names |= _names(" ".join(_verdict_text(card)))
-    out = set()
-    for n in names:
-        try:
-            if not _is_external(n):
-                out.add(n)
-        except ValueError:
-            out.add(n)  # a host name
-    return out
+
+    def internal(found: Iterable[str]) -> set[str]:
+        out = set()
+        for n in found:
+            try:
+                if not _is_external(n):
+                    out.add(n)
+            except ValueError:
+                out.add(n)  # a host name
+        return out
+
+    own = internal(names)
+    if own:
+        # The alert (or the host) named the subject: the verdict's prose adds
+        # nothing, and a near-miss neighbour it mentions must not become the
+        # subject (its record would then count as the subject's own).
+        return own
+    return internal(names | _names(" ".join(_verdict_text(card))))
 
 
 def _record_rows(blob: Any) -> list[Any]:
