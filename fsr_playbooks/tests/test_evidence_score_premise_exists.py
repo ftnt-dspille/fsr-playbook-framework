@@ -83,10 +83,13 @@ def test_a_lookup_that_could_not_look_stays_unread():
     assert check(reader=Reader(asset=PLAIN_ASSET["data"], change=None))["status"] == "unread_exists"
 
 
-def test_the_reader_is_asked_only_when_the_turn_read_nothing():
+def test_the_reader_is_asked_when_a_kind_of_record_is_unread_and_never_on_a_contradiction():
     r = Reader(asset=PLAIN_ASSET["data"], change=[])
     p = check(reg={**UNREAD, "asset": asset_read(PLAIN_ASSET)}, reader=r)
-    assert p["status"] == "read" and r.calls == [] and "exists" not in p
+    # 2h: an asset read leaves the change kind unread, so the host is asked; the
+    # status stays ``read`` and nothing is flagged because no change record exists
+    assert p["status"] == "read" and len(r.calls) == 1 and "unread_kinds_exist" not in p
+    r.calls.clear()
     p = check(reg={**UNREAD, "asset": asset_read(SANDBOX_ASSET)}, reader=r)
     assert p["status"] == "contradicted" and r.calls == []
 
@@ -140,4 +143,5 @@ def test_the_lookup_cost_is_recorded_with_the_hosts_request_counts():
 def test_no_lookup_cost_when_no_reader_was_asked():
     assert "lookup" not in check()
     read = {"v": vt(), "alert": alert_read(), "asset": asset_read(PLAIN_ASSET)}
-    assert "lookup" not in check(reg=read, reader=Reader(asset=[], change=[]))
+    assert "lookup" not in check(reg=read)
+    assert "lookup" in check(reg=read, reader=Reader(asset=[], change=[]))

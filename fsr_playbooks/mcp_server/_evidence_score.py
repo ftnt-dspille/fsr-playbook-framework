@@ -963,6 +963,30 @@ def subject_records_exist(reader: Any, subject: set[str]) -> dict[str, bool | No
     return out
 
 
+def _lookup_exists(subject_reader: Any, subject: set[str]
+                   ) -> tuple[dict[str, bool | None], dict[str, Any] | None]:
+    """The existence lookup with what it cost the turn (shadow telemetry): wall
+    time, plus whatever request counts the host reader reports."""
+    asked: dict[str, Any] = {}
+
+    def timed(names: list[str]) -> Any:
+        t0 = time.monotonic()
+        try:
+            got = subject_reader(names)
+            asked["got"] = got
+            return got
+        finally:
+            asked["ms"] = int((time.monotonic() - t0) * 1000)
+
+    exists = subject_records_exist(timed if subject_reader is not None else None, subject)
+    if "ms" not in asked:
+        return exists, None
+    got = asked.get("got")
+    stats = got.get("stats") if isinstance(got, dict) else None
+    return exists, {"ms": asked["ms"], **({k: v for k, v in stats.items()
+                                           if isinstance(v, int)} if isinstance(stats, dict) else {})}
+
+
 def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                   record_subject: str | None = None,
                   known_names: Iterable[str] | None = None,
@@ -1025,32 +1049,29 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     status = "contradicted" if contra else ("read" if read else "unread")
     out: dict[str, Any] = {"status": status, "records": sorted(read),
                            "contradicted_by": contra, "subject": sorted(subject)[:6]}
-    if status == "unread":
-        asked: dict[str, Any] = {}
-
-        def timed(names: list[str]) -> Any:
-            t0 = time.monotonic()
-            try:
-                got = subject_reader(names)
-                asked["got"] = got
-                return got
-            finally:
-                asked["ms"] = int((time.monotonic() - t0) * 1000)
-
-        exists = subject_records_exist(timed if subject_reader is not None else None, subject)
-        if "ms" in asked:
-            # What the existence lookup cost this turn (shadow telemetry): wall
-            # time, plus whatever request counts the host reader reports.
-            stats = (asked.get("got") or {}).get("stats") if isinstance(asked.get("got"), dict) else None
-            out["lookup"] = {"ms": asked["ms"], **({k: v for k, v in stats.items()
-                                                    if isinstance(v, int)} if isinstance(stats, dict) else {})}
-        if exists:
+    read_kinds = sorted({_premise_kind(registry[eid]) for eid in read})
+    if read:
+        out["read_kinds"] = read_kinds
+    if status == "unread" or (status == "read" and set(read_kinds) != {"asset", "change"}):
+        # The turn read none of the subject's records, or only one kind of them:
+        # ask the host whether a record exists that the turn did not read.
+        exists, lookup = _lookup_exists(subject_reader, subject)
+        if lookup:
+            out["lookup"] = lookup
+        if exists and status == "unread":
             out["exists"] = exists
             vals = list(exists.values())
             if any(v is True for v in vals):
                 out["status"] = "unread_exists"
             elif vals and all(v is False for v in vals):
                 out["status"] = "none_exists"
+        elif exists:
+            out["exists"] = exists
+            # the status stays ``read``; the card says which kind it left unread
+            missing = [k for k in ("asset", "change")
+                       if k not in read_kinds and exists.get(k) is True]
+            if missing:
+                out["unread_kinds_exist"] = missing
     return out
 
 
