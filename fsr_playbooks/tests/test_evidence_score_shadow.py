@@ -66,9 +66,9 @@ def score(c, registry, unchecked=(), **kw):
 
 @pytest.mark.parametrize("case, c, registry, unchecked, want, tier", [
     ("support, uncovered, one class", card(), {"a": vt()}, ["ServiceNow"], 0.8, "support"),
-    ("support + coverage", card(), {"a": vt()}, [], 0.88, "support_partial"),
+    ("support + coverage", card(), {"a": vt()}, [], 0.85, "support_covered"),
     ("support + corroboration, uncovered", card(), {"a": vt(), "b": siem()},
-     ["ServiceNow"], 0.88, "support_partial"),
+     ["ServiceNow"], 0.9, "support_corroborated"),
     ("support + corroboration + coverage (C2 shape)", card(), {"a": vt(), "b": siem()},
      [], 0.95, "support_corroborated_covered"),
     ("record read only", card(), {"a": record_read()}, [], 0.5, "no_independent_support"),
@@ -88,7 +88,7 @@ def test_ladder(case, c, registry, unchecked, want, tier):
 def test_record_text_is_not_independent_even_next_to_a_rated_lookup_on_the_alert():
     # a read of the alert itself adds no class: the 680b4332 rule
     s = score(card(), {"a": vt(), "r": record_read()}, [])
-    assert s["score"] == 0.88 and s["support_classes"] == ["intel"]
+    assert s["score"] == 0.85 and s["support_classes"] == ["intel"]
 
 
 def test_contradiction_caps_the_score():
@@ -152,9 +152,9 @@ def test_the_card_carries_the_score_beside_the_models_confidence(turn):
     r = _emit(0.85)
     c = r["card"]
     assert c["confidence"] == 0.85
-    assert c["evidence_score"]["score"] == 0.88  # no ready sources reported: covered
-    assert c["evidence_score"]["tier"] == "support_partial"
-    assert cv.get_turn_evidence().verdicts()[-1]["evidence_score"]["score"] == 0.88
+    assert c["evidence_score"]["score"] == 0.85  # no ready sources reported: covered
+    assert c["evidence_score"]["tier"] == "support_covered"
+    assert cv.get_turn_evidence().verdicts()[-1]["evidence_score"]["score"] == 0.85
 
 
 def test_a_scoring_failure_never_touches_the_verdict(turn, monkeypatch):

@@ -244,6 +244,17 @@ def set_turn_ready_connectors(sources: dict[str, dict[str, str]] | None) -> None
     _turn_ready_connectors.set(clean if sources is not None else None)
 
 
+# Text the turn was handed that is a legitimate source of identifiers but is not
+# a tool result: the mounted record's body, set by the host. The evidence score
+# counts an address in it as sourced, not recited.
+_turn_known_context: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "turn_known_context", default=None)
+
+
+def set_turn_known_context(blob: Any) -> None:
+    _turn_known_context.set(blob)
+
+
 # U6: display labels for connector ids, {connector name: catalog label}, from
 # the box's connector catalog. The enhancement offer carries the labels of the
 # connectors its diff names, so the card never shows a bare id. The host hands

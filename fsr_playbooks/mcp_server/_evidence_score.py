@@ -10,26 +10,37 @@ still compares the self-reported confidence. Step 3 will switch the comparison;
 until then this is calibration data (does the score separate known-correct from
 known-wrong verdicts?).
 
-The values are a ladder, not a sum, and are placeholders to be calibrated:
+The values are a ladder, not a sum (calibrated on the step 2 sample: corroboration
+weighs more than coverage, since it is the stronger guard against one poisoned
+or wrong source):
 
     no independent substantive support ........ 0.50
     support ................................... 0.80
-    support + one of (corroboration, coverage)  0.88
+    support + coverage ........................ 0.85
+    support + corroboration ................... 0.90
     support + corroboration + coverage ........ 0.95
-    any contradiction or unsourced identifier . capped at 0.50
+    contradiction, unsourced identifier, or a
+    hedge disposition (suspicious,
+    needs_more_info) .......................... capped at 0.50
+
+Coverage counts only the ready sources that can hold evidence about the subject
+(see ``_applicable``), and credits a native-MCP tool as a query of its source.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
+from collections.abc import Iterable
 from typing import Any
 
 log = logging.getLogger(__name__)
 
 TIER_NONE = 0.5
 TIER_SUPPORT = 0.8
-TIER_PARTIAL = 0.88
+TIER_COVERED = 0.85
+TIER_CORROBORATED = 0.9
 TIER_FULL = 0.95
 
 _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.]*\d)")
@@ -40,6 +51,14 @@ _SCAN_LIMIT = 200_000
 _MALICIOUS_SEV = frozenset({"error"})
 _CLEAN_SEV = frozenset({"ok"})
 _BENIGN_DISPOSITIONS = frozenset({"benign", "false_positive"})
+#: A verdict that says it cannot conclude is not evidence-backed, whatever a
+#: lookup returned: its score is capped, not laddered.
+_HEDGE_DISPOSITIONS = frozenset({"suspicious", "needs_more_info"})
+_LOG_PRODUCTS = ("siem", "analyzer", "fortiedr", "splunk", "qradar", "sentinel", "elastic")
+_CIDR = re.compile(r"(?<![\d.])((?:\d{1,3}\.){3}\d{1,3})/(\d{1,2})\b")
+#: Log helpers (tool prefix) that cannot hold event evidence about an external
+#: indicator: the management plane and the log aggregator.
+_NOT_FOR_EXTERNAL = frozenset({"faz_", "fmg_"})
 
 
 def identifiers(*blobs: Any) -> list[str]:
@@ -87,8 +106,147 @@ def _source_class(e: dict[str, Any], ready_sources: dict[str, str],
     if meta:
         return meta.get("kind") or ("connector:" + connector)
     if connector:
+        # a log product reached through the generic runner is a log source
+        # (an event hit is not exculpatory), same as its helper-tool prefix
+        if any(w in _norm(connector) for w in _LOG_PRODUCTS):
+            return "log:" + connector
         return "connector:" + connector
-    return "other"
+    return "other:" + _record_kind(e)
+
+
+def _norm(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+_LABEL_NOISE = frozenset({"fortinet", "connector", "api", "rest", "v2", "v3"})
+
+
+def _label_tokens(label: str) -> list[str]:
+    toks = [_norm(t) for t in re.split(r"[\s_\-/]+", label)]
+    return [t for t in toks if len(t) >= 4 and t not in _LABEL_NOISE]
+
+
+#: Documentation ranges stand for real public addresses in examples, fixtures and
+#: tests; the stdlib calls them non-global, so they are named here.
+_DOC_NETS = tuple(ipaddress.ip_network(n) for n in
+                  ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24",
+                   "2001:db8::/32"))
+
+
+def _is_external(ip: str) -> bool:
+    addr = ipaddress.ip_address(ip)
+    if any(addr in n for n in _DOC_NETS if n.version == addr.version):
+        return True
+    return addr.is_global
+
+
+def _scope(ips: Iterable[str]) -> tuple[bool, bool]:
+    """(names an external IP, names only non-global IPs) for the IPs a verdict
+    is about. No IPs: (False, False), i.e. nothing can be ruled out."""
+    ext = priv = False
+    for ip in ips:
+        try:
+            if _is_external(ip):
+                ext = True
+            else:
+                priv = True
+        except ValueError:
+            continue
+    return ext, priv and not ext
+
+
+def _credited(label: str, registry: dict[str, dict[str, Any]], intel: bool) -> bool:
+    """True when a successful call in the registry queried the source ``label``
+    even though the connector ledger does not show it: a native-MCP tool
+    (``mcp_<server>__<tool>``) of that product, a reader finding whose source
+    names it, or (for threat intel) any rated native-MCP lookup."""
+    toks = _label_tokens(label)
+    for e in registry.values():
+        if not isinstance(e, dict) or e.get("ok") is not True:
+            continue
+        name = str(e.get("name") or "")
+        finding = e.get("finding") if isinstance(e.get("finding"), dict) else {}
+        hay = _norm(name) + "|" + _norm(finding.get("source"))
+        if any(t in hay for t in toks):
+            return True
+        if intel and name.startswith("mcp_") and finding.get("severity"):
+            return True
+    return False
+
+
+def _applicable_unchecked(unchecked: list[str], registry: dict[str, dict[str, Any]],
+                          ready_sources: dict[str, str],
+                          ready_connectors: dict[str, dict[str, str]],
+                          ips: Iterable[str], has_hash: bool) -> list[str]:
+    """The ready, unqueried sources that could still hold evidence about the
+    subject. Dropped: a management-plane or log-aggregator source when the
+    question is an external indicator; external threat intel when every address
+    named is internal; and any source a native-MCP tool already queried."""
+    ext, internal_only = _scope(ips)
+    kinds = {m.get("label"): m.get("kind") for m in ready_connectors.values()}
+    prefixes = {lab: pre for pre, lab in ready_sources.items()}
+    out = []
+    for label in unchecked:
+        if label in prefixes and ext and prefixes[label] in _NOT_FOR_EXTERNAL:
+            continue
+        kind = kinds.get(label)
+        if kind == "intel" and internal_only and not has_hash:
+            continue
+        if _credited(label, registry, intel=(kind == "intel")):
+            continue
+        out.append(label)
+    return out
+
+
+_KIND_WORDS = (("change", "change"), ("prior_case", "prior_case"),
+               ("asset", "asset"), ("cmdb", "asset"), ("inventory", "asset"),
+               ("device", "asset"), ("ticket", "ticket"), ("incident", "ticket"),
+               ("alert", "alert"))
+
+
+def _record_kind(e: dict[str, Any]) -> str:
+    """What kind of record a generic (class ``other``) read is about, from the
+    call's own module, path or tool name: an asset record and a change record
+    are different evidence though both arrive through the one generic class."""
+    args = e.get("args") if isinstance(e.get("args"), dict) else {}
+    parts = [str(e.get("name") or "")]
+    for k in ("module", "module_name", "table", "resource", "iri", "uuid", "path",
+              "endpoint", "op", "type", "collection"):
+        v = args.get(k)
+        if isinstance(v, str):
+            parts.append(v)
+    hay = " ".join(parts).lower()
+    for word, kind in _KIND_WORDS:
+        if word in hay:
+            return kind
+    return "record"
+
+
+def _derived_addresses(text: str, unsourced: set[str], known: set[str]) -> set[str]:
+    """Unsourced addresses that are network arithmetic on a sourced one, not a
+    recital: ``192.0.2.0/24`` over a known 192.0.2.9, or a bare ``.0`` network
+    address next to a known address of the same /24."""
+    derived: set[str] = set()
+    known_ips = []
+    for k in known:
+        try:
+            known_ips.append(ipaddress.ip_address(k))
+        except ValueError:
+            continue
+    for base, bits in _CIDR.findall(text):
+        if base not in unsourced:
+            continue
+        try:
+            net = ipaddress.ip_network(f"{base}/{bits}", strict=False)
+        except ValueError:
+            continue
+        if any(ip in net for ip in known_ips if ip.version == net.version):
+            derived.add(base)
+    for u in unsourced:
+        if u.endswith(".0") and any(str(ip).rsplit(".", 1)[0] == u.rsplit(".", 1)[0]
+                                    for ip in known_ips if ip.version == 4):
+            derived.add(u)
+    return derived
 
 
 def _reads_record(e: dict[str, Any], record_subject: str) -> bool:
@@ -104,14 +262,17 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                   record_subject: str | None = None,
                   unchecked_sources: list[str] | None = None,
                   ready_sources: dict[str, str] | None = None,
-                  ready_connectors: dict[str, dict[str, str]] | None = None
+                  ready_connectors: dict[str, dict[str, str]] | None = None,
+                  known_extra: Iterable[str] | None = None
                   ) -> dict[str, Any]:
     """The evidence score for ``card`` (a delivered verdict) against ``registry``.
 
     Pure. Returns {score, tier, components, missing, capped_by, ...}.
     ``unchecked_sources`` is the labels of ready sources the turn never queried
     (``unchecked_ready_sources``). ``record_subject`` is the uuid of the record
-    under triage; a read of it is not independent evidence."""
+    under triage; a read of it is not independent evidence. ``known_extra`` is
+    identifiers the turn was handed rather than looked up (the analyst's own
+    message, the mounted record's body): they are sourced, not recited."""
     ready_sources = ready_sources or {}
     ready_connectors = ready_connectors or {}
     disposition = str(card.get("disposition") or "")
@@ -120,6 +281,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     # (a host-only verdict) means an entry cannot be tied to a subject by
     # identifier, so any other independent entry counts as about it.
     text_ids = set(identifiers(*_verdict_text(card)))
+    text_ips = [i for i in text_ids if "." in i]
+    has_hash = any("." not in i for i in text_ids)
 
     facts: dict[str, dict[str, Any]] = {}
     for eid, e in registry.items():
@@ -168,10 +331,16 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     if disposition in _BENIGN_DISPOSITIONS:
         same_way = classes
     else:
+        # A generic record read or module search ("other:*") is not a second
+        # source: it can only echo the alert, a prior alert or another module.
         same_way = {f["cls"] for f in facts.values()
-                    if eligible(f) and f["sev"] not in _CLEAN_SEV}
+                    if eligible(f) and f["sev"] not in _CLEAN_SEV
+                    and not f["cls"].startswith("other")}
     corroborated = has_support and len(same_way | classes) >= 2
-    covered = not (unchecked_sources or [])
+    applicable_unchecked = _applicable_unchecked(
+        list(unchecked_sources or []), registry, ready_sources, ready_connectors,
+        text_ips, has_hash)
+    covered = not applicable_unchecked
 
     contradicted = any(
         eligible(f) and ((disposition == "true_positive" and f["sev"] in _CLEAN_SEV)
@@ -182,15 +351,23 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     known: set[str] = set()
     for f in facts.values():
         known |= f["ids"]
-    unsourced = sorted(text_ids - known)
+    known |= {str(x) for x in (known_extra or [])}
+    unsourced_set = text_ids - known
+    unsourced_set -= _derived_addresses(" ".join(_verdict_text(card)), unsourced_set, known)
+    unsourced = sorted(unsourced_set)
 
     if not has_support:
         score, tier = TIER_NONE, "no_independent_support"
     else:
-        steps = int(corroborated) + int(covered)
-        score, tier = ((TIER_SUPPORT, "support"), (TIER_PARTIAL, "support_partial"),
-                       (TIER_FULL, "support_corroborated_covered"))[steps]
+        score, tier = {
+            (False, False): (TIER_SUPPORT, "support"),
+            (False, True): (TIER_COVERED, "support_covered"),
+            (True, False): (TIER_CORROBORATED, "support_corroborated"),
+            (True, True): (TIER_FULL, "support_corroborated_covered"),
+        }[(corroborated, covered)]
     capped_by: list[str] = []
+    if disposition in _HEDGE_DISPOSITIONS:
+        capped_by.append("hedge_disposition")
     if contradicted:
         capped_by.append("contradiction")
     if unsourced:
@@ -205,7 +382,7 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     if has_support and not corroborated:
         missing.append("no second independent source class")
     if not covered:
-        missing.append("ready sources not queried: " + ", ".join(unchecked_sources or []))
+        missing.append("ready sources not queried: " + ", ".join(applicable_unchecked))
     if contradicted:
         missing.append("a lookup about the subject rated the opposite way")
     if unsourced:

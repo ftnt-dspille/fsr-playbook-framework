@@ -1806,11 +1806,19 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
     try:
         from ..llm.session_state import current  # noqa: PLC0415
         from . import _citation_validator as cv  # noqa: PLC0415
-        from ._evidence_score import record_score, score_verdict  # noqa: PLC0415
+        from ._evidence_score import (  # noqa: PLC0415
+            identifiers,
+            record_score,
+            score_verdict,
+        )
         registry = evidence_ctx.valid_ids()
+        # Identifiers the turn was handed rather than looked up (the analyst's
+        # own message, the mounted record's body the host bound) are sourced.
+        handed = identifiers(current().user_message, cv._turn_known_context.get())
         record_score(card, score_verdict(
             card, registry,
             record_subject=current().autonomy_subject,
+            known_extra=handed,
             unchecked_sources=cv.unchecked_ready_sources(registry),
             ready_sources=cv._turn_ready_sources.get(),
             ready_connectors=cv._turn_ready_connectors.get()))
