@@ -1,0 +1,6 @@
+# Check-runs that must be green on a branch head before make promote moves main.
+ruff (lint)
+pytest (py3.10)
+pytest (py3.11)
+pytest (py3.12)
+build + twine check
