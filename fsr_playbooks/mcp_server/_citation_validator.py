@@ -66,7 +66,8 @@ class TurnEvidence:
                  args: dict[str, Any] | None = None,
                  finding: dict[str, Any] | None = None,
                  thin: bool | None = None, empty: bool | None = None,
-                 idents: list[str] | None = None) -> None:
+                 idents: list[str] | None = None,
+                 events: list[dict[str, Any]] | None = None) -> None:
         """Record that a tool call succeeded or failed. ``args`` is kept so a
         policy can tell WHAT a cited call looked up (its target), not just
         which tool ran; ``finding`` is what a threat-intel lookup SAID (see
@@ -82,6 +83,8 @@ class TurnEvidence:
             entry["empty"] = True
         if idents:
             entry["idents"] = list(idents)
+        if events:
+            entry["events"] = list(events)
         self._registry[tool_use_id] = entry
 
     def record_verdict(self, card: dict[str, Any]) -> None:
@@ -430,12 +433,13 @@ def register_tool_result(tool_use_id: str, tool_name: str, success: bool,
         finding = read_finding(tool_name, args, result) if success else None
         thin = result_is_thin(result) if (success and result is not None) else None
         empty = result_is_empty_set(result) if success else False
-        idents = None
+        idents = events = None
         if success and result is not None:
-            from ._evidence_score import identifiers  # noqa: PLC0415
+            from ._evidence_score import event_facts, identifiers  # noqa: PLC0415
             idents = identifiers(result)
+            events = event_facts(result)
         evidence.register(tool_use_id, tool_name, success, args, finding, thin, empty,
-                          idents)
+                          idents, events)
 
 
 def record_delivered_verdict(card: dict[str, Any]) -> None:

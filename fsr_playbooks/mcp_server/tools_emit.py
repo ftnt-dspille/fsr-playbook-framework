@@ -1807,6 +1807,7 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
         from ..llm.session_state import current  # noqa: PLC0415
         from . import _citation_validator as cv  # noqa: PLC0415
         from ._evidence_score import (  # noqa: PLC0415
+            event_facts,
             identifiers,
             record_score,
             score_verdict,
@@ -1819,6 +1820,7 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
             card, registry,
             record_subject=current().autonomy_subject,
             known_extra=handed,
+            known_events=event_facts(cv._turn_known_context.get()),
             unchecked_sources=cv.unchecked_ready_sources(registry),
             ready_sources=cv._turn_ready_sources.get(),
             ready_connectors=cv._turn_ready_connectors.get()))

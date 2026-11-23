@@ -23,6 +23,10 @@ or wrong source):
     hedge disposition (suspicious,
     needs_more_info) .......................... capped at 0.50
 
+A log hit that only returns the alert's own events (same event or incident id,
+or the same source, destination and moment as the mounted alert) is an echo, not
+corroboration: see ``is_echo``.
+
 Coverage counts only the ready sources that can hold evidence about the subject
 (see ``_applicable``), and credits a native-MCP tool as a query of its source.
 """
@@ -101,6 +105,122 @@ def weak_rating(finding: Any) -> bool:
     if total < _ENGINE_MIN_TOTAL:
         return False
     return hits < _WEAK_MAX_DETECTIONS or hits / total < _WEAK_MAX_RATIO
+
+
+#: Keys that name an event, incident or alert in a log row or a record body.
+_ID_KEYS = frozenset({
+    "incidentid", "incident_id", "eventid", "event_id", "alertid", "alert_id",
+    "sourceid", "source_id", "id", "uuid", "sessionid", "session_id", "logid",
+    "log_id", "incidentid", "eventseq", "ph_event_id", "phincidentid"})
+_SRC_KEYS = frozenset({"srcipaddr", "sourceip", "src_ip", "srcip", "src", "source_ip",
+                       "srcaddr", "src_addr", "sourceaddress"})
+_DST_KEYS = frozenset({"destipaddr", "destinationip", "dest_ip", "dstip", "dst",
+                       "destination_ip", "dstaddr", "dst_addr", "destip",
+                       "destinationaddress"})
+_TIME_KEYS = frozenset({"ts", "phrecvtime", "createdate", "timestamp", "time", "eventtime",
+                        "_time", "@timestamp", "start_time", "starttime", "event_time",
+                        "receivetime", "devtime", "date"})
+#: Events at the same source and destination within this many seconds of the
+#: alert are the alert's own; hours apart they are a pattern, not an echo.
+_ECHO_WINDOW_SECONDS = 120
+_MAX_EVENTS = 60
+_MIN_ID_LEN = 4
+
+
+def _epoch(v: Any) -> float | None:
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        x = float(v)
+        return x / 1000.0 if x > 1e11 else x
+    if isinstance(v, str) and v.strip():
+        t = v.strip()
+        try:
+            return _epoch(float(t))
+        except ValueError:
+            pass
+        try:
+            from datetime import datetime, timezone  # noqa: PLC0415
+            dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def event_facts(blob: Any) -> list[dict[str, Any]]:
+    """Event-shaped rows in a tool result or record body, bounded: each is
+    ``{"ids": [...], "src": ip, "dst": ip, "t": epoch seconds}`` with only the
+    keys the row carries. A row counts when it names an event id or a
+    source/destination pair. Used to tell an alert's own events from new ones."""
+    if isinstance(blob, str):
+        try:
+            blob = json.loads(blob)
+        except ValueError:
+            return []
+    out: list[dict[str, Any]] = []
+    budget = [800]
+
+    def walk(node: Any, depth: int) -> None:
+        if len(out) >= _MAX_EVENTS or depth > 6 or budget[0] <= 0:
+            return
+        budget[0] -= 1
+        if isinstance(node, list):
+            for x in node:
+                walk(x, depth + 1)
+        elif isinstance(node, dict):
+            ids: list[str] = []
+            src = dst = t = None
+            for k, v in node.items():
+                lk = str(k).lower()
+                if lk in _ID_KEYS and isinstance(v, (str, int)) and not isinstance(v, bool):
+                    sv = str(v).strip().lower()
+                    if len(sv) >= _MIN_ID_LEN:
+                        ids.append(sv)
+                elif lk in _SRC_KEYS and isinstance(v, str):
+                    src = v.strip()
+                elif lk in _DST_KEYS and isinstance(v, str):
+                    dst = v.strip()
+                elif lk in _TIME_KEYS and t is None:
+                    t = _epoch(v)
+            row: dict[str, Any] = {}
+            if ids:
+                row["ids"] = sorted(set(ids))
+            if src and dst:
+                row["src"], row["dst"] = src, dst
+                if t is not None:
+                    row["t"] = t
+            if row:
+                out.append(row)
+            for v in node.values():
+                if isinstance(v, (list, dict)):
+                    walk(v, depth + 1)
+
+    walk(blob, 0)
+    return out
+
+
+def is_echo(events: list[dict[str, Any]], own: list[dict[str, Any]]) -> bool:
+    """True when ``events`` (a log result's rows) are all the alert's own: each
+    shares an event or incident id with a row of the alert, or has the alert's
+    source and destination within ``_ECHO_WINDOW_SECONDS`` of it. An empty list
+    (nothing parsed) is not an echo: it cannot be shown to be one."""
+    if not events or not own:
+        return False
+    own_ids = {i for o in own for i in o.get("ids") or []}
+    for ev in events:
+        if own_ids & set(ev.get("ids") or []):
+            continue
+        t = ev.get("t")
+        if t is not None and "src" in ev and any(
+                o.get("src") == ev["src"] and o.get("dst") == ev["dst"]
+                and o.get("t") is not None
+                and abs(o["t"] - t) <= _ECHO_WINDOW_SECONDS for o in own):
+            continue
+        return False
+    return True
 
 
 def _verdict_text(card: dict[str, Any]) -> list[str]:
@@ -291,7 +411,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                   unchecked_sources: list[str] | None = None,
                   ready_sources: dict[str, str] | None = None,
                   ready_connectors: dict[str, dict[str, str]] | None = None,
-                  known_extra: Iterable[str] | None = None
+                  known_extra: Iterable[str] | None = None,
+                  known_events: list[dict[str, Any]] | None = None
                   ) -> dict[str, Any]:
     """The evidence score for ``card`` (a delivered verdict) against ``registry``.
 
@@ -312,6 +433,13 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     text_ips = [i for i in text_ids if "." in i]
     has_hash = any("." not in i for i in text_ids)
 
+    # The alert's own rows: the record under triage as the turn read it (a read
+    # whose args name the record) and the body the host bound as known context.
+    own_events: list[dict[str, Any]] = list(known_events or [])
+    for e in registry.values():
+        if isinstance(e, dict) and e.get("ok") is True and _reads_record(e, subject_rec):
+            own_events.extend(e.get("events") or [])
+
     facts: dict[str, dict[str, Any]] = {}
     for eid, e in registry.items():
         if not isinstance(e, dict) or str(e.get("name") or "").startswith("emit_"):
@@ -328,6 +456,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
             "cls": _source_class(e, ready_sources, ready_connectors),
             "ids": ids,
         }
+        facts[eid]["echo"] = (facts[eid]["cls"].startswith("log:")
+                              and is_echo(e.get("events") or [], own_events))
 
     def eligible(f: dict[str, Any]) -> bool:
         return f["substantive"] and f["independent"] and f["about"]
@@ -362,9 +492,11 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     else:
         # A generic record read or module search ("other:*") is not a second
         # source: it can only echo the alert, a prior alert or another module.
+        # An echo (a log hit that only returns the alert's own events) says
+        # nothing the alert did not already say.
         same_way = {f["cls"] for f in facts.values()
                     if eligible(f) and f["sev"] not in _CLEAN_SEV
-                    and not f["cls"].startswith("other")}
+                    and not f["cls"].startswith("other") and not f["echo"]}
     corroborated = has_support and len(same_way | classes) >= 2
     applicable_unchecked = _applicable_unchecked(
         list(unchecked_sources or []), registry, ready_sources, ready_connectors,
@@ -378,7 +510,10 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     # no rated support of its own: a young address has no reputation yet.
     record_backed = bool(classes) and any(
         not c.startswith("log:") and c != "intel" for c in classes)
-    log_hit = any(eligible(f) and f["cls"].startswith("log:") for f in facts.values())
+    log_hit = any(eligible(f) and f["cls"].startswith("log:") and not f["echo"]
+                  for f in facts.values())
+    echo_only = (disposition == "true_positive" and not log_hit
+                 and any(f["echo"] for f in facts.values()))
     behavioural_only = (disposition == "true_positive" and log_hit
                         and not has_support)
 
@@ -427,6 +562,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     if behavioural_only:
         missing.append("conviction rests on log hits; no source rated the "
                        "subject malicious")
+    if echo_only:
+        missing.append("the only log hit returns the alert's own events")
     if has_support and not corroborated:
         missing.append("no second independent source class")
     if not covered:
@@ -446,6 +583,7 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
         "capped_by": capped_by,
         "cited_support": sorted(set(support) & cited),
         "support_classes": sorted(classes),
+        "echo": sorted(eid for eid, f in facts.items() if f["echo"]),
     }
 
 
