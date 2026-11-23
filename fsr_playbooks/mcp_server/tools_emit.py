@@ -1797,6 +1797,28 @@ VERDICT_SHOWN_NOTE = (
     "stage it; otherwise end with at most one sentence on the next step.")
 
 
+def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
+    """Phase 2 step 2 (shadow): compute the code-derived evidence score and
+    record it beside the model's confidence. Nothing reads it for a decision, so
+    a failure here must never touch the verdict."""
+    if evidence_ctx is None:
+        return
+    try:
+        from ..llm.session_state import current  # noqa: PLC0415
+        from . import _citation_validator as cv  # noqa: PLC0415
+        from ._evidence_score import record_score, score_verdict  # noqa: PLC0415
+        registry = evidence_ctx.valid_ids()
+        record_score(card, score_verdict(
+            card, registry,
+            record_subject=current().autonomy_subject,
+            unchecked_sources=cv.unchecked_ready_sources(registry),
+            ready_sources=cv._turn_ready_sources.get(),
+            ready_connectors=cv._turn_ready_connectors.get()))
+    except Exception:  # noqa: BLE001
+        import logging  # noqa: PLC0415
+        logging.getLogger(__name__).debug("evidence score failed", exc_info=True)
+
+
 def emit_verdict(
     disposition: str,
     severity: str,
@@ -2034,6 +2056,7 @@ def emit_verdict(
         card["what_would_help"] = helps
     if recommended_actions:
         card["recommended_actions"] = recommended_actions
+    _record_evidence_score(card, evidence_ctx)
     from ._citation_validator import record_delivered_verdict
     record_delivered_verdict(card)
     return {"ok": True, "card": card, "shown": VERDICT_SHOWN_NOTE}

@@ -567,6 +567,10 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
         # downgrading a policy that asks for enforce.
         "mode": "shadow" if policy.mode == "shadow" else "enforce_unavailable",
         "verdict_id": (verdict or {}).get("id"),
+        # Shadow record only (Phase 2 step 2): the code-derived score beside the
+        # model's own number. No check above reads either of these two keys.
+        "model_confidence": (verdict or {}).get("confidence"),
+        "evidence_score": (verdict or {}).get("evidence_score"),
         "evidence": cited,
         "targets": targets,
         "ts": time.time(),
