@@ -231,8 +231,10 @@ class RequestedActionPostcondition:
         if name == "emit_card":
             ct = str(a.get("card_type") or "").strip().lower()
             if ct == "verdict":
-                card = result.get("card") if isinstance(result.get("card"), dict) else {}
-                payload = a.get("payload") if isinstance(a.get("payload"), dict) else {}
+                card_v = result.get("card")
+                card = card_v if isinstance(card_v, dict) else {}
+                payload_v = a.get("payload")
+                payload = payload_v if isinstance(payload_v, dict) else {}
                 d = str(card.get("disposition") or payload.get("disposition") or "")
                 if d.strip():
                     # The last delivered verdict wins, confidence with it.

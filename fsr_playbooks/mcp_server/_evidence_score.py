@@ -424,7 +424,8 @@ def _credited(label: str, registry: dict[str, dict[str, Any]], intel: bool) -> b
         if not isinstance(e, dict) or e.get("ok") is not True:
             continue
         name = str(e.get("name") or "")
-        finding = e.get("finding") if isinstance(e.get("finding"), dict) else {}
+        finding_v = e.get("finding")
+        finding = finding_v if isinstance(finding_v, dict) else {}
         hay = _norm(name) + "|" + _norm(finding.get("source"))
         if any(t in hay for t in toks):
             return True
@@ -467,7 +468,8 @@ def _record_kind(e: dict[str, Any]) -> str:
     """What kind of record a generic (class ``other``) read is about, from the
     call's own module, path or tool name: an asset record and a change record
     are different evidence though both arrive through the one generic class."""
-    args = e.get("args") if isinstance(e.get("args"), dict) else {}
+    args_v = e.get("args")
+    args = args_v if isinstance(args_v, dict) else {}
     parts = [str(e.get("name") or "")]
     for k in ("module", "module_name", "table", "resource", "iri", "uuid", "path",
               "endpoint", "op", "type", "collection"):
@@ -723,7 +725,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     }
 
 def _record_hay(e: dict[str, Any]) -> str:
-    args = e.get("args") if isinstance(e.get("args"), dict) else {}
+    args_v = e.get("args")
+    args = args_v if isinstance(args_v, dict) else {}
     parts = [str(e.get("name") or "")]
     for k in ("module", "module_name", "table", "resource", "iri", "uuid", "path",
               "endpoint", "op", "type", "collection", "connector"):
