@@ -786,18 +786,88 @@ def _subject_names(card: dict[str, Any], registry: dict[str, dict[str, Any]],
     return out
 
 
+def _record_rows(blob: Any) -> list[Any]:
+    """The rows of a record lookup result: the lists inside it, else the blob as
+    one row. Bounded."""
+    if isinstance(blob, str):
+        try:
+            blob = json.loads(blob)
+        except ValueError:
+            return [blob]
+    rows: list[Any] = []
+
+    def walk(node: Any, depth: int) -> None:
+        if len(rows) >= 50 or depth > 4:
+            return
+        if isinstance(node, list):
+            if node and all(isinstance(x, dict) for x in node):
+                rows.extend(node[:50 - len(rows)])
+            else:
+                for x in node:
+                    walk(x, depth + 1)
+        elif isinstance(node, dict):
+            for v in node.values():
+                if isinstance(v, (list, dict)):
+                    walk(v, depth + 1)
+
+    walk(blob, 0)
+    return rows or ([blob] if blob not in (None, "", [], {}) else [])
+
+
+def subject_records_exist(reader: Any, subject: set[str]) -> dict[str, bool | None]:
+    """Ask the host whether the subject has an asset record and a change record.
+
+    ``reader(names)`` returns ``{"asset": rows, "change": rows}``: the rows a
+    bounded lookup for ``names`` found (an empty list when it found none, None
+    when it could not look). A kind exists only when a returned row itself names
+    the subject (a neighbour's record does not). ``{}`` when no reader is bound
+    or it fails. Never raises."""
+    if reader is None or not subject:
+        return {}
+    names = sorted(subject, key=lambda n: (n.replace(".", "").isdigit(), n))[:4]
+    try:
+        got = reader(names)
+    except Exception:  # noqa: BLE001
+        log.debug("subject records reader failed", exc_info=True)
+        return {}
+    out: dict[str, bool | None] = {}
+    for kind in ("asset", "change"):
+        v = (got or {}).get(kind) if isinstance(got, dict) else None
+        if v is None:
+            out[kind] = None
+            continue
+        found = False
+        for row in _record_rows(v):
+            try:
+                text = json.dumps(row, default=str)[:20000]
+            except Exception:  # noqa: BLE001
+                continue
+            if _names_subject(_names(text, row if isinstance(row, dict) else None),
+                              _nets(text), subject):
+                found = True
+                break
+        out[kind] = found
+    return out
+
+
 def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                   record_subject: str | None = None,
-                  known_names: Iterable[str] | None = None) -> dict[str, Any]:
+                  known_names: Iterable[str] | None = None,
+                  subject_reader: Any = None) -> dict[str, Any]:
     """Did the turn read the subject's OWN records (its asset record, a change
     record naming it), and does any of them contradict the verdict?
 
     ``read``: a successful asset or change read names the subject and nothing in
-    it contradicts the disposition. ``unread``: none does. ``contradicted``: a
-    record naming the subject explains the activity the verdict calls hostile
-    (a conviction against a sandbox, a honeypot, an approved change that names
-    the address), or marks a benign host as compromised. Pure; a separate signal
-    from the score, recorded beside it (shadow only)."""
+    it contradicts the disposition. ``contradicted``: a record naming the subject
+    explains the activity the verdict calls hostile (a conviction against a
+    sandbox, a honeypot, an approved change that names the address), or marks a
+    benign host as compromised. When the turn read none, the host's
+    ``subject_reader`` (a bounded lookup, called only then) says whether such a
+    record exists: ``unread_exists`` (it exists and was not read) or
+    ``none_exists`` (the host looked and there is none). ``unread`` is left for
+    "the host did not say" (no reader, or a lookup that failed). Pure apart from
+    the reader; a separate signal from the score, recorded beside it (shadow
+    only)."""
     subject_rec = (record_subject or "").strip().lower()
     disposition = str(card.get("disposition") or "")
     subject = _subject_names(card, registry, subject_rec, known_names or [])
@@ -832,8 +902,18 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
             if hit:
                 contra.append({"call": eid, "roles": hit})
     status = "contradicted" if contra else ("read" if read else "unread")
-    return {"status": status, "records": sorted(read), "contradicted_by": contra,
-            "subject": sorted(subject)[:6]}
+    out: dict[str, Any] = {"status": status, "records": sorted(read),
+                           "contradicted_by": contra, "subject": sorted(subject)[:6]}
+    if status == "unread":
+        exists = subject_records_exist(subject_reader, subject)
+        if exists:
+            out["exists"] = exists
+            vals = list(exists.values())
+            if any(v is True for v in vals):
+                out["status"] = "unread_exists"
+            elif vals and all(v is False for v in vals):
+                out["status"] = "none_exists"
+    return out
 
 
 def record_premise(card: dict[str, Any], premise: dict[str, Any]) -> None:

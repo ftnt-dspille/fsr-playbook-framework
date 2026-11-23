@@ -261,6 +261,19 @@ def set_turn_known_context(blob: Any) -> None:
     _turn_known_context.set(blob)
 
 
+# The host's bounded lookup for the subject's own records: ``reader(names)`` ->
+# ``{"asset": rows | None, "change": rows | None}``. The premise check calls it
+# only when the turn read none of them, to tell "a record existed and was not
+# read" from "none exists". None = the host did not bind one (the premise then
+# stays ``unread``). Shadow only: no decision reads the premise.
+_turn_subject_records: contextvars.ContextVar[Callable[[list[str]], Any] | None] = (
+    contextvars.ContextVar("turn_subject_records", default=None))
+
+
+def set_turn_subject_records(reader: Callable[[list[str]], Any] | None) -> None:
+    _turn_subject_records.set(reader)
+
+
 # U6: display labels for connector ids, {connector name: catalog label}, from
 # the box's connector catalog. The enhancement offer carries the labels of the
 # connectors its diff names, so the card never shows a bare id. The host hands
