@@ -127,3 +127,17 @@ def test_the_bound_reader_reaches_the_card(turn):
 
 def test_no_reader_bound_leaves_the_card_as_before(turn):
     assert _emit()["premise"]["status"] == "unread"
+
+
+def test_the_lookup_cost_is_recorded_with_the_hosts_request_counts():
+    r = Reader(asset=[], change=[])
+    r.answer["stats"] = {"asset_requests": 2, "change_ops": 0, "junk": "x"}
+    lk = check(reader=r)["lookup"]
+    assert isinstance(lk["ms"], int) and lk["ms"] >= 0
+    assert lk["asset_requests"] == 2 and lk["change_ops"] == 0 and "junk" not in lk
+
+
+def test_no_lookup_cost_when_no_reader_was_asked():
+    assert "lookup" not in check()
+    read = {"v": vt(), "alert": alert_read(), "asset": asset_read(PLAIN_ASSET)}
+    assert "lookup" not in check(reg=read, reader=Reader(asset=[], change=[]))

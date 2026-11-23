@@ -36,6 +36,7 @@ import ipaddress
 import json
 import logging
 import re
+import time
 from collections.abc import Iterable
 from typing import Any
 
@@ -918,7 +919,24 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     out: dict[str, Any] = {"status": status, "records": sorted(read),
                            "contradicted_by": contra, "subject": sorted(subject)[:6]}
     if status == "unread":
-        exists = subject_records_exist(subject_reader, subject)
+        asked: dict[str, Any] = {}
+
+        def timed(names: list[str]) -> Any:
+            t0 = time.monotonic()
+            try:
+                got = subject_reader(names)
+                asked["got"] = got
+                return got
+            finally:
+                asked["ms"] = int((time.monotonic() - t0) * 1000)
+
+        exists = subject_records_exist(timed if subject_reader is not None else None, subject)
+        if "ms" in asked:
+            # What the existence lookup cost this turn (shadow telemetry): wall
+            # time, plus whatever request counts the host reader reports.
+            stats = (asked.get("got") or {}).get("stats") if isinstance(asked.get("got"), dict) else None
+            out["lookup"] = {"ms": asked["ms"], **({k: v for k, v in stats.items()
+                                                    if isinstance(v, int)} if isinstance(stats, dict) else {})}
         if exists:
             out["exists"] = exists
             vals = list(exists.values())
