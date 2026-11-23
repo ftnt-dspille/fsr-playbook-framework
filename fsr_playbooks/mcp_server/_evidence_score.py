@@ -398,8 +398,9 @@ def premise_facts(blob: Any) -> dict[str, Any]:
                 for name, rx in table.items() if rx.search(own))
             if roles:
                 sub = json.dumps(node, default=str)[:20000]
-                row = {"roles": roles, "names": sorted(_names(sub, node))[:20],
-                       "nets": _nets(sub)}
+                row: dict[str, Any] = {"roles": roles,
+                                       "names": sorted(_names(sub, node))[:20],
+                                       "nets": _nets(sub)}
                 win, lapsed = _window(node)
                 if win:
                     row["window"] = win
