@@ -571,6 +571,7 @@ def evaluate(policy: Policy, call: Call, *, verdicts: list[dict[str, Any]],
         # model's own number. No check above reads either of these two keys.
         "model_confidence": (verdict or {}).get("confidence"),
         "evidence_score": (verdict or {}).get("evidence_score"),
+        "premise": (verdict or {}).get("premise"),
         "evidence": cited,
         "targets": targets,
         "ts": time.time(),

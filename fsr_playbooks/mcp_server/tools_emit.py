@@ -1809,6 +1809,9 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
         from ._evidence_score import (  # noqa: PLC0415
             event_facts,
             identifiers,
+            premise_check,
+            premise_facts,
+            record_premise,
             record_score,
             score_verdict,
         )
@@ -1824,6 +1827,9 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
             unchecked_sources=cv.unchecked_ready_sources(registry),
             ready_sources=cv._turn_ready_sources.get(),
             ready_connectors=cv._turn_ready_connectors.get()))
+        record_premise(card, premise_check(
+            card, registry, record_subject=current().autonomy_subject,
+            known_names=premise_facts(cv._turn_known_context.get()).get("names") or []))
     except Exception:  # noqa: BLE001
         import logging  # noqa: PLC0415
         logging.getLogger(__name__).debug("evidence score failed", exc_info=True)

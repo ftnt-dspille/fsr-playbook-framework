@@ -222,6 +222,117 @@ def is_echo(events: list[dict[str, Any]], own: list[dict[str, Any]]) -> bool:
         return False
     return True
 
+# --- premise: the subject's own records ------------------------------------
+#: Role and approval wording in a record about the subject. STRONG roles say the
+#: subject is expected to touch hostile infrastructure (a sandbox, a honeypot);
+#: SCOPED terms (approval, an approved change, an allow list, a scanner) explain
+#: contact only with the address the record names; ALARM terms say the subject
+#: itself is already known bad.
+_STRONG_ROLES = {
+    "sandbox": re.compile(r"sandbox", re.I),
+    "honeypot": re.compile(r"honey[ -]?(?:pot|net)", re.I),
+    "detonation": re.compile(r"detonat", re.I),
+    "malware_analysis": re.compile(r"malware[ -]analysis|threat[ -]research", re.I),
+    "pentest": re.compile(r"pen(?:etration)?[ -]?test|red[ -]team", re.I),
+}
+_SCOPED_ROLES = {
+    "scanner": re.compile(r"\bscanner\b|vulnerability scan", re.I),
+    "approved": re.compile(r"\bapproved\b|\bauthori[sz]ed\b|\bsanctioned\b", re.I),
+    "change": re.compile(r"\bchg[- ]?\d+|change request|standing change", re.I),
+    "allowlist": re.compile(r"allow[- ]?list|whitelist", re.I),
+    "expected": re.compile(r"\bexpected\b", re.I),
+}
+_ALARM_ROLES = {
+    "compromised": re.compile(r"compromised|infected|quarantin|re-?imag", re.I),
+}
+_HOST_KEYS = frozenset({"computername", "hostname", "host", "devicename", "devname",
+                        "sourcehost", "assetname", "srchostname", "dsthostname",
+                        "endpointname", "machinename"})
+_HOSTLIKE = re.compile(r"(?<![\w-])[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w-])", re.I)
+_MAX_ROWS = 20
+_MAX_NAMES = 60
+_ROW_TEXT_LIMIT = 4000
+
+
+def _names(text: str, blob: Any = None) -> set[str]:
+    """Subject-handle tokens in ``text``: IPv4 addresses and host names (a
+    host-key value, or a hyphenated token with a digit such as ``mkt-ws-31``)."""
+    out = set(identifiers(text))
+    for m in _HOSTLIKE.findall(text):
+        if any(c.isdigit() for c in m):
+            out.add(m.lower())
+    if isinstance(blob, dict):
+        for k, v in blob.items():
+            if str(k).lower() in _HOST_KEYS and isinstance(v, str) and len(v.strip()) >= 3:
+                out.add(v.strip().lower())
+    return out
+
+
+def _nets(text: str) -> list[str]:
+    out = []
+    for base, bits in _CIDR.findall(text):
+        try:
+            out.append(str(ipaddress.ip_network(f"{base}/{bits}", strict=False)))
+        except ValueError:
+            continue
+    return sorted(set(out))[:10]
+
+
+def premise_facts(blob: Any) -> dict[str, Any]:
+    """What a result says about hosts and their roles, bounded, for the premise
+    check. ``names``: every IPv4 address and host name in it. ``nets``: networks
+    it names. ``rows``: each record row (dict) whose own text carries role or
+    approval wording, as ``{roles, names, nets}``. Empty dict when there is
+    nothing to say."""
+    if isinstance(blob, str):
+        try:
+            blob = json.loads(blob)
+        except ValueError:
+            return {}
+    try:
+        text = json.dumps(blob, default=str)[:_SCAN_LIMIT]
+    except Exception:  # noqa: BLE001
+        return {}
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    budget = [800]
+
+    def walk(node: Any, depth: int) -> None:
+        if len(rows) >= _MAX_ROWS or depth > 6 or budget[0] <= 0:
+            return
+        budget[0] -= 1
+        if isinstance(node, list):
+            for x in node:
+                walk(x, depth + 1)
+        elif isinstance(node, dict):
+            own = " ".join(v for v in node.values() if isinstance(v, str))[:_ROW_TEXT_LIMIT]
+            roles = sorted(
+                name for table in (_STRONG_ROLES, _SCOPED_ROLES, _ALARM_ROLES)
+                for name, rx in table.items() if rx.search(own))
+            if roles:
+                sub = json.dumps(node, default=str)[:20000]
+                row = {"roles": roles, "names": sorted(_names(sub, node))[:20],
+                       "nets": _nets(sub)}
+                key = json.dumps(row, sort_keys=True)
+                if key not in seen:
+                    seen.add(key)
+                    rows.append(row)
+            for v in node.values():
+                if isinstance(v, (list, dict)):
+                    walk(v, depth + 1)
+
+    walk(blob, 0)
+    names = sorted(_names(text, blob if isinstance(blob, dict) else None))[:_MAX_NAMES]
+    out: dict[str, Any] = {}
+    if names:
+        out["names"] = names
+    nets = _nets(text)
+    if nets:
+        out["nets"] = nets
+    if rows:
+        out["rows"] = rows
+    return out
+
 
 def _verdict_text(card: dict[str, Any]) -> list[str]:
     parts = [str(card.get("summary") or "")]
@@ -455,6 +566,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
             "weak": weak_rating(finding),
             "cls": _source_class(e, ready_sources, ready_connectors),
             "ids": ids,
+            "kind": _premise_kind(e) if e.get("ok") is True else "",
+            "rows": (e.get("premise") or {}).get("rows") or [],
         }
         facts[eid]["echo"] = (facts[eid]["cls"].startswith("log:")
                               and is_echo(e.get("events") or [], own_events))
@@ -517,13 +630,36 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     behavioural_only = (disposition == "true_positive" and log_hit
                         and not has_support)
 
+    def explained(f: dict[str, Any]) -> bool:
+        """True when a rating's address is named by an independent asset or change
+        record that gives a role or an approval for it (an approved change that
+        names the CDN, a reassigned vendor address): the rating is explained, so
+        it does not contradict a benign call."""
+        rated = set()
+        for i in f["ids"]:
+            try:
+                if "." in i and _is_external(i):
+                    rated.add(i)
+            except ValueError:
+                continue
+        if not rated:
+            return False
+        for r in facts.values():
+            if not (r["kind"] and r["substantive"] and r["independent"]):
+                continue
+            for row in r["rows"]:
+                if (set(row.get("names") or []) & rated
+                        and set(row.get("roles") or []) & (set(_STRONG_ROLES) | set(_SCOPED_ROLES))):
+                    return True
+        return False
+
     def contradicts(f: dict[str, Any]) -> bool:
         if not eligible(f):
             return False
         if disposition == "true_positive":
             return f["sev"] in _CLEAN_SEV and not behavioural_only
         if disposition in _BENIGN_DISPOSITIONS and f["sev"] in _MALICIOUS_SEV:
-            return not (f["weak"] and record_backed)
+            return not ((f["weak"] and record_backed) or explained(f))
         return False
 
     contradicted = any(contradicts(f) for f in facts.values())
@@ -585,6 +721,127 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
         "support_classes": sorted(classes),
         "echo": sorted(eid for eid, f in facts.items() if f["echo"]),
     }
+
+def _record_hay(e: dict[str, Any]) -> str:
+    args = e.get("args") if isinstance(e.get("args"), dict) else {}
+    parts = [str(e.get("name") or "")]
+    for k in ("module", "module_name", "table", "resource", "iri", "uuid", "path",
+              "endpoint", "op", "type", "collection", "connector"):
+        v = args.get(k)
+        if isinstance(v, str):
+            parts.append(v)
+    return " ".join(parts).lower()
+
+
+_ASSET_WORDS = ("asset", "cmdb", "inventory", "device", "host", "endpoint", "computer")
+
+
+def _premise_kind(e: dict[str, Any]) -> str:
+    """``asset`` or ``change`` when a call read the host's own record or a change
+    record; "" otherwise (an alert, a prior case, a log, a rating)."""
+    hay = _record_hay(e)
+    if "change" in hay:
+        return "change"
+    if any(w in hay for w in _ASSET_WORDS):
+        return "asset"
+    return ""
+
+
+def _in_nets(ip: str, nets: Iterable[str]) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for n in nets:
+        try:
+            net = ipaddress.ip_network(n, strict=False)
+        except ValueError:
+            continue
+        if net.version == addr.version and addr in net:
+            return True
+    return False
+
+
+def _names_subject(names: Iterable[str], nets: Iterable[str], subject: set[str]) -> bool:
+    nm = set(names)
+    return bool(nm & subject) or any(_in_nets(s, nets) for s in subject if "." in s)
+
+
+def _subject_names(card: dict[str, Any], registry: dict[str, dict[str, Any]],
+                   record_subject: str, known_names: Iterable[str]) -> set[str]:
+    """Host names and internal addresses of the subject: the alert as the turn
+    read it, as the host bound it, and the internal addresses the verdict names."""
+    names: set[str] = set(known_names)
+    for e in registry.values():
+        if isinstance(e, dict) and e.get("ok") is True and _reads_record(e, record_subject):
+            names |= set((e.get("premise") or {}).get("names") or [])
+    names |= _names(" ".join(_verdict_text(card)))
+    out = set()
+    for n in names:
+        try:
+            if not _is_external(n):
+                out.add(n)
+        except ValueError:
+            out.add(n)  # a host name
+    return out
+
+
+def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
+                  record_subject: str | None = None,
+                  known_names: Iterable[str] | None = None) -> dict[str, Any]:
+    """Did the turn read the subject's OWN records (its asset record, a change
+    record naming it), and does any of them contradict the verdict?
+
+    ``read``: a successful asset or change read names the subject and nothing in
+    it contradicts the disposition. ``unread``: none does. ``contradicted``: a
+    record naming the subject explains the activity the verdict calls hostile
+    (a conviction against a sandbox, a honeypot, an approved change that names
+    the address), or marks a benign host as compromised. Pure; a separate signal
+    from the score, recorded beside it (shadow only)."""
+    subject_rec = (record_subject or "").strip().lower()
+    disposition = str(card.get("disposition") or "")
+    subject = _subject_names(card, registry, subject_rec, known_names or [])
+    verdict_external = set()
+    for i in identifiers(*_verdict_text(card)):
+        try:
+            if "." in i and _is_external(i):
+                verdict_external.add(i)
+        except ValueError:
+            continue
+    read: list[str] = []
+    contra: list[dict[str, Any]] = []
+    for eid, e in registry.items():
+        if (not isinstance(e, dict) or e.get("ok") is not True
+                or _reads_record(e, subject_rec) or not _premise_kind(e)):
+            continue
+        p = e.get("premise") or {}
+        if not _names_subject(p.get("names") or [], p.get("nets") or [], subject):
+            continue
+        read.append(eid)
+        for row in p.get("rows") or []:
+            if not _names_subject(row.get("names") or [], row.get("nets") or [], subject):
+                continue
+            roles = set(row.get("roles") or [])
+            hit: list[str] = []
+            if disposition == "true_positive":
+                hit = sorted(roles & set(_STRONG_ROLES))
+                if not hit and set(row.get("names") or []) & verdict_external:
+                    hit = sorted(roles & set(_SCOPED_ROLES))
+            elif disposition in _BENIGN_DISPOSITIONS:
+                hit = sorted(roles & set(_ALARM_ROLES))
+            if hit:
+                contra.append({"call": eid, "roles": hit})
+    status = "contradicted" if contra else ("read" if read else "unread")
+    return {"status": status, "records": sorted(read), "contradicted_by": contra,
+            "subject": sorted(subject)[:6]}
+
+
+def record_premise(card: dict[str, Any], premise: dict[str, Any]) -> None:
+    """Put the premise check on ``card`` beside the score. Recording only."""
+    card["premise"] = premise
+    log.info("premise disposition=%s status=%s records=%s contradicted_by=%s",
+             card.get("disposition"), premise.get("status"), premise.get("records"),
+             premise.get("contradicted_by"))
 
 
 def record_score(card: dict[str, Any], score: dict[str, Any]) -> None:
