@@ -54,6 +54,14 @@ _BENIGN_DISPOSITIONS = frozenset({"benign", "false_positive"})
 #: A verdict that says it cannot conclude is not evidence-backed, whatever a
 #: lookup returned: its score is capped, not laddered.
 _HEDGE_DISPOSITIONS = frozenset({"suspicious", "needs_more_info"})
+#: A detection-count rating ("3/94") is a weak malicious signal below this many
+#: detections or this share of engines: it does not, by itself, contradict a
+#: benign call backed by a record. Applies only to engine-count scales
+#: (``_ENGINE_MIN_TOTAL`` or more), not to "2/3 feeds" style counts.
+_WEAK_MAX_DETECTIONS = 5
+_WEAK_MAX_RATIO = 0.05
+_ENGINE_MIN_TOTAL = 20
+_RATIO = re.compile(r"(\d+)\s*/\s*(\d+)")
 _LOG_PRODUCTS = ("siem", "analyzer", "fortiedr", "splunk", "qradar", "sentinel", "elastic")
 _CIDR = re.compile(r"(?<![\d.])((?:\d{1,3}\.){3}\d{1,3})/(\d{1,2})\b")
 #: Log helpers (tool prefix) that cannot hold event evidence about an external
@@ -81,6 +89,20 @@ def identifiers(*blobs: Any) -> list[str]:
     return sorted(found)[:_MAX_IDENTS]
 
 
+def weak_rating(finding: Any) -> bool:
+    """True when a reader finding rates malicious on a detection-count scale
+    but below the minimum count or share (a handful of engines out of ~90)."""
+    if not isinstance(finding, dict):
+        return False
+    m = _RATIO.fullmatch(str(finding.get("score_str") or "").strip())
+    if not m:
+        return False
+    hits, total = int(m.group(1)), int(m.group(2))
+    if total < _ENGINE_MIN_TOTAL:
+        return False
+    return hits < _WEAK_MAX_DETECTIONS or hits / total < _WEAK_MAX_RATIO
+
+
 def _verdict_text(card: dict[str, Any]) -> list[str]:
     parts = [str(card.get("summary") or "")]
     for f in card.get("findings") or []:
@@ -101,6 +123,12 @@ def _source_class(e: dict[str, Any], ready_sources: dict[str, str],
     for prefix in ready_sources:
         if name.startswith(prefix):
             return "log:" + prefix
+    if name.startswith("mcp_") and "__" in name:
+        # a native-MCP tool of a log product (its incident or event lookups) is a
+        # log hit, same as the product's helper tools; other servers stay generic
+        server = name[len("mcp_"):].split("__", 1)[0]
+        if any(w in _norm(server) for w in _LOG_PRODUCTS):
+            return "log:mcp_" + server
     connector = str((e.get("args") or {}).get("connector") or "")
     meta = ready_connectors.get(connector)
     if meta:
@@ -296,6 +324,7 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
             "independent": not _reads_record(e, subject_rec),
             "about": (not text_ids) or bool(text_ids & ids),
             "sev": finding.get("severity") if isinstance(finding, dict) else None,
+            "weak": weak_rating(finding),
             "cls": _source_class(e, ready_sources, ready_connectors),
             "ids": ids,
         }
@@ -342,11 +371,27 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
         text_ips, has_hash)
     covered = not applicable_unchecked
 
-    contradicted = any(
-        eligible(f) and ((disposition == "true_positive" and f["sev"] in _CLEAN_SEV)
-                         or (disposition in _BENIGN_DISPOSITIONS
-                             and f["sev"] in _MALICIOUS_SEV))
-        for f in facts.values())
+    # Which way the lookups that contradict the verdict rated. A weak
+    # malicious rating (a few engines of ~90) does not overturn a benign call
+    # that a record (asset, change, prior case) backs. A clean rating does not
+    # overturn a conviction that rests on a log hit about the subject and has
+    # no rated support of its own: a young address has no reputation yet.
+    record_backed = bool(classes) and any(
+        not c.startswith("log:") and c != "intel" for c in classes)
+    log_hit = any(eligible(f) and f["cls"].startswith("log:") for f in facts.values())
+    behavioural_only = (disposition == "true_positive" and log_hit
+                        and not has_support)
+
+    def contradicts(f: dict[str, Any]) -> bool:
+        if not eligible(f):
+            return False
+        if disposition == "true_positive":
+            return f["sev"] in _CLEAN_SEV and not behavioural_only
+        if disposition in _BENIGN_DISPOSITIONS and f["sev"] in _MALICIOUS_SEV:
+            return not (f["weak"] and record_backed)
+        return False
+
+    contradicted = any(contradicts(f) for f in facts.values())
 
     known: set[str] = set()
     for f in facts.values():
@@ -379,6 +424,9 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     if not has_support:
         missing.append("no independent, substantive source about the subject "
                        "points the same way")
+    if behavioural_only:
+        missing.append("conviction rests on log hits; no source rated the "
+                       "subject malicious")
     if has_support and not corroborated:
         missing.append("no second independent source class")
     if not covered:

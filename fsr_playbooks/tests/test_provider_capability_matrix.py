@@ -328,3 +328,18 @@ def test_cache_stamp_never_lands_on_a_deferred_tool() -> None:
     assert both == [], turn.request_tools
     stamped = [t["name"] for t in turn.request_tools if "cache_control" in t]
     assert stamped == ["validate_yaml"], turn.request_tools
+
+
+def test_host_only_tool_keys_never_reach_the_wire() -> None:
+    """The connector stamps a declared native-MCP write tool with `tier` and
+    `confirm_mode`; the Messages API 400s ("tools.N.custom.tier: Extra inputs
+    are not permitted"), failing every turn of a box that runs Claude. The
+    spec the host keeps is untouched; the wire copy drops them."""
+    p = AnthropicProvider(api_key="test-key")
+    spec = {"name": "mcp_fortisiem__block", "description": "d",
+            "input_schema": {"type": "object"}, "tier": 3, "confirm_mode": "approve"}
+    turn = p.open_turn(system="s", messages=[], tools=[spec], turn_budget=4)
+    for t in turn.request_tools:
+        assert "tier" not in t and "confirm_mode" not in t, t
+    assert turn.request_tools[0]["name"] == "mcp_fortisiem__block"
+    assert spec["tier"] == 3 and spec["confirm_mode"] == "approve"

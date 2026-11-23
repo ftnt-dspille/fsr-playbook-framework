@@ -219,3 +219,94 @@ def test_the_emit_path_reads_the_analyst_message_and_the_mounted_record(handed_t
     with ss.bound(ss.SessionState(user_message=f"is {HOST_IP} ok?")):
         r = emit_card(card_type="verdict", payload=dict(payload))
     assert "unsourced_identifier" not in r["card"]["evidence_score"]["capped_by"]
+
+
+# ---- 6. step 2c: the contradiction cap needs a real contradiction -----------------
+
+def weak_vt(ip=IP, score_str="3/94"):
+    f = {"source": "VirusTotal", "verdict": "malicious", "severity": "error",
+         "score_str": score_str}
+    return {"name": "run_op", "ok": True, "finding": f, "idents": [ip],
+            "args": {"connector": "virustotal", "op": "query_ip", "params": {"ip": ip}}}
+
+
+def clean_vt(ip=IP):
+    return {"name": "run_op", "ok": True, "idents": [ip],
+            "finding": {"source": "VirusTotal", "verdict": "clean", "severity": "ok",
+                        "score_str": "0/94"},
+            "args": {"connector": "virustotal", "op": "query_ip", "params": {"ip": ip}}}
+
+
+def test_a_few_detections_do_not_contradict_a_record_backed_benign_call():
+    reg = {"a": read("assets"), "b": read("change_requests"), "c": weak_vt()}
+    s = score(card("false_positive"), reg)
+    assert "contradiction" not in s["capped_by"], s
+    assert s["score"] >= 0.85
+
+
+@pytest.mark.parametrize("score_str", ["4/94", "9/200", "3/60"])
+def test_weak_scales_are_weak(score_str):
+    reg = {"a": read("assets"), "c": weak_vt(score_str=score_str)}
+    assert "contradiction" not in score(card("false_positive"), reg)["capped_by"]
+
+
+@pytest.mark.parametrize("score_str", ["12/94", "47/94", "5/94", "2/3", None])
+def test_real_detections_still_contradict_a_benign_call(score_str):
+    reg = {"a": read("assets"), "c": weak_vt(score_str=score_str)}
+    s = score(card("false_positive"), reg)
+    assert "contradiction" in s["capped_by"] and s["score"] == 0.5
+
+
+def test_weak_rating_still_contradicts_a_benign_call_with_no_record_behind_it():
+    # benign resting only on a clean rating from another feed, no record
+    reg = {"a": clean_vt(), "c": weak_vt("203.0.113.9")}
+    s = score(card("false_positive"), reg)
+    assert "contradiction" in s["capped_by"]
+
+
+def test_clean_rating_does_not_contradict_a_log_backed_conviction():
+    reg = {"a": clean_vt(), "b": siem()}
+    s = score(card(), reg)
+    assert "contradiction" not in s["capped_by"], s
+    assert s["components"]["no_contradiction"] is True
+    # still honest: nothing rated the subject malicious, so no support
+    assert s["tier"] == "no_independent_support" and s["score"] == 0.5
+    assert any("log hits" in m for m in s["missing"])
+
+
+def test_clean_rating_still_contradicts_a_conviction_with_a_malicious_rating():
+    reg = {"a": clean_vt(), "b": siem(), "c": vt()}
+    assert "contradiction" in score(card(), reg)["capped_by"]
+
+
+def test_clean_rating_still_contradicts_a_conviction_with_no_log_hit():
+    reg = {"a": clean_vt(), "b": read("alerts")}
+    assert "contradiction" in score(card(), reg)["capped_by"]
+
+
+# ---- 7. step 2c: a native-MCP log tool is a log hit --------------------------------
+
+def mcp_rep():
+    return {"name": "mcp_fortisiem__get_reputation_by_entity", "ok": True,
+            "finding": MAL, "idents": [IP], "args": {"entity": IP}}
+
+
+def mcp_incidents(server="fortisiem", tool="get_incidents_by_entity"):
+    return {"name": f"mcp_{server}__{tool}", "ok": True, "idents": [IP],
+            "args": {"entity": IP}}
+
+
+def test_native_mcp_log_lookup_corroborates_a_native_mcp_rating():
+    s = score(card(), {"a": mcp_rep(), "b": mcp_incidents()}, ["FortiSIEM"])
+    assert s["components"]["corroboration"] is True, s["missing"]
+    assert s["tier"] == "support_corroborated_covered" and s["score"] == 0.95
+
+
+def test_native_mcp_log_lookup_is_a_log_class_not_a_record_read():
+    s = score(card(), {"a": vt(), "b": mcp_incidents(tool="get_context_by_entity")}, [])
+    assert s["components"]["corroboration"] is True
+
+
+def test_a_non_log_native_mcp_server_still_does_not_corroborate():
+    s = score(card(), {"a": vt(), "b": mcp_incidents("utility", "global_search")}, [])
+    assert s["components"]["corroboration"] is False and s["score"] == 0.85

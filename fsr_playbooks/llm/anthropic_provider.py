@@ -647,6 +647,18 @@ def _round_usage(final: Any) -> RoundUsage:
                       getattr(u, "cache_creation_input_tokens", 0) or 0)
 
 
+#: Host-side bookkeeping a tool spec may carry (the connector stamps a declared
+#: write tool with its tier). The Messages API 400s any key it does not define.
+_HOST_ONLY_TOOL_KEYS = frozenset({"tier", "confirm_mode"})
+
+
+def _wire_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    """``tool`` without the keys only the host reads."""
+    if _HOST_ONLY_TOOL_KEYS.isdisjoint(tool):
+        return tool
+    return {k: v for k, v in tool.items() if k not in _HOST_ONLY_TOOL_KEYS}
+
+
 class _AnthropicTurn:
     """One stream's Messages history and the requests that read it."""
 
@@ -658,7 +670,8 @@ class _AnthropicTurn:
         self.turn_budget = turn_budget
         # `is None` (not `not tools`): the budget-ask "deliver" path passes []
         # to force a no-research wrap-up turn.
-        self.plain_tools = anthropic_tools() if tools is None else list(tools)
+        self.plain_tools = [_wire_tool(t) for t in
+                            (anthropic_tools() if tools is None else tools)]
         self.allowed_names = {t["name"] for t in self.plain_tools}
         # Prompt caching: the (system + tools) prefix is cached for 5 min, so
         # within a session every turn after the first reads it at 0.1x.
