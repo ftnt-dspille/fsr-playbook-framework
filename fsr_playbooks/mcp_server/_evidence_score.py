@@ -279,6 +279,92 @@ def _nets(text: str) -> list[str]:
     return sorted(set(out))[:10]
 
 
+_WINDOW_START_KEYS = frozenset({
+    "start_date", "planned_start_date", "planned_start", "window_start", "work_start",
+    "valid_from", "validfrom", "starts", "startdate", "start_time", "starttime",
+    "scheduled_start", "scheduledstart", "begin", "begins", "effective_from"})
+_WINDOW_END_KEYS = frozenset({
+    "end_date", "planned_end_date", "planned_end", "window_end", "work_end",
+    "valid_to", "validto", "valid_until", "validuntil", "expires", "expiry",
+    "expiry_date", "enddate", "end_time", "endtime", "scheduled_end", "scheduledend",
+    "effective_to", "ends"})
+_STATE_KEYS = frozenset({"state", "status", "phase", "stage", "approval_state"})
+_LAPSED_STATES = re.compile(r"^(?:expired|cancel+ed|rejected|withdrawn|revoked|lapsed)\b", re.I)
+
+
+def _window(node: dict[str, Any]) -> tuple[list[float | None] | None, bool]:
+    """The change window a record row states, as ``[start, end]`` epoch seconds
+    (either may be None), and whether the row says it has lapsed outright
+    (expired, cancelled, rejected, withdrawn). ``(None, False)`` when the row
+    states neither."""
+    start = end = None
+    lapsed = False
+    for k, v in node.items():
+        lk = str(k).lower()
+        if lk in _WINDOW_START_KEYS and start is None:
+            start = _epoch(v)
+        elif lk in _WINDOW_END_KEYS and end is None:
+            end = _epoch(v)
+        elif lk in _STATE_KEYS and isinstance(v, str) and _LAPSED_STATES.match(v.strip()):
+            lapsed = True
+    return ([start, end] if (start is not None or end is not None) else None), lapsed
+
+
+def window_covers(row: dict[str, Any], times: Iterable[float]) -> bool:
+    """Does a record row's change window cover the alert? A window that ended
+    before the alert (or starts after it), or a row that says the change has
+    lapsed, covers nothing: it neither explains the activity nor contradicts a
+    conviction of it. A row with no stated window, or an alert whose time is not
+    known, is taken as covering (nothing shows otherwise)."""
+    if row.get("lapsed"):
+        return False
+    w = row.get("window")
+    ts = list(times)
+    if not w or not ts:
+        return True
+    s, e = w
+    return any((s is None or t >= s) and (e is None or t <= e) for t in ts)
+
+
+def _top_time(blob: Any) -> float | None:
+    """The time a record states for itself (an alert's create date), from its own
+    top-level keys; None for a list or a record without one."""
+    if not isinstance(blob, dict):
+        return None
+    for k, v in list(blob.items()):
+        if str(k).lower() in ("data", "result", "record") and isinstance(v, dict):
+            t = _top_time(v)
+            if t is not None:
+                return t
+    for k, v in blob.items():
+        if str(k).lower() in _TIME_KEYS and not isinstance(v, (dict, list)):
+            t = _epoch(v)
+            if t is not None:
+                return t
+    return None
+
+
+def _alert_times(registry: dict[str, dict[str, Any]], record_subject: str,
+                 known_events: Iterable[dict[str, Any]] | None,
+                 known_time: float | None) -> list[float]:
+    """When the alert happened, as the turn knows it: the times of the record
+    under triage as the turn read it, of the events the host bound, and the bound
+    record's own time."""
+    out: list[float] = []
+    if known_time is not None:
+        out.append(known_time)
+    for ev in known_events or []:
+        if ev.get("t") is not None:
+            out.append(ev["t"])
+    for e in registry.values():
+        if isinstance(e, dict) and e.get("ok") is True and _reads_record(e, record_subject):
+            p = e.get("premise") or {}
+            if p.get("t") is not None:
+                out.append(p["t"])
+            out.extend(ev["t"] for ev in e.get("events") or [] if ev.get("t") is not None)
+    return out
+
+
 def premise_facts(blob: Any) -> dict[str, Any]:
     """What a result says about hosts and their roles, bounded, for the premise
     check. ``names``: every IPv4 address and host name in it. ``nets``: networks
@@ -314,6 +400,11 @@ def premise_facts(blob: Any) -> dict[str, Any]:
                 sub = json.dumps(node, default=str)[:20000]
                 row = {"roles": roles, "names": sorted(_names(sub, node))[:20],
                        "nets": _nets(sub)}
+                win, lapsed = _window(node)
+                if win:
+                    row["window"] = win
+                if lapsed:
+                    row["lapsed"] = True
                 key = json.dumps(row, sort_keys=True)
                 if key not in seen:
                     seen.add(key)
@@ -325,6 +416,9 @@ def premise_facts(blob: Any) -> dict[str, Any]:
     walk(blob, 0)
     names = sorted(_names(text, blob if isinstance(blob, dict) else None))[:_MAX_NAMES]
     out: dict[str, Any] = {}
+    top_t = _top_time(blob)
+    if top_t is not None:
+        out["t"] = top_t
     if names:
         out["names"] = names
     nets = _nets(text)
@@ -526,7 +620,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                   ready_sources: dict[str, str] | None = None,
                   ready_connectors: dict[str, dict[str, str]] | None = None,
                   known_extra: Iterable[str] | None = None,
-                  known_events: list[dict[str, Any]] | None = None
+                  known_events: list[dict[str, Any]] | None = None,
+                  known_time: float | None = None
                   ) -> dict[str, Any]:
     """The evidence score for ``card`` (a delivered verdict) against ``registry``.
 
@@ -553,6 +648,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     for e in registry.values():
         if isinstance(e, dict) and e.get("ok") is True and _reads_record(e, subject_rec):
             own_events.extend(e.get("events") or [])
+
+    alert_at = _alert_times(registry, subject_rec, known_events, known_time)
 
     facts: dict[str, dict[str, Any]] = {}
     for eid, e in registry.items():
@@ -651,6 +748,8 @@ def score_verdict(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
             if not (r["kind"] and r["substantive"] and r["independent"]):
                 continue
             for row in r["rows"]:
+                if not window_covers(row, alert_at):
+                    continue  # a closed or expired window explains nothing
                 if (set(row.get("names") or []) & rated
                         and set(row.get("roles") or []) & (set(_STRONG_ROLES) | set(_SCOPED_ROLES))):
                     return True
@@ -867,6 +966,8 @@ def subject_records_exist(reader: Any, subject: set[str]) -> dict[str, bool | No
 def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                   record_subject: str | None = None,
                   known_names: Iterable[str] | None = None,
+                  known_events: Iterable[dict[str, Any]] | None = None,
+                  known_time: float | None = None,
                   subject_reader: Any = None) -> dict[str, Any]:
     """Did the turn read the subject's OWN records (its asset record, a change
     record naming it), and does any of them contradict the verdict?
@@ -892,6 +993,7 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                 verdict_external.add(i)
         except ValueError:
             continue
+    alert_at = _alert_times(registry, subject_rec, known_events, known_time)
     read: list[str] = []
     contra: list[dict[str, Any]] = []
     for eid, e in registry.items():
@@ -906,6 +1008,11 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
             if not _names_subject(row.get("names") or [], row.get("nets") or [], subject):
                 continue
             roles = set(row.get("roles") or [])
+            if not window_covers(row, alert_at):
+                # a change window that ended before the alert (or has not begun,
+                # or lapsed) neither explains the activity nor contradicts a
+                # conviction of it; the record was still read
+                roles &= set(_ALARM_ROLES)
             hit: list[str] = []
             if disposition == "true_positive":
                 hit = sorted(roles & set(_STRONG_ROLES))

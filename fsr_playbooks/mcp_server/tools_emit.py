@@ -1824,12 +1824,15 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
             record_subject=current().autonomy_subject,
             known_extra=handed,
             known_events=event_facts(cv._turn_known_context.get()),
+            known_time=premise_facts(cv._turn_known_context.get()).get("t"),
             unchecked_sources=cv.unchecked_ready_sources(registry),
             ready_sources=cv._turn_ready_sources.get(),
             ready_connectors=cv._turn_ready_connectors.get()))
         record_premise(card, premise_check(
             card, registry, record_subject=current().autonomy_subject,
             known_names=premise_facts(cv._turn_known_context.get()).get("names") or [],
+            known_events=event_facts(cv._turn_known_context.get()),
+            known_time=premise_facts(cv._turn_known_context.get()).get("t"),
             subject_reader=cv._turn_subject_records.get()))
     except Exception:  # noqa: BLE001
         import logging  # noqa: PLC0415
