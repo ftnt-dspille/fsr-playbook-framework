@@ -34,6 +34,7 @@ from fsr_playbooks.mcp_server._evidence_score import (
     row_relevant,
     score_verdict,
     subject_context,
+    unwrap_fields,
 )
 from fsr_playbooks.mcp_server.tools_emit import emit_card
 
@@ -303,3 +304,66 @@ def test_a_preread_never_changes_an_autonomy_decision(conf, expect):
         assert premise["preread"]["hold"] is True      # the shadow would hold ...
         d = _decide(conf, premise)
         assert (d["outcome"], d["failed"]) == (base["outcome"], base["failed"])  # ... and does not
+
+
+# ---- ServiceNow wraps every field as {value, display_value} -------------------------------
+
+def sn(v, d=None):
+    return {"value": v, "display_value": v if d is None else d}
+
+
+def sn_chg(extra=None):
+    """A change row in the shape the ServiceNow connector returns: every field a
+    wrapper, a reference field carrying a link, dates as UTC ``value``."""
+    row = {"number": sn("CHG0030001"), "state": sn("-1", "Implement"),
+           "approval": sn("approved", "Approved"),
+           "short_description": sn("Vendor proof of concept"),
+           "description": sn(f"Approved: {HOST} runs a proof of concept against {IP}."),
+           "start_date": sn("2026-09-29 08:00:00", "2026-09-29 04:00:00"),
+           "end_date": sn("2026-09-30 08:00:00", "2026-09-30 04:00:00"),
+           "reason": sn(""), "parent": {"value": "", "link": ""},
+           "assigned_to": {"value": "6816f79cc0a8016401c5a33be04be441",
+                           "link": "https://example.service-now.com/api/now/table/sys_user/6816"},
+           "sys_id": sn("c0a1d0a10f3e4a518c01aa0000007101")}
+    row.update(extra or {})
+    return row
+
+
+def test_a_servicenow_change_row_is_parsed_not_flagged_unparsed():
+    p = check(preread=pre(asset=[], change={"result": [sn_chg({"scope": sn("198.51.100.0/24")})]}))
+    assert "unparsed_record" not in p and "unparsed_record" not in p["preread"]
+    assert p["preread"]["kinds"] == ["change"]
+
+
+def test_a_servicenow_change_row_gives_kind_state_approval_window_and_scope():
+    note = preread_note(pre(change={"result": [sn_chg({"scope": sn("198.51.100.0/24")})]}))
+    assert "Change record CHG0030001" in note
+    assert "state Implement" in note and "approval Approved" in note
+    assert "window 2026-09-29 08:00 UTC to 2026-09-30 08:00 UTC" in note  # UTC value, not the zoned display
+    assert "scope 198.51.100.0/24" in note
+    assert f"runs a proof of concept against {IP}" in note
+
+
+def test_a_servicenow_row_relevance_follows_its_window_and_state():
+    live = pre(change={"result": [sn_chg()]})
+    lapsed = pre(change={"result": [sn_chg({"start_date": sn("2026-08-18 02:00:00"),
+                                            "end_date": sn("2026-08-18 06:00:00")})]})
+    cancelled = pre(change={"result": [sn_chg({"state": sn("4", "Canceled")})]})
+    # a covering approved change can excuse a conviction; a lapsed or cancelled one cannot
+    assert check(card("true_positive"), preread=live)["preread"]["relevant"] == ["change"]
+    assert check(card("true_positive"), preread=lapsed)["preread"]["relevant"] == []
+    assert check(card("true_positive"), preread=cancelled)["preread"]["relevant"] == []
+
+
+def test_an_unreadable_servicenow_row_still_sets_the_flag():
+    empty = {"number": sn(""), "state": sn(""), "parent": {"value": "", "link": ""}}
+    p = check(preread=pre(asset=[], change={"result": [empty]}))
+    assert p["unparsed_record"] is True and p["preread"]["hold"] is True
+
+
+def test_plain_rows_are_unchanged_by_the_unwrap():
+    row = chg(WINDOW_OPEN)
+    assert unwrap_fields(row) == row
+    assert unwrap_fields("CHG0030001 | Implement") == "CHG0030001 | Implement"
+    assert preread_note(pre(change={"result": [row]})) == preread_note(
+        pre(change={"result": [{k: sn(v) for k, v in row.items()}]}))
