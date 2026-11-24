@@ -1,0 +1,75 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2",
+  "value": [
+    {
+      "id": "00000000-0000-0000-0000-000000000b01",
+      "tenantId": "00000000-0000-0000-0000-000000000000",
+      "title": "Synthetic phishing campaign",
+      "status": "inProgress",
+      "category": "InitialAccess",
+      "classification": "unknown",
+      "determination": "unknown",
+      "severity": "high",
+      "assignedTo": "bob@contoso.example",
+      "actorDisplayName": null,
+      "alertWebUrl": "https://security.microsoft.com/alerts/00000000-0000-0000-0000-000000000b01",
+      "incidentId": "00000000-0000-0000-0000-000000000c01",
+      "incidentWebUrl": "https://security.microsoft.com/incidents/00000000-0000-0000-0000-000000000c01",
+      "detectorId": "synthetic-detector",
+      "detectionSource": "microsoftDefenderForEndpoint",
+      "serviceSource": "microsoftDefenderForEndpoint",
+      "productName": "Microsoft Defender for Endpoint",
+      "alertPolicyId": null,
+      "providerAlertId": "00000000-0000-0000-0000-000000000b01",
+      "firstActivityDateTime": "2026-01-15T08:50:00Z",
+      "lastActivityDateTime": "2026-01-15T09:00:00Z",
+      "lastUpdateDateTime": "2026-01-15T09:05:00Z",
+      "createdDateTime": "2026-01-15T09:01:00Z",
+      "resolvedDateTime": null,
+      "description": "Synthetic alert for offline fixtures.",
+      "recommendedActions": "Isolate the device and reset the user's password.",
+      "threatDisplayName": null,
+      "threatFamilyName": null,
+      "mitreTechniques": [
+        "T1566"
+      ],
+      "systemTags": [],
+      "comments": [],
+      "evidence": [
+        {
+          "@odata.type": "#microsoft.graph.security.deviceEvidence",
+          "createdDateTime": "2026-01-15T09:01:00Z",
+          "deviceDnsName": "workstation01.contoso.example",
+          "mdeDeviceId": "00000000-0000-0000-0000-000000000d01",
+          "firstSeenDateTime": "2026-01-10T00:00:00Z",
+          "healthStatus": "active",
+          "onboardingStatus": "onboarded",
+          "osPlatform": "Windows",
+          "osBuild": "22621",
+          "version": "10",
+          "riskScore": "30",
+          "verdict": "unknown",
+          "detailedRoles": [
+            "Primary"
+          ],
+          "tags": [],
+          "remediationStatus": "none",
+          "remediationStatusDetails": null,
+          "rbacGroupId": 1,
+          "rbacGroupName": null,
+          "defenderAvStatus": "enabled",
+          "lastIpAddress": "192.0.2.10",
+          "lastExternalIpAddress": "198.51.100.7",
+          "azureAdDeviceId": null,
+          "vmMetadata": null,
+          "ipInterfaces": [],
+          "loggedOnUsers": []
+        }
+      ],
+      "additionalData": {
+        "AlertUri": "https://security.example.invalid/alert/1",
+        "Intent": "Persistence"
+      }
+    }
+  ]
+}

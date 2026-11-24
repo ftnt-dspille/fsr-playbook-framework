@@ -1,17 +1,96 @@
-"""Typed connector output models, keyed per connector.
+"""Typed models for connector outputs and configs.
 
-Provenance doctrine (m365-trial-test-plan 8.2): every model cites its source
--- ``source-derived (operations.py), live-capture pending`` until a capture
-lands -- and normalizes the connector's REAL wire quirks, not idealized
-shapes. Sanitized mock fixtures live beside the models under ``mocks/``.
+The m365-trial plan §8.2 doctrine: one output model per operation, models
+normalize REAL wire quirks (not idealized docs shapes), config models come
+from the connector's own config schema, and every model cites its
+provenance in its docstring. Until live captures are promoted into the
+``mocks/`` fixtures, the provenance line reads "source-derived (...),
+live-capture pending" and the model must be treated as unverified against
+the wire.
 
-Current modules: ``microsoft_365_defender`` (the microsoft-365-defender
-connector). The microsoft-graph security pair lands as ``graph_common`` +
-its own module.
+First connectors typed: the soarshelf Microsoft Graph security pair
+(``microsoft-graph_dev`` 17 ops, ``microsoft-graph-api-security`` 5 ops) and
+``microsoft-365-defender`` (4 ops; its models import the shared error shapes
+from ``graph_common``). The consumer is the playbook side: connector outputs
+land under ``vars.steps.<step>.data.<field>`` in production and directly on
+``vars.steps.<step>.<field>`` under ``--mock`` (mock_result verbatim, no
+envelope -- see the linter's mock-envelope rule).
 """
+from fsr_playbooks.connectors.typed.graph_common import (
+    AadstsTokenError,
+    AlertComment,
+    AlertUnion,
+    GraphConnectorErrorText,
+    GraphErrorBody,
+    GraphErrorEnvelope,
+    GraphInnerError,
+    HostState,
+    LegacySecurityAlert,
+    LegacySecurityAlertsPage,
+    MutationNoContentResult,
+    ODataListPage,
+    SecurityAlertsV2Page,
+    SecurityAlertV2,
+    SecurityIncident,
+    SecurityIncidentsPage,
+    TokenResponseErrorText,
+    VendorInformation,
+    extract_error_body,
+    parse_graph_connector_error,
+)
+from fsr_playbooks.connectors.typed.microsoft_graph_api_security import (
+    OPERATION_MODELS as API_SECURITY_OPERATION_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_graph_api_security import (
+    AdvancedHuntingColumn,
+    AdvancedHuntingResult,
+    AlertResult,
+    AlertsV2Page,
+    MicrosoftGraphApiSecurityConfig,
+)
+from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
+    OPERATION_MODELS as GRAPH_DEV_OPERATION_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
+    AlertCommentsPage,
+    DeleteMessageResult,
+    DirectoryGroup,
+    DirectoryMember,
+    GroupMembersPage,
+    GroupsPage,
+    IpRange,
+    MailboxMessagePage,
+    MailDeleteTarget,
+    MailDeleteThreadError,
+    MailEmailAddress,
+    MailMessage,
+    MailMessageBody,
+    MailMessageFlag,
+    MailRecipient,
+    MailSearchThreadError,
+    MessageDeleted,
+    MicrosoftGraphDevConfig,
+    NamedLocation,
+    NamedLocationRecord,
+    NamedLocationsPage,
+    RevokeSessionsResult,
+    RiskyUser,
+    RiskyUserRecord,
+    RiskyUsersPage,
+    SecurityAlertResult,
+    SecurityAlertsAnyVersionPage,
+    ThreadedMailResult,
+)
+from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
+    IncidentsPage as GraphDevIncidentsPage,
+)
 from fsr_playbooks.connectors.typed.microsoft_365_defender import (
-    OP_OUTPUT_MODELS,
-    OP_PARAM_MODELS,
+    OP_OUTPUT_MODELS as M365_DEFENDER_OP_OUTPUT_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_365_defender import (
+    OP_PARAM_MODELS as M365_DEFENDER_OP_PARAM_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_365_defender import (
     AdvancedHuntingParams,
     AdvancedHuntingResponse,
     DefenderConnectorConfig,
@@ -28,19 +107,30 @@ from fsr_playbooks.connectors.typed.microsoft_365_defender import (
 )
 
 __all__ = [
-    "OP_OUTPUT_MODELS",
-    "OP_PARAM_MODELS",
-    "AdvancedHuntingParams",
-    "AdvancedHuntingResponse",
-    "DefenderConnectorConfig",
-    "GetIncidentParams",
-    "GetIncidentResponse",
-    "Incident",
-    "IncidentAlert",
-    "IncidentComment",
-    "IncidentListResponse",
-    "ListIncidentsParams",
-    "UpdateIncidentParams",
-    "UpdateIncidentResponse",
+    "AadstsTokenError", "AlertComment", "AlertUnion",
+    "GraphConnectorErrorText", "GraphErrorBody", "GraphErrorEnvelope",
+    "GraphInnerError", "HostState", "LegacySecurityAlert",
+    "LegacySecurityAlertsPage", "MutationNoContentResult", "ODataListPage",
+    "SecurityAlertV2", "SecurityAlertsV2Page", "SecurityIncident",
+    "SecurityIncidentsPage", "TokenResponseErrorText", "VendorInformation",
+    "extract_error_body", "parse_graph_connector_error",
+    "API_SECURITY_OPERATION_MODELS", "AdvancedHuntingColumn",
+    "AdvancedHuntingResult", "AlertsV2Page", "AlertResult",
+    "MicrosoftGraphApiSecurityConfig",
+    "GRAPH_DEV_OPERATION_MODELS", "DeleteMessageResult", "DirectoryGroup",
+    "DirectoryMember", "GroupsPage", "GroupMembersPage",
+    "GraphDevIncidentsPage", "IpRange", "MailboxMessagePage",
+    "MailDeleteTarget", "MailDeleteThreadError", "MailEmailAddress",
+    "MailMessage", "MailMessageBody", "MailMessageFlag", "MailRecipient",
+    "MailSearchThreadError", "MessageDeleted", "MicrosoftGraphDevConfig",
+    "NamedLocation", "NamedLocationRecord", "NamedLocationsPage",
+    "RevokeSessionsResult", "RiskyUser", "RiskyUserRecord", "RiskyUsersPage",
+    "SecurityAlertResult", "SecurityAlertsAnyVersionPage",
+    "AlertCommentsPage", "ThreadedMailResult",
+    "M365_DEFENDER_OP_OUTPUT_MODELS", "M365_DEFENDER_OP_PARAM_MODELS",
+    "AdvancedHuntingParams", "AdvancedHuntingResponse",
+    "DefenderConnectorConfig", "GetIncidentParams", "GetIncidentResponse",
+    "Incident", "IncidentAlert", "IncidentComment", "IncidentListResponse",
+    "ListIncidentsParams", "UpdateIncidentParams", "UpdateIncidentResponse",
     "UpdateIncidentResult",
 ]

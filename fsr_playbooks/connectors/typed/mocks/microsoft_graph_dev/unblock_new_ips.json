@@ -1,0 +1,15 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations/$entity",
+  "@odata.type": "#microsoft.graph.ipNamedLocation",
+  "id": "00000000-0000-0000-0000-000000000f01",
+  "displayName": "Lab blocked ranges",
+  "createdDateTime": "2026-01-10T07:00:00Z",
+  "modifiedDateTime": "2026-01-15T10:05:00Z",
+  "isTrusted": false,
+  "ipRanges": [
+    {
+      "@odata.type": "#microsoft.graph.iPv4CidrRange",
+      "cidrAddress": "192.0.2.0/24"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2",
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/security/alerts_v2?$skip=50",
+  "value": [
+    {
+      "id": "00000000-0000-0000-0000-000000000b01",
+      "tenantId": "00000000-0000-0000-0000-000000000000",
+      "title": "Synthetic phishing campaign",
+      "status": "inProgress",
+      "category": "InitialAccess",
+      "severity": "high",
+      "serviceSource": "microsoftDefenderForEndpoint",
+      "productName": "Microsoft Defender for Endpoint",
+      "createdDateTime": "2026-01-15T09:01:00Z",
+      "lastUpdateDateTime": "2026-01-15T09:05:00Z"
+    }
+  ]
+}

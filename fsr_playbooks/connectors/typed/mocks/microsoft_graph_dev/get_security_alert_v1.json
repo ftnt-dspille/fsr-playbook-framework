@@ -1,0 +1,27 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#security#security/alerts/$entity",
+  "id": "00000000-0000-0000-0000-000000000a01",
+  "azureTenantId": "00000000-0000-0000-0000-000000000000",
+  "assignedTo": "bob@contoso.example",
+  "category": "Persistence",
+  "closedDateTime": null,
+  "comments": [],
+  "confidence": 60,
+  "createdDateTime": "2026-01-15T09:00:00Z",
+  "description": "Synthetic alert for offline fixtures.",
+  "detectionIds": [],
+  "eventDateTime": "2026-01-15T08:55:00Z",
+  "feedback": "unknown",
+  "incidentIds": [],
+  "lastModifiedDateTime": "2026-01-15T09:05:00Z",
+  "severity": "medium",
+  "status": "newAlert",
+  "title": "Synthetic persistence activity",
+  "vendorInformation": {
+    "provider": "WindowsDefenderATP",
+    "providerVersion": "1.0",
+    "subProvider": null,
+    "vendor": "Microsoft"
+  },
+  "hostStates": []
+}

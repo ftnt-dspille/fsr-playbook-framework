@@ -292,6 +292,40 @@ _STATE_KEYS = frozenset({"state", "status", "phase", "stage", "approval_state"})
 _LAPSED_STATES = re.compile(r"^(?:expired|cancel+ed|rejected|withdrawn|revoked|lapsed)\b", re.I)
 
 
+_WRAPPER_KEYS = frozenset({"value", "display_value", "link"})
+
+
+def unwrap_fields(node: Any, key: str = "", depth: int = 0) -> Any:
+    """A record with its ``{"value": ..., "display_value": ...}`` field wrappers
+    removed (ServiceNow answers every field this way; a reference field also
+    carries a ``link``). A wrapper becomes its scalar: ``display_value`` for text
+    (the state, approval and description an analyst reads), ``value`` for a date
+    or time field (``display_value`` is in the user's zone, ``value`` is UTC),
+    falling back to the other when the preferred one is empty. Everything else,
+    plain strings included, is returned unchanged. Recursive, bounded, pure."""
+    if depth > 8:
+        return node
+    if isinstance(node, list):
+        return [unwrap_fields(x, key, depth + 1) for x in node]
+    if not isinstance(node, dict):
+        return node
+    if ("value" in node or "display_value" in node) and set(node) <= _WRAPPER_KEYS:
+        lk = key.lower()
+        order = ("value", "display_value") if (
+            lk in _WINDOW_START_KEYS or lk in _WINDOW_END_KEYS or lk in _TIME_KEYS
+        ) else ("display_value", "value")
+        picked = None
+        for k in order:
+            v = node.get(k)
+            if v not in (None, "") and not isinstance(v, (dict, list)):
+                picked = v
+                break
+        if picked is None:
+            picked = node.get(order[0], node.get(order[1], ""))
+        return picked if not isinstance(picked, (dict, list)) else unwrap_fields(picked, key, depth + 1)
+    return {k: unwrap_fields(v, str(k), depth + 1) for k, v in node.items()}
+
+
 def _window(node: dict[str, Any]) -> tuple[list[float | None] | None, bool]:
     """The change window a record row states, as ``[start, end]`` epoch seconds
     (either may be None), and whether the row says it has lapsed outright
@@ -299,6 +333,7 @@ def _window(node: dict[str, Any]) -> tuple[list[float | None] | None, bool]:
     states neither."""
     start = end = None
     lapsed = False
+    node = unwrap_fields(node)
     for k, v in node.items():
         lk = str(k).lower()
         if lk in _WINDOW_START_KEYS and start is None:
@@ -376,6 +411,7 @@ def premise_facts(blob: Any) -> dict[str, Any]:
             blob = json.loads(blob)
         except ValueError:
             return {}
+    blob = unwrap_fields(blob)
     try:
         text = json.dumps(blob, default=str)[:_SCAN_LIMIT]
     except Exception:  # noqa: BLE001
@@ -908,6 +944,7 @@ def _record_rows(blob: Any) -> list[Any]:
             blob = json.loads(blob)
         except ValueError:
             return [blob]
+    blob = unwrap_fields(blob)
     rows: list[Any] = []
 
     def walk(node: Any, depth: int) -> None:
@@ -1024,6 +1061,7 @@ def _flatten_records(blob: Any) -> list[Any]:
             blob = json.loads(blob)
         except ValueError:
             return [blob] if blob.strip() else []
+    blob = unwrap_fields(blob)
     out: list[Any] = []
 
     def walk(node: Any, depth: int) -> None:
@@ -1048,7 +1086,9 @@ def _flatten_records(blob: Any) -> list[Any]:
 
 
 def _parseable(row: Any) -> bool:
-    """A row the extractors can read: a dict with at least one text or number."""
+    """A row the extractors can read: a dict with at least one text or number
+    (field wrappers unwrapped first)."""
+    row = unwrap_fields(row)
     return isinstance(row, dict) and any(
         isinstance(v, (str, int, float)) and not isinstance(v, bool) and str(v).strip()
         for v in row.values())
@@ -1109,6 +1149,7 @@ def record_line(kind: str, row: dict[str, Any]) -> str:
     short text. No field names, ids or tool names."""
     label = "Change record" if kind == "change" else "Asset record"
     bits: list[str] = []
+    row = unwrap_fields(row)
     low = {str(k).lower(): v for k, v in row.items()}
     num = low.get("number")
     if isinstance(num, str) and num.strip():
@@ -1153,6 +1194,7 @@ def preread_note(preread: Any) -> str:
 
 
 def _row_facts(row: dict[str, Any]) -> dict[str, Any]:
+    row = unwrap_fields(row)
     f = premise_facts(row)
     roles: set[str] = set()
     for r in f.get("rows") or []:
