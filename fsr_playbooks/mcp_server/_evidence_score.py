@@ -287,12 +287,36 @@ _WINDOW_END_KEYS = frozenset({
     "end_date", "planned_end_date", "planned_end", "window_end", "work_end",
     "valid_to", "validto", "valid_until", "validuntil", "expires", "expiry",
     "expiry_date", "enddate", "end_time", "endtime", "scheduled_end", "scheduledend",
-    "effective_to", "ends"})
+    "effective_to", "ends", "duedate", "due_date"})
+_DATE_ONLY_END_KEYS = frozenset({"duedate", "due_date"})
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _STATE_KEYS = frozenset({"state", "status", "phase", "stage", "approval_state"})
-_LAPSED_STATES = re.compile(r"^(?:expired|cancel+ed|rejected|withdrawn|revoked|lapsed)\b", re.I)
+_LAPSED_STATES = re.compile(r"^(?:expired|cancel+ed|rejected|declined|withdrawn|revoked|lapsed|abandoned)\b", re.I)
 
 
 _WRAPPER_KEYS = frozenset({"value", "display_value", "link"})
+#: Jira answers a status, issue type, priority or resolution as an object with a
+#: ``name``; the name is what an analyst reads.
+_NAMED_OBJECT_KEYS = _STATE_KEYS | {"issuetype", "priority", "resolution"}
+
+
+def _adf_text(node: Any, depth: int = 0) -> str:
+    """The plain text of an Atlassian Document Format node (Jira Cloud answers a
+    description or comment as one). Bounded."""
+    if depth > 12 or node is None:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(_adf_text(x, depth + 1) for x in node)
+    if not isinstance(node, dict):
+        return ""
+    if node.get("type") == "text":
+        return str(node.get("text") or "")
+    if node.get("type") == "hardBreak":
+        return "\n"
+    inner = _adf_text(node.get("content"), depth + 1)
+    return inner + "\n" if node.get("type") in ("paragraph", "heading", "listItem") else inner
 
 
 def unwrap_fields(node: Any, key: str = "", depth: int = 0) -> Any:
@@ -309,6 +333,17 @@ def unwrap_fields(node: Any, key: str = "", depth: int = 0) -> Any:
         return [unwrap_fields(x, key, depth + 1) for x in node]
     if not isinstance(node, dict):
         return node
+    if node.get("type") == "doc" and isinstance(node.get("content"), list):
+        return _adf_text(node).strip()
+    if isinstance(node.get("fields"), dict) and isinstance(node.get("key"), str):
+        # a Jira issue: its own fields sit under ``fields``; read them as the row
+        flat = {k: v for k, v in node.items() if k != "fields"}
+        for k, v in node["fields"].items():
+            flat.setdefault(k, v)
+        return unwrap_fields(flat, key, depth + 1)
+    if (key.lower() in _NAMED_OBJECT_KEYS and isinstance(node.get("name"), str)
+            and not isinstance(node.get("value"), (dict, list))):
+        return node["name"]
     if ("value" in node or "display_value" in node) and set(node) <= _WRAPPER_KEYS:
         lk = key.lower()
         order = ("value", "display_value") if (
@@ -340,6 +375,9 @@ def _window(node: dict[str, Any]) -> tuple[list[float | None] | None, bool]:
             start = _epoch(v)
         elif lk in _WINDOW_END_KEYS and end is None:
             end = _epoch(v)
+            if end is not None and lk in _DATE_ONLY_END_KEYS and isinstance(v, str) \
+                    and _DATE_ONLY.match(v.strip()):
+                end += 86399.0  # a due date is the end of that day
         elif lk in _STATE_KEYS and isinstance(v, str) and _LAPSED_STATES.match(v.strip()):
             lapsed = True
     return ([start, end] if (start is not None or end is not None) else None), lapsed
@@ -1014,7 +1052,7 @@ _PREREAD_MAX_ROWS = 5
 _PREREAD_NOTE_ROWS = 3
 _PREREAD_NOTE_TEXT = 400
 _CONTAINER_KEYS = frozenset({"result", "results", "records", "data", "items",
-                             "hydra:member", "rows", "members"})
+                             "hydra:member", "rows", "members", "issues", "values"})
 _DESC_KEYS = ("short_description", "description", "summary", "notes", "comments",
               "justification")
 _APPROVAL_KEYS = frozenset({"approval", "approval_state"})
@@ -1151,7 +1189,7 @@ def record_line(kind: str, row: dict[str, Any]) -> str:
     bits: list[str] = []
     row = unwrap_fields(row)
     low = {str(k).lower(): v for k, v in row.items()}
-    num = low.get("number")
+    num = low.get("number") or low.get("key")
     if isinstance(num, str) and num.strip():
         label += f" {num.strip()}"
     state = next((str(v).strip() for k, v in low.items()
