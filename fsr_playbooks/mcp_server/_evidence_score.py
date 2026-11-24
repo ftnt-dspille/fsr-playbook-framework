@@ -1262,21 +1262,52 @@ def supports_innocent(row: dict[str, Any], alert_times: Iterable[float],
     return False
 
 
+def undermines_benign(row: dict[str, Any], alert_times: Iterable[float],
+                      dest: Iterable[str]) -> bool:
+    """Owner rule A for a benign close: does this record AFFIRMATIVELY undermine
+    it? Yes for an alarm role (the subject is already known bad), and for a record
+    that claims to authorise the activity (a scoped role: approval, change, allow
+    list, scanner) but whose authority fails: it has lapsed, states no window at
+    all, states a window that does not cover the alert, or names a scope (a
+    network, or an external address) that excludes the destination. A strong role
+    (sandbox, honeypot) backs the close. A silent or neutral record (a plain asset
+    row, a record with no role) undermines nothing."""
+    f = _row_facts(row)
+    roles = f["roles"]
+    if roles & set(_ALARM_ROLES):
+        return True
+    if roles & set(_STRONG_ROLES) or not roles & set(_SCOPED_ROLES):
+        return False
+    times, dst = list(alert_times), list(dest)
+    if f["lapsed"] or not f["window"] or not window_covers(
+            {"window": f["window"], "lapsed": f["lapsed"]}, times):
+        return True
+    ext = {n for n in f["names"] if _is_ipv4(n) and _is_external(n)}
+    return bool((f["nets"] or ext) and not _names_dest(f, dst))
+
+
+def _is_ipv4(text: str) -> bool:
+    try:
+        return ipaddress.ip_address(text).version == 4
+    except ValueError:
+        return False
+
+
 def row_relevant(row: dict[str, Any], disposition: str, alert_times: Iterable[float],
                  dest: Iterable[str]) -> bool:
-    """The step 4 relevance rule (relA): could this record, seen by the turn, have
-    moved the disposition? A hedge is already capped, so no. A conviction is moved
-    only by a record that would excuse the activity. A benign close is moved by an
-    alarm role, or by any record that fails to back it (a lapsed window, a scope
-    that excludes the destination, no stated role)."""
+    """The step 4 relevance rule (relA, with the owner's rule A for benign
+    closes): could this record, seen by the turn, have moved the disposition? A
+    hedge is already capped, so no. A conviction is moved only by a record that
+    would excuse the activity (``supports_innocent``). A benign close is moved only
+    by a record that affirmatively undermines it (``undermines_benign``); a silent
+    or neutral record does not move it."""
     if disposition in _HEDGE_DISPOSITIONS:
         return False
     dest, alert_times = list(dest), list(alert_times)
     if disposition == "true_positive":
         return supports_innocent(row, alert_times, dest)
     if disposition in _BENIGN_DISPOSITIONS:
-        return bool(_row_facts(row)["roles"] & set(_ALARM_ROLES)) or not supports_innocent(
-            row, alert_times, dest)
+        return undermines_benign(row, alert_times, dest)
     return True  # an unknown disposition is not released
 
 
@@ -1285,8 +1316,8 @@ def preread_review(card: dict[str, Any], preread: Any, alert_times: Iterable[flo
     """Shadow review of the pre-read records against the delivered verdict:
     ``kinds`` (with a row naming the subject), ``relevant`` (kinds with a row that
     could move the disposition), ``unparsed_record`` (a fetched row the extractors
-    could not read; relevant to any non-hedge verdict, so a conviction on it would
-    hold) and ``hold`` (the shadow decision relA would take on the pre-read
+    could not read; relevant to a conviction, so a conviction on it would hold;
+    not an affirmative signal against a benign close, so that is not held on it) and ``hold`` (the shadow decision relA would take on the pre-read
     alone). Pure."""
     disposition = str(card.get("disposition") or "")
     kinds: list[str] = []
@@ -1304,7 +1335,8 @@ def preread_review(card: dict[str, Any], preread: Any, alert_times: Iterable[flo
             alarm = alarm or any(_row_facts(r)["roles"] & set(_ALARM_ROLES) for r in rows)
     hedge = disposition in _HEDGE_DISPOSITIONS
     out: dict[str, Any] = {"kinds": kinds, "relevant": relevant,
-                           "hold": bool(not hedge and (relevant or unparsed))}
+                           "hold": bool(not hedge and (relevant or (
+                               unparsed and disposition not in _BENIGN_DISPOSITIONS)))}
     if kinds:
         # whole-set facts, so the stricter and looser readings of "relevant" can
         # be replayed from the card: some record could excuse the activity /

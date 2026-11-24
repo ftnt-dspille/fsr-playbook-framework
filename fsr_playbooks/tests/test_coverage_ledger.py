@@ -297,3 +297,18 @@ class TestConnectorSourceKind:
         assert autonomy.connector_source_kind("virustotal") == "intel"
         assert autonomy.connector_source_kind("slack") is None
         assert autonomy.connector_source_kind("unknown") is None
+
+
+    def test_jira_connectors_are_tickets_even_when_the_catalog_lacks_them(self, monkeypatch):
+        """The packaged slim catalog has no Jira row, so the category lookup gives
+        nothing; a known ticketing connector is still a ticket source."""
+        from fsr_playbooks.llm import autonomy
+        monkeypatch.setattr(autonomy, "_connector_category", lambda c: None)
+        assert autonomy.connector_source_kind("jirav2") == "tickets"
+        assert autonomy.connector_source_kind("jira") == "tickets"
+        assert autonomy.connector_source_kind("unknown") is None
+
+    def test_the_catalog_wins_over_the_known_name_fallback(self, monkeypatch):
+        from fsr_playbooks.llm import autonomy
+        monkeypatch.setattr(autonomy, "_connector_category", lambda c: "threat intelligence")
+        assert autonomy.connector_source_kind("jira") == "intel"

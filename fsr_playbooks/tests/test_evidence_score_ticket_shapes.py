@@ -109,14 +109,15 @@ NO_WINDOW = {"number": "CHG-7201", "state": "Implemented", "approval": "approved
              "description": f"Approved: {HOST} may send the quarterly reconciliation file to {IP}."}
 
 
-def test_a_windowless_approval_that_names_the_destination_looks_excusing_to_relA():
-    """Characterisation of today's rule (no stated window covers): the record
-    counts as able to excuse, so a conviction is held and a benign close is
-    admitted as backed. Recorded so the owner's decision (a missing window is an
-    affirmative undermining signal for a benign close) has a test to change."""
+def test_a_windowless_approval_that_names_the_destination_holds_both_ways():
+    """Conviction side (relA, unchanged): no stated window covers, so the record
+    counts as able to excuse and a conviction is held. Benign side (owner rule A):
+    a missing window is an affirmative undermining signal, so a benign close
+    resting on it is held too."""
     assert supports_innocent(NO_WINDOW, [ALERT_T], DEST)
     assert row_relevant(NO_WINDOW, "true_positive", [ALERT_T], DEST) is True
-    assert row_relevant(NO_WINDOW, "benign", [ALERT_T], DEST) is False
+    assert row_relevant(NO_WINDOW, "benign", [ALERT_T], DEST) is True
+    assert row_relevant(NO_WINDOW, "false_positive", [ALERT_T], DEST) is True
     assert _row_facts(NO_WINDOW)["window"] is None
 
 

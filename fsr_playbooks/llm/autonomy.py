@@ -378,11 +378,21 @@ _TICKET_CATEGORY_WORDS = ("itsm", "ticket", "service desk", "service management"
                           "incident management", "case management", "cmdb")
 
 
+# Ticketing connectors the packaged slim catalog does not carry (it holds only a
+# few rows, ServiceNow among them): without this, a configured Jira connector
+# classifies as nothing, is never asked by the pre-read or listed by the coverage
+# ledger, and a change record that lives there is invisible to the verdict.
+_KNOWN_TICKET_CONNECTORS = frozenset({"jira", "jirav2"})
+
+
 def connector_source_kind(connector: str) -> str | None:
     """"tickets" or "intel" for a connector the catalog files as such, else None.
     The I5 coverage ledger uses it to name the configured ticket and
-    threat-intel connectors a turn has not queried."""
+    threat-intel connectors a turn has not queried. A known ticketing connector
+    the catalog lacks (Jira) is a ticket source too."""
     cat = _connector_category(connector)
+    if not cat and connector in _KNOWN_TICKET_CONNECTORS:
+        return "tickets"
     if not cat:
         return None
     if any(w in cat for w in _TICKET_CATEGORY_WORDS):

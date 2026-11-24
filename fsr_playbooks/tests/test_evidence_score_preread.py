@@ -154,11 +154,15 @@ def test_a_conviction_is_moved_only_by_a_record_that_excuses_it():
     assert rel(SANDBOX_ASSET["data"][0], "true_positive") is True  # strong role
 
 
-def test_a_benign_close_is_held_unless_the_record_backs_it():
+def test_a_benign_close_is_held_only_on_an_affirmative_undermining_signal():
     assert rel(chg(WINDOW_OPEN), "benign") is False                # backs the close
-    assert rel(chg(WINDOW_OLD), "benign") is True                  # lapsed: cannot back it
+    assert rel(chg(WINDOW_OLD), "benign") is True                  # lapsed window
+    assert rel(chg({"state": "Canceled"}), "benign") is True       # lapsed state
+    assert rel(chg(), "benign") is True                            # no window stated
     assert rel(chg(WINDOW_OPEN, text="Approved scan of 198.51.100.0/24."), "benign") is True
-    assert rel(PLAIN_ASSET["data"][0], "benign") is True           # silent
+    assert rel(PLAIN_ASSET["data"][0], "benign") is False          # silent: admitted
+    assert rel({"name": HOST, "description": "Vendor laptop, Dell."}, "benign") is False  # neutral
+    assert rel(SANDBOX_ASSET["data"][0], "benign") is False        # strong role backs it
     assert rel({"name": HOST, "description": "Host is compromised and quarantined."},
                "false_positive") is True
 
@@ -184,8 +188,8 @@ def test_the_review_carries_whole_set_facts_for_replay():
     r = preread_review(card("benign"), pre(asset=PLAIN_ASSET["data"],
                                            change={"result": [chg(WINDOW_OPEN)]}),
                        [ALERT_T], [IP])
-    # per row the plain asset cannot back the close (relevant), but the set is backed
-    assert r["relevant"] == ["asset"] and r["backed"] is True and r["alarm"] is False
+    # the plain asset is silent (not held under rule A) and the set is backed
+    assert r["relevant"] == [] and r["backed"] is True and r["alarm"] is False
     r = preread_review(card("benign"), pre(asset=[{"name": HOST, "description": "compromised"}]),
                        [ALERT_T], [IP])
     assert r["alarm"] is True and r["backed"] is False
@@ -221,9 +225,10 @@ def test_a_fetched_row_that_cannot_be_read_sets_the_flag_and_would_hold_a_convic
     assert p["preread"]["unparsed_record"] is True and p["preread"]["hold"] is True
 
 
-def test_the_flag_is_relevant_to_a_benign_close_too_but_never_to_a_hedge():
+def test_the_flag_holds_a_conviction_not_a_benign_close_and_never_a_hedge():
     blob = "CHG0030001 | Implement | lab-eval-12"
-    assert check(card("benign"), preread=pre(asset=[], change=blob))["preread"]["hold"] is True
+    assert check(card("benign"), preread=pre(asset=[], change=blob))["preread"]["hold"] is False
+    assert check(card("true_positive"), preread=pre(asset=[], change=blob))["preread"]["hold"] is True
     h = check(card("needs_more_info"), preread=pre(asset=[], change=blob))
     assert h["unparsed_record"] is True and h["preread"]["hold"] is False
 
@@ -271,7 +276,7 @@ def test_the_emitted_card_carries_the_preread_premise():
     assert c["premise"]["status"] == "read"
     assert c["premise"]["read_kinds"] == ["asset", "change"]
     # neither a silent asset nor a lapsed change can back the close
-    assert c["premise"]["preread"]["relevant"] == ["asset", "change"]
+    assert c["premise"]["preread"]["relevant"] == ["change"]
     assert c["premise"]["preread"]["hold"] is True
 
 
@@ -367,3 +372,25 @@ def test_plain_rows_are_unchanged_by_the_unwrap():
     assert unwrap_fields("CHG0030001 | Implement") == "CHG0030001 | Implement"
     assert preread_note(pre(change={"result": [row]})) == preread_note(
         pre(change={"result": [{k: sn(v) for k, v in row.items()}]}))
+
+
+# ---- owner rule A, end to end through the review ------------------------------------------
+
+def test_a_windowless_approval_holds_a_benign_close_and_a_neutral_record_admits_it():
+    windowless = {"result": [chg()]}
+    held = preread_review(card("benign"), pre(change=windowless), [ALERT_T], [IP])
+    assert held["relevant"] == ["change"] and held["hold"] is True
+    neutral = preread_review(card("benign"), pre(asset=PLAIN_ASSET["data"]), [ALERT_T], [IP])
+    assert neutral["relevant"] == [] and neutral["hold"] is False
+    covered = preread_review(card("benign"), pre(change={"result": [chg(WINDOW_OPEN)]}),
+                             [ALERT_T], [IP])
+    assert covered["hold"] is False
+
+
+def test_the_conviction_side_is_unchanged_by_rule_a():
+    # a plain asset does not excuse a conviction; a covering approval does; so does
+    # a windowless one (no stated window covers on the conviction side)
+    plain = preread_review(card("true_positive"), pre(asset=PLAIN_ASSET["data"]), [ALERT_T], [IP])
+    assert plain["hold"] is False
+    assert preread_review(card("true_positive"), pre(change={"result": [chg()]}),
+                          [ALERT_T], [IP])["hold"] is True
