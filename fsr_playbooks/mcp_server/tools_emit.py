@@ -1811,11 +1811,14 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
             identifiers,
             premise_check,
             premise_facts,
+            preread_entries,
             record_premise,
             record_score,
             score_verdict,
         )
-        registry = evidence_ctx.valid_ids()
+        preread = cv._turn_preread_records.get()
+        # records the host read at the start of the turn count as read
+        registry = {**preread_entries(preread), **evidence_ctx.valid_ids()}
         # Identifiers the turn was handed rather than looked up (the analyst's
         # own message, the mounted record's body the host bound) are sourced.
         handed = identifiers(current().user_message, cv._turn_known_context.get())
@@ -1833,7 +1836,8 @@ def _record_evidence_score(card: dict[str, Any], evidence_ctx: Any) -> None:
             known_names=premise_facts(cv._turn_known_context.get()).get("names") or [],
             known_events=event_facts(cv._turn_known_context.get()),
             known_time=premise_facts(cv._turn_known_context.get()).get("t"),
-            subject_reader=cv._turn_subject_records.get()))
+            subject_reader=cv._turn_subject_records.get(),
+            preread=preread))
     except Exception:  # noqa: BLE001
         import logging  # noqa: PLC0415
         logging.getLogger(__name__).debug("evidence score failed", exc_info=True)

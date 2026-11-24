@@ -274,6 +274,20 @@ def set_turn_subject_records(reader: Callable[[list[str]], Any] | None) -> None:
     _turn_subject_records.set(reader)
 
 
+# The subject's asset and change records, read by the host at the START of the
+# turn (not on demand): ``{"asset": rows | None, "change": rows | None, "names":
+# [...], "t": epoch | None, "dst": [...], "ms": int, "stats": {...}}`` (see
+# ``_evidence_score.preread_entries``). The host also shows the model a note of
+# them. The evidence score and the premise count them as read. None = nothing was
+# pre-read (the premise falls back to ``subject_records``). Shadow only.
+_turn_preread_records: contextvars.ContextVar[dict[str, Any] | None] = (
+    contextvars.ContextVar("turn_preread_records", default=None))
+
+
+def set_turn_preread_records(preread: dict[str, Any] | None) -> None:
+    _turn_preread_records.set(preread if isinstance(preread, dict) else None)
+
+
 # U6: display labels for connector ids, {connector name: catalog label}, from
 # the box's connector catalog. The enhancement offer carries the labels of the
 # connectors its diff names, so the card never shows a bare id. The host hands
