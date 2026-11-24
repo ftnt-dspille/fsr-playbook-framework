@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "TooManyRequests",
+    "message": "Rate limit exceeded. Retry after 10 seconds."
+  }
+}

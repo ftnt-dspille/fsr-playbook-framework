@@ -1,0 +1,68 @@
+{
+  "incidentId": 9,
+  "incidentUri": "https://api.security.microsoft.com/api/incidents/9",
+  "redirectIncidentId": "",
+  "incidentName": "Suspicious activity on two endpoints",
+  "createdTime": "2026-11-01T08:12:40.5521101Z",
+  "lastUpdateTime": "2026-11-03T09:30:12.0045511Z",
+  "assignedTo": "bob@contoso.example",
+  "classification": "TruePositive",
+  "determination": "Malware",
+  "status": "Resolved",
+  "severity": "Medium",
+  "tags": [],
+  "comments": [
+    {
+      "comment": "Ticket opened with the endpoint team.",
+      "createdBy": "bob@contoso.example",
+      "createdTime": "2026-11-01T09:00:00.000Z"
+    },
+    {
+      "comment": "Malware quarantined, endpoint reimaged.",
+      "createdBy": null,
+      "createdTime": "2026-11-03T09:30:12.0045511Z"
+    }
+  ],
+  "alerts": [
+    {
+      "alertId": "alert-0002",
+      "providerAlertId": "00000000-0000-0000-0000-000000000003",
+      "incidentId": 9,
+      "serviceSource": "Microsoft Defender for Endpoint",
+      "creationTime": "2026-11-01T08:10:00.2019430Z",
+      "lastUpdatedTime": "2026-11-03T09:30:12.0045511Z",
+      "resolvedTime": "2026-11-03T09:30:12.0045511Z",
+      "firstActivity": "2026-11-01T08:05:00.0000000Z",
+      "lastActivity": "2026-11-01T08:09:58.0000000Z",
+      "title": "Malware quarantined",
+      "description": "A malware sample was detected and quarantined by antivirus.",
+      "category": "Malware",
+      "status": "Resolved",
+      "severity": "Medium",
+      "investigationId": "",
+      "investigationState": "N/A",
+      "classification": "TruePositive",
+      "determination": "Malware",
+      "detectionSource": "WindowsDefenderAtp",
+      "detectorId": "00000000-0000-0000-0000-000000000004",
+      "assignedTo": "bob@contoso.example",
+      "actorName": null,
+      "threatFamilyName": "SyntheticExample",
+      "mitreTechniques": [],
+      "devices": [
+        "device-0002"
+      ],
+      "entities": [
+        {
+          "entityType": "File",
+          "evidenceCreationTime": "2026-11-01T08:10:00.2019430Z",
+          "verdict": "Malicious",
+          "remediationStatus": "Remediated",
+          "fileName": "payload.exe",
+          "filePath": "C:\\Users\\bob\\Downloads\\payload.exe",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    }
+  ]
+}

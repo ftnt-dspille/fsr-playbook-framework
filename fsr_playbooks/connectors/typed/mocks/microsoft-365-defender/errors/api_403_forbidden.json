@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "Forbidden",
+    "message": "The application lacks the required OAuth permission (Incidents.Read.All / AdvancedHunting.Read.All) or admin consent has not been granted."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "BadRequest",
+    "message": "Query contains a syntax error: identify the entity you want to search for or the table you want to query."
+  }
+}

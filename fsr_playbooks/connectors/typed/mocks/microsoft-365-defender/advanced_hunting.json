@@ -1,0 +1,77 @@
+{
+  "Schema": [
+    {
+      "Name": "Timestamp",
+      "Type": "DateTime"
+    },
+    {
+      "Name": "DeviceName",
+      "Type": "string"
+    },
+    {
+      "Name": "InitiatingProcessFileName",
+      "Type": "string"
+    },
+    {
+      "Name": "EventCount",
+      "Type": "int"
+    },
+    {
+      "Name": "BytesSent",
+      "Type": "real"
+    },
+    {
+      "Name": "IsExternal",
+      "Type": "bool"
+    }
+  ],
+  "Results": [
+    {
+      "Timestamp": "2026-11-03T10:15:22.1234567Z",
+      "DeviceName": "win11-workstation-01",
+      "InitiatingProcessFileName": "powershell.exe",
+      "EventCount": 3,
+      "BytesSent": 15360.0,
+      "IsExternal": false
+    },
+    {
+      "Timestamp": "2026-11-03T10:18:45.9876543Z",
+      "DeviceName": "win11-workstation-02",
+      "InitiatingProcessFileName": "wscript.exe",
+      "EventCount": 1,
+      "BytesSent": 512.5,
+      "IsExternal": true
+    }
+  ],
+  "Stats": {
+    "ExecutionTime": 0.117,
+    "resource_usage": {
+      "cache": {
+        "memory": {
+          "hits": 5,
+          "misses": 1,
+          "total": 6
+        },
+        "disk": {
+          "hits": 0,
+          "misses": 0,
+          "total": 0
+        }
+      },
+      "cpu": {
+        "user": "00:00:00.0312500",
+        "kernel": "00:00:00.0156250",
+        "total cpu": "00:00:00.0468750"
+      },
+      "memory": {
+        "peak_per_node": "125829120"
+      }
+    },
+    "dataset_statistics": [
+      {
+        "table_row_count": 2,
+        "table_size": 2048
+      }
+    ]
+  }
+}

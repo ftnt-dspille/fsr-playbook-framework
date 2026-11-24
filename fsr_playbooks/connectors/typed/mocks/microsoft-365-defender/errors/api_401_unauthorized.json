@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "Unauthorized",
+    "message": "Access token is empty or expired."
+  }
+}

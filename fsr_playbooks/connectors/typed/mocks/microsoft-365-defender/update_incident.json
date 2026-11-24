@@ -1,0 +1,16 @@
+{
+  "status": "Resolved",
+  "assignedTo": "alice@contoso.example",
+  "classification": "FalsePositive",
+  "determination": "NotMalicious",
+  "tags": [
+    "triaged"
+  ],
+  "comments": [
+    {
+      "comment": "Closed as a false positive after review.",
+      "createdBy": "alice@contoso.example",
+      "createdTime": "2026-11-03T11:20:00.000Z"
+    }
+  ]
+}
