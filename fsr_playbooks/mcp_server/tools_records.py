@@ -166,8 +166,21 @@ def _unknown_fields(client: Any, module: str, fields: dict) -> dict | None:
     attrs = _module_attrs(client, module)
     if not attrs:
         return None
-    bad = [k for k in fields if isinstance(k, str) and not k.startswith("@")
-           and k not in attrs and k not in _SYSTEM_WRITABLE]
+
+    def _missing(have: dict) -> list:
+        return [k for k in fields if isinstance(k, str) and not k.startswith("@")
+                and k not in have and k not in _SYSTEM_WRITABLE]
+
+    bad = _missing(attrs)
+    if not bad:
+        return None
+    # The cache lives as long as the worker; a field added to the module since
+    # it filled would be refused as a typo. Re-read once before refusing.
+    _ATTR_CACHE.pop((getattr(client, "base_url", ""), module), None)
+    attrs = _module_attrs(client, module)
+    if not attrs:
+        return None  # the refresh failed: fail open
+    bad = _missing(attrs)
     if not bad:
         return None
     from fsr_playbooks.mcp_server.tools_triage import _nearest_field_names

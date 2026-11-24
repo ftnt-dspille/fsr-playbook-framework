@@ -468,6 +468,34 @@ def test_a_field_the_module_lacks_is_refused_before_the_card(alert_writer, monke
     assert not [c for c in cap if c[0] in ("put", "post")]
 
 
+def test_a_field_added_after_the_cache_filled_is_not_refused(alert_writer, monkeypatch):
+    """The attribute cache lives for the worker; a field created on the box
+    afterwards must trigger one re-read, not an unknown_field refusal."""
+    monkeypatch.setattr(_shared, "_live_client", lambda: _Client())
+    tools_records._ATTR_CACHE.clear()
+    reads = []
+
+    def fake_request(method, client, url, **kwargs):
+        if "/api/3/model_metadatas" in url:
+            reads.append(url)
+            attrs = [{"name": "name", "type": "string"}]
+            if len(reads) > 1:
+                attrs.append({"name": "refactorOutputScript", "type": "text"})
+            return _Resp(200, {"hydra:member": [{"attributes": attrs}]})
+        return _Resp(200, {"@id": url, "uuid": "u1"})
+
+    monkeypatch.setattr(_shared, "live_request_with_reauth", fake_request)
+    c = _Client()
+    assert tools_records._unknown_fields(c, "alerts", {"name": "x"}) is None
+    assert len(reads) == 1
+    assert tools_records._unknown_fields(c, "alerts", {"refactorOutputScript": "s"}) is None
+    assert len(reads) == 2
+    # a genuine typo is still refused
+    out = tools_records._unknown_fields(c, "alerts", {"refactorOutputScrip": "s"})
+    assert out and out["code"] == "unknown_field"
+    assert out["suggestions"]["refactorOutputScrip"] == ["refactorOutputScript"]
+
+
 def test_the_write_itself_refuses_it_too(alert_writer, monkeypatch):
     """A grant or a resumed approval reaches the body without the pre-card check."""
     cap = []
