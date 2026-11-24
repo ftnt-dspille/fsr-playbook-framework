@@ -1021,6 +1021,7 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     alert_at = _alert_times(registry, subject_rec, known_events, known_time)
     read: list[str] = []
     contra: list[dict[str, Any]] = []
+    contra_kinds: set[str] = set()
     for eid, e in registry.items():
         if (not isinstance(e, dict) or e.get("ok") is not True
                 or _reads_record(e, subject_rec) or not _premise_kind(e)):
@@ -1047,6 +1048,7 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                 hit = sorted(roles & set(_ALARM_ROLES))
             if hit:
                 contra.append({"call": eid, "roles": hit})
+                contra_kinds.add(str(_premise_kind(e)))
     status = "contradicted" if contra else ("read" if read else "unread")
     out: dict[str, Any] = {"status": status, "records": sorted(read),
                            "contradicted_by": contra, "subject": sorted(subject)[:6]}
@@ -1073,6 +1075,35 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
                        if k not in read_kinds and exists.get(k) is True]
             if missing:
                 out["unread_kinds_exist"] = missing
+    advisory = premise_advisory(out, contra_kinds)
+    if advisory:
+        out["advisory"] = advisory
+    return out
+
+
+_ADVISORY_KINDS = ("asset", "change")
+
+
+def premise_advisory(premise: dict[str, Any],
+                     contra_kinds: Iterable[str] = ()) -> list[dict[str, str]]:
+    """What the card may tell the analyst about the subject's records (Phase 2
+    step 3a, advisory only: no hold, no decision reads it). One entry per record
+    kind: ``unread`` (a record of that kind exists and this investigation did not
+    read it) or ``conflict`` (a record it read conflicts with the verdict).
+    Empty when there is nothing to say. Kinds only, never field names: the card
+    words it. Pure."""
+    out: list[dict[str, str]] = []
+    status = premise.get("status")
+    if status == "contradicted":
+        out += [{"kind": k, "state": "conflict"}
+                for k in _ADVISORY_KINDS if k in set(contra_kinds)]
+    elif status == "unread_exists":
+        exists = premise.get("exists") or {}
+        out += [{"kind": k, "state": "unread"}
+                for k in _ADVISORY_KINDS if exists.get(k) is True]
+    for k in premise.get("unread_kinds_exist") or []:
+        if k in _ADVISORY_KINDS and not any(a["kind"] == k for a in out):
+            out.append({"kind": k, "state": "unread"})
     return out
 
 
@@ -1082,6 +1113,10 @@ def record_premise(card: dict[str, Any], premise: dict[str, Any]) -> None:
     log.info("premise disposition=%s status=%s records=%s contradicted_by=%s",
              card.get("disposition"), premise.get("status"), premise.get("records"),
              premise.get("contradicted_by"))
+    if premise.get("advisory"):
+        # the live rate is read from the stored card (the connector's
+        # scripts/premise_advisory_rate.py); this log line is its twin
+        log.info("premise_advisory shown=%s", premise["advisory"])
 
 
 def record_score(card: dict[str, Any], score: dict[str, Any]) -> None:
