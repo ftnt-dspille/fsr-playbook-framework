@@ -1,0 +1,751 @@
+{
+  "type": "workflow_collections",
+  "macros": [],
+  "exported_tags": [
+    "Microsoft",
+    "microsoft-365-defender",
+    "security"
+  ],
+  "data": [
+    {
+      "@type": "WorkflowCollection",
+      "name": "Sample - Microsoft 365 Defender - 1.2.1",
+      "description": "Sample playbooks for the \"Microsoft 365 Defender\" connector. If you are planning to use the sample playbooks in your environment, ensure that you clone those playbooks and move them to a different collection, since the sample playbook collection gets deleted during connector upgrade and delete.",
+      "visible": true,
+      "image": null,
+      "uuid": "cf910594-e6cc-5f03-89d2-a3c6e30aedc1",
+      "recordTags": [
+        "microsoft-365-defender",
+        "Microsoft",
+        "security"
+      ],
+      "workflows": [
+        {
+          "@type": "Workflow",
+          "name": "Triage Defender Incident to Response",
+          "aliasName": null,
+          "tag": "",
+          "recordTags": [],
+          "description": "The flagship loop for the M365 trial: fetch Active Microsoft 365 Defender incidents oldest-first, pull the oldest one in full, hunt its devices in Advanced Hunting for last-24h network activity, create a FortiSOAR alert that records the triage, then ask a human through a Microsoft Teams approval card. Approve and the playbook updates the Defender incident (status In Progress, classification TruePositive) and runs the Graph-side containment - the reported source IP is appended to a Conditional Access IP named location and the compromised user's sessions are revoked. Reject and the incident is left open with an explanatory comment on the matching Graph security alert; nothing is changed on either surface.\nWhy oldest-first: Defender's incident list answers newest-first, and a backlog demo wants the STALEST unhandled incident, so the playbook sorts the fetched list by createdTime itself instead of relying on API order.\nWhy a SOAR alert mid-playbook: the Defender incident is the detection, the FortiSOAR alert is the case - the approval card links to it, and the update comment names it, so the response trail starts and ends on records a SOC actually works.\nInputs: approver (Teams recipient for the approval card - default soc-oncall@contoso.example), reported_ip (the source IP to block - default 198.51.100.7), named_location_id (the existing IP named location the IP is appended to; the op appends, it does not create - default is the sample location id), graph_alert_id (the Graph security alerts_v2 id the reject-branch comment goes on; Graph alert ids are a different surface from Defender alertIds, so the caller supplies the Graph-side id - default is the sample alert id). Outputs: outcome (responded, held or nothing_to_triage), incident_id, soar_alert, compromised_user, revoked, named_location.\nLive prerequisites: the Defender connector configured against a tenant with the M365 Defender plane licensed, the microsoft-graph_dev connector configured (User.RevokeSessions.All, Policy.Read.All, SecurityAlert.Read. .. for the comment), and an existing IP named location for the block. The advanced_hunting query is read-only KQL over DeviceNetworkEvents.",
+          "isActive": true,
+          "debug": true,
+          "singleRecordExecution": false,
+          "remoteExecutableFlag": 0,
+          "parameters": [
+            "approver",
+            "reported_ip",
+            "named_location_id",
+            "graph_alert_id"
+          ],
+          "synchronous": false,
+          "lastModifyDate": 1795558320,
+          "collection": "/api/3/workflow_collections/cf910594-e6cc-5f03-89d2-a3c6e30aedc1",
+          "versions": [],
+          "triggerStep": "/api/3/workflow_steps/c78e258b-3a16-5fec-9867-b7d02483139d",
+          "steps": [
+            {
+              "@type": "WorkflowStep",
+              "name": "Start",
+              "description": null,
+              "arguments": {
+                "step_variables": {
+                  "input": {
+                    "params": []
+                  }
+                }
+              },
+              "status": null,
+              "top": "120",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/b348f017-9a94-471f-87f8-ce88b6a7ad62",
+              "group": null,
+              "uuid": "c78e258b-3a16-5fec-9867-b7d02483139d"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Resolve Inputs",
+              "description": null,
+              "arguments": {
+                "approver": "{{ vars.input.params.approver | default(vars.approver, true) | default('soc-oncall@contoso.example', true) }}",
+                "reported_ip": "{{ vars.input.params.reported_ip | default(vars.reported_ip, true) | default('198.51.100.7', true) }}",
+                "named_location_id": "{{ vars.input.params.named_location_id | default(vars.named_location_id, true) | default('00000000-0000-0000-0000-000000000f01', true) }}",
+                "graph_alert_id": "{{ vars.input.params.graph_alert_id | default(vars.graph_alert_id, true) | default('00000000-0000-0000-0000-000000000b01', true) }}"
+              },
+              "status": null,
+              "top": "250",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "8b52c715-9f3c-5251-8ae8-28171d2e55c0"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "List Incidents",
+              "description": null,
+              "arguments": {
+                "connector": "microsoft-365-defender",
+                "operation": "list_incidents",
+                "config": "",
+                "params": {
+                  "status": "Active",
+                  "get_all_records": true
+                },
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://api.security.microsoft.com/api/$metadata#Incidents\",\n    \"value\": [\n      {\n        \"incidentId\": \"9\",\n        \"incidentUri\": \"https://api.security.microsoft.com/api/incidents/9\",\n        \"redirectIncidentId\": null,\n        \"incidentName\": \"Ransomware activity on one endpoint\",\n        \"createdTime\": \"2026-11-02T09:45:51.3616613Z\",\n        \"lastUpdateTime\": \"2026-11-03T11:12:05.2134802Z\",\n        \"assignedTo\": \"alice@contoso.example\",\n        \"classification\": \"TruePositive\",\n        \"determination\": \"MultiStagedAttack\",\n        \"status\": \"Active\",\n        \"severity\": \"High\",\n        \"tags\": [\n          \"ransomware\"\n        ],\n        \"comments\": [\n          {\n            \"comment\": \"Containment started, isolating the endpoint.\",\n            \"createdBy\": \"alice@contoso.example\",\n            \"createdTime\": \"2026-11-02T10:02:11.08Z\"\n          }\n        ],\n        \"alerts\": [\n          {\n            \"alertId\": \"alert-0001\",\n            \"providerAlertId\": \"00000000-0000-0000-0000-000000000001\",\n            \"incidentId\": \"9\",\n            \"serviceSource\": \"Microsoft Defender for Endpoint\",\n            \"creationTime\": \"2026-11-02T09:44:02.1170834Z\",\n            \"lastUpdatedTime\": \"2026-11-03T10:55:00.5510421Z\",\n            \"resolvedTime\": null,\n            \"firstActivity\": \"2026-11-02T09:40:00.0000000Z\",\n            \"lastActivity\": \"2026-11-02T09:43:58.0000000Z\",\n            \"title\": \"Suspicious PowerShell command line\",\n            \"description\": \"A PowerShell process issued a command line associated with ransomware staging.\",\n            \"category\": \"DefenseEvasion\",\n            \"status\": \"New\",\n            \"severity\": \"High\",\n            \"investigationId\": \"12\",\n            \"investigationState\": \"Terminated\",\n            \"classification\": \"TruePositive\",\n            \"determination\": \"MultiStagedAttack\",\n            \"detectionSource\": \"WindowsDefenderAtp\",\n            \"detectorId\": \"00000000-0000-0000-0000-000000000002\",\n            \"assignedTo\": \"alice@contoso.example\",\n            \"actorName\": null,\n            \"threatFamilyName\": null,\n            \"mitreTechniques\": [\n              \"T1059\",\n              \"T1486\"\n            ],\n            \"devices\": [\n              \"device-0001\"\n            ],\n            \"entities\": [\n              {\n                \"entityType\": \"User\",\n                \"evidenceCreationTime\": \"2026-11-02T09:45:51.3616613Z\",\n                \"verdict\": \"Suspicious\",\n                \"remediationStatus\": \"None\",\n                \"accountName\": \"alice\",\n                \"userSid\": \"S-1-5-21-0000000000-0000000000-0000000000-1001\",\n                \"aadUserId\": \"00000000-0000-0000-0000-000000000000\",\n                \"userPrincipalName\": \"alice@contoso.example\"\n              },\n              {\n                \"entityType\": \"Device\",\n                \"evidenceCreationTime\": \"2026-11-02T09:45:51.3616613Z\",\n                \"verdict\": \"Compromised\",\n                \"remediationStatus\": \"None\",\n                \"deviceId\": \"device-0001\",\n                \"deviceName\": \"win11-workstation-01\"\n              }\n            ]\n          }\n        ]\n      },\n      {\n        \"incidentId\": \"10\",\n        \"incidentUri\": \"https://api.security.microsoft.com/api/incidents/10\",\n        \"redirectIncidentId\": null,\n        \"incidentName\": \"Suspicious activity on two endpoints\",\n        \"createdTime\": \"2026-11-03T08:12:40.5521101Z\",\n        \"lastUpdateTime\": \"2026-11-03T09:30:12.0045511Z\",\n        \"assignedTo\": \"bob@contoso.example\",\n        \"classification\": \"TruePositive\",\n        \"determination\": \"Malware\",\n        \"status\": \"Active\",\n        \"severity\": \"Medium\",\n        \"tags\": [],\n        \"comments\": [\n          {\n            \"comment\": \"Ticket opened with the endpoint team.\",\n            \"createdBy\": \"bob@contoso.example\",\n            \"createdTime\": \"2026-11-03T09:00:00.000Z\"\n          }\n        ],\n        \"alerts\": [\n          {\n            \"alertId\": \"alert-0002\",\n            \"providerAlertId\": \"00000000-0000-0000-0000-000000000003\",\n            \"incidentId\": \"10\",\n            \"serviceSource\": \"Microsoft Defender for Endpoint\",\n            \"creationTime\": \"2026-11-03T08:10:00.2019430Z\",\n            \"lastUpdatedTime\": \"2026-11-03T09:30:12.0045511Z\",\n            \"resolvedTime\": null,\n            \"firstActivity\": \"2026-11-03T08:05:00.0000000Z\",\n            \"lastActivity\": \"2026-11-03T08:09:58.0000000Z\",\n            \"title\": \"Malware quarantined\",\n            \"description\": \"A malware sample was detected and quarantined by antivirus.\",\n            \"category\": \"Malware\",\n            \"status\": \"New\",\n            \"severity\": \"Medium\",\n            \"investigationId\": \"\",\n            \"investigationState\": \"N/A\",\n            \"classification\": \"TruePositive\",\n            \"determination\": \"Malware\",\n            \"detectionSource\": \"WindowsDefenderAtp\",\n            \"detectorId\": \"00000000-0000-0000-0000-000000000004\",\n            \"assignedTo\": \"bob@contoso.example\",\n            \"actorName\": null,\n            \"threatFamilyName\": \"SyntheticExample\",\n            \"mitreTechniques\": [],\n            \"devices\": [\n              \"device-0002\"\n            ],\n            \"entities\": [\n              {\n                \"entityType\": \"File\",\n                \"evidenceCreationTime\": \"2026-11-03T08:10:00.2019430Z\",\n                \"verdict\": \"Malicious\",\n                \"remediationStatus\": \"Remediated\",\n                \"fileName\": \"payload.exe\",\n                \"filePath\": \"C:\\\\Users\\\\bob\\\\Downloads\\\\payload.exe\",\n                \"sha256\": 0\n              },\n              {\n                \"entityType\": \"Device\",\n                \"evidenceCreationTime\": \"2026-11-03T08:10:00.2019430Z\",\n                \"verdict\": \"Compromised\",\n                \"remediationStatus\": \"None\",\n                \"deviceId\": \"device-0002\",\n                \"deviceName\": \"win11-workstation-02\"\n              }\n            ]\n          }\n        ]\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"list_incidents\"\n}",
+                "version": "1.2.0",
+                "name": "Microsoft 365 Defender",
+                "operationTitle": "Get Incidents List",
+                "step_variables": [],
+                "pickFromTenant": false
+              },
+              "status": null,
+              "top": "380",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "d3fa3e68-8bb0-58a0-8869-6178cb0b202a"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Oldest First",
+              "description": null,
+              "arguments": {
+                "active_count": "{{ (vars.steps.List_Incidents.data.value | default([], true)) | length }}",
+                "oldest_incident_id": "{{ ((vars.steps.List_Incidents.data.value | default([], true)) | sort(attribute='createdTime') | first | default(none, true)).incidentId | default('', true) }}"
+              },
+              "status": null,
+              "top": "510",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "f9cb19a5-43af-5294-ad0c-17e2a1b0311e"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Incidents Found",
+              "description": null,
+              "arguments": {
+                "conditions": [
+                  {
+                    "option": "Active incidents found",
+                    "condition": "{{ vars.oldest_incident_id | default('', true) | length > 0 }}",
+                    "step_iri": "/api/3/workflow_steps/b57588bc-84b4-56c2-8d2f-cde13bffe949",
+                    "step_name": "Get Incident"
+                  },
+                  {
+                    "option": "Nothing to triage",
+                    "default": true,
+                    "step_iri": "/api/3/workflow_steps/72fe3745-28ec-50d5-b449-6c17182403b5",
+                    "step_name": "Nothing To Triage"
+                  }
+                ]
+              },
+              "status": null,
+              "top": "640",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/12254cf5-5db7-4b1a-8cb1-3af081924b28",
+              "group": null,
+              "uuid": "4941d03d-0da0-5bc7-8d17-5e15d75b5d4a"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Get Incident",
+              "description": null,
+              "arguments": {
+                "connector": "microsoft-365-defender",
+                "operation": "get_incident",
+                "config": "",
+                "params": {
+                  "id": "{{ vars.oldest_incident_id }}"
+                },
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://api.security.microsoft.com/api/$metadata#Incidents/$entity\",\n    \"incidentId\": \"9\",\n    \"incidentUri\": \"https://api.security.microsoft.com/api/incidents/9\",\n    \"redirectIncidentId\": null,\n    \"incidentName\": \"Ransomware activity on one endpoint\",\n    \"createdTime\": \"2026-11-02T09:45:51.3616613Z\",\n    \"lastUpdateTime\": \"2026-11-03T11:12:05.2134802Z\",\n    \"assignedTo\": \"alice@contoso.example\",\n    \"classification\": \"TruePositive\",\n    \"determination\": \"MultiStagedAttack\",\n    \"status\": \"Active\",\n    \"severity\": \"High\",\n    \"tags\": [\n      \"ransomware\"\n    ],\n    \"comments\": [\n      {\n        \"comment\": \"Containment started, isolating the endpoint.\",\n        \"createdBy\": \"alice@contoso.example\",\n        \"createdTime\": \"2026-11-02T10:02:11.08Z\"\n      }\n    ],\n    \"alerts\": [\n      {\n        \"alertId\": \"alert-0001\",\n        \"providerAlertId\": \"00000000-0000-0000-0000-000000000001\",\n        \"incidentId\": \"9\",\n        \"serviceSource\": \"Microsoft Defender for Endpoint\",\n        \"creationTime\": \"2026-11-02T09:44:02.1170834Z\",\n        \"lastUpdatedTime\": \"2026-11-03T10:55:00.5510421Z\",\n        \"resolvedTime\": null,\n        \"firstActivity\": \"2026-11-02T09:40:00.0000000Z\",\n        \"lastActivity\": \"2026-11-02T09:43:58.0000000Z\",\n        \"title\": \"Suspicious PowerShell command line\",\n        \"description\": \"A PowerShell process issued a command line associated with ransomware staging.\",\n        \"category\": \"DefenseEvasion\",\n        \"status\": \"New\",\n        \"severity\": \"High\",\n        \"investigationId\": \"12\",\n        \"investigationState\": \"Terminated\",\n        \"classification\": \"TruePositive\",\n        \"determination\": \"MultiStagedAttack\",\n        \"detectionSource\": \"WindowsDefenderAtp\",\n        \"detectorId\": \"00000000-0000-0000-0000-000000000002\",\n        \"assignedTo\": \"alice@contoso.example\",\n        \"actorName\": null,\n        \"threatFamilyName\": null,\n        \"mitreTechniques\": [\n          \"T1059\",\n          \"T1486\"\n        ],\n        \"devices\": [\n          \"device-0001\"\n        ],\n        \"entities\": [\n          {\n            \"entityType\": \"User\",\n            \"evidenceCreationTime\": \"2026-11-02T09:45:51.3616613Z\",\n            \"verdict\": \"Suspicious\",\n            \"remediationStatus\": \"None\",\n            \"accountName\": \"alice\",\n            \"userSid\": \"S-1-5-21-0000000000-0000000000-0000000000-1001\",\n            \"aadUserId\": \"00000000-0000-0000-0000-000000000000\",\n            \"userPrincipalName\": \"alice@contoso.example\"\n          },\n          {\n            \"entityType\": \"Device\",\n            \"evidenceCreationTime\": \"2026-11-02T09:45:51.3616613Z\",\n            \"verdict\": \"Compromised\",\n            \"remediationStatus\": \"None\",\n            \"deviceId\": \"device-0001\",\n            \"deviceName\": \"win11-workstation-01\"\n          }\n        ]\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"get_incident\"\n}",
+                "version": "1.2.0",
+                "name": "Microsoft 365 Defender",
+                "operationTitle": "Get Incident Details",
+                "step_variables": [],
+                "pickFromTenant": false
+              },
+              "status": null,
+              "top": "770",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "b57588bc-84b4-56c2-8d2f-cde13bffe949"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Extract Context",
+              "description": null,
+              "arguments": {
+                "device_list_json": "{{ (vars.steps.Get_Incident.data.alerts | default([], true)) | map(attribute='entities') | map('default', [], true) | sum(start=[]) | selectattr('entityType', 'equalto', 'Device') | map(attribute='deviceName') | unique | list | tojson }}",
+                "compromised_user": "{{ ((vars.steps.Get_Incident.data.alerts | default([], true)) | map(attribute='entities') | map('default', [], true) | sum(start=[]) | selectattr('entityType', 'equalto', 'User') | map(attribute='userPrincipalName') | unique | list | first) | default('unknown@contoso.example', true) }}",
+                "device_count": "{{ ((vars.steps.Get_Incident.data.alerts | default([], true)) | map(attribute='entities') | map('default', [], true) | sum(start=[]) | selectattr('entityType', 'equalto', 'Device') | map(attribute='deviceName') | unique | list) | length }}"
+              },
+              "status": null,
+              "top": "900",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "9b08c531-33df-5fdf-b4f2-b389deb44f23"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Device Hunt",
+              "description": null,
+              "arguments": {
+                "connector": "microsoft-365-defender",
+                "operation": "advanced_hunting",
+                "config": "",
+                "params": {
+                  "Query": "DeviceNetworkEvents | where Timestamp > ago(24h) and DeviceName in (dynamic({{ vars.device_list_json }})) | summarize EventCount=count(), BytesSent=sum(RemoteSize), IsExternal=any(IsExternal)\n  by DeviceName, InitiatingProcessFileName"
+                },
+                "mock_result": "{\n  \"data\": {\n    \"Schema\": [\n      {\n        \"Name\": \"Timestamp\",\n        \"Type\": \"DateTime\"\n      },\n      {\n        \"Name\": \"DeviceName\",\n        \"Type\": \"string\"\n      },\n      {\n        \"Name\": \"InitiatingProcessFileName\",\n        \"Type\": \"string\"\n      },\n      {\n        \"Name\": \"EventCount\",\n        \"Type\": \"int\"\n      },\n      {\n        \"Name\": \"BytesSent\",\n        \"Type\": \"real\"\n      },\n      {\n        \"Name\": \"IsExternal\",\n        \"Type\": \"bool\"\n      }\n    ],\n    \"Results\": [\n      {\n        \"Timestamp\": \"2026-11-03T10:15:22.1234567Z\",\n        \"DeviceName\": \"win11-workstation-01\",\n        \"InitiatingProcessFileName\": \"powershell.exe\",\n        \"EventCount\": 3,\n        \"BytesSent\": 15360.0,\n        \"IsExternal\": false\n      }\n    ],\n    \"Stats\": {\n      \"ExecutionTime\": 0.117,\n      \"resource_usage\": {\n        \"cache\": {\n          \"memory\": {\n            \"hits\": 5,\n            \"misses\": 1,\n            \"total\": 6\n          },\n          \"disk\": {\n            \"hits\": 0,\n            \"misses\": 0,\n            \"total\": 0\n          }\n        },\n        \"cpu\": {\n          \"user\": 0.0,\n          \"kernel\": 0.0,\n          \"total cpu\": 0.0\n        },\n        \"memory\": {\n          \"peak_per_node\": 12582912.0\n        }\n      },\n      \"dataset_statistics\": []\n    }\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"advanced_hunting\"\n}",
+                "version": "1.2.0",
+                "name": "Microsoft 365 Defender",
+                "operationTitle": "Advanced Hunting",
+                "step_variables": [],
+                "pickFromTenant": false
+              },
+              "status": null,
+              "top": "1030",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "36ba5ab8-615c-5185-9220-1bdcfa5f2525"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Create SOAR Alert",
+              "description": null,
+              "arguments": {
+                "operation": "Replace",
+                "step_variables": [],
+                "mock_result": "{\n  \"data\": {\n    \"@id\": \"/api/3/alerts/00000000-0000-0000-0000-0000000000a1\",\n    \"id\": 101,\n    \"name\": \"M365 Defender incident 9\",\n    \"severity\": \"High\",\n    \"type\": \"Ransomware\",\n    \"description\": \"Triage of Microsoft 365 Defender incident 9 (High).\"\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"create\"\n}",
+                "resource": {
+                  "name": "M365 Defender incident {{ vars.steps.Get_Incident.data.incidentId }}",
+                  "description": "Triage of Microsoft 365 Defender incident {{ vars.steps.Get_Incident.data.incidentId }} \"{{ vars.steps.Get_Incident.data.incidentName }}\" (severity {{ vars.steps.Get_Incident.data.severity | default('unknown', true) }}). Compromised user: {{ vars.compromised_user }}. Devices in evidence: {{ vars.device_count }}. Advanced Hunting matched {{ (vars.steps.Device_Hunt.data.Results | default([], true)) | length }} network-activity row(s) in the last 24h. Response pending approval.",
+                  "severity": "/api/3/picklists/40187287-89fc-4e9c-b717-e9443d57eedb",
+                  "type": "/api/3/picklists/8b6f20f0-08ba-47f7-bc7d-233592309940"
+                },
+                "collection": "/api/3/alerts"
+              },
+              "status": null,
+              "top": "1160",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/2597053c-e718-44b4-8394-4d40fe26d357",
+              "group": null,
+              "uuid": "7e816b56-5957-56c7-9652-3c14f3166089"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Approval",
+              "description": "<b>{{ vars.steps.Get_Incident.data.incidentName }}</b> (severity {{ vars.steps.Get_Incident.data.severity | default('unknown', true) }}, status {{ vars.steps.Get_Incident.data.status | default('unknown', true) }}).<br> Compromised user: {{ vars.compromised_user }}.<br> Devices: {{ vars.device_count }} in evidence; Advanced Hunting saw {{ (vars.steps.Device_Hunt.data.Results | default([], true)) | length }} network-activity row(s).<br><br> On <b>approve</b>: incident set to In Progress / TruePositive, {{ vars.reported_ip }} blocked in the Conditional Access named location, sessions revoked for {{ vars.compromised_user }}. On <b>reject</b>: the incident stays open and the Graph alert records that the response was not approved.",
+              "arguments": {
+                "isRecordLinked": true,
+                "record": "{{ vars.steps.Create_SOAR_Alert.data['@id'] }}",
+                "owner_detail": {
+                  "isAssigned": false,
+                  "externalRecipients": "{{ vars.approver }}"
+                },
+                "inputInternalUsers": true,
+                "inline_channel_list": [
+                  "/api/3/picklists/c7c35e25-9c26-4a43-a984-4f57d2027111"
+                ],
+                "unauthenticated_input": true,
+                "type": "DecisionBased",
+                "input": {
+                  "schema": {
+                    "title": "Approve response on Defender incident {{ vars.steps.Get_Incident.data.incidentId }}?",
+                    "description": "<b>{{ vars.steps.Get_Incident.data.incidentName }}</b> (severity {{ vars.steps.Get_Incident.data.severity | default('unknown', true) }}, status {{ vars.steps.Get_Incident.data.status | default('unknown', true) }}).<br> Compromised user: {{ vars.compromised_user }}.<br> Devices: {{ vars.device_count }} in evidence; Advanced Hunting saw {{ (vars.steps.Device_Hunt.data.Results | default([], true)) | length }} network-activity row(s).<br><br> On <b>approve</b>: incident set to In Progress / TruePositive, {{ vars.reported_ip }} blocked in the Conditional Access named location, sessions revoked for {{ vars.compromised_user }}. On <b>reject</b>: the incident stays open and the Graph alert records that the response was not approved.",
+                    "inputVariables": []
+                  }
+                },
+                "is_approval": false,
+                "step_variables": [],
+                "response_mapping": {
+                  "options": [
+                    {
+                      "option": "approve",
+                      "primary": true,
+                      "step_iri": "/api/3/workflow_steps/93c5baf7-49a9-5fa1-9e49-d6c5c58c6e02"
+                    },
+                    {
+                      "option": "reject",
+                      "step_iri": "/api/3/workflow_steps/601aae6c-2a0e-515f-85e2-6601f2ad2501"
+                    }
+                  ],
+                  "duplicateOption": false,
+                  "customSuccessMessage": "Awaiting Playbook resumed successfully."
+                },
+                "email_notification": {
+                  "enabled": false,
+                  "smtpParameters": []
+                },
+                "external_channel_list": []
+              },
+              "status": null,
+              "top": "1290",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/fc04082a-d7dc-4299-96fb-6837b1baa0fe",
+              "group": null,
+              "uuid": "defb10e1-9f36-586d-9a29-55d26c155439"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Update Incident",
+              "description": null,
+              "arguments": {
+                "connector": "microsoft-365-defender",
+                "operation": "update_incident",
+                "config": "",
+                "params": {
+                  "id": "{{ vars.steps.Get_Incident.data.incidentId }}",
+                  "status": "In Progress",
+                  "classification": "TruePositive",
+                  "comment": "Containment approved via FortiSOAR (SOAR alert {{ vars.steps.Create_SOAR_Alert.data['@id'] }}): blocking {{ vars.reported_ip }} and revoking sessions for {{ vars.compromised_user }}."
+                },
+                "mock_result": "{\n  \"data\": {\n    \"status\": \"In Progress\",\n    \"assignedTo\": \"alice@contoso.example\",\n    \"classification\": \"TruePositive\",\n    \"determination\": \"MultiStagedAttack\",\n    \"tags\": [\n      \"ransomware\"\n    ],\n    \"comments\": [\n      {\n        \"comment\": \"Containment approved via FortiSOAR (SOAR alert /api/3/alerts/00000000-0000-0000-0000-0000000000a1): blocking 198.51.100.7 and revoking sessions for alice@contoso.example.\",\n        \"createdBy\": \"FortiSOAR\",\n        \"createdTime\": \"2026-11-03T11:20:00.000Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"update_incident\"\n}",
+                "version": "1.2.0",
+                "name": "Microsoft 365 Defender",
+                "operationTitle": "Update Incident",
+                "step_variables": [],
+                "pickFromTenant": false
+              },
+              "status": null,
+              "top": "1420",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "93c5baf7-49a9-5fa1-9e49-d6c5c58c6e02"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Block IPs",
+              "description": null,
+              "arguments": {
+                "connector": "microsoft-graph_dev",
+                "operation": "block_new_ips",
+                "config": "",
+                "params": {
+                  "namedLocationUuid": "{{ vars.named_location_id }}",
+                  "ipv4_ips": "{{ vars.reported_ip }}",
+                  "ipv6_ips": ""
+                },
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations/$entity\",\n    \"@odata.type\": \"#microsoft.graph.ipNamedLocation\",\n    \"id\": \"00000000-0000-0000-0000-000000000f01\",\n    \"displayName\": \"Lab blocked ranges\",\n    \"createdDateTime\": \"2026-01-10T07:00:00Z\",\n    \"modifiedDateTime\": \"2026-01-15T10:00:00Z\",\n    \"isTrusted\": false,\n    \"ipRanges\": [\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"192.0.2.0/24\"\n      },\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"198.51.100.0/24\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"block_new_ips\"\n}"
+              },
+              "status": null,
+              "top": "1550",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "5e9c1866-6d79-50d9-aeef-d6b0362b7d9e"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Revoke Sessions",
+              "description": null,
+              "arguments": {
+                "connector": "microsoft-graph_dev",
+                "operation": "revoke_user_sessions",
+                "config": "",
+                "params": {
+                  "user": "{{ vars.compromised_user }}"
+                },
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#Edm.Boolean\",\n    \"value\": true\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"revoke_user_sessions\"\n}"
+              },
+              "status": null,
+              "top": "1680",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "34d07c1b-2dd6-55dc-a7fc-be0450706b01"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Reject Comment",
+              "description": null,
+              "arguments": {
+                "connector": "microsoft-graph_dev",
+                "operation": "add_comment_on_security_alert",
+                "config": "",
+                "params": {
+                  "alert_id": "{{ vars.graph_alert_id }}",
+                  "comment": "Defender incident {{ vars.steps.Get_Incident.data.incidentId }} ({{ vars.steps.Get_Incident.data.incidentName }}): response REJECTED at approval. The incident was left open; no IPs were blocked and no sessions were revoked. See SOAR alert {{ vars.steps.Create_SOAR_Alert.data['@id'] }}."
+                },
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Defender incident 9 (Ransomware activity on one endpoint): response REJECTED at approval. The incident was left open; no IPs were blocked and no sessions were revoked. See SOAR alert /api/3/alerts/00000000-0000-0000-0000-0000000000a1.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:42:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}"
+              },
+              "status": null,
+              "top": "1420",
+              "left": "540",
+              "stepType": "/api/3/workflow_step_types/0bfed618-0316-11e7-93ae-92361f002671",
+              "group": null,
+              "uuid": "601aae6c-2a0e-515f-85e2-6601f2ad2501"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Responded",
+              "description": null,
+              "arguments": {
+                "outcome": "responded",
+                "incident_id": "{{ vars.steps.Get_Incident.data.incidentId }}",
+                "soar_alert": "{{ vars.steps.Create_SOAR_Alert.data['@id'] }}",
+                "compromised_user": "{{ vars.compromised_user }}",
+                "revoked": "{{ vars.steps.Revoke_Sessions.data.value }}",
+                "named_location": "{{ vars.steps.Block_IPs.data.displayName }}"
+              },
+              "status": null,
+              "top": "1810",
+              "left": "200",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "1934b7cb-7ed3-5aa2-8276-c4c804c5245f"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Held",
+              "description": null,
+              "arguments": {
+                "outcome": "held",
+                "incident_id": "{{ vars.steps.Get_Incident.data.incidentId }}",
+                "soar_alert": "{{ vars.steps.Create_SOAR_Alert.data['@id'] }}",
+                "compromised_user": "{{ vars.compromised_user }}",
+                "revoked": false,
+                "named_location": ""
+              },
+              "status": null,
+              "top": "1550",
+              "left": "540",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "c60e47e8-fa77-5a0a-929a-86e997952500"
+            },
+            {
+              "@type": "WorkflowStep",
+              "name": "Nothing To Triage",
+              "description": null,
+              "arguments": {
+                "outcome": "nothing_to_triage",
+                "incident_id": "",
+                "soar_alert": "",
+                "compromised_user": "",
+                "revoked": false,
+                "named_location": ""
+              },
+              "status": null,
+              "top": "770",
+              "left": "540",
+              "stepType": "/api/3/workflow_step_types/04d0cf46-b6a8-42c4-8683-60a7eaa69e8f",
+              "group": null,
+              "uuid": "72fe3745-28ec-50d5-b449-6c17182403b5"
+            }
+          ],
+          "routes": [
+            {
+              "@type": "WorkflowRoute",
+              "name": "Start -> Resolve Inputs",
+              "targetStep": "/api/3/workflow_steps/8b52c715-9f3c-5251-8ae8-28171d2e55c0",
+              "sourceStep": "/api/3/workflow_steps/c78e258b-3a16-5fec-9867-b7d02483139d",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "477a3086-9167-56f2-be43-895bcaef6182"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Resolve Inputs -> List Incidents",
+              "targetStep": "/api/3/workflow_steps/d3fa3e68-8bb0-58a0-8869-6178cb0b202a",
+              "sourceStep": "/api/3/workflow_steps/8b52c715-9f3c-5251-8ae8-28171d2e55c0",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "e1d8167a-86f2-55e5-ad1e-966c6b94b97b"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "List Incidents -> Oldest First",
+              "targetStep": "/api/3/workflow_steps/f9cb19a5-43af-5294-ad0c-17e2a1b0311e",
+              "sourceStep": "/api/3/workflow_steps/d3fa3e68-8bb0-58a0-8869-6178cb0b202a",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "dc9aa81f-e09e-52a7-96d5-35a77ea124e2"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Oldest First -> Incidents Found",
+              "targetStep": "/api/3/workflow_steps/4941d03d-0da0-5bc7-8d17-5e15d75b5d4a",
+              "sourceStep": "/api/3/workflow_steps/f9cb19a5-43af-5294-ad0c-17e2a1b0311e",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "54ece6e9-07f9-5b66-b623-cef2e3a420fe"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Incidents Found -> Get Incident",
+              "targetStep": "/api/3/workflow_steps/b57588bc-84b4-56c2-8d2f-cde13bffe949",
+              "sourceStep": "/api/3/workflow_steps/4941d03d-0da0-5bc7-8d17-5e15d75b5d4a",
+              "label": "Active incidents found",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "28bbbe2a-b611-5cee-82f3-83c9323b6e3b"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Incidents Found -> Nothing To Triage",
+              "targetStep": "/api/3/workflow_steps/72fe3745-28ec-50d5-b449-6c17182403b5",
+              "sourceStep": "/api/3/workflow_steps/4941d03d-0da0-5bc7-8d17-5e15d75b5d4a",
+              "label": "Nothing to triage",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "621a43d7-c323-5ede-8501-5f8fe49b2062"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Get Incident -> Extract Context",
+              "targetStep": "/api/3/workflow_steps/9b08c531-33df-5fdf-b4f2-b389deb44f23",
+              "sourceStep": "/api/3/workflow_steps/b57588bc-84b4-56c2-8d2f-cde13bffe949",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "dc2c864c-27a6-528f-924e-7bc28226a764"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Extract Context -> Device Hunt",
+              "targetStep": "/api/3/workflow_steps/36ba5ab8-615c-5185-9220-1bdcfa5f2525",
+              "sourceStep": "/api/3/workflow_steps/9b08c531-33df-5fdf-b4f2-b389deb44f23",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "2a0e8c3a-db36-534c-97d5-f9157d2fc672"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Device Hunt -> Create SOAR Alert",
+              "targetStep": "/api/3/workflow_steps/7e816b56-5957-56c7-9652-3c14f3166089",
+              "sourceStep": "/api/3/workflow_steps/36ba5ab8-615c-5185-9220-1bdcfa5f2525",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "a9695b99-cd1c-5c61-860c-e47601d83e5d"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Create SOAR Alert -> Approval",
+              "targetStep": "/api/3/workflow_steps/defb10e1-9f36-586d-9a29-55d26c155439",
+              "sourceStep": "/api/3/workflow_steps/7e816b56-5957-56c7-9652-3c14f3166089",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "097fb508-dcd7-581f-b88b-2dd09e53e445"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Approval -> Update Incident",
+              "targetStep": "/api/3/workflow_steps/93c5baf7-49a9-5fa1-9e49-d6c5c58c6e02",
+              "sourceStep": "/api/3/workflow_steps/defb10e1-9f36-586d-9a29-55d26c155439",
+              "label": "approve",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "af7d3de0-11b9-5d1e-ad01-54d56225a8ac"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Approval -> Reject Comment",
+              "targetStep": "/api/3/workflow_steps/601aae6c-2a0e-515f-85e2-6601f2ad2501",
+              "sourceStep": "/api/3/workflow_steps/defb10e1-9f36-586d-9a29-55d26c155439",
+              "label": "reject",
+              "isExecuted": false,
+              "group": null,
+              "uuid": "0b667e2f-b1a4-56b0-9142-3d89f58b40f6"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Update Incident -> Block IPs",
+              "targetStep": "/api/3/workflow_steps/5e9c1866-6d79-50d9-aeef-d6b0362b7d9e",
+              "sourceStep": "/api/3/workflow_steps/93c5baf7-49a9-5fa1-9e49-d6c5c58c6e02",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "0833b94d-96f9-5e94-b4d0-846e3ac54b8d"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Block IPs -> Revoke Sessions",
+              "targetStep": "/api/3/workflow_steps/34d07c1b-2dd6-55dc-a7fc-be0450706b01",
+              "sourceStep": "/api/3/workflow_steps/5e9c1866-6d79-50d9-aeef-d6b0362b7d9e",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "57fafc82-39d6-5dd3-8220-1ef7a7b41c09"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Revoke Sessions -> Responded",
+              "targetStep": "/api/3/workflow_steps/1934b7cb-7ed3-5aa2-8276-c4c804c5245f",
+              "sourceStep": "/api/3/workflow_steps/34d07c1b-2dd6-55dc-a7fc-be0450706b01",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "d354bf59-d89d-52a3-b96b-05d48be39693"
+            },
+            {
+              "@type": "WorkflowRoute",
+              "name": "Reject Comment -> Held",
+              "targetStep": "/api/3/workflow_steps/c60e47e8-fa77-5a0a-929a-86e997952500",
+              "sourceStep": "/api/3/workflow_steps/601aae6c-2a0e-515f-85e2-6601f2ad2501",
+              "label": null,
+              "isExecuted": false,
+              "group": null,
+              "uuid": "b7d2962d-26bf-5103-a1f1-ebf2dd364487"
+            }
+          ],
+          "groups": [
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: List Incidents",
+              "description": "Active incidents only, all pages (get_all_records). The datetime params are left off on purpose: they must carry fractional seconds or the connector refuses the run before any HTTP call, and a triage sweep wants everything Active, not a time slice.",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "380",
+              "left": "540",
+              "height": "160",
+              "width": "440",
+              "uuid": "d31e9a4d-6748-50f4-93be-41a29afd738d",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: Extract Context",
+              "description": "The incident's evidence carries the hunt targets: device names feed the Advanced Hunting query, the user entities name the accounts whose sessions get revoked on approval. Entities flatten across alerts; a null entities list (fresh incidents) collapses to nothing through the default filters instead of failing the render.",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "906",
+              "left": "540",
+              "height": "182",
+              "width": "440",
+              "uuid": "914ed6cb-3525-5740-86a2-e7d1d3405b3f",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: Device Hunt",
+              "description": "Read-only KQL over DeviceNetworkEvents for the incident's devices in the last 24h - the \"what did these machines actually do\" slice a responder wants before approving containment. The device list is injected as a KQL dynamic() array built from the incident evidence.",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "1108",
+              "left": "540",
+              "height": "160",
+              "width": "440",
+              "uuid": "755d5835-7422-5442-a60a-1f5a8f7f3d07",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: Update Incident",
+              "description": "Status and classification carry the decision; the comment names the SOAR alert so the Defender incident points back at the case record. Values are the connector's own display keys ('In Progress' maps to the API's InProgress on the wire).",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "1420",
+              "left": "880",
+              "height": "160",
+              "width": "440",
+              "uuid": "56d47b0b-01d4-5c07-b031-2a087735bb45",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: Block IPs",
+              "description": "The Conditional Access half of the containment, on Graph: the reported IP is appended to an existing IP named location (existing ranges are preserved). The named location must exist - create it once per tenant and pass its id; block_new_ips refuses trusted locations and non-IP locations by design.",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "1758",
+              "left": "540",
+              "height": "182",
+              "width": "440",
+              "uuid": "f3f0b880-8c3b-5028-9a65-739083403e9f",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: Revoke Sessions",
+              "description": "revokeSignInSessions kills every token issued so far for the compromised account - the user re-authenticates, an attacker holding a stolen session cookie is out.",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "1960",
+              "left": "540",
+              "height": "116",
+              "width": "440",
+              "uuid": "26fcf775-8f99-506c-ae33-a52665954457",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: Reject Comment",
+              "description": "Graph security alerts_v2 ids are a different surface from Defender alertIds, so the caller passes the Graph-side alert to annotate (graph_alert_id); on a live tenant that id comes from the matching alert in the Graph security API.",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "1600",
+              "left": "880",
+              "height": "138",
+              "width": "440",
+              "uuid": "a0e3dbaf-e7ac-549f-8493-53b59c733589",
+              "recordTags": []
+            },
+            {
+              "@type": "WorkflowGroup",
+              "name": "Note: Nothing To Triage",
+              "description": "A clean no-op: no Active incidents (or the fetch answered empty). Scheduled runs land here most days, which is the point.",
+              "type": "note",
+              "isCollapsed": false,
+              "hasTriggerStep": false,
+              "hideInLogs": true,
+              "metadata": [],
+              "reusable": false,
+              "top": "770",
+              "left": "880",
+              "height": "116",
+              "width": "440",
+              "uuid": "89d15b8a-3d73-5481-9707-c70e4e256498",
+              "recordTags": []
+            }
+          ],
+          "priority": "/api/3/picklists/9e8d41e4-8ada-4a2c-bd02-07f62c6d0a00",
+          "playbookOrigin": null,
+          "isEditable": true,
+          "uuid": "6515e285-1ade-556e-bd96-4697756dea0c",
+          "owners": [],
+          "isPrivate": false
+        }
+      ]
+    }
+  ]
+}
