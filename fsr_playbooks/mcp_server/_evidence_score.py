@@ -1241,7 +1241,8 @@ def _preread_exists(preread: dict[str, Any]) -> tuple[dict[str, bool | None], di
     exists: dict[str, bool | None] = {}
     for kind in _PREREAD_KINDS:
         exists[kind] = None if preread.get(kind) is None else bool(preread_rows(preread, kind)[0])
-    stats = preread.get("stats") if isinstance(preread.get("stats"), dict) else {}
+    raw_stats = preread.get("stats")
+    stats: dict[str, Any] = raw_stats if isinstance(raw_stats, dict) else {}
     lookup = {"ms": int(preread.get("ms") or 0),
               **{k: v for k, v in stats.items() if isinstance(v, int)}}
     return exists, lookup
