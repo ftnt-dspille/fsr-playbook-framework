@@ -36,7 +36,7 @@ URL prefix: `/api/wf/api/workflows/`.
 | `retry` | `POST /<pk>/retry/` | `(request, pk)` | "Retry a failed workflow from failed step onwards" -- restart from last failed step |
 | `approval` | `POST /<pk>/approval/` | `(request, pk)` | Approval-step shortcut. Likely takes `{decision: approve\|reject, comment}` -- needs probe |
 | `proxy` | `POST /<pk>/proxy/` | `(request, pk)` | Forwarding for cross-tenant playbook calls -- verify shape on a multi-tenant box |
-| `wfinput_resume` | `POST /<pk>/wfinput_resume/` | (cython) | Decoy -- appears canonical but the real path is `PUT /api/wf/api/manual-wf-input/<pk>/`. See `QUERY_API.md`. |
+| `wfinput_resume` | `POST /<pk>/wfinput_resume/` | (cython) | **Canonical manual-input resume.** Body: `{input: {<var>: <value>}, step_iri, step_id, manual_input_id}` (+ optional `approved`, `user`). Used by the FSR UI, the fsrpb CLI, and both bot connectors (Teams/Slack listeners POST here). The `PUT /api/wf/api/manual-wf-input/<pk>/` alternative only updates the record -- it does **not** resume the run (verified live; see `MANUAL_INPUT.md` §8). |
 | `refresh_settings` | `POST /<pk>/refresh_settings/` | (cython) | Reload appliance-wide settings; rare |
 
 ## 2. Aggregate / dashboard -- same ViewSet
@@ -71,7 +71,7 @@ URL prefix: `/api/wf/api/manual-wf-input/`.
 |---|---|---|
 | `list_wfinput` | `POST /list_wfinput/` | Hydra collection of pending inputs (GET → 405) |
 | `retrieve_wfinput` | `POST /<pk>/retrieve_wfinput/` | Adds `input.schema` + `response_mapping` |
-| (PUT detail) | `PUT /<pk>/` | Submit response -- **canonical resume**. Body: `{workflow:<int_pk>, input:<dict>, type, step_id}` |
+| (PUT detail) | `PUT /<pk>/` | Updates the input record only -- does **not** resume the run (verified live 2026-05; the canonical resume is `POST /api/wf/api/workflows/<pk>/wfinput_resume/`, see §1). |
 
 Open task #24: enumerate all input-variable + response-option shapes (text, dropdown, checkbox, file, approval, agent-routed, unauthenticated link, email channel, timeout).
 

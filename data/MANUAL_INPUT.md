@@ -157,7 +157,9 @@ The shape of a single inputVariable item (per UI bundle):
 "external_email_attachments": null
 ```
 
-Channel IRIs point at `picklist` records -- likely a "Channels" picklist namespace in your appliance. List them via `GET /api/3/picklists?listName=…&name=…`.
+Channel IRIs point at `picklist` records in the **`External Channel`** picklist namespace -- exactly three values: `Email` (order 0), `Slack` (1), `Microsoft Teams` (2).
+
+**RESOLVED (was an open probe):** how channels dispatch. Each picklist value resolves through the `rules_engine_channel` registry table (workflow DB) to a connector operation: `Microsoft Teams` → `microsoft-teams.send_message_or_approval_form_to_bot`, `Slack` → `slack.send_input`, `Email` → `smtp.send_email`. Dispatch happens at pause time via `workflow.eval.notify_manual_input` → `rules_engine` action handlers. Full chain, card format, resume path and the responder-identity gap: see `MANUAL_INPUT_CHANNELS.md`.
 
 ## 7. `timeout` -- auto-route on no response
 
@@ -191,7 +193,9 @@ Body:
   "step_id":          <int>,              // pending input's step_id (from list_wfinput)
   "manual_input_id":  <int>,              // pending input's pk
   "approved":         true|false,         // ONLY when is_approval=true: true if primary option chosen
-  "user":             "/api/3/people/<uuid>"  // current user IRI; omit for unauthenticated
+  "user":             "/api/3/people/<uuid>"  // current user IRI; omit for unauthenticated.
+                                              // IGNORED on authenticated calls: attribution is
+                                              // always the request's own principal (live-verified)
 }
 ```
 
@@ -204,6 +208,8 @@ Verified live in `python/tests/integration/test_e2e_runs.py::test_stage4_manual_
 - `POST /api/wf/api/manual-wf-input/list_wfinput/` requires a **`limit` query parameter**. Without it the endpoint 500s. The UI uses `?format=json&limit=1`. Use a generous value (e.g., `limit=200`) for full enumeration.
 - DELETE on a stuck input record (`DELETE /api/wf/api/manual-wf-input/<pk>/`) returns 204 and silently terminates that prompt -- useful for cleaning up orphaned awaiting runs from earlier failed resume attempts.
 - A single broken-state input record can cause `list_wfinput` to 500 when `limit` includes it; bisect to find the bad pk and DELETE.
+
+**Audit attribution (verified via the gateway `auditlogs` table):** every resume writes a `component: sealab, operation: Resume` row titled "Manual Input Provided To Resume Playbook [<playbook>] on <record>". `details.user` (a `/api/3/people/<uuid>` IRI) is present only when the resume was made by an authenticated user session; `details` also carries the submitted `input`, the owner-team snapshot (`__TEAMS`), `step_id` and `step_iri`. Resumes made by the Teams/Slack bot connectors are HMAC machine calls, so they are attributed to the integrations service principal -- **the bot channels never record who clicked** (see `MANUAL_INPUT_CHANNELS.md` §6).
 
 ## 9. CLI coverage
 
@@ -219,4 +225,4 @@ Auto-defaults: `--option` defaults to the primary, then the first option. `--var
 - Submit through the unauthenticated link path -- verify the public URL grammar.
 - Trigger a timeout and confirm the timeout step_iri is taken.
 - Probe `WorkflowViewSet.approval` action -- likely a shortcut for `is_approval=true` prompts that takes `{decision: approve|reject, comment}`.
-- Confirm what `inline_channel_list`/`external_channel_list` picklists look like when populated (none on dev corpus).
+- ~~Confirm what `inline_channel_list`/`external_channel_list` picklists look like when populated~~ **RESOLVED** -- see §6 and `MANUAL_INPUT_CHANNELS.md`.

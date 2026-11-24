@@ -51,3 +51,13 @@ summary: ApprovalManualInput step parameter reference.
 | `step_variables` | 3 | 100.0% | ✓ |
 | `type` | 3 | 100.0% | ✗ unrecognized |
 | `unauthenticated_input` | 3 | 100.0% | ✗ unrecognized |
+
+## Approvals delivered to Teams / Slack channels
+
+When an approval prompt is delivered through the `Microsoft Teams` or `Slack`
+channel, the approve/reject decision reaches the playbook purely through each
+button's `step_iri` routing -- the bot listeners never send the `approved`
+boolean this step type accepts. Also note the responder is **not** identified:
+the bot connectors resume the run as the integrations service principal, so the
+approval audit trail does not name the person who clicked. Details, evidence
+and workarounds: `data/MANUAL_INPUT_CHANNELS.md` (§5-§7).
