@@ -2,9 +2,9 @@
   "@odata.context": "https://api.security.microsoft.com/api/$metadata#Incidents",
   "value": [
     {
-      "incidentId": 9,
+      "incidentId": "9",
       "incidentUri": "https://api.security.microsoft.com/api/incidents/9",
-      "redirectIncidentId": "",
+      "redirectIncidentId": null,
       "incidentName": "Ransomware activity on one endpoint",
       "createdTime": "2026-11-02T09:45:51.3616613Z",
       "lastUpdateTime": "2026-11-03T11:12:05.2134802Z",
@@ -27,7 +27,7 @@
         {
           "alertId": "alert-0001",
           "providerAlertId": "00000000-0000-0000-0000-000000000001",
-          "incidentId": 9,
+          "incidentId": "9",
           "serviceSource": "Microsoft Defender for Endpoint",
           "creationTime": "2026-11-02T09:44:02.1170834Z",
           "lastUpdatedTime": "2026-11-03T10:55:00.5510421Z",

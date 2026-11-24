@@ -85,7 +85,7 @@ DeterminationOption = Literal[
 ]
 
 # info.json onchange: the determinations each classification offers.
-_DETERMINATION_BY_CLASSIFICATION: dict[str, frozenset] = {
+_DETERMINATION_BY_CLASSIFICATION: dict[str, frozenset[str]] = {
     "TruePositive": frozenset(
         {"Multistage attack", "Malicious user activity", "Compromised account",
          "Malware", "Phishing", "Unwanted software", "Other"}
@@ -99,8 +99,6 @@ _DETERMINATION_BY_CLASSIFICATION: dict[str, frozenset] = {
 }
 
 _DEFENDER_DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
-
-_CTIME_FMT = "%a %b %d %H:%M:%S %Y"
 
 # Advanced-hunting result cells are typed per column at query time: strings,
 # numbers, booleans, and dynamic (nested JSON) values. Strict scalars keep
@@ -143,8 +141,12 @@ class DefenderConnectorConfig(BaseModel):
     ``config_id``) are written back by the connector itself
     (``microsoft_api_auth.check``), not typed by a user.
 
-    ``expiresOn`` is a **ctime string** ("Mon Nov 24 10:00:00 2026"), not an
-    epoch -- ``convert_ts_epoch`` parses it back with ``%a %b %d %H:%M:%S %Y``.
+    ``expiresOn`` is an **epoch-float** (``time() + expires_in``), normalized
+    to ``float`` here from float/int/numeric-string. Live-capture-corrected
+    (2026-11): an earlier read claimed a ctime STRING; that is wrong --
+    ``convert_ts_epoch`` runs ``ctime(ts)`` on the stored value, which
+    requires a NUMBER (it produces the ctime string internally and parses it
+    back), so a preseeded ctime string crashes the op with a ValueError.
     """
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
@@ -163,7 +165,7 @@ class DefenderConnectorConfig(BaseModel):
 
     # runtime-managed by microsoft_api_auth.check / validate_token
     accessToken: str | None = None
-    expiresOn: str | None = None
+    expiresOn: float | None = None
     refresh_token: str | None = None
     config_id: str | None = None
 
@@ -177,12 +179,25 @@ class DefenderConnectorConfig(BaseModel):
             host = "https://" + host
         return host.rstrip("/")
 
-    @field_validator("expiresOn", mode="after")
+    @field_validator("expiresOn", mode="before")
     @classmethod
-    def _ctime_expires_on(cls, value: str | None) -> str | None:
-        if value is not None:
-            datetime.strptime(value, _CTIME_FMT)  # raises on drift from ctime()
-        return value
+    def _epoch_float_expires_on(cls, value: Any) -> Any:
+        """The stored value is what ``time() + expires_in`` produced: a NUMBER
+        (``convert_ts_epoch`` runs ``ctime()`` on it, so a ctime STRING or any
+        non-numeric form crashes the op). Numeric strings are tolerated --
+        ``convert_ts_epoch`` floats them itself."""
+        if value is None or isinstance(value, float):
+            return value
+        if isinstance(value, bool):
+            raise ValueError("expiresOn must be an epoch number, not a bool")
+        if isinstance(value, int):
+            return float(value)
+        if isinstance(value, str):
+            return float(value)  # raises ValueError -> clean ValidationError
+        raise ValueError(
+            "expiresOn must be an epoch float (time.time() + seconds), not "
+            f"{type(value).__name__}"
+        )
 
     @model_validator(mode="after")
     def _delegated_needs_code(self) -> DefenderConnectorConfig:
@@ -508,7 +523,11 @@ class UpdateIncidentResult(BaseModel):
 
 UpdateIncidentResponse: TypeAlias = UpdateIncidentResult | Literal[True]
 """``update_incident`` output: the updated fields, OR ``True`` when the PATCH
-body is empty (``api_request`` returns ``True`` for an empty body)."""
+body is empty (``api_request`` returns ``True`` for an empty body).
+
+The same empty-body quirk as the graph-security pair's
+``graph_common.MutationNoContentResult``; this union keeps the dict side
+typed to the connector's own output_schema instead of a bare dict."""
 
 
 class AHDatasetStat(BaseModel):
@@ -582,6 +601,11 @@ class AdvancedHuntingResponse(BaseModel):
     )
 
 
+#: Per-op PARAM models. The graph-security pair types its params only in the
+#: docstrings; this connector's params carry real platform quirks (blank-string
+#: TEXT params, the unchecked-checkbox ``get_all_records: ""``, the
+#: microseconds-only datetime format, the classification/determination pair),
+#: so they get first-class models AND a registry.
 OP_PARAM_MODELS: dict[str, type[BaseModel]] = {
     "list_incidents": ListIncidentsParams,
     "get_incident": GetIncidentParams,
@@ -589,7 +613,11 @@ OP_PARAM_MODELS: dict[str, type[BaseModel]] = {
     "advanced_hunting": AdvancedHuntingParams,
 }
 
-OP_OUTPUT_MODELS: dict[str, Any] = {
+#: Per-op OUTPUT models -- same name/shape as the graph-security pair's
+#: ``OPERATION_MODELS`` so the shared suites can route uniformly.
+#: ``update_incident`` maps to the UNION (dict or the empty-body ``True``),
+#: not a single model class.
+OPERATION_MODELS: dict[str, Any] = {
     "list_incidents": IncidentListResponse,
     "get_incident": GetIncidentResponse,
     "update_incident": UpdateIncidentResponse,
@@ -619,5 +647,5 @@ __all__ = [
     "AHDatasetStat",
     "CellValue",
     "OP_PARAM_MODELS",
-    "OP_OUTPUT_MODELS",
+    "OPERATION_MODELS",
 ]

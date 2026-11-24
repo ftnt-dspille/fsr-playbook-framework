@@ -1,7 +1,7 @@
 {
-  "incidentId": 9,
+  "incidentId": "9",
   "incidentUri": "https://api.security.microsoft.com/api/incidents/9",
-  "redirectIncidentId": "",
+  "redirectIncidentId": null,
   "incidentName": "Suspicious activity on two endpoints",
   "createdTime": "2026-11-01T08:12:40.5521101Z",
   "lastUpdateTime": "2026-11-03T09:30:12.0045511Z",
@@ -27,7 +27,7 @@
     {
       "alertId": "alert-0002",
       "providerAlertId": "00000000-0000-0000-0000-000000000003",
-      "incidentId": 9,
+      "incidentId": "9",
       "serviceSource": "Microsoft Defender for Endpoint",
       "creationTime": "2026-11-01T08:10:00.2019430Z",
       "lastUpdatedTime": "2026-11-03T09:30:12.0045511Z",

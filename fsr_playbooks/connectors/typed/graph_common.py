@@ -132,6 +132,21 @@ class AadstsTokenError(_WireModel):
     correlation_id: str | None = None
     error_uri: str | None = None
 
+    def aadsts_code(self) -> int | None:
+        """The AADSTS error number, from ``error_codes`` or the description.
+
+        Real descriptions lead with ``AADSTS<code>: ...``; ``error_codes`` is
+        the structured form when present. Returns ``None`` when neither
+        carries a number.
+        """
+        if self.error_codes:
+            return self.error_codes[0]
+        if self.error_description:
+            m = re.search(r"\bAADSTS(\d{6,7})\b", self.error_description)
+            if m:
+                return int(m.group(1))
+        return None
+
 
 class TokenResponseErrorText(_WireModel):
     """The ConnectorError text both auth modules raise for a failed token

@@ -233,7 +233,8 @@ def _install_sdk_stubs() -> None:
         sys.modules.setdefault(name, mod)
 
 
-def load_connector_package(source: ConnectorSource, soarshelf_home: Path):
+def load_connector_package(source: ConnectorSource, soarshelf_home: Path
+                           ) -> tuple[types.ModuleType, dict[str, Any]]:
     """Import a connector package (no __init__.py in the shipped dir) with
     relative imports intact."""
     pkg_dir = soarshelf_home / source.subdir
@@ -289,11 +290,12 @@ def acquire_token(tenant_id: str, client_id: str, client_secret: str,
     if resp.status_code != 200:
         raise SystemExit(
             f"token request failed: HTTP {resp.status_code}: {resp.text[:300]}")
-    return resp.json()["access_token"]
+    payload: dict[str, Any] = resp.json()
+    return str(payload["access_token"])
 
 
 def build_config(connector: str, token: str, tenant_id: str, client_id: str,
-                 client_secret: str, info: dict) -> dict[str, Any]:
+                 client_secret: str, info: dict[str, Any]) -> dict[str, Any]:
     config: dict[str, Any] = {
         "auth_type": "Without a User - Application Permission",
         "resource": GRAPH_RESOURCE,
@@ -332,8 +334,9 @@ def _coerce_value(raw: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def run_op(connector: str, source: ConnectorSource, pkg, info: dict,
-           config: dict, op: str, params: dict) -> dict:
+def run_op(connector: str, source: ConnectorSource, pkg: types.ModuleType,
+           info: dict[str, Any], config: dict[str, Any], op: str,
+           params: dict[str, Any]) -> dict[str, Any]:
     """Run one op in-process and return the fixture body (without the
     connector/op/params envelope)."""
     fn = getattr(pkg.operations, "operations", {}).get(op)
@@ -386,7 +389,8 @@ def _jsonable(result: Any) -> Any:
 
 def capture_connector(connector: str, source: ConnectorSource, soarshelf_home: Path,
                       outdir: Path, token: str, tenant_id: str, client_id: str,
-                      client_secret: str, allow_mutating: bool, overrides: dict,
+                      client_secret: str, allow_mutating: bool,
+                      overrides: dict[str, dict[str, Any]],
                       only: set[str], skip: set[str]) -> list[Path]:
     pkg, info = load_connector_package(source, soarshelf_home)
     config = build_config(connector, token, tenant_id, client_id, client_secret, info)

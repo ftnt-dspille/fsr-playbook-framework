@@ -14,7 +14,7 @@
 #   - Python deps are managed by uv. `make sync` to install/update everything.
 #     The Makefile uses `uv run` so it always picks the project venv at .venv/.
 
-.PHONY: jinja-export jinja-probe jinja-docs jinja-verify backend frontend dev e2e tests tests-random playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate enhance-live release ci-watch corpus-gate corpus-gen corpus-triage matrix tool-gate agreement mypy mypy-gate doctor db-restore wire-audit wire-census test-effect-probes
+.PHONY: jinja-export jinja-probe jinja-docs jinja-verify backend frontend dev e2e tests tests-random playbook-tests verify lint clean help sync bootstrap preflight kill-ports chat-fast chat-drive chat-calibrate enhance-live release ci-watch corpus-gate corpus-gen corpus-triage matrix tool-gate agreement mypy mypy-gate typecheck typecheck-strict doctor db-restore wire-audit wire-census test-effect-probes
 
 PY        := uv run python
 FRONTEND_DIR := web/frontend
@@ -328,6 +328,12 @@ mypy: ## mypy type-check over fsr_playbooks/compiler (default config; not --stri
 
 mypy-gate: ## ratchet gate: fail on NEW mypy errors in llm/ + mcp_server/ (baseline docs/typing/mypy_ratchet.json)
 	$(VENV_PY) scripts/mypy_gate.py
+
+typecheck: ## mypy over the typed connector-model package (default checks)
+	$(VENV_PY) -m mypy fsr_playbooks/connectors/typed
+
+typecheck-strict: ## mypy --strict over the typed connector-model package
+	$(VENV_PY) -m mypy --strict fsr_playbooks/connectors/typed
 
 doctor: ## environment preflight: version resolution, pyfsr floor, reference DB
 	$(VENV_PY) -m fsr_playbooks.doctor

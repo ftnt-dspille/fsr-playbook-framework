@@ -16,10 +16,12 @@ TEST-NET addresses, no real hostnames. Provenance for the whole set:
 v1.0.0), live-capture pending`` -- replace with promoted captures as they
 land (``scratch/captures/<connector>/<op>.json`` is the raw-capture spot).
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 _MOCKS_DIR = Path(__file__).resolve().parent
 
@@ -54,12 +56,22 @@ MOCK_FIXTURES: dict[str, dict[str, str]] = {
         "update_security_incident": "microsoft_graph_api_security/update_security_incident.json",
         "run_advanced_hunting": "microsoft_graph_api_security/run_advanced_hunting.json",
     },
+    "microsoft-365-defender": {
+        "list_incidents": "microsoft-365-defender/list_incidents.json",
+        "get_incident": "microsoft-365-defender/get_incident.json",
+        "update_incident": "microsoft-365-defender/update_incident.json",
+        "advanced_hunting": "microsoft-365-defender/advanced_hunting.json",
+    },
 }
 
 #: Shared Graph error envelopes. The same bodies serve both connectors:
 #: microsoft-graph_dev embeds them in its ``Fail To request API ...``
 #: ConnectorError text; microsoft-graph-api-security raises
 #: ``Microsoft Graph Error | Status=... | Code=... | Message=...``.
+#: The ``m365def-`` bodies are the microsoft-365-defender connector's own
+#: shapes (its ConnectorError text is the third format,
+#: ``Response [code:reason Details: message]``); they live under the
+#: connector's own directory, not the shared ``errors/``.
 ERROR_FIXTURES: dict[str, str] = {
     "graph-401-invalid-token": "errors/graph-401-invalid-token.json",
     "graph-403-forbidden": "errors/graph-403-forbidden.json",
@@ -67,10 +79,17 @@ ERROR_FIXTURES: dict[str, str] = {
     "graph-429-throttled": "errors/graph-429-throttled.json",
     "aadsts-7000215-invalid-secret": "errors/aadsts-7000215-invalid-secret.json",
     "aadsts-700016-app-not-found": "errors/aadsts-700016-app-not-found.json",
+    "m365def-401-unauthorized": "microsoft-365-defender/errors/api_401_unauthorized.json",
+    "m365def-403-forbidden": "microsoft-365-defender/errors/api_403_forbidden.json",
+    "m365def-403-not-provisioned": "microsoft-365-defender/errors/api_403_not_provisioned.json",
+    "m365def-404-incident-not-found": "microsoft-365-defender/errors/api_404_incident_not_found.json",
+    "m365def-429-throttled": "microsoft-365-defender/errors/api_429_throttled.json",
+    "m365def-400-bad-query": "microsoft-365-defender/errors/api_400_bad_query.json",
+    "m365def-aadsts-7000215-invalid-secret": "microsoft-365-defender/errors/token_aadsts_invalid_client.json",
 }
 
 
-def load_mock(connector: str, op: str) -> dict:
+def load_mock(connector: str, op: str) -> dict[str, Any]:
     """Load one op's mock fixture as a dict."""
     try:
         rel = MOCK_FIXTURES[connector][op]
@@ -79,7 +98,8 @@ def load_mock(connector: str, op: str) -> dict:
             f"no mock fixture for {connector}.{op}; known ops: "
             f"{sorted(MOCK_FIXTURES.get(connector, {}))}"
         ) from None
-    return json.loads((_MOCKS_DIR / rel).read_text())
+    parsed: dict[str, Any] = json.loads((_MOCKS_DIR / rel).read_text())
+    return parsed
 
 
 def mock_result_json(connector: str, op: str) -> str:
@@ -88,7 +108,7 @@ def mock_result_json(connector: str, op: str) -> str:
     return json.dumps(load_mock(connector, op))
 
 
-def load_error_fixture(key: str) -> dict:
+def load_error_fixture(key: str) -> dict[str, Any]:
     """Load one shared error envelope as a dict."""
     try:
         rel = ERROR_FIXTURES[key]
@@ -96,7 +116,8 @@ def load_error_fixture(key: str) -> dict:
         raise KeyError(
             f"no error fixture {key!r}; known: {sorted(ERROR_FIXTURES)}"
         ) from None
-    return json.loads((_MOCKS_DIR / rel).read_text())
+    parsed: dict[str, Any] = json.loads((_MOCKS_DIR / rel).read_text())
+    return parsed
 
 
 __all__ = [

@@ -1,9 +1,11 @@
-"""Offline tests for the Graph-security typed models + mock fixtures.
+"""Offline tests for the typed models + mock fixtures of the soarshelf
+Microsoft security connectors (m365-trial plan §8.2/8.3).
 
-The contract under test (m365-trial plan §8.2/8.3):
+The contract under test:
 
-- every registered op of both soarshelf Microsoft Graph security
-  connectors has a mock fixture and an output model;
+- every registered op of the three soarshelf Microsoft security connectors
+  (``microsoft-graph_dev``, ``microsoft-graph-api-security``,
+  ``microsoft-365-defender``) has a mock fixture and an output model;
 - every fixture validates through its model and round-trips exactly
   (``model_dump(by_alias=True, exclude_unset=True) == fixture``);
 - error envelopes validate through the error models;
@@ -22,7 +24,9 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from fsr_playbooks.connectors.typed import defender_common as dcom
 from fsr_playbooks.connectors.typed import graph_common as gc
+from fsr_playbooks.connectors.typed import microsoft_365_defender as mdef
 from fsr_playbooks.connectors.typed import microsoft_graph_api_security as sec
 from fsr_playbooks.connectors.typed import microsoft_graph_dev as dev
 from fsr_playbooks.connectors.typed.capture_graph_security import (
@@ -30,6 +34,7 @@ from fsr_playbooks.connectors.typed.capture_graph_security import (
     PARAM_SETS,
     SENTINEL_ID,
 )
+from fsr_playbooks.connectors.typed.defender_common import DefenderAPIError
 from fsr_playbooks.connectors.typed.graph_common import (
     AadstsTokenError,
     GraphErrorEnvelope,
@@ -79,8 +84,17 @@ def _all_fixture_keys() -> list[tuple[str, str]]:
 
 def _model_for(connector: str, key: str) -> type[BaseModel]:
     op = _VARIANT_OPS.get(key, key)
-    registry = DEV_OPS if connector == "microsoft-graph_dev" else SEC_OPS
-    return registry[op]
+    if connector == "microsoft-graph_dev":
+        return DEV_OPS[op]
+    if connector == "microsoft-graph-api-security":
+        return SEC_OPS[op]
+    if connector == "microsoft-365-defender":
+        # update_incident's registry entry is the dict-or-True UNION; its
+        # fixture is the dict side, so route the roundtrip through that model
+        if op == "update_incident":
+            return mdef.UpdateIncidentResult
+        return mdef.OPERATION_MODELS[op]
+    raise KeyError(connector)
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +104,9 @@ def _model_for(connector: str, key: str) -> type[BaseModel]:
 
 def test_every_registered_op_has_a_fixture_and_model() -> None:
     for registry, connector in [(DEV_OPS, "microsoft-graph_dev"),
-                                (SEC_OPS, "microsoft-graph-api-security")]:
+                                (SEC_OPS, "microsoft-graph-api-security"),
+                                (mdef.OPERATION_MODELS,
+                                 "microsoft-365-defender")]:
         mocked = set(MOCK_FIXTURES[connector])
         missing = sorted(set(registry) - mocked)
         assert not missing, f"{connector}: ops without a mock fixture: {missing}"
@@ -118,6 +134,13 @@ def test_sec_registry_covers_the_five_registered_ops() -> None:
         "get_security_incidents", "get_security_alerts", "get_security_alert",
         "update_security_incident", "run_advanced_hunting",
     }
+
+
+def test_defender_registry_covers_the_four_registered_ops() -> None:
+    assert set(mdef.OPERATION_MODELS) == {
+        "list_incidents", "get_incident", "update_incident", "advanced_hunting",
+    }
+    assert set(mdef.OP_PARAM_MODELS) == set(mdef.OPERATION_MODELS)
 
 
 # ---------------------------------------------------------------------------
@@ -216,9 +239,21 @@ def test_incident_page_alerts_pass_through_until_captured() -> None:
 @pytest.mark.parametrize("key", sorted(ERROR_FIXTURES))
 def test_error_fixture_validates(key: str) -> None:
     fixture = load_error_fixture(key)
-    model = AadstsTokenError if key.startswith("aadsts-") else GraphErrorEnvelope
+    if key.startswith("aadsts-") or key.startswith("m365def-aadsts-"):
+        model: type[BaseModel] = AadstsTokenError
+    elif key.startswith("m365def-"):
+        # the defender connector's own resource-error shape (nested OR flat)
+        model = DefenderAPIError
+    else:
+        model = GraphErrorEnvelope
     parsed = model.model_validate(fixture)
     assert parsed.model_dump(by_alias=True, exclude_unset=True) == fixture
+
+
+def test_the_defender_not_provisioned_403_is_a_registered_shape() -> None:
+    parsed = DefenderAPIError.model_validate(
+        load_error_fixture("m365def-403-not-provisioned"))
+    assert "provisioned" in parsed.error_text()
 
 
 def test_throttling_error_carries_graph_code() -> None:
@@ -325,7 +360,7 @@ def _public_models(module) -> list[type[BaseModel]]:
     return seen
 
 
-@pytest.mark.parametrize("module", [gc, dev, sec])
+@pytest.mark.parametrize("module", [gc, dev, sec, mdef, dcom])
 def test_every_model_cites_provenance(module) -> None:
     for model in _public_models(module):
         doc = " ".join((model.__doc__ or "").split())
@@ -336,7 +371,7 @@ def test_every_model_cites_provenance(module) -> None:
 
 
 def test_no_model_claims_live_verification_yet() -> None:
-    for module in (gc, dev, sec):
+    for module in (gc, dev, sec, mdef, dcom):
         for model in _public_models(module):
             assert "live-verified" not in " ".join(
                 (model.__doc__ or "").split()).lower()

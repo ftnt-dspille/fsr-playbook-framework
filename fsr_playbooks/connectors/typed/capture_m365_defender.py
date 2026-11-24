@@ -1,74 +1,214 @@
 #!/usr/bin/env python3
-"""Live capture driver for the microsoft-365-defender connector ops.
+"""proto-msftcap: capture live Microsoft 365 Defender connector fixtures.
 
-Enumerates the connector's 4 operations (list_incidents, get_incident,
-update_incident, advanced_hunting) with representative parameter sets, runs
-them against the live Microsoft 365 Defender tenant, and writes one JSON
-fixture per capture into ``scratch/captures/microsoft-365-defender/``
-(``scratch/`` is gitignored -- raw captures stay local; promote SANITIZED
-shapes into ``mocks/microsoft-365-defender/`` by hand).
+Loads the soarshelf microsoft-365-defender connector package BY PATH
+(stubbing the FortiSOAR connector SDK it imports), acquires a
+client-credentials token against the trial tenant, runs each of the 4 ops
+(list_incidents, get_incident, update_incident, advanced_hunting) with
+representative param sets, and writes one JSON fixture per capture under
+``scratch/captures/microsoft-365-defender/`` (``scratch/`` is gitignored --
+raw captures are local-only; promote SANITIZED shapes into
+``typed/mocks/microsoft-365-defender/`` by hand, never commit a raw capture).
 
-The connector package is imported BY PATH (it is a dash-named FortiSOAR
-connector source, not an installed module); the FortiSOAR connector SDK is
-stubbed in-process when absent, so this runs on any machine with
-``requests``. Credentials come ONLY from the environment:
+Fixtures follow the m365-trial plan §8.1 discipline: an op that 403s, 404s
+or 429s still produces a fixture (the error body IS a valid fixture). On the
+current trial tenant the Defender security plane is NOT provisioned yet, so
+``403 Account is not provisioned`` is the EXPECTED outcome for most/all ops
+until endpoint onboarding lands -- bank those shapes; auth itself is proven
+(the Microsoft Threat Protection SP has Incident.ReadWrite.All +
+AdvancedHunting.Read.All granted).
 
-    M365_DEFENDER_TENANT_ID      directory (tenant) id
-    M365_DEFENDER_CLIENT_ID      application (client) id
-    M365_DEFENDER_CLIENT_SECRET  application secret
-    M365_DEFENDER_RESOURCE       optional; default https://api.security.microsoft.com
+Token shape (live-capture-corrected, mirrors the FIXED
+``capture_graph_security.py``): ``acquire_token`` returns the RAW access
+token with NO ``Bearer `` prefix -- it is preseeded as ``accessToken`` and
+the connector's ``validate_token`` adds the prefix itself; a prefixed value
+produces a ``Bearer Bearer …`` header. The preseeded ``expiresOn`` is an
+epoch FLOAT (``time.time() + 3300``) -- ``convert_ts_epoch`` runs
+``ctime()`` on it, which requires a number; a ctime string crashes.
 
-Representative parameter sets are cited from the connector's own sample
-playbook (``playbooks/playbooks.json``) and the reference store's
-``operation_params`` (connector ``microsoft-365-defender``).
+Usage (from the repo root, after exporting the M365 env vars)::
 
-Error bodies are valid fixtures too: a syntactically-bad KQL query (400), a
-not-found incident id (404 -- which this connector RETURNS as a raw
-``requests.Response`` instead of raising: recorded as status/reason/body), and
-optionally (``--auth-error``) a token request with a deliberately-wrong secret
-(AADSTS envelope, raw body + the ConnectorError message the connector raises).
-
-``update_incident`` is CAPTURED NON-MUTATINGLY by default (a not-found id).
-``--write`` additionally performs one REAL update (a comment on the first
-listed incident) -- run it only against a tenant where that is acceptable.
-
-Usage (run from the fsr-playbook-framework repo root):
-
+    export M365_TENANT_ID=... M365_CLIENT_ID=... M365_CLIENT_SECRET=...
     .venv/bin/python -m fsr_playbooks.connectors.typed.capture_m365_defender \
-        [--connector-src PATH] [--out DIR] [--incident-id ID] [--write] [--auth-error]
+        [--allow-mutating] [--set update_incident.id=9] [--auth-error]
 
-Default connector source:
-``~/PycharmProjects/soarshelf/content/connectors/fetch-microsoft-365-defender-incidents-oldest-first/package/microsoft-365-defender``
-(override with ``FSRPB_DEFENDER_CONNECTOR_SRC`` or ``--connector-src``).
+``update_incident`` is captured NON-mutatingly by default (a not-found id,
+which also pins the connector's 404-returns-a-raw-Response quirk);
+``--allow-mutating`` additionally performs one REAL update (a comment on
+the first listed incident, or whatever ``--set`` points at).
+``--auth-error`` captures the raw AADSTS invalid-client body via a
+deliberately-wrong secret.
 
-This script is NOT run by the test suite; it exists so the main session can
-produce captures in one command when live creds are available.
+Env: ``M365_TENANT_ID`` / ``M365_CLIENT_ID`` / ``M365_CLIENT_SECRET``
+(required; ``M365_DEFENDER_*`` spellings accepted as fallback),
+``M365_DEFENDER_RESOURCE`` (optional; default
+https://api.security.microsoft.com), ``FSRPB_DEFENDER_CONNECTOR_SRC``
+(optional; connector source dir override).
+
+This script is NOT run by the test suite; the main session runs it when
+live creds are available.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .defender_common import load_connector_package, stub_fortisoar_connector_sdk
+import requests
 
-DEFAULT_CONNECTOR_SRC = (
-    "~/PycharmProjects/soarshelf/content/connectors/"
-    "fetch-microsoft-365-defender-incidents-oldest-first/package/microsoft-365-defender"
+from fsr_playbooks.connectors.typed.defender_common import (
+    load_connector_package,
+    parse_connector_error_message,
+    stub_fortisoar_connector_sdk,
 )
-DEFAULT_OUT = Path("scratch/captures/microsoft-365-defender")
 
-_NOT_FOUND_ID = "999999"
-_BAD_KQL = "this is not kql !!!"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_OUTDIR = REPO_ROOT / "scratch" / "captures"
+DEFAULT_CONNECTOR_SRC = (
+    Path.home()
+    / "PycharmProjects"
+    / "soarshelf"
+    / "content"
+    / "connectors"
+    / "fetch-microsoft-365-defender-incidents-oldest-first"
+    / "package"
+    / "microsoft-365-defender"
+)
+
+DEFENDER_RESOURCE = "https://api.security.microsoft.com"
+AUTH_URL = "https://login.microsoftonline.com"
+#: the connector's own scope string (microsoft_api_auth.MicrosoftAuth.scope)
+DEFENDER_SCOPE = "https://api.security.microsoft.com/.default offline_access"
+
+#: All-zero sentinel incident id: no real incident carries it, so a
+#: get/update aimed at one exercises the 404 path (which this connector
+#: RETURNS as a raw requests.Response instead of raising).
+SENTINEL_ID = "999999"
 _CAPTURE_COMMENT = "soarshelf capture"
 
+MUTATING_OPS = {"update_incident"}
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def _env(name: str, fallback: str) -> str:
+    return os.environ.get(name) or os.environ.get(fallback, "")
+
+
+def acquire_token(
+    tenant_id: str, client_id: str, client_secret: str, verify_ssl: bool = True
+) -> str:
+    """Client-credentials token -- the same request
+    ``acquire_token_with_client_credentials`` makes (scope included), done
+    here so the ops run from a pre-seeded config without the connector's
+    refresh/write-back path.
+
+    Returns the RAW access token (NO ``Bearer `` prefix): it is stored in
+    the config as ``accessToken`` and the connector's ``validate_token``
+    adds the prefix itself -- a prefixed value here produces a live-proven
+    ``Bearer Bearer …`` header.
+    """
+    resp = requests.post(
+        f"{AUTH_URL}/{tenant_id}/oauth2/v2.0/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": DEFENDER_SCOPE,
+        },
+        verify=verify_ssl,
+        timeout=60,
+    )
+    if resp.status_code != 200:
+        raise SystemExit(
+            f"token request failed: HTTP {resp.status_code}: {resp.text[:300]}"
+        )
+    payload: dict[str, Any] = resp.json()
+    return str(payload["access_token"])
+
+
+def build_config(
+    token: str,
+    tenant_id: str,
+    client_id: str,
+    client_secret: str,
+    resource: str = DEFENDER_RESOURCE,
+    verify_ssl: bool = True,
+) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "auth_type": "Without a User - Application Permission",
+        "resource": resource,
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "verify_ssl": verify_ssl,
+        "accessToken": token,  # RAW -- validate_token adds "Bearer " itself
+        # epoch float -- matches what the connector itself persists
+        # (resp['expiresOn'] = ts_now + resp['expires_in']); convert_ts_epoch
+        # calls ctime() on it, so it MUST be a number.
+        "expiresOn": time.time() + 3300,
+        "config_id": "capture",
+    }
+    return config
+
+
+def _jsonable(result: Any) -> Any:
+    """The ops return parsed JSON, ``True`` (empty body), or -- on the 404
+    path -- a raw requests.Response; make all three fixture-shaped."""
+    if isinstance(result, (bool, int, float, str)) or result is None:
+        return result
+    if isinstance(result, (dict, list)):
+        return result
+    status = getattr(result, "status_code", None)
+    if status is not None:
+        # the documented 404 quirk: api_request returns the Response itself
+        try:
+            body: Any = result.json()
+        except ValueError:
+            body = None
+        return {
+            "__response_object__": True,
+            "status_code": status,
+            "body": body,
+            "text": getattr(result, "text", "")[:2000],
+        }
+    return repr(result)
+
+
+def run_op(
+    ops: Any,
+    op: str,
+    config: dict[str, Any],
+    params: dict[str, Any],
+    connector_info: dict[str, str],
+) -> dict[str, Any]:
+    """Run one op in-process and return the fixture body (without the
+    connector/op/params envelope)."""
+    fn = getattr(ops, op, None)
+    if fn is None:
+        return {"kind": "not_registered", "message": f"op {op!r} not in operations"}
+    try:
+        result = fn(config, dict(params), dict(connector_info))
+    except Exception as exc:  # ConnectorError and friends ARE error fixtures
+        text = str(exc)
+        fixture: dict[str, Any] = {"kind": "connector_error", "message": text}
+        parsed = parse_connector_error_message(text)
+        if parsed is not None:
+            fixture["parsed"] = parsed
+        else:
+            # e.g. the KeyError degradation "ConnectorError('message')" a flat
+            # error body produces -- bank it verbatim
+            fixture["parsed"] = None
+        return fixture
+    response = _jsonable(result)
+    if isinstance(response, dict) and response.get("__response_object__"):
+        # the 404-returns-a-raw-Response quirk: a fixture, not a failure
+        return {"kind": "raw_response", "response": response}
+    return {"kind": "ok", "response": response}
 
 
 def _defender_dt(dt: datetime) -> str:
@@ -76,39 +216,20 @@ def _defender_dt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _env_creds() -> dict[str, Any] | None:
-    tenant = os.environ.get("M365_DEFENDER_TENANT_ID")
-    client = os.environ.get("M365_DEFENDER_CLIENT_ID")
-    secret = os.environ.get("M365_DEFENDER_CLIENT_SECRET")
-    if not (tenant and client and secret):
-        return None
-    config: dict[str, Any] = {
-        "auth_type": "Without a User - Application Permission",
-        "resource": os.environ.get("M365_DEFENDER_RESOURCE")
-        or "https://api.security.microsoft.com",
-        "tenant_id": tenant,
-        "client_id": client,
-        "client_secret": secret,
-        "verify_ssl": True,
-    }
-    return config
+def _load_env_file(path: Path) -> None:
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def _record_response(result: Any) -> dict[str, Any]:
-    """Shape whatever the op returned into a JSON-recordable mapping.
-
-    The op returns parsed JSON for 2xx bodies, ``True`` for an empty body,
-    and a raw ``requests.Response`` for a 404 (the connector's documented
-    quirk) -- the last one is recorded as status/reason/body.
-    """
-    if hasattr(result, "status_code"):  # raw requests.Response (404 quirk)
-        return {
-            "raw_response": True,
-            "status_code": result.status_code,
-            "reason": result.reason,
-            "body": result.text[:4000],
-        }
-    return {"raw_response": False, "body": result}
+def _coerce_value(raw: str) -> Any:
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return raw
 
 
 def _write(out_dir: Path, name: str, payload: dict[str, Any]) -> Path:
@@ -119,205 +240,308 @@ def _write(out_dir: Path, name: str, payload: dict[str, Any]) -> Path:
 
 
 def _capture(
-    ops: Any, op_name: str, params: dict[str, Any], config: dict[str, Any],
-    connector_info: dict[str, str], out_dir: Path, variant: str = "",
-) -> dict[str, Any] | None:
-    label = "{}{}.json".format(op_name, ("." + variant) if variant else "")
-    try:
-        result = getattr(ops, op_name)(config, dict(params), dict(connector_info))
-        recorded = _record_response(result)
-    except Exception as err:  # ConnectorError and friends ARE error fixtures
-        recorded = {"raised": type(err).__name__, "message": str(err)}
-        ok = False
-    else:
-        ok = not recorded.get("raw_response")
-    path = _write(out_dir, label, {
+    ops: Any,
+    op: str,
+    label: str,
+    params: dict[str, Any],
+    config: dict[str, Any],
+    connector_info: dict[str, str],
+    out_dir: Path,
+) -> dict[str, Any]:
+    name = f"{op}.json" if label == "default" else f"{op}.{label}.json"
+    fixture = {
         "connector": connector_info["connector_name"],
-        "version": connector_info["connector_version"],
-        "op": op_name,
+        "connector_version": connector_info["connector_version"],
+        "op": op,
+        "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "params": params,
-        "captured_at_utc": _utcnow().isoformat(timespec="seconds") + "Z",
-        "response": recorded,
-    })
-    status = "captured" if ok else ("ERROR (fixture)" if "raised" not in recorded
-                                    else "RAISED (fixture)")
-    print(f"  {label}: {status} -> {path}")
-    return recorded if ok else None
-
-
-def _error_probe(
-    ops: Any, op_name: str, params: dict[str, Any], config: dict[str, Any],
-    connector_info: dict[str, str], out_dir: Path, tag: str,
-) -> None:
-    """Run an op expected to FAIL and record the error shape."""
-    try:
-        result = getattr(ops, op_name)(config, dict(params), dict(connector_info))
-        recorded = _record_response(result)
-        kind = "raw_response" if recorded.get("raw_response") else "unexpected_success"
-    except Exception as err:
-        recorded = {"raised": type(err).__name__, "message": str(err)}
-        kind = "raised"
-    path = _write(out_dir, f"{op_name}.error_{tag}.json", {
-        "connector": connector_info["connector_name"],
-        "version": connector_info["connector_version"],
-        "op": op_name,
-        "params": params,
-        "captured_at_utc": _utcnow().isoformat(timespec="seconds") + "Z",
-        "error_kind": kind,
-        "response": recorded,
-    })
-    print(f"  {op_name}.error_{tag}.json: {kind} -> {path}")
-
-
-def _auth_error_probe(config: dict[str, Any], connector_info: dict[str, str],
-                      out_dir: Path) -> None:
-    """Token request with a deliberately-wrong secret -> raw AADSTS body."""
-    import requests
-
-    token_url = "https://login.microsoftonline.com/{}/oauth2/v2.0/token".format(
-        config["tenant_id"]
-    )
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": config["client_id"],
-        "client_secret": "deliberately-wrong-do-not-use",
-        "scope": "https://api.security.microsoft.com/.default offline_access",
+        **run_op(ops, op, config, params, connector_info),
     }
-    resp = requests.post(token_url, data=data, verify=config.get("verify_ssl", True))
+    path = _write(out_dir, name, fixture)
+    status = fixture["kind"]
+    if status == "connector_error" and fixture.get("parsed"):
+        status = f"connector_error/{fixture['parsed']['status_code']}"
+    print(f"  {name}: {status} -> {path}")
+    return fixture
+
+
+def _auth_error_probe(config: dict[str, Any], out_dir: Path) -> None:
+    """Token request with a deliberately-wrong secret -> raw AADSTS body."""
+    resp = requests.post(
+        f"{AUTH_URL}/{config['tenant_id']}/oauth2/v2.0/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": config["client_id"],
+            "client_secret": "deliberately-wrong-do-not-use",
+            "scope": DEFENDER_SCOPE,
+        },
+        verify=config.get("verify_ssl", True),
+        timeout=60,
+    )
     try:
         body: Any = resp.json()
     except ValueError:
         body = resp.text
-    path = _write(out_dir, "token.error_auth.json", {
-        "connector": connector_info["connector_name"],
-        "version": connector_info["connector_version"],
-        "op": "token",
-        "captured_at_utc": _utcnow().isoformat(timespec="seconds") + "Z",
-        "status_code": resp.status_code,
-        "response": {"raw_response": False, "body": body},
-    })
+    path = _write(
+        out_dir,
+        "token.error_auth.json",
+        {
+            "connector": "microsoft-365-defender",
+            "op": "token",
+            "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "kind": "token_error",
+            "status_code": resp.status_code,
+            "response": body,
+        },
+    )
     print(f"  token.error_auth.json: {resp.status_code} -> {path}")
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--connector-src", default=os.environ.get("FSRPB_DEFENDER_CONNECTOR_SRC")
-        or DEFAULT_CONNECTOR_SRC,
+    parser = argparse.ArgumentParser(
+        description="Capture live Microsoft 365 Defender fixtures into "
+        "scratch/captures/microsoft-365-defender/"
     )
-    parser.add_argument("--out", default=str(DEFAULT_OUT))
-    parser.add_argument("--incident-id", help="use this incident id instead of the first listed")
-    parser.add_argument("--write", action="store_true",
-                        help="also perform ONE real update_incident (comment)")
-    parser.add_argument("--no-error-probes", action="store_true")
-    parser.add_argument("--auth-error", action="store_true",
-                        help="also capture an AADSTS invalid-client body")
+    parser.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR)
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help="optional KEY=VALUE file for the M365_* vars",
+    )
+    parser.add_argument(
+        "--connector-src",
+        type=Path,
+        default=Path(
+            os.environ.get("FSRPB_DEFENDER_CONNECTOR_SRC", DEFAULT_CONNECTOR_SRC)
+        ),
+    )
+    parser.add_argument(
+        "--allow-mutating",
+        action="store_true",
+        help="also run update_incident for real (a comment on "
+        "the first listed incident, or the --set target)",
+    )
+    parser.add_argument(
+        "--only", action="append", default=[], help="run only this op (repeatable)"
+    )
+    parser.add_argument("--skip", action="append", default=[])
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="OP.PARAM=VALUE",
+        help="override one param (VALUE is JSON-decoded)",
+    )
+    parser.add_argument(
+        "--auth-error",
+        action="store_true",
+        help="also capture an AADSTS invalid-client body",
+    )
     args = parser.parse_args(argv)
 
-    config = _env_creds()
-    if config is None:
-        print("M365_DEFENDER_TENANT_ID / _CLIENT_ID / _CLIENT_SECRET are not set "
-              "-- nothing captured (the test suite never runs this).", file=sys.stderr)
-        return 2
+    if args.env_file:
+        _load_env_file(args.env_file)
+    tenant_id = _env("M365_TENANT_ID", "M365_DEFENDER_TENANT_ID")
+    client_id = _env("M365_CLIENT_ID", "M365_DEFENDER_CLIENT_ID")
+    client_secret = _env("M365_CLIENT_SECRET", "M365_DEFENDER_CLIENT_SECRET")
+    if not (tenant_id and client_id and client_secret):
+        parser.error(
+            "set M365_TENANT_ID / M365_CLIENT_ID / M365_CLIENT_SECRET "
+            "(or pass --env-file)"
+        )
+
+    overrides: dict[str, dict[str, Any]] = {}
+    for raw in args.set:
+        op_key, _, value = raw.partition("=")
+        op, _, param = op_key.partition(".")
+        if not op or not param:
+            parser.error(f"--set expects OP.PARAM=VALUE, got {raw!r}")
+        overrides.setdefault(op, {})[param] = _coerce_value(value)
 
     stubbed = stub_fortisoar_connector_sdk()
-    src = Path(args.connector_src).expanduser()
+    src = args.connector_src.expanduser()
     pkg = load_connector_package(src, "fsrpb_capture_m365_defender")
     ops = pkg.operations
-    info_path = src / "info.json"
-    info = json.loads(info_path.read_text())
+    info = json.loads((src / "info.json").read_text())
     connector_info = {
         "connector_name": info["name"],
         "connector_version": info["version"],
     }
-    out_dir = Path(args.out)
-    print("capturing {} v{} from {} (SDK stubbed: {})".format(
-        connector_info["connector_name"], connector_info["connector_version"],
-        src, stubbed,
-    ))
-    print(f"config keys used: {sorted(config.keys())}")
+    resource = os.environ.get("M365_DEFENDER_RESOURCE") or DEFENDER_RESOURCE
+    config = build_config(
+        acquire_token(tenant_id, client_id, client_secret),
+        tenant_id,
+        client_id,
+        client_secret,
+        resource=resource,
+    )
+    out_dir = args.outdir / connector_info["connector_name"]
+    print(
+        f"capturing {connector_info['connector_name']} "
+        f"v{connector_info['connector_version']} from {src} "
+        f"(SDK stubbed: {stubbed})"
+    )
+    print("config keys: " + ", ".join(sorted(config.keys())))
 
-    # mint + cache the token exactly like the connector's health check does
-    check = getattr(ops, "check")
-    try:
-        check(config, dict(connector_info))
-    except Exception as err:
-        print(f"token mint FAILED: {type(err).__name__}: {err}",
-              file=sys.stderr)
-        print("(if the creds are right but the tenant rejects the grant, capture "
-              "the body with --auth-error)", file=sys.stderr)
-        return 1
-    print("token minted (accessToken present: {})".format(bool(config.get("accessToken"))))
+    only = set(args.only)
+    skip = set(args.skip)
 
-    failures: list[str] = []
+    def wanted(op: str) -> bool:
+        return (not only or op in only) and op not in skip
 
     # -- list_incidents ------------------------------------------------------
-    week_ago = _defender_dt(_utcnow() - timedelta(days=7))
-    primary = _capture(ops, "list_incidents", {
-        "get_all_records": False, "top": 5,
-    }, config, connector_info, out_dir)
-    if primary is None:
-        failures.append("list_incidents")
-    _capture(ops, "list_incidents", {
-        "status": ["Active"], "get_all_records": False, "top": 5,
-    }, config, connector_info, out_dir, variant="status_active")
-    _capture(ops, "list_incidents", {
-        "get_all_records": True, "query": f"lastUpdateTime ge {week_ago}",
-    }, config, connector_info, out_dir, variant="incremental_pull")
-    _capture(ops, "list_incidents", {
-        "lastUpdateTime": week_ago, "get_all_records": False, "top": 5,
-    }, config, connector_info, out_dir, variant="lastupdatetime_param")
+    week_ago = _defender_dt(
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+    )
+    primary: dict[str, Any] | None = None
+    if wanted("list_incidents"):
+        primary = _capture(
+            ops,
+            "list_incidents",
+            "default",
+            {"get_all_records": False, "top": 5},
+            config,
+            connector_info,
+            out_dir,
+        )
+        _capture(
+            ops,
+            "list_incidents",
+            "status_active",
+            {"status": ["Active"], "get_all_records": False, "top": 5},
+            config,
+            connector_info,
+            out_dir,
+        )
+        _capture(
+            ops,
+            "list_incidents",
+            "incremental_pull",
+            {"get_all_records": True, "query": f"lastUpdateTime ge {week_ago}"},
+            config,
+            connector_info,
+            out_dir,
+        )
+        _capture(
+            ops,
+            "list_incidents",
+            "lastupdatetime_param",
+            {"lastUpdateTime": week_ago, "get_all_records": False, "top": 5},
+            config,
+            connector_info,
+            out_dir,
+        )
 
-    # -- get_incident (id from the listing) ----------------------------------
-    first = None
-    if primary and isinstance(primary.get("body"), dict):
-        value = primary["body"].get("value") or []
-        if value:
-            first = str(value[0].get("incidentId"))
-    incident_id = args.incident_id or first
-    if incident_id:
-        if _capture(ops, "get_incident", {"id": incident_id},
-                    config, connector_info, out_dir) is None:
-            failures.append("get_incident")
-    else:
-        failures.append("get_incident (no incident id available)")
-        print("  get_incident: SKIPPED -- listing returned no incidents")
+    # -- get_incident (real id from the listing when one came back) ----------
+    if wanted("get_incident"):
+        first: str | None = None
+        if primary and primary.get("kind") == "ok":
+            value = (primary.get("response") or {}).get("value") or []
+            if value:
+                first = str(value[0].get("incidentId"))
+        _capture(
+            ops,
+            "get_incident",
+            "not_found",
+            {"id": SENTINEL_ID},
+            config,
+            connector_info,
+            out_dir,
+        )
+        if first:
+            _capture(
+                ops,
+                "get_incident",
+                "first_listed",
+                {"id": first},
+                config,
+                connector_info,
+                out_dir,
+            )
+        else:
+            print(
+                "  get_incident.first_listed: SKIPPED -- listing returned "
+                "no incidents (a 403-not-provisioned tenant will not)"
+            )
 
-    # -- update_incident (non-mutating by default) ---------------------------
-    if args.write and incident_id:
-        if _capture(ops, "update_incident", {
-            "id": incident_id, "comment": _CAPTURE_COMMENT,
-        }, config, connector_info, out_dir) is None:
-            failures.append("update_incident")
-    else:
-        if not args.write:
-            print("  update_incident: capture is non-mutating by default "
-                  "(--write performs one real comment update)")
+    # -- update_incident (non-mutating by default: the sentinel 404 pins the
+    # raw-Response quirk; --allow-mutating adds one real comment update) -----
+    if wanted("update_incident"):
+        _capture(
+            ops,
+            "update_incident",
+            "not_found",
+            {"id": SENTINEL_ID, "comment": _CAPTURE_COMMENT},
+            config,
+            connector_info,
+            out_dir,
+        )
+        if args.allow_mutating:
+            target = str(
+                overrides.get("update_incident", {}).get("id")
+                or (primary or {})
+                .get("response", {})
+                .get("value", [{}])[0]
+                .get("incidentId", SENTINEL_ID)
+            )
+            params = {"id": target, "comment": _CAPTURE_COMMENT}
+            params.update(
+                {
+                    k: v
+                    for k, v in overrides.get("update_incident", {}).items()
+                    if k != "id"
+                }
+            )
+            _capture(
+                ops,
+                "update_incident",
+                "comment_update",
+                params,
+                config,
+                connector_info,
+                out_dir,
+            )
+        else:
+            print(
+                "  update_incident.comment_update: SKIP (mutating; "
+                "--allow-mutating to run)"
+            )
 
     # -- advanced_hunting ----------------------------------------------------
-    if _capture(ops, "advanced_hunting", {
-        "Query": "DeviceInfo | take 5",
-    }, config, connector_info, out_dir) is None:
-        failures.append("advanced_hunting")
-    _capture(ops, "advanced_hunting", {
-        "Query": 'search DeviceName: "abc"',
-    }, config, connector_info, out_dir, variant="sample_search")
+    if wanted("advanced_hunting"):
+        _capture(
+            ops,
+            "advanced_hunting",
+            "default",
+            {"Query": "DeviceInfo | take 5"},
+            config,
+            connector_info,
+            out_dir,
+        )
+        _capture(
+            ops,
+            "advanced_hunting",
+            "sample_search",
+            {"Query": 'search DeviceName: "abc"'},
+            config,
+            connector_info,
+            out_dir,
+        )
+        _capture(
+            ops,
+            "advanced_hunting",
+            "bad_kql",
+            {"Query": "this is not kql !!!"},
+            config,
+            connector_info,
+            out_dir,
+        )
 
-    # -- error bodies (valid fixtures too) ------------------------------------
-    if not args.no_error_probes:
-        _error_probe(ops, "get_incident", {"id": _NOT_FOUND_ID},
-                     config, connector_info, out_dir, "not_found")
-        _error_probe(ops, "update_incident", {"id": _NOT_FOUND_ID},
-                     config, connector_info, out_dir, "not_found")
-        _error_probe(ops, "advanced_hunting", {"Query": _BAD_KQL},
-                     config, connector_info, out_dir, "bad_kql")
     if args.auth_error:
-        _auth_error_probe(config, connector_info, out_dir)
+        _auth_error_probe(config, out_dir)
 
-    print(f"done. fixtures in {out_dir.resolve()}")
-    if failures:
-        print("FAILED primary captures: {}".format(", ".join(failures)), file=sys.stderr)
-        return 1
+    print(f"done: fixtures under {out_dir}")
     return 0
 
 

@@ -38,6 +38,27 @@ from fsr_playbooks.connectors.typed.graph_common import (
     extract_error_body,
     parse_graph_connector_error,
 )
+from fsr_playbooks.connectors.typed.microsoft_365_defender import (
+    OP_PARAM_MODELS as M365_DEFENDER_OP_PARAM_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_365_defender import (
+    OPERATION_MODELS as M365_DEFENDER_OPERATION_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_365_defender import (
+    AdvancedHuntingParams,
+    AdvancedHuntingResponse,
+    DefenderConnectorConfig,
+    GetIncidentParams,
+    GetIncidentResponse,
+    Incident,
+    IncidentAlert,
+    IncidentComment,
+    IncidentListResponse,
+    ListIncidentsParams,
+    UpdateIncidentParams,
+    UpdateIncidentResponse,
+    UpdateIncidentResult,
+)
 from fsr_playbooks.connectors.typed.microsoft_graph_api_security import (
     OPERATION_MODELS as API_SECURITY_OPERATION_MODELS,
 )
@@ -84,27 +105,6 @@ from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
 from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
     IncidentsPage as GraphDevIncidentsPage,
 )
-from fsr_playbooks.connectors.typed.microsoft_365_defender import (
-    OP_OUTPUT_MODELS as M365_DEFENDER_OP_OUTPUT_MODELS,
-)
-from fsr_playbooks.connectors.typed.microsoft_365_defender import (
-    OP_PARAM_MODELS as M365_DEFENDER_OP_PARAM_MODELS,
-)
-from fsr_playbooks.connectors.typed.microsoft_365_defender import (
-    AdvancedHuntingParams,
-    AdvancedHuntingResponse,
-    DefenderConnectorConfig,
-    GetIncidentParams,
-    GetIncidentResponse,
-    Incident,
-    IncidentAlert,
-    IncidentComment,
-    IncidentListResponse,
-    ListIncidentsParams,
-    UpdateIncidentParams,
-    UpdateIncidentResponse,
-    UpdateIncidentResult,
-)
 
 __all__ = [
     "AadstsTokenError", "AlertComment", "AlertUnion",
@@ -127,7 +127,7 @@ __all__ = [
     "RevokeSessionsResult", "RiskyUser", "RiskyUserRecord", "RiskyUsersPage",
     "SecurityAlertResult", "SecurityAlertsAnyVersionPage",
     "AlertCommentsPage", "ThreadedMailResult",
-    "M365_DEFENDER_OP_OUTPUT_MODELS", "M365_DEFENDER_OP_PARAM_MODELS",
+    "M365_DEFENDER_OPERATION_MODELS", "M365_DEFENDER_OP_PARAM_MODELS",
     "AdvancedHuntingParams", "AdvancedHuntingResponse",
     "DefenderConnectorConfig", "GetIncidentParams", "GetIncidentResponse",
     "Incident", "IncidentAlert", "IncidentComment", "IncidentListResponse",
