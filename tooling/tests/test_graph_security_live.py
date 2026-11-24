@@ -124,4 +124,9 @@ def test_preseeded_config_carries_both_tenant_field_names(live_config) -> None:
     sec_config = live_config["microsoft-graph-api-security"]
     assert dev_config["tenant"] == _TENANT and "tenant_id" not in dev_config
     assert sec_config["tenant_id"] == _TENANT and "tenant" not in sec_config
-    assert dev_config["accessToken"].startswith("Bearer ")
+    # RAW token: validate_token adds the "Bearer " prefix itself; a prefixed
+    # value here becomes a live-proven "Bearer Bearer …" header (Graph
+    # InvalidAuthenticationToken).
+    assert dev_config["accessToken"].startswith("eyJ")
+    assert not dev_config["accessToken"].startswith("Bearer ")
+    assert sec_config["accessToken"].startswith("eyJ")

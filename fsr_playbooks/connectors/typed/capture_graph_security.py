@@ -267,7 +267,14 @@ def acquire_token(tenant_id: str, client_id: str, client_secret: str,
                   verify_ssl: bool = True) -> str:
     """Client-credentials token -- the same request
     ``acquire_token_with_client_credentials`` makes, done here so the ops
-    can run from a pre-seeded config without the msal/refresh path."""
+    can run from a pre-seeded config without the msal/refresh path.
+
+    Returns the RAW access token (no ``Bearer `` prefix): it is stored in the
+    config as ``accessToken`` and the connector's ``validate_token`` adds the
+    prefix itself -- a prefixed value here produces a live-proven
+    ``Bearer Bearer …`` header (Graph: InvalidAuthenticationToken, "The token
+    could not be read").
+    """
     resp = requests.post(
         f"{AUTH_URL}/{tenant_id}/oauth2/v2.0/token",
         data={
@@ -282,7 +289,7 @@ def acquire_token(tenant_id: str, client_id: str, client_secret: str,
     if resp.status_code != 200:
         raise SystemExit(
             f"token request failed: HTTP {resp.status_code}: {resp.text[:300]}")
-    return "Bearer " + resp.json()["access_token"]
+    return resp.json()["access_token"]
 
 
 def build_config(connector: str, token: str, tenant_id: str, client_id: str,
@@ -294,9 +301,11 @@ def build_config(connector: str, token: str, tenant_id: str, client_id: str,
         "client_secret": client_secret,
         "verify_ssl": True,
         "accessToken": token,
-        # ctime string -- both connectors parse expiresOn with
-        # strptime(ctime(ts), "%a %b %d %H:%M:%S %Y")
-        "expiresOn": time.ctime(time.time() + 3300),
+        # epoch float -- matches what the connector itself persists
+        # (resp['expiresOn'] = ts_now + resp['expires_in']); convert_ts_epoch
+        # calls ctime(ts) on it, so it MUST be a number, and its string
+        # fallback branch wants '%Y-%m-%d %H:%M:%S.%f', not a ctime string.
+        "expiresOn": time.time() + 3300,
         "config_id": "capture",
         "connector_info": {
             "connector_name": info.get("name", connector),

@@ -382,12 +382,18 @@ class GraphThrottleMeta(_WireModel):
 
 
 def parse_graph_connector_error(text: str) -> GraphConnectorErrorText | None:
-    """Parse the microsoft-graph-api-security ConnectorError text.
+    """Parse the two ConnectorError text shapes the graph-security pair raises.
 
-    Its ``api_request`` raises
+    microsoft-graph-api-security ``api_request`` raises
     ``Microsoft Graph Error | Status=<int> | Code=<str> | Message=<str>``
     where Code/Message come out of the GraphErrorEnvelope body (or
     ``NonJSONResponse`` / the raw text when the body was not JSON).
+
+    microsoft-graph_dev ``api_request`` raises
+    ``Fail To request API <url> response is :b'<json bytes>' with reason:
+    <Reason>`` — the JSON body is embedded as a bytes repr and the status is
+    only present as the requests reason word (live-proven shape: Graph
+    security endpoints 403 "Account is not provisioned" land here).
     """
     m = re.match(
         r"^Microsoft Graph Error \| Status=(?P<status>\d+) "
@@ -395,13 +401,44 @@ def parse_graph_connector_error(text: str) -> GraphConnectorErrorText | None:
         text.strip(),
         re.DOTALL,
     )
-    if not m:
-        return None
-    return GraphConnectorErrorText(
-        status=int(m.group("status")),
-        code=m.group("code"),
-        message=m.group("message"),
+    if m:
+        return GraphConnectorErrorText(
+            status=int(m.group("status")),
+            code=m.group("code"),
+            message=m.group("message"),
+        )
+    m = re.match(
+        r"^Fail To request API (?P<url>\S+) response is :b?'?(?P<body>.*?)'?;"
+        r"? with reason: (?P<reason>[A-Za-z ]+)$",
+        text.strip(),
+        re.DOTALL,
     )
+    if m:
+        reason_to_status = {
+            "Unauthorized": 401,
+            "Forbidden": 403,
+            "NotFound": 404,
+            "BadRequest": 400,
+            "Conflict": 409,
+            "TooManyRequests": 429,
+            "InternalServerError": 500,
+        }
+        # the reason is the requests HTTP phrase ("Not Found"); strip spaces
+        status = reason_to_status.get(m.group("reason").replace(" ", ""), 0)
+        # the embedded body carries the authoritative code/message
+        body = extract_error_body(m.group("body"))
+        code = ""
+        message = m.group("body")[:300]
+        if body:
+            err = body.get("error", body)
+            code = str(err.get("code", ""))
+            message = str(err.get("message", message))
+        return GraphConnectorErrorText(
+            status=status,
+            code=code,
+            message=message,
+        )
+    return None
 
 
 class GraphConnectorErrorText(_WireModel):
