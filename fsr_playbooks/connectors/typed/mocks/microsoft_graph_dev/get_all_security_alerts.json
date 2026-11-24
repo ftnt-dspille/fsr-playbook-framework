@@ -1,0 +1,54 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#security#security/alerts",
+  "value": [
+    {
+      "id": "00000000-0000-0000-0000-000000000a01",
+      "azureTenantId": "00000000-0000-0000-0000-000000000000",
+      "azureSubscriptionId": null,
+      "riskScore": "48",
+      "tags": [
+        "Test-Tag"
+      ],
+      "activityGroupName": null,
+      "assignedTo": "bob@contoso.example",
+      "category": "Persistence",
+      "closedDateTime": null,
+      "comments": [],
+      "confidence": 60,
+      "createdDateTime": "2026-01-15T09:00:00Z",
+      "description": "Synthetic alert for offline fixtures.",
+      "detectionIds": [],
+      "eventDateTime": "2026-01-15T08:55:00Z",
+      "feedback": "unknown",
+      "incidentIds": [],
+      "lastEventDateTime": "2026-01-15T08:55:00Z",
+      "lastModifiedDateTime": "2026-01-15T09:05:00Z",
+      "recommendedActions": [
+        "Isolate the device"
+      ],
+      "severity": "medium",
+      "sourceMaterials": [],
+      "status": "newAlert",
+      "title": "Synthetic persistence activity",
+      "vendorInformation": {
+        "provider": "WindowsDefenderATP",
+        "providerVersion": "1.0",
+        "subProvider": null,
+        "vendor": "Microsoft"
+      },
+      "hostStates": [
+        {
+          "fqdn": "workstation01.contoso.example",
+          "isAzureAdJoined": true,
+          "isAzureAdRegistered": false,
+          "isHybridAzureDomainJoined": false,
+          "netBiosName": "WORKSTATION01",
+          "os": "Windows",
+          "privateIpAddress": "192.0.2.10",
+          "publicIpAddress": "198.51.100.7",
+          "riskScore": "30"
+        }
+      ]
+    }
+  ]
+}

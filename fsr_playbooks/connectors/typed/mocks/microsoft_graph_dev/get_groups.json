@@ -1,0 +1,20 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#groups",
+  "value": [
+    {
+      "id": "00000000-0000-0000-0000-000000000e01",
+      "deletedDateTime": null,
+      "classification": null,
+      "createdDateTime": "2026-01-10T12:00:00Z",
+      "description": "Synthetic security group for fixtures.",
+      "displayName": "SOAR Lab Responders",
+      "expirationDateTime": null,
+      "groupTypes": [],
+      "mail": null,
+      "mailEnabled": false,
+      "mailNickname": "soar-lab-responders",
+      "securityEnabled": true,
+      "visibility": null
+    }
+  ]
+}

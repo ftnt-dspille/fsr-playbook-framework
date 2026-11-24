@@ -1,0 +1,19 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#groups('00000000-0000-0000-0000-000000000e01')/members",
+  "value": [
+    {
+      "@odata.type": "#microsoft.graph.user",
+      "id": "00000000-0000-0000-0000-000000000001",
+      "businessPhones": [],
+      "displayName": "Alice Chen",
+      "givenName": "Alice",
+      "jobTitle": "SOC Analyst",
+      "mail": "alice@contoso.example",
+      "mobilePhone": null,
+      "officeLocation": null,
+      "preferredLanguage": "en-US",
+      "surname": "Chen",
+      "userPrincipalName": "alice@contoso.example"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "00000000-0000-0000-0000-000000000b01",
+  "tenantId": "00000000-0000-0000-0000-000000000000",
+  "title": "Synthetic phishing campaign",
+  "status": "inProgress",
+  "category": "InitialAccess",
+  "classification": "unknown",
+  "determination": "unknown",
+  "severity": "high",
+  "assignedTo": "bob@contoso.example",
+  "serviceSource": "microsoftDefenderForEndpoint",
+  "productName": "Microsoft Defender for Endpoint",
+  "createdDateTime": "2026-01-15T09:01:00Z",
+  "lastUpdateDateTime": "2026-01-15T09:05:00Z",
+  "comments": [],
+  "evidence": []
+}

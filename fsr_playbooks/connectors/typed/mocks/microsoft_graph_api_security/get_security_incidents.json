@@ -1,0 +1,18 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#security#security/incidents",
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/security/incidents?$skip=50",
+  "value": [
+    {
+      "id": "00000000-0000-0000-0000-000000000c01",
+      "title": "Synthetic multi-stage incident",
+      "status": "active",
+      "severity": "high",
+      "classification": "unknown",
+      "determination": "unknown",
+      "assignedTo": null,
+      "createdDateTime": "2026-01-15T09:01:00Z",
+      "lastUpdateDateTime": "2026-01-15T09:05:00Z",
+      "incidentWebUrl": "https://security.microsoft.com/incidents/00000000-0000-0000-0000-000000000c01"
+    }
+  ]
+}
