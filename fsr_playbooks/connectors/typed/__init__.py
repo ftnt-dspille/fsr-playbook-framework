@@ -11,7 +11,10 @@ the wire.
 First connectors typed: the soarshelf Microsoft Graph security pair
 (``microsoft-graph_dev`` 17 ops, ``microsoft-graph-api-security`` 5 ops) and
 ``microsoft-365-defender`` (4 ops; its models import the shared error shapes
-from ``graph_common``). The consumer is the playbook side: connector outputs
+from ``graph_common``). The Management Activity API (the audit plane) is
+typed the same way but consumed directly over REST -- see
+``microsoft_management_activity`` / ``capture_management_activity``.
+The consumer is the playbook side: connector outputs
 land under ``vars.steps.<step>.data.<field>`` in production and directly on
 ``vars.steps.<step>.<field>`` under ``--mock`` (mock_result verbatim, no
 envelope -- see the linter's mock-envelope rule).
@@ -105,6 +108,28 @@ from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
 from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
     IncidentsPage as GraphDevIncidentsPage,
 )
+from fsr_playbooks.connectors.typed.microsoft_management_activity import (
+    OPERATION_MODELS as MANAGEMENT_ACTIVITY_OPERATION_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_management_activity import (
+    ActivityAPIErrorBody,
+    AppAccessContext,
+    AuditRecordPage,
+    CommonAuditRecord,
+    ContentListItem,
+    ContentPage,
+    EntraAuditRecord,
+    EntraAuditRecordPage,
+    GeneralAuditRecord,
+    GeneralAuditRecordPage,
+    IdentityTypeValuePair,
+    ManagementActivityAPIError,
+    ManagementActivityWebhook,
+    ModifiedProperty,
+    NameValuePair,
+    SubscriptionListItem,
+    SubscriptionsPage,
+)
 
 __all__ = [
     "AadstsTokenError", "AlertComment", "AlertUnion",
@@ -133,4 +158,11 @@ __all__ = [
     "Incident", "IncidentAlert", "IncidentComment", "IncidentListResponse",
     "ListIncidentsParams", "UpdateIncidentParams", "UpdateIncidentResponse",
     "UpdateIncidentResult",
+    "MANAGEMENT_ACTIVITY_OPERATION_MODELS", "ActivityAPIErrorBody",
+    "AppAccessContext", "AuditRecordPage", "CommonAuditRecord",
+    "ContentListItem", "ContentPage", "EntraAuditRecord",
+    "EntraAuditRecordPage", "GeneralAuditRecord", "GeneralAuditRecordPage",
+    "IdentityTypeValuePair", "ManagementActivityAPIError",
+    "ManagementActivityWebhook", "ModifiedProperty", "NameValuePair",
+    "SubscriptionListItem", "SubscriptionsPage",
 ]

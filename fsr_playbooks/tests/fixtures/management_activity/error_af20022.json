@@ -1,0 +1,6 @@
+{
+    "error": {
+        "code": "AF20022",
+        "message": "No subscription found for the specified content type."
+    }
+}
