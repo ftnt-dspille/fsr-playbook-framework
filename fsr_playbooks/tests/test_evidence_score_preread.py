@@ -412,3 +412,44 @@ def test_an_asset_row_that_cites_a_change_number_does_not_undermine_a_benign_clo
     assert row_relevant(bad, "benign", [ALERT_T], [IP], "asset") is True
     # the conviction side does not look at the kind
     assert row_relevant(asset, "true_positive", [ALERT_T], [IP], "asset") is True
+
+
+# ---- a hold always names its record --------------------------------------------------
+
+# the known-answer world where the asset leans benign and the standing change scopes
+# the approval to a range that excludes the alert's destination
+SCOPED_ASSET = {"name": HOST, "ipAddress": HOST_IP, "hostName": HOST,
+                "description": "Vendor support jump host. Sessions to the vendor support "
+                               "portal are expected. The vendor rotates portal addresses."}
+SCOPED_CHANGE = {"number": "CHG-7102", "state": "Implement", "approval": "approved",
+                 "short_description": "Vendor support portal egress",
+                 "description": f"Approved standing change: {HOST} may reach the vendor support "
+                                "portal range 198.51.100.0/24 only. Any other destination is "
+                                "not covered by this change.",
+                 "start_date": "2026-01-01 00:00:00", "end_date": "2026-12-31 23:59:00"}
+
+
+def test_a_verdict_that_quotes_the_change_scope_is_not_contradicted_by_that_change():
+    text = (f"{HOST} ({HOST_IP}) is beaconing to {IP}, outside its approved egress scope "
+            "(CHG-7102 covers 198.51.100.0/24 only).")
+    c = {"id": "v", "disposition": "true_positive", "confidence": 0.7, "summary": text,
+         "findings": [{"claim": text, "evidence": ["a"]}]}
+    p = check(c, preread=pre(asset=[SCOPED_ASSET], change={"result": [SCOPED_CHANGE]}))
+    assert p["status"] == "read" and p["contradicted_by"] == []
+    assert p["preread"]["relevant"] == [] and p["preread"]["hold"] is False
+    # the same change does contradict a verdict that accuses an address it names
+    named = {**SCOPED_CHANGE, "description": SCOPED_CHANGE["description"] + f" Also {IP}."}
+    p = check(c, preread=pre(asset=[SCOPED_ASSET], change={"result": [named]}))
+    assert p["status"] == "contradicted"
+
+
+def test_every_hold_names_the_record_that_caused_it():
+    # a conflict hold (the turn's own contradiction) says which kinds
+    p = check(card(), preread=pre(change={"result": [chg(WINDOW_OPEN)]}))
+    r = p["preread"]
+    assert r["hold"] is True and (r["relevant"] or r.get("conflict") or r.get("unparsed_record"))
+    c2 = check(card(), reg={**UNREAD, "asset": __import__("test_evidence_score_premise").asset_read(
+        SANDBOX_ASSET)}, preread=pre(asset=[], change=[]))
+    r2 = c2["preread"]
+    assert c2["status"] == "contradicted" and r2["hold"] is True
+    assert r2["conflict"] == ["asset"] and r2["relevant"] == []

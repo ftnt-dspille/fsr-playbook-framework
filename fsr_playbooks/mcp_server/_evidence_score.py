@@ -1420,7 +1420,10 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     subject = _subject_names(card, registry, subject_rec,
                              list(known_names or []) + list((pre or {}).get("names") or []))
     verdict_external = set()
-    for i in identifiers(*_verdict_text(card)):
+    # A network the verdict quotes (the scope of a change it cites as NOT covering
+    # the destination) is not an address it accuses: its base address must not make
+    # that change "name" the verdict's address.
+    for i in identifiers(*[_CIDR.sub(" ", t) for t in _verdict_text(card)]):
         try:
             if "." in i and _is_external(i):
                 verdict_external.add(i)
@@ -1497,7 +1500,10 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
         dest |= {ev["dst"] for ev in known_events or [] if ev.get("dst")}
         review = preread_review(card, pre, alert_at, sorted(dest))
         if out["status"] == "contradicted":
+            # a conflict the turn found holds on its own; say which kinds, so a
+            # hold always names its record (relevant, conflict or unparsed_record)
             review["hold"] = True
+            review["conflict"] = sorted(contra_kinds)
         if review.get("unparsed_record"):
             out["unparsed_record"] = True
         if pre.get("ms") is not None:
