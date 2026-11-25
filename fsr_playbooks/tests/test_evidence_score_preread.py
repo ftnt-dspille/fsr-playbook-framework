@@ -453,3 +453,57 @@ def test_every_hold_names_the_record_that_caused_it():
     r2 = c2["preread"]
     assert c2["status"] == "contradicted" and r2["hold"] is True
     assert r2["conflict"] == ["asset"] and r2["relevant"] == []
+
+
+# ---- an empty answer is not an unreadable record ------------------------------------------
+
+#: Empty answers, each with where its shape comes from. The first group is what the
+#: lookups return today (the ServiceNow change API body, the FortiSOAR collection, the
+#: Jira search body, the run_op envelope, the agent-proxied stub); the second is a
+#: wrapper or text that carries no rows.
+EMPTY_ANSWERS = [
+    {"result": []},                                                    # ServiceNow change list
+    {"hydra:member": [], "hydra:totalItems": 0, "@id": "/api/3/assets"},  # FortiSOAR collection
+    {"issues": [], "isLast": True},                                    # Jira search body
+    {"issues": [], "total": 0, "jql": "text ~ \"h\"", "truncated": False},  # Jira fetch_all body
+    {"data": [], "status": "Success"},                                 # run_op envelope
+    {"remote_status": "in-progress", "result": {}},                    # agent-proxied stub
+    {"data": None},
+    {"result": None, "status": "Success", "message": ""},
+    {"result": ""},
+    {"result": "No records found"},
+    {"data": None, "message": "No records found"},
+    {"success": True},
+    {"status": "Success", "isLast": True, "nextPageToken": None},
+    "No records found",
+    "0 results",
+    '{"result": []}',
+    [{"result": []}, {"data": None}],                                  # one answer per change op
+]
+
+
+@pytest.mark.parametrize("blob", EMPTY_ANSWERS)
+def test_an_empty_answer_yields_no_rows_and_does_not_set_the_flag(blob):
+    for kind in ({"asset": blob, "change": []}, {"asset": [], "change": blob}):
+        p = check(preread=pre(**kind))
+        assert "unparsed_record" not in p and "unparsed_record" not in p["preread"]
+        assert p["preread"]["hold"] is False
+        assert p["status"] == "none_exists"
+
+
+@pytest.mark.parametrize("blob", [
+    {"result": [{"a": None, "b": [], "c": {}}]},               # a row with no text in a result
+    {"result": [{"success": True, "x": None}]},                # same, not an envelope row
+    {"data": None, "other": {"x": {"y": 1}}},                  # a null wrapper beside unreadable content
+    {"isLast": True, "rows_note": {"a": {"b": 1}}},            # a status wrapper holding unreadable content
+    [{"result": []}, "CHG0030001 lab-eval-12"],                # one unreadable item among empties
+])
+def test_an_unreadable_row_beside_or_inside_a_result_still_sets_the_flag(blob):
+    p = check(preread=pre(asset=[], change=blob))
+    assert p["unparsed_record"] is True and p["preread"]["hold"] is True
+
+
+def test_a_null_wrapper_does_not_hide_a_readable_record():
+    row = chg() | {"items": None}
+    p = check(preread=pre(asset=[], change=row))
+    assert "unparsed_record" not in p and p["preread"]["kinds"] == ["change"]

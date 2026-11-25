@@ -1090,15 +1090,55 @@ def subject_context(record: Any) -> dict[str, Any]:
     return out
 
 
+#: Keys a result envelope or status wrapper carries beside its rows. A dict whose
+#: keys are all these and whose values hold nothing to read is an empty answer,
+#: not a record.
+_ENVELOPE_KEYS = frozenset({
+    "status", "message", "ok", "success", "code", "operation", "remote_status",
+    "count", "total", "totalitems", "hydra:totalitems", "islast", "nextpagetoken",
+    "truncated", "jql", "found"})
+#: A text answer that says there is nothing ("No records found", "0 results").
+_EMPTY_TEXT = re.compile(
+    r"^\W*(?:no|zero|0|none|nothing)\b[\w\s,'-]{0,40}?"
+    r"(?:records?|results?|rows?|items?|entries|changes?|tickets?|issues?|"
+    r"matches|data|found|returned)\W*$", re.I)
+
+
+def _nothing(v: Any) -> bool:
+    """A value with nothing to read in it: None, blank text, a bool, or an empty
+    list or dict."""
+    return v is None or isinstance(v, bool) or (
+        isinstance(v, (str, list, dict)) and not (v.strip() if isinstance(v, str) else v))
+
+
+def _empty_answer(node: dict[str, Any]) -> bool:
+    """A dict that is an empty answer, not a record: a result wrapper whose rows
+    are null, blank or say nothing was found (``{"data": null}``,
+    ``{"result": "No records found"}``), or a status wrapper with nothing in it
+    (``{"success": true}``), with nothing else readable beside it."""
+    wrapped = False
+    for k, v in node.items():
+        lk = str(k).lower()
+        if lk in _CONTAINER_KEYS and (
+                _nothing(v) or (isinstance(v, str) and _EMPTY_TEXT.match(v))):
+            wrapped = True
+        elif not (lk in _ENVELOPE_KEYS or _nothing(v)):
+            return False
+    return wrapped or (all(str(k).lower() in _ENVELOPE_KEYS for k in node)
+                       and all(_nothing(v) for v in node.values()))
+
+
 def _flatten_records(blob: Any) -> list[Any]:
     """The record rows inside a lookup result: a wrapper (``result``, ``data``,
     a list) is descended, a dict without one is a record, a non-dict is kept
-    as an opaque row. Bounded."""
+    as an opaque row. An empty answer yields no rows: a wrapper whose rows are
+    null or blank (``{"data": null}``), a status wrapper with no record in it
+    (``{"success": true}``) and a text that says nothing was found. Bounded."""
     if isinstance(blob, str):
         try:
             blob = json.loads(blob)
         except ValueError:
-            return [blob] if blob.strip() else []
+            return [blob] if blob.strip() and not _EMPTY_TEXT.match(blob) else []
     blob = unwrap_fields(blob)
     out: list[Any] = []
 
@@ -1114,9 +1154,12 @@ def _flatten_records(blob: Any) -> list[Any]:
             if inner:
                 for v in inner:
                     walk(v, depth + 1)
-            elif node:
+            elif node and not _empty_answer(node):
                 out.append(node)
-        elif node not in (None, ""):
+        elif isinstance(node, str):
+            if node.strip() and not _EMPTY_TEXT.match(node):
+                out.append(node)
+        elif node is not None:
             out.append(node)
 
     walk(blob, 0)
