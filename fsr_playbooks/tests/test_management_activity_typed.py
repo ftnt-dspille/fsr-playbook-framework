@@ -151,6 +151,27 @@ def test_general_records_validate_through_both_page_models() -> None:
     assert dlp.SensitiveInfoDetectionIsIncluded is False
 
 
+def test_scc_parameters_as_string_validates_after_live_rebaseline() -> None:
+    # LIVE-CAPTURE REBASELINED 2026-11-25: SecurityComplianceCenter records
+    # deliver Parameters (and NonPIIParameters) as a plain cmdlet string,
+    # not the documented list of NameValuePair. Sanitized from a real
+    # Audit.General blob (provenance: live capture, sanitized).
+    body = _load("content_records_general_scc_parameters_string.json")
+    exact = m.GeneralAuditRecordPage.model_validate(body)
+    union = m.AuditRecordPage.model_validate(body)
+    assert exact.model_dump() == union.model_dump()
+    (scc,) = exact.root
+    assert scc.Workload == "SecurityComplianceCenter"
+    assert scc.RecordType == 18
+    assert isinstance(scc.Parameters, str)
+    assert "-Organization" in scc.Parameters
+    assert isinstance(scc.NonPIIParameters, str)
+    assert "<SNIP-PII>" in scc.NonPIIParameters
+    # the documented list form still binds on the same model
+    assert m.GeneralAuditRecordPage.model_validate(
+        _load("content_records_general.json")).root[0].Parameters[0].Name == "Identity"
+
+
 def test_error_fixture_validates_through_the_api_error_model() -> None:
     parsed = m.ManagementActivityAPIError.model_validate(_load("error_af20022.json"))
     assert parsed.error.code == "AF20022"

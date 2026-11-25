@@ -386,7 +386,15 @@ class GeneralAuditRecord(CommonAuditRecord):
 
     # Exchange Admin schema
     ModifiedObjectResolvedName: str | None = None
-    Parameters: list[NameValuePair] | None = None
+    # LIVE-CAPTURE REBASELINED 2026-11-25: the schema page documents
+    # Parameters as a list of Common.NameValuePair, but the wire also
+    # delivers a PLAIN STRING on SecurityComplianceCenter-workload records
+    # (single-line cmdlet text, e.g. '-Organization "..." -SkipValidations
+    # "True"'; observed on 5 records of one Audit.General blob). Accept both.
+    Parameters: list[NameValuePair] | str | None = None
+    # NonPIIParameters: not in the schema docs; wire-observed on the same
+    # SecurityComplianceCenter records (PII-snipped copy of the cmdlet text).
+    NonPIIParameters: list[NameValuePair] | str | None = None
     ModifiedProperties: list[ModifiedProperty] | None = None
     ExternalAccess: bool | None = None
     OriginatingServer: str | None = None

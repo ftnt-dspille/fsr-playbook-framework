@@ -46,3 +46,9 @@ Per-file provenance:
   The reference page "Errors" body shape with the documented AF20022 code
   and message ("No subscription found for the specified content type."),
   constructed from the Errors table.
+
+- content_records_general_scc_parameters_string.json
+  LIVE-CAPTURE REBASELINED: one SecurityComplianceCenter-workload record
+  (RecordType 18, Get-Label) sanitized from a real Audit.General blob.
+  Pins the wire truth that Parameters and NonPIIParameters arrive as a
+  plain cmdlet string here, not the documented NameValuePair list.
