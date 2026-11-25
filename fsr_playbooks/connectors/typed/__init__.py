@@ -105,6 +105,38 @@ from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
 from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
     IncidentsPage as GraphDevIncidentsPage,
 )
+from fsr_playbooks.connectors.typed.microsoft_purview_ediscovery import (
+    OPERATION_MODELS as PURVIEW_EDISCOVERY_OPERATION_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_purview_ediscovery import (
+    CaseOperation,
+    CasesPage,
+    CaseStatus,
+    CreatedCase,
+    CustodianCreateResult,
+    CustodianRow,
+    CustodiansBulkResult,
+    CustodiansPage,
+    DataSourceScope,
+    DeletedSearchResult,
+    EdiscoveryCase,
+    EdiscoveryCustodian,
+    EdiscoverySearch,
+    EstimateOperation,
+    ExportFileMetadata,
+    ExportResultOperation,
+    HoldStatus,
+    OperationsPage,
+    OperationStatus,
+    PurgeResult,
+    SearchCreateResult,
+    SearchesPage,
+    SearchStatisticsResult,
+    SiteSource,
+    UserSource,
+    WaitForOperationResult,
+    WaitSearchStatisticsResult,
+)
 
 __all__ = [
     "AadstsTokenError", "AlertComment", "AlertUnion",
@@ -133,4 +165,13 @@ __all__ = [
     "Incident", "IncidentAlert", "IncidentComment", "IncidentListResponse",
     "ListIncidentsParams", "UpdateIncidentParams", "UpdateIncidentResponse",
     "UpdateIncidentResult",
+    "PURVIEW_EDISCOVERY_OPERATION_MODELS", "CaseOperation", "CasesPage",
+    "CaseStatus", "CreatedCase", "CustodianCreateResult", "CustodianRow",
+    "CustodiansBulkResult", "CustodiansPage", "DataSourceScope",
+    "DeletedSearchResult", "EdiscoveryCase", "EdiscoveryCustodian",
+    "EdiscoverySearch", "EstimateOperation", "ExportFileMetadata",
+    "ExportResultOperation", "HoldStatus", "OperationsPage",
+    "OperationStatus", "PurgeResult", "SearchCreateResult", "SearchesPage",
+    "SearchStatisticsResult", "SiteSource", "UserSource",
+    "WaitForOperationResult", "WaitSearchStatisticsResult",
 ]
