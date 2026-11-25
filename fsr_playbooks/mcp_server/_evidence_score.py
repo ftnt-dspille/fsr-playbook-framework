@@ -1263,20 +1263,23 @@ def supports_innocent(row: dict[str, Any], alert_times: Iterable[float],
 
 
 def undermines_benign(row: dict[str, Any], alert_times: Iterable[float],
-                      dest: Iterable[str]) -> bool:
+                      dest: Iterable[str], kind: str = "change") -> bool:
     """Owner rule A for a benign close: does this record AFFIRMATIVELY undermine
-    it? Yes for an alarm role (the subject is already known bad), and for a record
+    it? Yes for an alarm role (the subject is already known bad), and for a real
+    change or approval record (``kind`` "change", read from a ticketing source)
     that claims to authorise the activity (a scoped role: approval, change, allow
     list, scanner) but whose authority fails: it has lapsed, states no window at
     all, states a window that does not cover the alert, or names a scope (a
     network, or an external address) that excludes the destination. A strong role
     (sandbox, honeypot) backs the close. A silent or neutral record (a plain asset
-    row, a record with no role) undermines nothing."""
+    row, a record with no role) undermines nothing, and an asset row that merely
+    cites a change number in its text is not a change record, so it cannot fail
+    an authority it never held: only an alarm role in it counts."""
     f = _row_facts(row)
     roles = f["roles"]
     if roles & set(_ALARM_ROLES):
         return True
-    if roles & set(_STRONG_ROLES) or not roles & set(_SCOPED_ROLES):
+    if kind != "change" or roles & set(_STRONG_ROLES) or not roles & set(_SCOPED_ROLES):
         return False
     times, dst = list(alert_times), list(dest)
     if f["lapsed"] or not f["window"] or not window_covers(
@@ -1294,7 +1297,7 @@ def _is_ipv4(text: str) -> bool:
 
 
 def row_relevant(row: dict[str, Any], disposition: str, alert_times: Iterable[float],
-                 dest: Iterable[str]) -> bool:
+                 dest: Iterable[str], kind: str = "change") -> bool:
     """The step 4 relevance rule (relA, with the owner's rule A for benign
     closes): could this record, seen by the turn, have moved the disposition? A
     hedge is already capped, so no. A conviction is moved only by a record that
@@ -1307,7 +1310,7 @@ def row_relevant(row: dict[str, Any], disposition: str, alert_times: Iterable[fl
     if disposition == "true_positive":
         return supports_innocent(row, alert_times, dest)
     if disposition in _BENIGN_DISPOSITIONS:
-        return undermines_benign(row, alert_times, dest)
+        return undermines_benign(row, alert_times, dest, kind)
     return True  # an unknown disposition is not released
 
 
@@ -1329,7 +1332,7 @@ def preread_review(card: dict[str, Any], preread: Any, alert_times: Iterable[flo
         unparsed = unparsed or un
         if rows:
             kinds.append(kind)
-            if any(row_relevant(r, disposition, times, dst) for r in rows):
+            if any(row_relevant(r, disposition, times, dst, kind) for r in rows):
                 relevant.append(kind)
             backed = backed or any(supports_innocent(r, times, dst) for r in rows)
             alarm = alarm or any(_row_facts(r)["roles"] & set(_ALARM_ROLES) for r in rows)

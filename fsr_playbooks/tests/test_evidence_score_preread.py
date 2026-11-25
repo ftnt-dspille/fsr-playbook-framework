@@ -394,3 +394,21 @@ def test_the_conviction_side_is_unchanged_by_rule_a():
     assert plain["hold"] is False
     assert preread_review(card("true_positive"), pre(change={"result": [chg()]}),
                           [ALERT_T], [IP])["hold"] is True
+
+
+def test_an_asset_row_that_cites_a_change_number_does_not_undermine_a_benign_close():
+    """Only a real change or approval RECORD from a ticketing source can fail an
+    authority. An asset row whose text cites a change number (no window, no
+    approval fields) is not one; it must not hold a benign close."""
+    asset = {"name": HOST, "description":
+             f"Developer workstation, syncs with a vendor endpoint at {IP} (change CHG-8803)."}
+    assert row_relevant(asset, "benign", [ALERT_T], [IP], "asset") is False
+    r = preread_review(card("benign"), pre(asset=[asset]), [ALERT_T], [IP])
+    assert r["relevant"] == [] and r["hold"] is False
+    # the same wording as a change-kind record (no window) still holds
+    assert row_relevant(asset, "benign", [ALERT_T], [IP], "change") is True
+    # an alarm role in an asset row still holds
+    bad = {"name": HOST, "description": "Host is compromised (change CHG-8803)."}
+    assert row_relevant(bad, "benign", [ALERT_T], [IP], "asset") is True
+    # the conviction side does not look at the kind
+    assert row_relevant(asset, "true_positive", [ALERT_T], [IP], "asset") is True
