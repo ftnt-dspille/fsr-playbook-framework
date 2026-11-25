@@ -454,6 +454,44 @@ def _op_name_is_destructive(op: str) -> bool:
     return any(v in nm for v in _CONTAINMENT_VERBS)
 
 
+# Network-device write ops the catalog files under `investigation` and the
+# op_safety probe leaves unclassified, so neither the category nor the verb
+# list catches them: FortiManager JSON-RPC mutations and installs, and
+# FortiGate CLI execution. Matched on connector family + op name (a named
+# table, not a per-call hack); every other op of those connectors keeps its
+# normal tier, so FMG `json_rpc_get` stays an auto-run read.
+_NET_WRITE_OPS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("fortinet-fortimanager", frozenset({
+        "json_rpc_execute", "json_rpc_set", "json_rpc_add", "json_rpc_update",
+        "json_rpc_delete", "json_rpc_freeform", "json_rpc_gui",
+        "install_policy", "reinstall_policy",
+    })),
+    ("fortinet-fortigate", frozenset({"execute_command"})),
+    ("fortigate", frozenset({"execute_command"})),
+)
+# Connectors with a generic REST passthrough: gated only for non-GET methods.
+_NET_REST_PASSTHROUGH = (
+    ("fortigate", "execute_api_request"),
+    ("fortinet-fortigate", "execute_api_request"),
+)
+
+
+def _is_net_write_op(args: dict[str, Any]) -> bool:
+    connector = str((args or {}).get("connector") or "").lower()
+    op = str((args or {}).get("op") or "").lower()
+    for prefix, ops in _NET_WRITE_OPS:
+        if connector.startswith(prefix) and op in ops:
+            return True
+    for prefix, rest_op in _NET_REST_PASSTHROUGH:
+        if connector.startswith(prefix) and op == rest_op:
+            params = (args or {}).get("params") or {}
+            method = ""
+            if isinstance(params, dict):
+                method = str(params.get("method") or params.get("http_method") or "")
+            return bool(method) and method.strip().upper() not in ("GET", "HEAD")
+    return False
+
+
 def _tier_for_run_op(args: dict[str, Any]) -> int:
     """Resolve effective tier for a `run_op` call from op_safety + category.
 
@@ -478,6 +516,10 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         # this ordering they auto-allow at tier 2 (no approval card) AND get
         # dropped from find_containment_actions' tier>=3 guard -- so "isolate
         # this host" would execute ungated and the proper op wouldn't surface.
+        return 4
+    if _is_net_write_op(args or {}):
+        # FMG writes / installs and FortiGate CLI exec: tier 4 (approval card)
+        # regardless of catalog category or a missing op_safety row.
         return 4
     if _op_name_is_destructive(op):
         # The op_safety probe is the PRIMARY signal above, but it is not always
