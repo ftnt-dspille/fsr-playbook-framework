@@ -287,12 +287,36 @@ _WINDOW_END_KEYS = frozenset({
     "end_date", "planned_end_date", "planned_end", "window_end", "work_end",
     "valid_to", "validto", "valid_until", "validuntil", "expires", "expiry",
     "expiry_date", "enddate", "end_time", "endtime", "scheduled_end", "scheduledend",
-    "effective_to", "ends"})
+    "effective_to", "ends", "duedate", "due_date"})
+_DATE_ONLY_END_KEYS = frozenset({"duedate", "due_date"})
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _STATE_KEYS = frozenset({"state", "status", "phase", "stage", "approval_state"})
-_LAPSED_STATES = re.compile(r"^(?:expired|cancel+ed|rejected|withdrawn|revoked|lapsed)\b", re.I)
+_LAPSED_STATES = re.compile(r"^(?:expired|cancel+ed|rejected|declined|withdrawn|revoked|lapsed|abandoned)\b", re.I)
 
 
 _WRAPPER_KEYS = frozenset({"value", "display_value", "link"})
+#: Jira answers a status, issue type, priority or resolution as an object with a
+#: ``name``; the name is what an analyst reads.
+_NAMED_OBJECT_KEYS = _STATE_KEYS | {"issuetype", "priority", "resolution"}
+
+
+def _adf_text(node: Any, depth: int = 0) -> str:
+    """The plain text of an Atlassian Document Format node (Jira Cloud answers a
+    description or comment as one). Bounded."""
+    if depth > 12 or node is None:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(_adf_text(x, depth + 1) for x in node)
+    if not isinstance(node, dict):
+        return ""
+    if node.get("type") == "text":
+        return str(node.get("text") or "")
+    if node.get("type") == "hardBreak":
+        return "\n"
+    inner = _adf_text(node.get("content"), depth + 1)
+    return inner + "\n" if node.get("type") in ("paragraph", "heading", "listItem") else inner
 
 
 def unwrap_fields(node: Any, key: str = "", depth: int = 0) -> Any:
@@ -309,6 +333,17 @@ def unwrap_fields(node: Any, key: str = "", depth: int = 0) -> Any:
         return [unwrap_fields(x, key, depth + 1) for x in node]
     if not isinstance(node, dict):
         return node
+    if node.get("type") == "doc" and isinstance(node.get("content"), list):
+        return _adf_text(node).strip()
+    if isinstance(node.get("fields"), dict) and isinstance(node.get("key"), str):
+        # a Jira issue: its own fields sit under ``fields``; read them as the row
+        flat = {k: v for k, v in node.items() if k != "fields"}
+        for k, v in node["fields"].items():
+            flat.setdefault(k, v)
+        return unwrap_fields(flat, key, depth + 1)
+    if (key.lower() in _NAMED_OBJECT_KEYS and isinstance(node.get("name"), str)
+            and not isinstance(node.get("value"), (dict, list))):
+        return node["name"]
     if ("value" in node or "display_value" in node) and set(node) <= _WRAPPER_KEYS:
         lk = key.lower()
         order = ("value", "display_value") if (
@@ -340,6 +375,9 @@ def _window(node: dict[str, Any]) -> tuple[list[float | None] | None, bool]:
             start = _epoch(v)
         elif lk in _WINDOW_END_KEYS and end is None:
             end = _epoch(v)
+            if end is not None and lk in _DATE_ONLY_END_KEYS and isinstance(v, str) \
+                    and _DATE_ONLY.match(v.strip()):
+                end += 86399.0  # a due date is the end of that day
         elif lk in _STATE_KEYS and isinstance(v, str) and _LAPSED_STATES.match(v.strip()):
             lapsed = True
     return ([start, end] if (start is not None or end is not None) else None), lapsed
@@ -1014,7 +1052,7 @@ _PREREAD_MAX_ROWS = 5
 _PREREAD_NOTE_ROWS = 3
 _PREREAD_NOTE_TEXT = 400
 _CONTAINER_KEYS = frozenset({"result", "results", "records", "data", "items",
-                             "hydra:member", "rows", "members"})
+                             "hydra:member", "rows", "members", "issues", "values"})
 _DESC_KEYS = ("short_description", "description", "summary", "notes", "comments",
               "justification")
 _APPROVAL_KEYS = frozenset({"approval", "approval_state"})
@@ -1052,15 +1090,55 @@ def subject_context(record: Any) -> dict[str, Any]:
     return out
 
 
+#: Keys a result envelope or status wrapper carries beside its rows. A dict whose
+#: keys are all these and whose values hold nothing to read is an empty answer,
+#: not a record.
+_ENVELOPE_KEYS = frozenset({
+    "status", "message", "ok", "success", "code", "operation", "remote_status",
+    "count", "total", "totalitems", "hydra:totalitems", "islast", "nextpagetoken",
+    "truncated", "jql", "found"})
+#: A text answer that says there is nothing ("No records found", "0 results").
+_EMPTY_TEXT = re.compile(
+    r"^\W*(?:no|zero|0|none|nothing)\b[\w\s,'-]{0,40}?"
+    r"(?:records?|results?|rows?|items?|entries|changes?|tickets?|issues?|"
+    r"matches|data|found|returned)\W*$", re.I)
+
+
+def _nothing(v: Any) -> bool:
+    """A value with nothing to read in it: None, blank text, a bool, or an empty
+    list or dict."""
+    return v is None or isinstance(v, bool) or (
+        isinstance(v, (str, list, dict)) and not (v.strip() if isinstance(v, str) else v))
+
+
+def _empty_answer(node: dict[str, Any]) -> bool:
+    """A dict that is an empty answer, not a record: a result wrapper whose rows
+    are null, blank or say nothing was found (``{"data": null}``,
+    ``{"result": "No records found"}``), or a status wrapper with nothing in it
+    (``{"success": true}``), with nothing else readable beside it."""
+    wrapped = False
+    for k, v in node.items():
+        lk = str(k).lower()
+        if lk in _CONTAINER_KEYS and (
+                _nothing(v) or (isinstance(v, str) and _EMPTY_TEXT.match(v))):
+            wrapped = True
+        elif not (lk in _ENVELOPE_KEYS or _nothing(v)):
+            return False
+    return wrapped or (all(str(k).lower() in _ENVELOPE_KEYS for k in node)
+                       and all(_nothing(v) for v in node.values()))
+
+
 def _flatten_records(blob: Any) -> list[Any]:
     """The record rows inside a lookup result: a wrapper (``result``, ``data``,
     a list) is descended, a dict without one is a record, a non-dict is kept
-    as an opaque row. Bounded."""
+    as an opaque row. An empty answer yields no rows: a wrapper whose rows are
+    null or blank (``{"data": null}``), a status wrapper with no record in it
+    (``{"success": true}``) and a text that says nothing was found. Bounded."""
     if isinstance(blob, str):
         try:
             blob = json.loads(blob)
         except ValueError:
-            return [blob] if blob.strip() else []
+            return [blob] if blob.strip() and not _EMPTY_TEXT.match(blob) else []
     blob = unwrap_fields(blob)
     out: list[Any] = []
 
@@ -1076,9 +1154,12 @@ def _flatten_records(blob: Any) -> list[Any]:
             if inner:
                 for v in inner:
                     walk(v, depth + 1)
-            elif node:
+            elif node and not _empty_answer(node):
                 out.append(node)
-        elif node not in (None, ""):
+        elif isinstance(node, str):
+            if node.strip() and not _EMPTY_TEXT.match(node):
+                out.append(node)
+        elif node is not None:
             out.append(node)
 
     walk(blob, 0)
@@ -1151,7 +1232,7 @@ def record_line(kind: str, row: dict[str, Any]) -> str:
     bits: list[str] = []
     row = unwrap_fields(row)
     low = {str(k).lower(): v for k, v in row.items()}
-    num = low.get("number")
+    num = low.get("number") or low.get("key")
     if isinstance(num, str) and num.strip():
         label += f" {num.strip()}"
     state = next((str(v).strip() for k, v in low.items()
@@ -1224,21 +1305,55 @@ def supports_innocent(row: dict[str, Any], alert_times: Iterable[float],
     return False
 
 
+def undermines_benign(row: dict[str, Any], alert_times: Iterable[float],
+                      dest: Iterable[str], kind: str = "change") -> bool:
+    """Owner rule A for a benign close: does this record AFFIRMATIVELY undermine
+    it? Yes for an alarm role (the subject is already known bad), and for a real
+    change or approval record (``kind`` "change", read from a ticketing source)
+    that claims to authorise the activity (a scoped role: approval, change, allow
+    list, scanner) but whose authority fails: it has lapsed, states no window at
+    all, states a window that does not cover the alert, or names a scope (a
+    network, or an external address) that excludes the destination. A strong role
+    (sandbox, honeypot) backs the close. A silent or neutral record (a plain asset
+    row, a record with no role) undermines nothing, and an asset row that merely
+    cites a change number in its text is not a change record, so it cannot fail
+    an authority it never held: only an alarm role in it counts."""
+    f = _row_facts(row)
+    roles = f["roles"]
+    if roles & set(_ALARM_ROLES):
+        return True
+    if kind != "change" or roles & set(_STRONG_ROLES) or not roles & set(_SCOPED_ROLES):
+        return False
+    times, dst = list(alert_times), list(dest)
+    if f["lapsed"] or not f["window"] or not window_covers(
+            {"window": f["window"], "lapsed": f["lapsed"]}, times):
+        return True
+    ext = {n for n in f["names"] if _is_ipv4(n) and _is_external(n)}
+    return bool((f["nets"] or ext) and not _names_dest(f, dst))
+
+
+def _is_ipv4(text: str) -> bool:
+    try:
+        return ipaddress.ip_address(text).version == 4
+    except ValueError:
+        return False
+
+
 def row_relevant(row: dict[str, Any], disposition: str, alert_times: Iterable[float],
-                 dest: Iterable[str]) -> bool:
-    """The step 4 relevance rule (relA): could this record, seen by the turn, have
-    moved the disposition? A hedge is already capped, so no. A conviction is moved
-    only by a record that would excuse the activity. A benign close is moved by an
-    alarm role, or by any record that fails to back it (a lapsed window, a scope
-    that excludes the destination, no stated role)."""
+                 dest: Iterable[str], kind: str = "change") -> bool:
+    """The step 4 relevance rule (relA, with the owner's rule A for benign
+    closes): could this record, seen by the turn, have moved the disposition? A
+    hedge is already capped, so no. A conviction is moved only by a record that
+    would excuse the activity (``supports_innocent``). A benign close is moved only
+    by a record that affirmatively undermines it (``undermines_benign``); a silent
+    or neutral record does not move it."""
     if disposition in _HEDGE_DISPOSITIONS:
         return False
     dest, alert_times = list(dest), list(alert_times)
     if disposition == "true_positive":
         return supports_innocent(row, alert_times, dest)
     if disposition in _BENIGN_DISPOSITIONS:
-        return bool(_row_facts(row)["roles"] & set(_ALARM_ROLES)) or not supports_innocent(
-            row, alert_times, dest)
+        return undermines_benign(row, alert_times, dest, kind)
     return True  # an unknown disposition is not released
 
 
@@ -1247,8 +1362,8 @@ def preread_review(card: dict[str, Any], preread: Any, alert_times: Iterable[flo
     """Shadow review of the pre-read records against the delivered verdict:
     ``kinds`` (with a row naming the subject), ``relevant`` (kinds with a row that
     could move the disposition), ``unparsed_record`` (a fetched row the extractors
-    could not read; relevant to any non-hedge verdict, so a conviction on it would
-    hold) and ``hold`` (the shadow decision relA would take on the pre-read
+    could not read; relevant to a conviction, so a conviction on it would hold;
+    not an affirmative signal against a benign close, so that is not held on it) and ``hold`` (the shadow decision relA would take on the pre-read
     alone). Pure."""
     disposition = str(card.get("disposition") or "")
     kinds: list[str] = []
@@ -1260,13 +1375,14 @@ def preread_review(card: dict[str, Any], preread: Any, alert_times: Iterable[flo
         unparsed = unparsed or un
         if rows:
             kinds.append(kind)
-            if any(row_relevant(r, disposition, times, dst) for r in rows):
+            if any(row_relevant(r, disposition, times, dst, kind) for r in rows):
                 relevant.append(kind)
             backed = backed or any(supports_innocent(r, times, dst) for r in rows)
             alarm = alarm or any(_row_facts(r)["roles"] & set(_ALARM_ROLES) for r in rows)
     hedge = disposition in _HEDGE_DISPOSITIONS
     out: dict[str, Any] = {"kinds": kinds, "relevant": relevant,
-                           "hold": bool(not hedge and (relevant or unparsed))}
+                           "hold": bool(not hedge and (relevant or (
+                               unparsed and disposition not in _BENIGN_DISPOSITIONS)))}
     if kinds:
         # whole-set facts, so the stricter and looser readings of "relevant" can
         # be replayed from the card: some record could excuse the activity /
@@ -1347,7 +1463,10 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
     subject = _subject_names(card, registry, subject_rec,
                              list(known_names or []) + list((pre or {}).get("names") or []))
     verdict_external = set()
-    for i in identifiers(*_verdict_text(card)):
+    # A network the verdict quotes (the scope of a change it cites as NOT covering
+    # the destination) is not an address it accuses: its base address must not make
+    # that change "name" the verdict's address.
+    for i in identifiers(*[_CIDR.sub(" ", t) for t in _verdict_text(card)]):
         try:
             if "." in i and _is_external(i):
                 verdict_external.add(i)
@@ -1424,7 +1543,10 @@ def premise_check(card: dict[str, Any], registry: dict[str, dict[str, Any]], *,
         dest |= {ev["dst"] for ev in known_events or [] if ev.get("dst")}
         review = preread_review(card, pre, alert_at, sorted(dest))
         if out["status"] == "contradicted":
+            # a conflict the turn found holds on its own; say which kinds, so a
+            # hold always names its record (relevant, conflict or unparsed_record)
             review["hold"] = True
+            review["conflict"] = sorted(contra_kinds)
         if review.get("unparsed_record"):
             out["unparsed_record"] = True
         if pre.get("ms") is not None:
