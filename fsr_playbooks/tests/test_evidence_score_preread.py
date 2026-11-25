@@ -154,11 +154,15 @@ def test_a_conviction_is_moved_only_by_a_record_that_excuses_it():
     assert rel(SANDBOX_ASSET["data"][0], "true_positive") is True  # strong role
 
 
-def test_a_benign_close_is_held_unless_the_record_backs_it():
+def test_a_benign_close_is_held_only_on_an_affirmative_undermining_signal():
     assert rel(chg(WINDOW_OPEN), "benign") is False                # backs the close
-    assert rel(chg(WINDOW_OLD), "benign") is True                  # lapsed: cannot back it
+    assert rel(chg(WINDOW_OLD), "benign") is True                  # lapsed window
+    assert rel(chg({"state": "Canceled"}), "benign") is True       # lapsed state
+    assert rel(chg(), "benign") is True                            # no window stated
     assert rel(chg(WINDOW_OPEN, text="Approved scan of 198.51.100.0/24."), "benign") is True
-    assert rel(PLAIN_ASSET["data"][0], "benign") is True           # silent
+    assert rel(PLAIN_ASSET["data"][0], "benign") is False          # silent: admitted
+    assert rel({"name": HOST, "description": "Vendor laptop, Dell."}, "benign") is False  # neutral
+    assert rel(SANDBOX_ASSET["data"][0], "benign") is False        # strong role backs it
     assert rel({"name": HOST, "description": "Host is compromised and quarantined."},
                "false_positive") is True
 
@@ -184,8 +188,8 @@ def test_the_review_carries_whole_set_facts_for_replay():
     r = preread_review(card("benign"), pre(asset=PLAIN_ASSET["data"],
                                            change={"result": [chg(WINDOW_OPEN)]}),
                        [ALERT_T], [IP])
-    # per row the plain asset cannot back the close (relevant), but the set is backed
-    assert r["relevant"] == ["asset"] and r["backed"] is True and r["alarm"] is False
+    # the plain asset is silent (not held under rule A) and the set is backed
+    assert r["relevant"] == [] and r["backed"] is True and r["alarm"] is False
     r = preread_review(card("benign"), pre(asset=[{"name": HOST, "description": "compromised"}]),
                        [ALERT_T], [IP])
     assert r["alarm"] is True and r["backed"] is False
@@ -221,9 +225,10 @@ def test_a_fetched_row_that_cannot_be_read_sets_the_flag_and_would_hold_a_convic
     assert p["preread"]["unparsed_record"] is True and p["preread"]["hold"] is True
 
 
-def test_the_flag_is_relevant_to_a_benign_close_too_but_never_to_a_hedge():
+def test_the_flag_holds_a_conviction_not_a_benign_close_and_never_a_hedge():
     blob = "CHG0030001 | Implement | lab-eval-12"
-    assert check(card("benign"), preread=pre(asset=[], change=blob))["preread"]["hold"] is True
+    assert check(card("benign"), preread=pre(asset=[], change=blob))["preread"]["hold"] is False
+    assert check(card("true_positive"), preread=pre(asset=[], change=blob))["preread"]["hold"] is True
     h = check(card("needs_more_info"), preread=pre(asset=[], change=blob))
     assert h["unparsed_record"] is True and h["preread"]["hold"] is False
 
@@ -271,7 +276,7 @@ def test_the_emitted_card_carries_the_preread_premise():
     assert c["premise"]["status"] == "read"
     assert c["premise"]["read_kinds"] == ["asset", "change"]
     # neither a silent asset nor a lapsed change can back the close
-    assert c["premise"]["preread"]["relevant"] == ["asset", "change"]
+    assert c["premise"]["preread"]["relevant"] == ["change"]
     assert c["premise"]["preread"]["hold"] is True
 
 
@@ -367,3 +372,138 @@ def test_plain_rows_are_unchanged_by_the_unwrap():
     assert unwrap_fields("CHG0030001 | Implement") == "CHG0030001 | Implement"
     assert preread_note(pre(change={"result": [row]})) == preread_note(
         pre(change={"result": [{k: sn(v) for k, v in row.items()}]}))
+
+
+# ---- owner rule A, end to end through the review ------------------------------------------
+
+def test_a_windowless_approval_holds_a_benign_close_and_a_neutral_record_admits_it():
+    windowless = {"result": [chg()]}
+    held = preread_review(card("benign"), pre(change=windowless), [ALERT_T], [IP])
+    assert held["relevant"] == ["change"] and held["hold"] is True
+    neutral = preread_review(card("benign"), pre(asset=PLAIN_ASSET["data"]), [ALERT_T], [IP])
+    assert neutral["relevant"] == [] and neutral["hold"] is False
+    covered = preread_review(card("benign"), pre(change={"result": [chg(WINDOW_OPEN)]}),
+                             [ALERT_T], [IP])
+    assert covered["hold"] is False
+
+
+def test_the_conviction_side_is_unchanged_by_rule_a():
+    # a plain asset does not excuse a conviction; a covering approval does; so does
+    # a windowless one (no stated window covers on the conviction side)
+    plain = preread_review(card("true_positive"), pre(asset=PLAIN_ASSET["data"]), [ALERT_T], [IP])
+    assert plain["hold"] is False
+    assert preread_review(card("true_positive"), pre(change={"result": [chg()]}),
+                          [ALERT_T], [IP])["hold"] is True
+
+
+def test_an_asset_row_that_cites_a_change_number_does_not_undermine_a_benign_close():
+    """Only a real change or approval RECORD from a ticketing source can fail an
+    authority. An asset row whose text cites a change number (no window, no
+    approval fields) is not one; it must not hold a benign close."""
+    asset = {"name": HOST, "description":
+             f"Developer workstation, syncs with a vendor endpoint at {IP} (change CHG-8803)."}
+    assert row_relevant(asset, "benign", [ALERT_T], [IP], "asset") is False
+    r = preread_review(card("benign"), pre(asset=[asset]), [ALERT_T], [IP])
+    assert r["relevant"] == [] and r["hold"] is False
+    # the same wording as a change-kind record (no window) still holds
+    assert row_relevant(asset, "benign", [ALERT_T], [IP], "change") is True
+    # an alarm role in an asset row still holds
+    bad = {"name": HOST, "description": "Host is compromised (change CHG-8803)."}
+    assert row_relevant(bad, "benign", [ALERT_T], [IP], "asset") is True
+    # the conviction side does not look at the kind
+    assert row_relevant(asset, "true_positive", [ALERT_T], [IP], "asset") is True
+
+
+# ---- a hold always names its record --------------------------------------------------
+
+# the known-answer world where the asset leans benign and the standing change scopes
+# the approval to a range that excludes the alert's destination
+SCOPED_ASSET = {"name": HOST, "ipAddress": HOST_IP, "hostName": HOST,
+                "description": "Vendor support jump host. Sessions to the vendor support "
+                               "portal are expected. The vendor rotates portal addresses."}
+SCOPED_CHANGE = {"number": "CHG-7102", "state": "Implement", "approval": "approved",
+                 "short_description": "Vendor support portal egress",
+                 "description": f"Approved standing change: {HOST} may reach the vendor support "
+                                "portal range 198.51.100.0/24 only. Any other destination is "
+                                "not covered by this change.",
+                 "start_date": "2026-01-01 00:00:00", "end_date": "2026-12-31 23:59:00"}
+
+
+def test_a_verdict_that_quotes_the_change_scope_is_not_contradicted_by_that_change():
+    text = (f"{HOST} ({HOST_IP}) is beaconing to {IP}, outside its approved egress scope "
+            "(CHG-7102 covers 198.51.100.0/24 only).")
+    c = {"id": "v", "disposition": "true_positive", "confidence": 0.7, "summary": text,
+         "findings": [{"claim": text, "evidence": ["a"]}]}
+    p = check(c, preread=pre(asset=[SCOPED_ASSET], change={"result": [SCOPED_CHANGE]}))
+    assert p["status"] == "read" and p["contradicted_by"] == []
+    assert p["preread"]["relevant"] == [] and p["preread"]["hold"] is False
+    # the same change does contradict a verdict that accuses an address it names
+    named = {**SCOPED_CHANGE, "description": SCOPED_CHANGE["description"] + f" Also {IP}."}
+    p = check(c, preread=pre(asset=[SCOPED_ASSET], change={"result": [named]}))
+    assert p["status"] == "contradicted"
+
+
+def test_every_hold_names_the_record_that_caused_it():
+    # a conflict hold (the turn's own contradiction) says which kinds
+    p = check(card(), preread=pre(change={"result": [chg(WINDOW_OPEN)]}))
+    r = p["preread"]
+    assert r["hold"] is True and (r["relevant"] or r.get("conflict") or r.get("unparsed_record"))
+    c2 = check(card(), reg={**UNREAD, "asset": __import__("test_evidence_score_premise").asset_read(
+        SANDBOX_ASSET)}, preread=pre(asset=[], change=[]))
+    r2 = c2["preread"]
+    assert c2["status"] == "contradicted" and r2["hold"] is True
+    assert r2["conflict"] == ["asset"] and r2["relevant"] == []
+
+
+# ---- an empty answer is not an unreadable record ------------------------------------------
+
+#: Empty answers, each with where its shape comes from. The first group is what the
+#: lookups return today (the ServiceNow change API body, the FortiSOAR collection, the
+#: Jira search body, the run_op envelope, the agent-proxied stub); the second is a
+#: wrapper or text that carries no rows.
+EMPTY_ANSWERS = [
+    {"result": []},                                                    # ServiceNow change list
+    {"hydra:member": [], "hydra:totalItems": 0, "@id": "/api/3/assets"},  # FortiSOAR collection
+    {"issues": [], "isLast": True},                                    # Jira search body
+    {"issues": [], "total": 0, "jql": "text ~ \"h\"", "truncated": False},  # Jira fetch_all body
+    {"data": [], "status": "Success"},                                 # run_op envelope
+    {"remote_status": "in-progress", "result": {}},                    # agent-proxied stub
+    {"data": None},
+    {"result": None, "status": "Success", "message": ""},
+    {"result": ""},
+    {"result": "No records found"},
+    {"data": None, "message": "No records found"},
+    {"success": True},
+    {"status": "Success", "isLast": True, "nextPageToken": None},
+    "No records found",
+    "0 results",
+    '{"result": []}',
+    [{"result": []}, {"data": None}],                                  # one answer per change op
+]
+
+
+@pytest.mark.parametrize("blob", EMPTY_ANSWERS)
+def test_an_empty_answer_yields_no_rows_and_does_not_set_the_flag(blob):
+    for kind in ({"asset": blob, "change": []}, {"asset": [], "change": blob}):
+        p = check(preread=pre(**kind))
+        assert "unparsed_record" not in p and "unparsed_record" not in p["preread"]
+        assert p["preread"]["hold"] is False
+        assert p["status"] == "none_exists"
+
+
+@pytest.mark.parametrize("blob", [
+    {"result": [{"a": None, "b": [], "c": {}}]},               # a row with no text in a result
+    {"result": [{"success": True, "x": None}]},                # same, not an envelope row
+    {"data": None, "other": {"x": {"y": 1}}},                  # a null wrapper beside unreadable content
+    {"isLast": True, "rows_note": {"a": {"b": 1}}},            # a status wrapper holding unreadable content
+    [{"result": []}, "CHG0030001 lab-eval-12"],                # one unreadable item among empties
+])
+def test_an_unreadable_row_beside_or_inside_a_result_still_sets_the_flag(blob):
+    p = check(preread=pre(asset=[], change=blob))
+    assert p["unparsed_record"] is True and p["preread"]["hold"] is True
+
+
+def test_a_null_wrapper_does_not_hide_a_readable_record():
+    row = chg() | {"items": None}
+    p = check(preread=pre(asset=[], change=row))
+    assert "unparsed_record" not in p and p["preread"]["kinds"] == ["change"]

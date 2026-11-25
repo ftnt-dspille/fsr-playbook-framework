@@ -29,14 +29,25 @@ from fsr_playbooks.connectors.typed.microsoft_graph_dev import (
 _SOARSHELF = Path(os.environ.get("SOARSHELF_HOME",
                                  Path.home() / "PycharmProjects" / "soarshelf"))
 
+# The loads below run at IMPORT time, and a module-level skipif cannot stop
+# that: an absent or partial soarshelf checkout must therefore short-circuit
+# here, or collection itself raises on CI (where no checkout exists) instead
+# of the tests skipping.
+_MISSING = [name for name, src in CONNECTOR_SOURCES.items()
+            if not (_SOARSHELF / src.subdir).exists()]
+_HAS_PACKAGES = not _MISSING
+
 pytestmark = pytest.mark.skipif(
-    not (_SOARSHELF / "content" / "connectors").exists(),
-    reason=f"soarshelf checkout not found at {_SOARSHELF} (set SOARSHELF_HOME)")
+    not _HAS_PACKAGES,
+    reason=f"soarshelf connector packages missing under {_SOARSHELF} "
+           f"({', '.join(_MISSING) or 'none'}); set SOARSHELF_HOME")
 
-_install_sdk_stubs()
+if _HAS_PACKAGES:
+    _install_sdk_stubs()
 
-_LOADED = {name: load_connector_package(src, _SOARSHELF)
-           for name, src in CONNECTOR_SOURCES.items()}
+_LOADED = ({name: load_connector_package(src, _SOARSHELF)
+            for name, src in CONNECTOR_SOURCES.items()}
+           if _HAS_PACKAGES else {})
 
 
 def test_dev_package_loads_with_all_seventeen_ops() -> None:
