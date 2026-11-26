@@ -126,3 +126,60 @@ def test_configless_builtin_passes_preflight_with_no_configuration(monkeypatch):
     assert tools_execution._preflight_connector(object(), "cyops_utilities") is None
     err = tools_execution._preflight_connector(object(), "some-other-connector")
     assert err and err["code"] == "connector_not_configured"
+
+
+# --- several configs, none default: the card carries the one the reads used ---
+# Live (FortiManager with five configs, only one reachable): the card had no
+# config, the approval ran on none and failed INTEGRATION-12, and the approval
+# was consumed. The investigation's own reads had already answered on one.
+FIVE = [{"id": f"fmg-{i}", "name": f"managerID_{i}", "default": False,
+         "runs_on_agent": False, "agent_id": "", "agent_name": ""}
+        for i in range(1, 6)]
+
+
+@pytest.fixture
+def five(monkeypatch):
+    monkeypatch.setattr(tools_execution, "connector_config_options",
+                        lambda client, connector: [dict(o) for o in FIVE])
+    tools_execution._CONFIG_USED.clear()
+    yield
+    tools_execution._CONFIG_USED.clear()
+
+
+def test_no_default_and_nothing_read_leaves_the_card_without_a_config(five):
+    chosen, opts = _card_config(object(), "fortinet-fortimanager-json-rpc", None)
+    assert chosen is None and len(opts) == 5
+
+
+def test_the_card_carries_the_config_the_reads_answered_on(five):
+    tools_execution.note_config_used("fortinet-fortimanager-json-rpc", "fmg-2")
+    chosen, opts = _card_config(object(), "fortinet-fortimanager-json-rpc", None)
+    assert chosen["id"] == "fmg-2" and len(opts) == 5
+
+
+def test_a_config_used_by_another_connector_is_not_borrowed(five):
+    tools_execution.note_config_used("fortigate-firewall", "fmg-2")
+    assert _card_config(object(), "fortinet-fortimanager-json-rpc", None)[0] is None
+
+
+def test_a_config_no_longer_offered_is_not_carried(five):
+    tools_execution.note_config_used("fortinet-fortimanager-json-rpc", "gone")
+    assert _card_config(object(), "fortinet-fortimanager-json-rpc", None)[0] is None
+
+
+def test_an_explicit_config_still_wins_over_the_one_used(five):
+    tools_execution.note_config_used("fortinet-fortimanager-json-rpc", "fmg-2")
+    chosen, _ = _card_config(object(), "fortinet-fortimanager-json-rpc", "managerID_4")
+    assert chosen["id"] == "fmg-4"
+
+
+def test_the_emitted_card_carries_the_used_config(five, monkeypatch):
+    monkeypatch.setattr(tools_execution, "_live_client_for_grounding", lambda: object())
+    monkeypatch.setattr(tools_execution, "_preflight_connector", lambda *a, **k: None)
+    tools_execution.note_config_used("fortinet-fortimanager-json-rpc", "fmg-2")
+    out = _fn(id="c1", connector="fortinet-fortimanager-json-rpc",
+              operation="json_rpc_execute", summary="Install the package",
+              args={"url": "/securityconsole/install/package", "data": {}},
+              editable_fields=[])
+    assert out["ok"], out
+    assert out["card"]["config"]["id"] == "fmg-2"

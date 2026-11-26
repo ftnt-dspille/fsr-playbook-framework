@@ -633,6 +633,27 @@ def populate_op_definitions(client, time_budget_s: float = 60.0,
             "elapsed_s": round(time.time() - start, 1)}
 
 
+_CONFIG_USED: dict[str, str] = {}
+
+
+def note_config_used(connector: str, config_id: str) -> None:
+    """Remember the configuration a live op on ``connector`` last ANSWERED on.
+
+    An action card for a connector with several configs and no default has no
+    config of its own, and an approved card with no config fails
+    (INTEGRATION-12) and is consumed. The investigation's own reads already
+    proved one config works, so the card preselects it (`config_used`).
+    Process-wide and per connector: only a successful op writes it, and the
+    analyst can still switch the config on the card."""
+    if connector and config_id:
+        _CONFIG_USED[connector] = str(config_id)
+
+
+def config_used(connector: str) -> str:
+    """The config id (or name) a live op on ``connector`` last answered on."""
+    return _CONFIG_USED.get(connector, "")
+
+
 def connector_config_options(client, connector: str) -> list[dict[str, Any]]:
     """Every active configuration of ``connector`` an action could run on.
 
@@ -1667,6 +1688,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                                config=config_id or "", agent=agent_id or "")
         except Exception:
             pass
+        note_config_used(connector, config_id)
         sample = data[0] if isinstance(data, list) and data else data
         top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
         summarized, truncated = (
@@ -2151,6 +2173,7 @@ def run_op(
                            config=exec_config or "")
     except Exception:
         pass  # recorder is best-effort; never break a live op over it
+    note_config_used(connector, exec_config)
     # top_keys reflect the FULL shape so authoring references stay accurate.
     sample = data[0] if isinstance(data, list) and data else data
     top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []

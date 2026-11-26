@@ -189,6 +189,124 @@ def test_fmg_error_passthrough(monkeypatch):
     assert "unreachable" in out["message"]
 
 
+# --- FMG: what changed (install / firmware tasks) and the case-4 device fields ---
+def _changes(**kw):
+    from fsr_playbooks.mcp_server import tools_noc
+    return tools_noc.fmg_device.fn(by="changes", **kw) if hasattr(
+        tools_noc.fmg_device, "fn") else tools_noc.fmg_device(by="changes", **kw)
+
+
+def test_changes_finds_the_install_task_that_named_the_device(fmg):
+    out = _changes(device="FGT-BRANCH-04")
+    assert out["ok"] is True
+    ids = [c["task_id"] for c in out["changes"]]
+    assert ids == [210]                      # not the HQ install, not the 40d-old upgrade
+    task = out["changes"][0]
+    assert task["title"] == "Install Device" and task["kind"] == "install"
+    assert task["user"] == "ops-apikey" and task["state"] == "done"
+    assert task["started"].endswith("Z") and task["finished"].endswith("Z")
+    assert "Installation to real device done" in task["result"]
+    assert out["window"] == "7d"
+
+
+def test_changes_says_package_installs_without_a_device_are_not_proof(fmg):
+    out = _changes(device="FGT-BRANCH-04")
+    # task 212 installs a package and names no device: counted, not attributed
+    assert out["install_tasks_without_device"] == 1
+
+
+def test_changes_reads_ids_first_then_only_the_lines_in_the_window(fmg):
+    _changes(device="FGT-BRANCH-04")
+    task_calls = [c for c in fmg if c["params"].get("url") == "/task/task"]
+    assert len(task_calls) == 2
+    assert task_calls[0]["params"]["data"] == {"option": ["no loadsub"]}
+    # the second call reads from the oldest in-window task (210), not the 40d one
+    assert task_calls[1]["params"]["data"] == {"filter": [["id", ">=", 210]]}
+    assert all(c["summarize"] is False for c in task_calls)
+
+
+def test_changes_widens_to_firmware_upgrades_named_by_serial(fmg):
+    out = _changes(device="FGT-BRANCH-04", window="60d")
+    by_id = {c["task_id"]: c for c in out["changes"]}
+    assert set(by_id) == {210, 201}
+    assert by_id[201]["kind"] == "firmware"
+    assert [c["task_id"] for c in out["changes"]] == [210, 201]   # newest first
+
+
+def test_changes_is_bounded_by_limit_and_says_so(fmg):
+    out = _changes(device="FGT-BRANCH-04", window="60d", limit=1)
+    assert out["count"] == 1 and out["truncated"] is True and out["total_found"] == 2
+
+
+def test_changes_flags_a_scan_cut_short(fmg, monkeypatch):
+    from fsr_playbooks.mcp_server import tools_noc
+    monkeypatch.setattr(tools_noc, "_FMG_TASK_SCAN", 1)
+    out = _changes(device="FGT-BRANCH-04")
+    assert out["scan_truncated"] is True and "newest 1" in out["note"]
+
+
+def test_changes_empty_window_is_typed_not_clean(fmg):
+    out = _changes(device="FGT-HQ-01", window="30m")
+    assert out["ok"] is True and out["changes"] == [] and out["code"] == "no_events"
+
+
+def test_changes_needs_a_device_and_skips_an_unmanaged_one(fmg):
+    from fsr_playbooks.mcp_server import tools_noc
+    fn = getattr(tools_noc.fmg_device, "fn", tools_noc.fmg_device)
+    assert "requires a device" in fn(by="changes")["error"]
+    out = _changes(device="some-laptop")
+    assert out["skipped"] == "not_fmg_managed" and out["changes"] == []
+    assert not [c for c in fmg if c["params"].get("url") == "/task/task"]
+
+
+def test_unknown_by_names_changes_among_the_choices(fmg):
+    from fsr_playbooks.mcp_server import tools_noc
+    fn = getattr(tools_noc.fmg_device, "fn", tools_noc.fmg_device)
+    assert "'changes'" in fn(by="nope")["error"]
+
+
+def test_changes_error_passthrough(monkeypatch):
+    def failing(connector, op, params=None, **kw):
+        if (params or {}).get("url") == "/task/task":
+            return {"ok": False, "status": "connector_unhealthy",
+                    "message": "FortiManager unreachable"}
+        return {"ok": True, "data": fx._fmg_json_rpc_get(params or {})}
+    monkeypatch.setattr(exec_api, "run_op", failing)
+    out = _changes(device="FGT-BRANCH-04")
+    assert out["ok"] is False and out["code"] == "connector_unhealthy"
+
+
+def test_device_digest_carries_case_four_fields_with_epochs_as_iso():
+    from fsr_playbooks.mcp_server.tools_noc import _fmg_digest_device
+    row = _fmg_digest_device({
+        "name": "fgt-a", "sn": "FGT60F0000000001", "conn_status": "down",
+        "conf_status": "outofsync", "db_status": "nomod",
+        "last_checked": 1790176096, "last_resync": 1790108311,
+        "mgmt_mode": "fmgfaz", "conn_mode": "active", "dev_status": "retrieved",
+        "flags": ["is_model", "reload_failed"], "first_tunnel_up": 1787857926})
+    assert row["last_checked"] == "2026-09-23T15:08:16Z"
+    assert row["last_resync"] == "2026-09-22T20:18:31Z"
+    assert row["mgmt_mode"] == "fmgfaz" and row["dev_status"] == "retrieved"
+    assert row["conn_mode"] == "active"
+    assert row["flags"] == ["reload_failed"] and row["is_model"] is True
+    assert row["first_tunnel_up"].endswith("Z")
+
+
+def test_device_digest_never_reports_a_resync_as_the_last_contact():
+    from fsr_playbooks.mcp_server.tools_noc import _fmg_digest_device
+    row = _fmg_digest_device({"name": "fgt-a", "last_checked": 1790176096,
+                              "last_resync": 0, "flags": None})
+    assert "last_resync" not in row and "flags" not in row
+    assert row["last_checked"].endswith("Z")
+
+
+def test_status_asks_fmg_for_the_new_device_fields(fmg):
+    fmg_get_device_status("FGT-BRANCH-04")
+    call = _call_to(fmg, lambda u: u.endswith("/device/FGT-BRANCH-04"))
+    fields = call["params"]["data"]["fields"]
+    assert {"last_resync", "mgmt_mode", "dev_status", "flags"} <= set(fields)
+
+
 # --- FAZ device-hunt: reuse the FAZ plumbing, scoped to a devid/serial --------
 @pytest.fixture
 def faz(monkeypatch):

@@ -61,7 +61,7 @@ def test_siem_search_every_axis_reaches_an_implementation(axis, no_transport):
     assert "unsupported by=" not in str(out.get("error", ""))
 
 
-@pytest.mark.parametrize("axis", ["list", "status", "ha", "policy"])
+@pytest.mark.parametrize("axis", ["list", "status", "ha", "policy", "changes"])
 def test_fmg_device_every_axis_reaches_an_implementation(axis, no_transport):
     out = _unwrap(tools_noc.fmg_device)(by=axis, device="fgt-1")
     assert isinstance(out, dict)
