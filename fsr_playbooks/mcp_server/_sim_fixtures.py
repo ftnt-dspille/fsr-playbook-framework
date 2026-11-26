@@ -260,6 +260,9 @@ def _fmg_device_row(down: bool) -> dict[str, Any]:
         "last_resync": "2026-06-09T22:00:00Z", "mgmt_mode": "fmgfaz",
         "conn_mode": "active", "dev_status": "retrieved",
         "flags": ["reload_failed"],
+        # `/dvmdb/adom/<a>/device/<name>` carries the vdom list (live shape).
+        "vdom": [{"name": "root", "oid": 3, "opmode": "nat",
+                  "vdom_type": "traffic", "devid": _NOC_DEVICE}],
     }
 
 
@@ -326,8 +329,43 @@ def _fmg_tasks(params: dict) -> list[dict[str, Any]]:
     return tasks
 
 
+def _fmg_device_db_rows(url: str) -> list[dict[str, Any]] | None:
+    """Device-database objects as `/pm/config/device/<d>/vdom/<v>/...` returns
+    them (live shapes, addresses scrubbed). The newest route (oid 3637) is the
+    blackhole an install added; FMG keeps no revisions, so the content is the
+    only evidence."""
+    if url.endswith("/router/static"):
+        def route(oid, seq, dst, comment, blackhole="disable"):
+            return {"oid": oid, "seq-num": seq, "dst": dst,
+                    "gateway": "198.51.100.254" if blackhole == "disable"
+                    else "0.0.0.0", "distance": 10, "priority": 1,
+                    "device": ["port1"] if blackhole == "disable" else [],
+                    "blackhole": blackhole, "comment": comment,
+                    "status": "enable"}
+        return [
+            route(3628, 1, ["0.0.0.0", "0.0.0.0"], "MGMT DO NOT MODIFY"),
+            route(3629, 2, ["198.18.0.0", "255.254.0.0"], "MGMT DO NOT MODIFY"),
+            route(3637, 900, ["192.0.2.0", "255.255.255.0"], "change-ticket",
+                  blackhole="enable"),
+        ]
+    if url.endswith("/system/interface"):
+        return [
+            {"oid": 109, "name": "port1", "ip": ["203.0.113.9", "255.255.255.0"],
+             "status": "up", "role": "wan", "alias": "",
+             "allowaccess": ["ping", "https", "ssh"],
+             "ipv6": {"autoconf": "disable", "oid": 1}},
+            {"oid": 110, "name": "port2", "ip": ["0.0.0.0", "0.0.0.0"],
+             "status": "down", "role": "lan", "alias": "lan-uplink"},
+        ]
+    return None
+
+
 def _fmg_json_rpc_get(params: dict) -> Any:
     url = str(params.get("url") or "")
+    if "/pm/config/device/" in url:
+        db = _fmg_device_db_rows(url)
+        if db is not None:
+            return _fmg_jsonrpc(db, url)
     if url.rstrip("/") == "/task/task":
         return _fmg_jsonrpc(_fmg_tasks(params), url)
     if url.endswith("/ha_slave"):

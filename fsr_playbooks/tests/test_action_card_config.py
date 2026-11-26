@@ -183,3 +183,88 @@ def test_the_emitted_card_carries_the_used_config(five, monkeypatch):
               editable_fields=[])
     assert out["ok"], out
     assert out["card"]["config"]["id"] == "fmg-2"
+
+
+# --- no read of the connector in the session, none default: ask the health ---
+# Live: a bare "stage an install" card (no investigation first) had no config
+# and five options; approving it failed INTEGRATION-12 and consumed the card.
+FMG = "fortinet-fortimanager-json-rpc"
+
+
+def _health(monkeypatch, verdicts):
+    """Per-config healthcheck verdicts by config id (status string, or None =
+    the probe failed). Probes are counted in the returned list."""
+    probed: list[str] = []
+    monkeypatch.setattr(tools_execution, "_configured_rows",
+                        lambda client: [{"name": FMG, "version": "1.0"}])
+    monkeypatch.setattr(tools_execution, "_cached_health", lambda *a, **k: None)
+    monkeypatch.setattr(tools_execution, "_store_health", lambda *a, **k: None)
+
+    def live(client, connector, version, config="", agent_id=""):
+        probed.append(config)
+        st = verdicts[config]
+        return ({"status": "error", "_probe_failed": True} if st is None
+                else {"status": st})
+
+    monkeypatch.setattr(tools_execution, "_live_healthcheck", live)
+    return probed
+
+
+def test_the_one_healthy_config_is_preselected(five, monkeypatch):
+    _health(monkeypatch, {o["id"]: "Disconnected" for o in FIVE} | {"fmg-2": "Available"})
+    chosen, opts = _card_config(object(), FMG, None)
+    assert chosen["id"] == "fmg-2" and len(opts) == 5
+
+
+def test_two_healthy_configs_leave_the_pick_to_the_analyst(five, monkeypatch):
+    _health(monkeypatch, {o["id"]: "Disconnected" for o in FIVE}
+            | {"fmg-2": "Available", "fmg-3": "Available"})
+    assert _card_config(object(), FMG, None)[0] is None
+
+
+def test_a_config_that_could_not_be_judged_is_not_guessed_around(five, monkeypatch):
+    _health(monkeypatch, {o["id"]: "Disconnected" for o in FIVE}
+            | {"fmg-2": "Available", "fmg-5": None})
+    assert _card_config(object(), FMG, None)[0] is None
+
+
+def test_reads_already_made_skip_the_probe(five, monkeypatch):
+    probed = _health(monkeypatch, {})
+    tools_execution.note_config_used(FMG, "fmg-4")
+    assert _card_config(object(), FMG, None)[0]["id"] == "fmg-4"
+    assert probed == []
+
+
+def _emit(**kw):
+    return _fn(id="c1", connector=FMG, operation="json_rpc_execute",
+               summary="Install the package", editable_fields=[],
+               args={"url": "/securityconsole/install/package",
+                     "data": {"adom": "root", "pkg": "default", "flags": None,
+                              "scope": [{"name": "fgt-1", "vdom": "root"}]}},
+               **kw)
+
+
+@pytest.fixture
+def emit_env(five, monkeypatch):
+    monkeypatch.setattr(tools_execution, "_live_client_for_grounding", lambda: object())
+    monkeypatch.setattr(tools_execution, "_preflight_connector", lambda *a, **k: None)
+
+
+def test_a_card_with_no_config_to_run_on_requires_the_pick(emit_env, monkeypatch):
+    _health(monkeypatch, {o["id"]: "Disconnected" for o in FIVE})
+    card = _emit()["card"]
+    assert "config" not in card and card["config_required"] is True
+    assert len(card["config_options"]) == 5
+
+
+def test_a_card_that_found_its_config_does_not_require_one(emit_env, monkeypatch):
+    _health(monkeypatch, {o["id"]: "Disconnected" for o in FIVE} | {"fmg-2": "Available"})
+    card = _emit()["card"]
+    assert card["config"]["id"] == "fmg-2" and "config_required" not in card
+
+
+def test_an_omitted_member_is_absent_not_null(emit_env, monkeypatch):
+    _health(monkeypatch, {o["id"]: "Disconnected" for o in FIVE})
+    data = _emit()["card"]["args"]["data"]
+    assert "flags" not in data
+    assert data["scope"] == [{"name": "fgt-1", "vdom": "root"}] and data["pkg"] == "default"

@@ -654,6 +654,46 @@ def config_used(connector: str) -> str:
     return _CONFIG_USED.get(connector, "")
 
 
+#: Total time one card spends probing configs it has no cached verdict for.
+_CONFIG_PROBE_BUDGET_S = 15.0
+
+
+def reachable_config_options(client, connector: str,
+                             options: list[dict[str, Any]]
+                             ) -> tuple[list[dict[str, Any]], int]:
+    """(options whose own healthcheck passes, how many could not be judged).
+
+    Uses the same per-config health the run preflight uses (cache first, then
+    one live probe, stored for the next caller). A probe that failed to give an
+    authoritative verdict, or that the time budget skipped, is counted as
+    unjudged, never as healthy and never as down."""
+    import time
+    rows = _configured_rows(client)
+    row = next((r for r in rows if r.get("name") == connector), None) or {}
+    version = row.get("version") or ""
+    start = time.time()
+    healthy: list[dict[str, Any]] = []
+    unjudged = 0
+    for opt in options:
+        cid = str(opt.get("id") or "")
+        health = _cached_health(connector, version, cid)
+        if health is None:
+            if (time.time() - start) > _CONFIG_PROBE_BUDGET_S:
+                unjudged += 1
+                continue
+            hc = _live_healthcheck(client, connector, version, cid,
+                                   agent_id=opt.get("agent_id") or "")
+            if hc.get("_probe_failed"):
+                unjudged += 1
+                continue
+            _store_health(connector, version, hc.get("status"),
+                          hc.get("message") or "", config=cid)
+            health = hc
+        if _is_healthy_status(health.get("status")):
+            healthy.append(opt)
+    return healthy, unjudged
+
+
 def connector_config_options(client, connector: str) -> list[dict[str, Any]]:
     """Every active configuration of ``connector`` an action could run on.
 

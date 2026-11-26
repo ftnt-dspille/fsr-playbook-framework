@@ -321,18 +321,22 @@ def fmg_device(by: str = "list", device: str = "", adom: str = "root",
     posture (state, last contact and resync, management mode, flags), ``ha``
     for cluster members, ``policy`` for the last package install state, or
     ``changes`` for what FortiManager ran against the device lately (installs,
-    firmware upgrades, retrieves: when, by whom, how each ended). Ask
-    ``changes`` first for "what changed" or "did that push break it".
+    firmware upgrades, retrieves: when, by whom, how each ended), or ``diff``
+    for WHAT the device configuration now holds (static routes, interfaces,
+    newest objects first) and whether it is what the last install applied.
+    Ask ``changes`` first for "what changed" or "did that push break it", then
+    ``diff`` for the content: a finished install means the change was applied,
+    not that it was harmless.
 
     Args:
       by: query type -- ``list`` (default), ``status``, ``ha``, ``policy``,
-        or ``changes``.
+        ``changes`` or ``diff``.
       device: the FMG device name (required for ``status`` / ``ha`` /
-        ``changes``; optional filter for ``policy``).
+        ``changes`` / ``diff``; optional filter for ``policy``).
       adom: FMG ADOM name (default 'root').
       limit: max rows to return (default 50 for ``list``, 25 for ``policy``,
-        25 for ``changes``).
-      window: lookback for ``changes`` only, e.g. '6h', '24h', '7d' (default).
+        25 for ``changes``, 25 objects per kind for ``diff``).
+      window: lookback for ``changes`` and ``diff`` only, e.g. '6h', '24h', '7d' (default).
     """
     by = by.lower().strip()
     if by == "list":
@@ -354,8 +358,14 @@ def fmg_device(by: str = "list", device: str = "", adom: str = "root",
         return fmg_get_device_changes(device=device, adom=adom,
                                       window=window or "7d",
                                       limit=min(limit, _FMG_CHANGES_MAX_LIMIT))
+    if by == "diff":
+        if not device:
+            return {"error": "by='diff' requires a device name"}
+        return fmg_get_device_diff(device=device, adom=adom,
+                                   window=window or "7d",
+                                   limit=min(limit, _FMG_DIFF_MAX_LIMIT))
     return {"error": f"unsupported by={by!r}: use 'list', 'status', 'ha', "
-                     "'policy', or 'changes'"}
+                     "'policy', 'changes', or 'diff'"}
 
 
 def fmg_get_device_list(adom: str = "root", limit: int = 50) -> dict[str, Any]:
@@ -499,6 +509,30 @@ def _fmg_task_kind(task: dict[str, Any]) -> str:
     return "other"
 
 
+#: What a finished install does and does not say. The task state is FMG's
+#: account of delivery, never of effect: a clean install of a bad object is
+#: still "done".
+_FMG_INSTALL_READING = (
+    "An install task with state done and no errors means the configuration "
+    "WAS APPLIED to the device. It says nothing about whether that "
+    "configuration was harmless. This list does not show what each install "
+    "changed: read the content with fmg_device by=diff before calling an "
+    "install benign or unrelated.")
+
+
+def _fmg_task_outcome(kind: str, task: dict[str, Any]) -> str | None:
+    """Plain-words outcome for an install task: delivered or not. Never a
+    verdict on impact."""
+    if kind != "install":
+        return None
+    state = str(task.get("state") or "").lower()
+    if state == "done" and not task.get("num_err"):
+        return "applied to the device (impact not judged)"
+    if state in ("error", "failed") or task.get("num_err"):
+        return "failed or partly failed"
+    return None
+
+
 def _fmg_line_matches(name: Any, idents: set[str]) -> bool:
     """Does a task line name belong to the device? FMG names lines by device
     (`dev`), by its working copy (`dev[copy]`) or, for firmware upgrades, by
@@ -612,6 +646,7 @@ def fmg_get_device_changes(device: str, adom: str = "root",
             "title": t.get("title"),
             "kind": kind,
             "state": t.get("state"),
+            "outcome": _fmg_task_outcome(kind, t),
             "started": _iso(t.get("start_tm")),
             "finished": _iso(t.get("end_tm")),
             "user": t.get("user"),
@@ -625,6 +660,8 @@ def fmg_get_device_changes(device: str, adom: str = "root",
     env = _envelope("json_rpc_get", echo, changes, limit,
                     covers=covers, window=echo["window"])
     env["changes"] = env.pop("events")
+    if any(c.get("kind") == "install" for c in changes):
+        env["reading"] = _FMG_INSTALL_READING
     env["tasks_in_window"] = len(in_window)
     if scan_truncated:
         env["scan_truncated"] = True
@@ -633,6 +670,177 @@ def fmg_get_device_changes(device: str, adom: str = "root",
     if unnamed_installs:
         env["install_tasks_without_device"] = unnamed_installs
     return env
+
+
+#: `by=diff`: bounded read of what the device's configuration now holds.
+_FMG_DIFF_DEFAULT_LIMIT = 10
+_FMG_DIFF_MAX_LIMIT = 25
+_FMG_DIFF_MAX_VDOMS = 3
+
+_FMG_DIFF_READING = (
+    "FortiManager keeps no revision history here, so this is the device's "
+    "CURRENT configuration content, not a before/after. Items are ordered "
+    "newest-created first (`oid` is creation order in FortiManager's "
+    "database), so the first items are the likeliest to be what the last "
+    "install added. Check them against the symptom before calling the "
+    "install harmless.")
+
+
+def _fmg_ip_mask(v: Any) -> Any:
+    """FMG stores an address as [ip, netmask]; render `ip/prefix`."""
+    if isinstance(v, list) and len(v) == 2 and all(isinstance(x, str) for x in v):
+        import ipaddress
+        try:
+            return str(ipaddress.ip_network(f"{v[0]}/{v[1]}", strict=False))
+        except ValueError:
+            return f"{v[0]} {v[1]}"
+    return v
+
+
+def _fmg_first(v: Any) -> Any:
+    return v[0] if isinstance(v, list) and v else (None if isinstance(v, list) else v)
+
+
+def _fmg_digest_route(r: dict[str, Any]) -> dict[str, Any]:
+    out = {
+        "oid": r.get("oid"), "seq": r.get("seq-num"),
+        "dst": _fmg_ip_mask(r.get("dst")), "gateway": r.get("gateway"),
+        "interface": _fmg_first(r.get("device")),
+        "blackhole": r.get("blackhole"), "status": r.get("status"),
+        "distance": r.get("distance"), "comment": r.get("comment"),
+    }
+    return {k: v for k, v in out.items() if not _is_empty(v)}
+
+
+def _fmg_digest_interface(r: dict[str, Any]) -> dict[str, Any]:
+    out = {
+        "oid": r.get("oid"), "name": r.get("name"),
+        "ip": _fmg_ip_mask(r.get("ip")), "status": r.get("status"),
+        "role": r.get("role"), "alias": r.get("alias"),
+    }
+    return {k: v for k, v in out.items() if not _is_empty(v)}
+
+
+#: (kind, device-DB path under the vdom, projected fields, digest)
+_FMG_DIFF_OBJECTS = (
+    ("static_routes", "router/static",
+     ["seq-num", "dst", "gateway", "device", "blackhole", "status",
+      "distance", "comment"], _fmg_digest_route),
+    ("interfaces", "system/interface", None, _fmg_digest_interface),
+)
+
+#: db_status / conf_status as FMG defines them, in words. Values outside the
+#: table pass through unexplained rather than guessed at.
+_FMG_DB_STATUS = {
+    "nomod": "no edits waiting: the device database equals what was last installed",
+    "mod": "edits are waiting in the device database and have NOT been installed",
+}
+_FMG_CONF_STATUS = {
+    "insync": "the device runs what FortiManager last installed",
+    "outofsync": "the device differs from FortiManager's last install "
+                 "(changed on the device, or an install is pending)",
+}
+
+
+def fmg_get_device_diff(device: str, adom: str = "root", window: str = "7d",
+                        limit: int = _FMG_DIFF_DEFAULT_LIMIT
+                        ) -> dict[str, Any]:
+    """What a managed device's configuration holds now, tied to its last install.
+
+    FortiManager keeps no revisions on every build, so there is no before/after
+    to diff. This reads the device database (static routes and interfaces, per
+    vdom) newest-created first, plus whether that database is what the last
+    install applied (`config_state`) and which install task that was
+    (`last_install`, cite its `task_id`). The first items are the likeliest to
+    be what the install added.
+
+    Args:
+      device: the FMG device name (required).
+      adom: FMG ADOM name (default 'root').
+      window: lookback used to find the last install task, e.g. '24h', '7d'.
+      limit: max objects per kind and vdom (default 10, at most 25).
+    """
+    limit = max(1, min(int(limit or _FMG_DIFF_DEFAULT_LIMIT),
+                       _FMG_DIFF_MAX_LIMIT))
+    skip = _fmg_require_managed(device, adom, "sections", "configuration read")
+    if skip is not None:
+        return skip
+    from fsr_playbooks.execution_api import run_op  # lazy: import cycle
+
+    echo: dict[str, Any] = {"adom": adom, "device": device, "limit": limit}
+
+    def read(url: str, fields: list[str] | None = None):
+        params: dict[str, Any] = {"url": url}
+        if fields:
+            params["data"] = {"fields": fields}
+        return run_op(_FMG_CONNECTOR, "json_rpc_get", params,
+                      config=_fmg_config(), confirm=True, summarize=False)
+
+    res = read(f"/dvmdb/adom/{adom}/device/{device}",
+               ["name", "vdom", "db_status", "conf_status", "dev_status"])
+    if not isinstance(res, dict) or not res.get("ok"):
+        return _fmg_fail(res, echo)
+    rows = _fmg_rows(res.get("data"))
+    dev = rows[0] if rows else {}
+    vdoms = [str(v.get("name")) for v in (dev.get("vdom") or [])
+             if isinstance(v, dict) and v.get("name")] or ["root"]
+    skipped_vdoms = max(0, len(vdoms) - _FMG_DIFF_MAX_VDOMS)
+    vdoms = vdoms[:_FMG_DIFF_MAX_VDOMS]
+
+    sections: list[dict[str, Any]] = []
+    unread: list[dict[str, Any]] = []
+    first_fail: Any = None
+    for vdom in vdoms:
+        for kind, path, fields, digest in _FMG_DIFF_OBJECTS:
+            r = read(f"/pm/config/device/{device}/vdom/{vdom}/{path}", fields)
+            if not isinstance(r, dict) or not r.get("ok"):
+                first_fail = first_fail or r
+                unread.append({"vdom": vdom, "kind": kind})
+                continue
+            items = [d for d in (digest(x) for x in _fmg_rows(r.get("data")))
+                     if d]
+            items.sort(key=lambda d: d.get("oid") if isinstance(
+                d.get("oid"), int) else -1, reverse=True)
+            sections.append({"vdom": vdom, "kind": kind, "total": len(items),
+                             "truncated": len(items) > limit,
+                             "items": items[:limit]})
+    if not sections:
+        return _fmg_fail(first_fail, echo)
+
+    state = {"db_status": dev.get("db_status"),
+             "conf_status": dev.get("conf_status"),
+             "dev_status": dev.get("dev_status")}
+    state["db_meaning"] = _FMG_DB_STATUS.get(str(state["db_status"]))
+    state["conf_meaning"] = _FMG_CONF_STATUS.get(str(state["conf_status"]))
+    state = {k: v for k, v in state.items() if not _is_empty(v)}
+
+    last_install: dict[str, Any] | None = None
+    ch = fmg_get_device_changes(device=device, adom=adom, window=window,
+                                limit=_FMG_CHANGES_MAX_LIMIT)
+    if isinstance(ch, dict) and ch.get("ok"):
+        for c in ch.get("changes") or []:
+            if c.get("kind") == "install":
+                last_install = {k: c.get(k) for k in
+                                ("task_id", "title", "state", "finished",
+                                 "user", "errors") if c.get(k) is not None}
+                break
+
+    out: dict[str, Any] = {
+        "ok": True, "op": "json_rpc_get", "query": echo,
+        "config_state": state, "last_install": last_install,
+        "sections": sections,
+        "count": sum(len(sec["items"]) for sec in sections),
+        "reading": _FMG_DIFF_READING,
+    }
+    if last_install is None:
+        out["last_install_note"] = (
+            f"no install task for this device in the last {window}")
+    if unread:
+        out["unread"] = unread
+        out["incomplete"] = True
+    if skipped_vdoms:
+        out["vdoms_not_read"] = skipped_vdoms
+    return out
 
 
 # ---------------------------------------------------------------------------
