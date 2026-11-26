@@ -132,3 +132,28 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
   stages and TurnPlan.gate_refusal. Audit counts refreshed from the local
   session DB. The delivery rows now say what the loop does, not that a
   forced nudge remains.
+
+## Command-exec ops are tiered by the command, not the op
+
+An op that runs a caller-supplied command line (today `ssh.run_remote_command`)
+has no catalog category, because its effect is in the argument. It used to land
+on the unknown-op tier 3, so a plain log read stopped on an approval card and a
+"log server" hop could never finish in one turn.
+
+The rule (`_tier_for_run_op`, and the same check in `run_op`'s confirm gate):
+
+- The ops are declared in `mcp_server/_readonly_command.py` `COMMAND_EXEC_OPS`
+  as (connector, op) -> the param holding the command line. Add a connector there
+  only when its op executes a command line.
+- A call whose command line is provably read-only is tier 2 (auto-run, logged).
+  Provable means `is_read_only_command`: a pipeline of allow-listed readers
+  (`ls`, `cat`, `tail`, `grep`, `journalctl`, `ps`, `find` ...) and nothing else.
+- Everything else stays tier 3: redirection, `;` `&&` `||` `&`, `$` or backtick
+  substitution, an unknown program, a path outside the system bin dirs, an
+  unbalanced quote, a missing or non-text command, and any flag that writes,
+  executes or streams forever (`find -delete/-exec`, `sort -o`, `tail -f`,
+  `date -s`, `journalctl --vacuum*`, `dmesg -C`). It fails closed.
+- Running it as a super user does not change the class: a read is a read.
+
+The decision is on the command's structure, never on the model's prose. Tests:
+`tests/test_readonly_command_tier.py`.

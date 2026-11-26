@@ -122,6 +122,18 @@ class TurnEvidence:
         return obj
 
 
+def payload_is_empty(v: Any) -> bool:
+    """A body that holds no rows: None, "", [], {}, or a dict whose every value
+    is itself empty (a search envelope such as {"result": []}). Shape only."""
+    if v in (None, "", [], {}):
+        return True
+    if isinstance(v, dict) and v:
+        return all(payload_is_empty(x) for x in v.values())
+    if isinstance(v, list):
+        return all(payload_is_empty(x) for x in v)
+    return False
+
+
 def result_is_thin(result: Any) -> bool:
     """True when a SUCCESSFUL call handed back nothing to reason from: no body,
     a typed empty (code no_events, empty true), a zero count or total, or an
@@ -142,7 +154,7 @@ def result_is_thin(result: Any) -> bool:
             return v <= 0
     for k in ("events", "results", "records", "data", "items", "matches"):
         if k in result:
-            return result[k] in (None, [], {}, "")
+            return payload_is_empty(result[k])
     return False
 
 
@@ -189,7 +201,7 @@ def result_is_empty_set(result: Any) -> bool:
             return v <= 0
     for k in ("events", "results", "records", "data", "items", "matches"):
         if k in result:
-            return result[k] in (None, [], {}, "")
+            return payload_is_empty(result[k])
     return False
 
 
@@ -383,6 +395,51 @@ def checked_ready_sources(registry: dict[str, dict[str, Any]]) -> list[str]:
     return _ready_source_split(registry)[0]
 
 
+# Calls that look a key up in a source. A discovery or record-read tool coming
+# back empty says nothing about whether a SOURCE holds the key.
+_HUNT_TOOLS = frozenset({"run_op", "run_connector_operation", "siem_search",
+                         "siem_search_ip", "siem_search_host", "siem_search_user",
+                         "prior_cases"})
+
+
+def dry_sources(registry: dict[str, dict[str, Any]]) -> list[str]:
+    """Names of the sources this turn searched that gave nothing to reason from:
+    the call errored or came back empty/thin (typed flags on the registry
+    entry, never the result's wording). A run_op is named by its connector, any
+    other hunt tool by its own name. A source that also answered once with real
+    rows is not dry."""
+    dry: list[str] = []
+    answered: set[str] = set()
+    for e in registry.values():
+        name = str((e or {}).get("name") or "")
+        if name not in _HUNT_TOOLS:
+            continue
+        label = str(((e or {}).get("args") or {}).get("connector") or "") \
+            if name in _QUERY_TOOLS else name
+        label = label or name
+        if (e or {}).get("ok") is True and (e or {}).get("thin") is not True:
+            answered.add(label)
+        elif label not in dry:
+            dry.append(label)
+    return [d for d in dry if d not in answered]
+
+
+def _dry_label(raw: str) -> str:
+    """A reader-facing name for a dry source: the catalog label of a connector or
+    log source the host reported, else a plain description. Never a tool id."""
+    conns = _turn_ready_connectors.get() or {}
+    if raw in conns:
+        return conns[raw]["label"]
+    for prefix, label in (_turn_ready_sources.get() or {}).items():
+        if raw.startswith(prefix):
+            return label
+    if raw == "prior_cases":
+        return "earlier cases"
+    if raw.startswith("siem_search"):
+        return "the log search"
+    return raw
+
+
 def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
     """The per-round tail note naming ready sources not yet queried, or "".
 
@@ -393,27 +450,46 @@ def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
     that sometimes never answered the question. Even then the note offers, and
     the model decides from the question whether a source is worth a call: live,
     a network-ops question was sent to threat intel and Jira by a note that
-    said "query them before concluding"."""
+    said "query them before concluding".
+
+    Once the turn is investigating, sources that came back empty or errored are
+    named too (`dry_sources`, from typed flags on the registry): an empty answer
+    is one source holding nothing for the key, and the other configured sources
+    can take the same key. Without that, two or three empty SIEM or case
+    lookups ended the hunt before a directory, ticket or log source was tried."""
     checked, names = _ready_source_split(registry)
     investigating = bool(checked) or any(
         str((e or {}).get("name") or "") == "run_op" for e in registry.values())
     if not investigating:
         conn_labels = {m["label"] for m in (_turn_ready_connectors.get() or {}).values()}
         names = [n for n in names if n not in conn_labels]
-    if not names:
+    dry = dry_sources(registry) if investigating else []
+    if not names and not dry:
         return ""
-    note = ("[ready, not yet queried this turn: " + ", ".join(names)
-            + ". These are available, not required: query one only when what"
-            " it holds could bear on THIS question (judge that from the"
-            " question, in any language), and leave the rest unqueried"
-            " without mentioning them.")
-    failed = sorted(m["label"] for c, m in (_turn_ready_connectors.get() or {}).items()
-                    if c in _failed_connectors(registry))
-    if failed:
-        note += (" Tried and errored, so not checked: " + ", ".join(failed)
-                 + ". Retry once with a different query, or report the source"
-                 " as unavailable.")
-    if investigating and "tickets" in _unchecked_kinds(registry):
+    note = ""
+    if names:
+        note = ("[ready, not yet queried this turn: " + ", ".join(names)
+                + ". These are available, not required: query one only when what"
+                " it holds could bear on THIS question (judge that from the"
+                " question, in any language), and leave the rest unqueried"
+                " without mentioning them.")
+        failed = sorted(m["label"] for c, m in (_turn_ready_connectors.get() or {}).items()
+                        if c in _failed_connectors(registry))
+        if failed:
+            note += (" Tried and errored, so not checked: " + ", ".join(failed)
+                     + ". Retry once with a different query, or report the source"
+                     " as unavailable.")
+    if dry:
+        note += (("" if note else "[") + " Came back empty or errored: "
+                 + ", ".join(dict.fromkeys(_dry_label(d) for d in dry))
+                 + ". That means only that source held nothing for the key you"
+                 " gave it, not that the key is clean. Every other configured"
+                 " source that holds activity or history (a directory, a log"
+                 " server, a case search, a record system; the connector list"
+                 " you read names them) can take the same key, such as a name,"
+                 " host, address or account: search them with it, one hop at a"
+                 " time, before you conclude.")
+    if names and investigating and "tickets" in _unchecked_kinds(registry):
         empty = any((e or {}).get("thin") is True for e in registry.values())
         note += (" If the question is about an alert, host or indicator that an"
                  " earlier analyst could have written up, tickets can hold the"

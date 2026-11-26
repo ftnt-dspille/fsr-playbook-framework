@@ -83,14 +83,19 @@ class TestCheckedSources:
         register_tool_result("c1", "siem_search", True, {}, _THIN)
         note = unchecked_ready_note(ev.valid_ids())
         assert "FortiAnalyzer" in note
-        assert "FortiSIEM" not in note
+        # FortiSIEM was queried: it may be named as empty, never as unqueried.
+        assert "FortiSIEM" not in note.split("Came back empty")[0]
 
-    def test_unchecked_note_is_empty_once_every_ready_source_is_queried(self):
+    def test_unchecked_note_lists_no_unqueried_source_once_every_ready_source_is_queried(self):
         ev = _ev()
         set_turn_ready_sources(READY)
         register_tool_result("c1", "siem_search", True, {}, _THIN)
         register_tool_result("c2", "faz_search", True, {}, _THIN)
-        assert unchecked_ready_note(ev.valid_ids()) == ""
+        note = unchecked_ready_note(ev.valid_ids())
+        # Nothing is left in the ready list to offer; the empties are still said
+        # plainly (see test_empty_answers_point_at_other_sources).
+        assert "ready, not yet queried" not in note
+        assert "Came back empty or errored" in note
 
 
 class TestVerdictCardSourcesChecked:

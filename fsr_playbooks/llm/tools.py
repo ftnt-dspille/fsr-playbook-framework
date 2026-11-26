@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from typing import Any, get_args, get_origin
 
 import fsr_playbooks.mcp_server as mcp_server
+from fsr_playbooks.mcp_server._readonly_command import (
+    command_exec_param,
+    op_call_is_read_only_command,
+)
 
 from .._db import default_db_path
 from .guard_fires import record_guard_fire, refusal
@@ -513,6 +517,12 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         # dropped from find_containment_actions' tier>=3 guard -- so "isolate
         # this host" would execute ungated and the proper op wouldn't surface.
         return 4
+    if command_exec_param(connector, op) is not None:
+        # A read-only command line (a log read) is a read; any other command
+        # keeps the approval gate (tier 3), and so does a missing or non-text
+        # one. Decided on the command's structure, never on the op name.
+        return 2 if op_call_is_read_only_command(
+            connector, op, (args or {}).get("params")) else 3
     if _is_net_write_op(args or {}):
         # FMG writes / installs and FortiGate CLI exec: tier 4 (approval card)
         # regardless of catalog category or a missing op_safety row.
