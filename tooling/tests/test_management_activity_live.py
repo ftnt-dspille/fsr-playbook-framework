@@ -8,7 +8,7 @@ stopped (the mutating paths live behind --start-subscriptions in
 ``fsr_playbooks.connectors.typed.capture_management_activity``).
 
 Credentials are read from the environment first, then from the gitignored
-lab env file ``~/PycharmProjects/Miscellaneous/fortisoar/scratch/.env.m365``
+lab env file ``scratch/.env.m365`` under the repo root
 (override with M365_ENV_FILE) -- the file this suite's capture driver reads,
 so a bare ``pytest tooling/tests/test_management_activity_live.py -q`` can
 run live without exporting anything.
@@ -55,7 +55,7 @@ _TENANT, _CLIENT_ID, _CLIENT_SECRET = resolve_creds()
 if not (_TENANT and _CLIENT_ID and _CLIENT_SECRET):
     pytest.skip(
         "live Management Activity capture needs M365_TENANT_ID / "
-        "M365_CLIENT_ID / M365_CLIENT_SECRET (env or the gitignored lab "
+        "M365_CLIENT_ID / M365_CLIENT_SECRET (env or the gitignored local "
         ".env.m365 file)",
         allow_module_level=True,
     )

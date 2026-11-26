@@ -152,7 +152,7 @@ def test_general_records_validate_through_both_page_models() -> None:
 
 
 def test_scc_parameters_as_string_validates_after_live_rebaseline() -> None:
-    # LIVE-CAPTURE REBASELINED 2026-11-25: SecurityComplianceCenter records
+    # LIVE-CAPTURE REBASELINED: SecurityComplianceCenter records
     # deliver Parameters (and NonPIIParameters) as a plain cmdlet string,
     # not the documented list of NameValuePair. Sanitized from a real
     # Audit.General blob (provenance: live capture, sanitized).

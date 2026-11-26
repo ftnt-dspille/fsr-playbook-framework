@@ -386,7 +386,7 @@ class GeneralAuditRecord(CommonAuditRecord):
 
     # Exchange Admin schema
     ModifiedObjectResolvedName: str | None = None
-    # LIVE-CAPTURE REBASELINED 2026-11-25: the schema page documents
+    # LIVE-CAPTURE REBASELINED: the schema page documents
     # Parameters as a list of Common.NameValuePair, but the wire also
     # delivers a PLAIN STRING on SecurityComplianceCenter-workload records
     # (single-line cmdlet text, e.g. '-Organization "..." -SkipValidations

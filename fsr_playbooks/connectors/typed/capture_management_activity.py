@@ -16,8 +16,8 @@ Usage (from the repo root)::
     .venv/bin/python -m fsr_playbooks.connectors.typed.capture_management_activity
 
 Credentials come from ``M365_TENANT_ID`` / ``M365_CLIENT_ID`` /
-``M365_CLIENT_SECRET`` in the environment, or from the gitignored lab env
-file ``~/PycharmProjects/Miscellaneous/fortisoar/scratch/.env.m365``
+``M365_CLIENT_SECRET`` in the environment, or from the gitignored local env
+file ``scratch/.env.m365 under the repo root``
 (override with ``--env-file`` or ``M365_ENV_FILE``). Nothing credential-ish
 is ever written into the fixtures; the index lands under ``scratch/``
 (gitignored).
@@ -59,14 +59,7 @@ from fsr_playbooks.connectors.typed.microsoft_management_activity import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTDIR = REPO_ROOT / "scratch" / "captures"
-DEFAULT_ENV_FILE = (
-    Path.home()
-    / "PycharmProjects"
-    / "Miscellaneous"
-    / "fortisoar"
-    / "scratch"
-    / ".env.m365"
-)
+DEFAULT_ENV_FILE = REPO_ROOT / "scratch" / ".env.m365"
 AUTH_URL = "https://login.microsoftonline.com"
 _CAPTURE_DIR_NAME = "microsoft-management-activity"
 _TIMEOUT = 60
@@ -97,7 +90,7 @@ def load_env_file(path: Path) -> bool:
 
 
 def resolve_creds(env_file: Path | None = None) -> tuple[str, str, str]:
-    """M365_* from the environment, else from the gitignored lab env file."""
+    """M365_* from the environment, else from the gitignored local env file."""
     if env_file is None:
         raw = os.environ.get("M365_ENV_FILE")
         env_file = Path(raw) if raw else DEFAULT_ENV_FILE
@@ -418,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="KEY=VALUE file for the M365_* vars (default: the gitignored "
-        "lab .env.m365, used only when the vars are not already set)",
+        "local .env.m365, used only when the vars are not already set)",
     )
     parser.add_argument(
         "--hours",
@@ -447,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
     if not (tenant_id and client_id and client_secret):
         parser.error(
             "set M365_TENANT_ID / M365_CLIENT_ID / M365_CLIENT_SECRET (env "
-            "or the gitignored lab .env.m365 file)"
+            "or the gitignored local .env.m365 file)"
         )
 
     out_dir = args.outdir / _CAPTURE_DIR_NAME
