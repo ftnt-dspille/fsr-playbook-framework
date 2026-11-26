@@ -2008,7 +2008,8 @@ def emit_verdict(
                     "a zero count, or an empty result). A committed verdict "
                     "needs evidence that shows something. Run one coverage "
                     "round first: query the ready sources you have not checked "
-                    "this turn, then send the verdict again. If nothing turns "
+                    "this turn that could bear on the question, then send the "
+                    "verdict again. If nothing turns "
                     "up, the verdict is capped at needs_more_info."
                     + (" Ready and not yet queried: " + ", ".join(unchecked) + "."
                        if unchecked else ""),

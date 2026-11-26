@@ -379,7 +379,10 @@ def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
     source itself, i.e. the agent chose to investigate. A plain question ("what
     is this alert's name") reads the record and answers; nudging it toward every
     intel connector turned a one-call lookup into a fifteen-call investigation
-    that sometimes never answered the question."""
+    that sometimes never answered the question. Even then the note offers, and
+    the model decides from the question whether a source is worth a call: live,
+    a network-ops question was sent to threat intel and Jira by a note that
+    said "query them before concluding"."""
     checked, names = _ready_source_split(registry)
     investigating = bool(checked) or any(
         str((e or {}).get("name") or "") == "run_op" for e in registry.values())
@@ -389,14 +392,19 @@ def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
     if not names:
         return ""
     note = ("[ready, not yet queried this turn: " + ", ".join(names)
-            + ". Query them before concluding, or say why not.")
+            + ". These are available, not required: query one only when what"
+            " it holds could bear on THIS question (judge that from the"
+            " question, in any language), and leave the rest unqueried"
+            " without mentioning them.")
     if investigating and "tickets" in _unchecked_kinds(registry):
         empty = any((e or {}).get("thin") is True for e in registry.values())
-        note += (" Earlier tickets can hold the deciding fact (an approved test,"
-                 " a known owner, a prior report)"
+        note += (" If the question is about an alert, host or indicator that an"
+                 " earlier analyst could have written up, tickets can hold the"
+                 " deciding fact (an approved test, a known owner, a prior report)"
                  + (", and the log searches so far came back empty" if empty else "")
-                 + ". Search the ticket system by the host name and by the"
-                 " indicator before you conclude.")
+                 + "; then search the ticket system by the host name and by the"
+                 " indicator before you conclude. A question about device or"
+                 " network state does not need them.")
     return note + "]"
 
 

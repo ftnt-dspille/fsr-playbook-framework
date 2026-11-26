@@ -1178,6 +1178,38 @@ def box_has_connector(connector: str) -> bool | None:
         return None
 
 
+def installed_connector_names(limit: int = 40) -> list[str]:
+    """Connector names the box reports installed (sorted, capped), or ``[]``
+    when it cannot be asked. Feeds the unknown-connector error so the model
+    chooses from the real roster instead of inventing a name."""
+    if _LIVE_CATALOG_PROBE is None:
+        return []
+    try:
+        names = _LIVE_CATALOG_PROBE()
+        return sorted(str(n) for n in (names or []))[:limit]
+    except Exception:  # noqa: BLE001 -- a diagnostic must never raise
+        return []
+
+
+def unknown_connector_suggestions(connector: str, near: list[str] | None = None) -> list[str]:
+    """Suggestions for an ``unknown_connector`` error: the connectors that DO
+    exist on this box, so the model picks one (or concludes none fits) rather
+    than guessing another name."""
+    out: list[str] = []
+    installed = installed_connector_names()
+    if installed:
+        out.append(
+            f"There is no connector named {connector!r} on this box. The installed "
+            "connectors are: " + ", ".join(installed) + ". Use one of these exact "
+            "names only if it fits the question; if none does, do not call a "
+            "connector, answer from what you have read.")
+    elif near:
+        out.append(f"Closest catalogued names: {', '.join(near)}.")
+    out.append("`find` searches the catalog; "
+               "`list_configured_connectors` lists what is configured.")
+    return out
+
+
 def stale_catalog_hint(connector: str) -> dict[str, Any] | None:
     """An error-envelope fragment when ``connector`` is on the box but NOT in
     the catalog; ``None`` otherwise (including "couldn't check").

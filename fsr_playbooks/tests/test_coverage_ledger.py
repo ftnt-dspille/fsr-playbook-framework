@@ -312,3 +312,24 @@ class TestConnectorSourceKind:
         from fsr_playbooks.llm import autonomy
         monkeypatch.setattr(autonomy, "_connector_category", lambda c: "threat intelligence")
         assert autonomy.connector_source_kind("jira") == "intel"
+
+
+def test_ledger_note_offers_sources_and_leaves_relevance_to_the_model():
+    """Live, "Query them before concluding" sent a network-ops question to threat
+    intel and Jira. The note must say the sources are available, not required,
+    and the ticket steer must be conditional on the question being about
+    something an earlier analyst could have written up."""
+    from fsr_playbooks.mcp_server._citation_validator import (
+        set_turn_ready_connectors,
+        unchecked_ready_note,
+    )
+    set_turn_ready_connectors({"jira": {"label": "Jira", "kind": "tickets"},
+                               "vt": {"label": "VirusTotal", "kind": "intel"}})
+    try:
+        note = unchecked_ready_note({"c1": {"name": "run_op", "args": {"connector": "x"}}})
+    finally:
+        set_turn_ready_connectors(None)
+    assert "Jira" in note and "VirusTotal" in note
+    assert "Query them before concluding" not in note
+    assert "not required" in note
+    assert "does not need them" in note

@@ -400,8 +400,8 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
     if row is not None:
         return None  # connector is catalogued → let normal tiering decide
     # Absent from the catalog. Ask the box before declaring it nonexistent.
+    from ..mcp_server import _shared
     try:
-        from ..mcp_server import _shared
         stale = _shared.stale_catalog_hint(connector)
     except Exception:  # noqa: BLE001 -- never harden a tier lookup into a crash
         stale = None
@@ -412,11 +412,7 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
         "code": "unknown_connector",
         "connector": connector,
         "message": f"connector '{connector}' not found in store",
-        "suggestions": [
-            "Run `find_connector` to search the catalog for the right name.",
-            "Only connectors from `list_configured_connectors` can run -- pivot "
-            "to a configured one, or consolidate what you already have.",
-        ],
+        "suggestions": _shared.unknown_connector_suggestions(connector),
     }
 
 

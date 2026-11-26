@@ -1960,9 +1960,7 @@ def run_op(
         return _err(
             "unknown_connector",
             f"connector '{connector}' not found in store",
-            suggestions=near or [
-                "Run `find_connector` to search the catalog",
-            ],
+            suggestions=_shared.unknown_connector_suggestions(connector, near),
             connector=connector,
         )
     version = crow["version"]
