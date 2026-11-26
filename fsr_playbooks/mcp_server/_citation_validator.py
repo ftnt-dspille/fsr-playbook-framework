@@ -12,6 +12,7 @@ bodies (those are in history already).
 from __future__ import annotations
 
 import contextvars
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -43,6 +44,15 @@ class TurnEvidence:
         self._undecided_refusals = 0
         # A staged action before any verdict is refused once per turn.
         self._verdict_first_refused = False
+        # Times this turn was held open (verdict refused, or a bare reply sent
+        # back) over a key a result revealed and nothing searched. Capped.
+        self._pivot_nudges = 0
+
+    def pivot_nudges(self) -> int:
+        return self._pivot_nudges
+
+    def note_pivot_nudge(self) -> None:
+        self._pivot_nudges += 1
 
     def thin_refusals(self) -> int:
         return self._thin_refusals
@@ -68,7 +78,8 @@ class TurnEvidence:
                  thin: bool | None = None, empty: bool | None = None,
                  idents: list[str] | None = None,
                  events: list[dict[str, Any]] | None = None,
-                 premise: dict[str, Any] | None = None) -> None:
+                 premise: dict[str, Any] | None = None,
+                 pivots: list[dict[str, str]] | None = None) -> None:
         """Record that a tool call succeeded or failed. ``args`` is kept so a
         policy can tell WHAT a cited call looked up (its target), not just
         which tool ran; ``finding`` is what a threat-intel lookup SAID (see
@@ -88,6 +99,8 @@ class TurnEvidence:
             entry["events"] = list(events)
         if premise:
             entry["premise"] = premise
+        if pivots:
+            entry["pivots"] = list(pivots)
         self._registry[tool_use_id] = entry
 
     def record_verdict(self, card: dict[str, Any]) -> None:
@@ -108,7 +121,8 @@ class TurnEvidence:
                 "_verdicts": list(self._verdicts),
                 "_thin_refusals": self._thin_refusals,
                 "_undecided_refusals": self._undecided_refusals,
-                "_verdict_first_refused": self._verdict_first_refused}
+                "_verdict_first_refused": self._verdict_first_refused,
+                "_pivot_nudges": self._pivot_nudges}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TurnEvidence:
@@ -119,6 +133,7 @@ class TurnEvidence:
         obj._thin_refusals = int(data.get("_thin_refusals") or 0)
         obj._undecided_refusals = int(data.get("_undecided_refusals") or 0)
         obj._verdict_first_refused = bool(data.get("_verdict_first_refused"))
+        obj._pivot_nudges = int(data.get("_pivot_nudges") or 0)
         return obj
 
 
@@ -440,7 +455,135 @@ def _dry_label(raw: str) -> str:
     return raw
 
 
-def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
+#: Open leads that hold a turn open at most this many times (a refused verdict or
+#: a bare reply sent back), so a noisy result can never loop it.
+PIVOT_NUDGE_CAP = 3
+_INDICATOR_TYPES = frozenset({"address", "hash", "domain"})
+_PIVOT_TYPE_WORDS = {
+    "address": "an address", "hash": "a file hash", "domain": "a domain",
+    "name": "a host or account name", "entity": "a person, account or host",
+}
+
+
+def _revealed_keys(tool_name: str, args: dict[str, Any] | None,
+                   result: Any) -> list[dict[str, str]] | None:
+    """Typed values a source's answer revealed (see ``_pivot_keys``). Only an
+    executed operation counts, and not a threat-intel connector's report."""
+    if tool_name not in _QUERY_TOOLS:
+        return None
+    connector = str((args or {}).get("connector") or "")
+    meta = (_turn_ready_connectors.get() or {}).get(connector) or {}
+    if meta.get("kind") == "intel":
+        return None
+    try:
+        from ._pivot_keys import pivot_keys  # noqa: PLC0415
+        return pivot_keys(result) or None
+    except Exception:  # noqa: BLE001 - a lead is advice; never fail a result over it
+        return None
+
+
+def _searched_text(registry: dict[str, dict[str, Any]]) -> str:
+    """What this turn searched sources with: the params of every hunt call that
+    was answered (a call that errored did not search)."""
+    from ._pivot_keys import call_text  # noqa: PLC0415
+    return " ".join(call_text((e or {}).get("args")) for e in registry.values()
+                    if str((e or {}).get("name") or "") in _HUNT_TOOLS
+                    and (e or {}).get("ok") is not False)
+
+
+def _accepting_sources(kind: str, registry: dict[str, dict[str, Any]]) -> list[str]:
+    """Labels of the sources that can take a key of this type: the connectors this
+    turn already got answers from, the ready ticket connectors, the ready log
+    sources. A threat-intel connector takes only an indicator (address, hash,
+    domain), never a person or host name."""
+    conns = _turn_ready_connectors.get() or {}
+    names: list[str] = []
+    # Record systems (tickets) first: they hold the activity rows of a key.
+    pool = _queried_connectors(registry) | {
+        c for c, m in conns.items() if m.get("kind") == "tickets"}
+    for c in sorted(pool, key=lambda c: ((conns.get(c) or {}).get("kind") != "tickets", c)):
+        if not c:
+            continue
+        if (conns.get(c) or {}).get("kind") == "intel" and kind not in _INDICATOR_TYPES:
+            continue
+        label = (conns.get(c) or {}).get("label") or connector_labels_for([c]).get(c) or c
+        if label not in names:
+            names.append(label)
+    for label in (_turn_ready_sources.get() or {}).values():
+        if label not in names:
+            names.append(label)
+    return names
+
+
+def open_pivot_keys(registry: dict[str, dict[str, Any]],
+                    limit: int = 3) -> list[dict[str, Any]]:
+    """Keys a source result revealed this turn that no answered search used,
+    newest result first: ``[{"v", "t", "sources": [labels]}]``. A value already
+    used as a search key, in any source, is not open; neither is one with no
+    source left that can take it."""
+    from ._pivot_keys import used_as_key  # noqa: PLC0415
+    hay = _searched_text(registry)
+    # What the turn was handed (the mounted record) is not revealed by a result.
+    try:
+        known = json.dumps(_turn_known_context.get(), default=str).lower()
+    except Exception:  # noqa: BLE001
+        known = ""
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for e in reversed(list(registry.values())):
+        for p in (e or {}).get("pivots") or []:
+            v, t = str(p.get("v") or ""), str(p.get("t") or "")
+            if not v or v.lower() in seen:
+                continue
+            seen.add(v.lower())
+            if used_as_key(v, hay) or v.lower() in known:
+                continue
+            sources = _accepting_sources(t, registry)
+            if sources:
+                out.append({"v": v, "t": t, "sources": sources})
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def pivot_facts(keys: list[dict[str, Any]]) -> str:
+    """The typed fact for open keys: which value, what type, which sources."""
+    return "; ".join(
+        f"{k['v']} ({_PIVOT_TYPE_WORDS.get(k['t'], 'a value')}), not yet used as a "
+        f"search key, can go to: {', '.join(k['sources'])}" for k in keys)
+
+
+def pivot_note(registry: dict[str, dict[str, Any]]) -> str:
+    """The round-tail note naming keys a result revealed and nothing searched, or
+    "". Skipped until the turn is hunting (a run_op answered)."""
+    keys = open_pivot_keys(registry)
+    if not keys:
+        return ""
+    return ("[open leads: a source result revealed " + pivot_facts(keys)
+            + ". Each is a key: search it in the sources named, one hop at a time,"
+            " before you conclude. Skip one only when it plainly has nothing to do"
+            " with the question, and say so in unknowns.]")
+
+
+def pivot_hold(evidence: TurnEvidence | None = None) -> str:
+    """The reason a turn that is about to end must go on, or "": a key a result
+    revealed was never searched and the turn has not yet been held open
+    ``PIVOT_NUDGE_CAP`` times. Counts the hold, so each call that returns text
+    spends one."""
+    evidence = get_turn_evidence() if evidence is None else evidence
+    if not isinstance(evidence, TurnEvidence) or evidence.pivot_nudges() >= PIVOT_NUDGE_CAP:
+        return ""
+    keys = open_pivot_keys(evidence.valid_ids())
+    if not keys:
+        return ""
+    evidence.note_pivot_nudge()
+    return ("A source result this turn revealed " + pivot_facts(keys)
+            + ". The turn is not done: search each key in the sources named"
+            " (one hop at a time), then conclude from what comes back. Skip one"
+            " only when it plainly has nothing to do with the question.")
+
+
+def _coverage_note(registry: dict[str, dict[str, Any]]) -> str:
     """The per-round tail note naming ready sources not yet queried, or "".
 
     Ticket and intel connectors join the note only once the turn has queried a
@@ -499,6 +642,11 @@ def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
                  " indicator before you conclude. A question about device or"
                  " network state does not need them.")
     return note + "]"
+
+
+def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
+    """The per-round tail note: unqueried and empty sources, then open leads."""
+    return " ".join(n for n in (_coverage_note(registry), pivot_note(registry)) if n)
 
 
 # (connector, op, params, result) -> {verdict, severity, source, ...} | None.
@@ -564,7 +712,9 @@ def register_tool_result(tool_use_id: str, tool_name: str, success: bool,
         finding = read_finding(tool_name, args, result) if success else None
         thin = result_is_thin(result) if (success and result is not None) else None
         empty = result_is_empty_set(result) if success else False
-        idents = events = premise = None
+        idents = events = premise = pivots = None
+        if success and result is not None and not empty:
+            pivots = _revealed_keys(tool_name, args, result)
         if success and result is not None:
             from ._evidence_score import (  # noqa: PLC0415
                 event_facts,
@@ -575,7 +725,7 @@ def register_tool_result(tool_use_id: str, tool_name: str, success: bool,
             events = event_facts(result)
             premise = premise_facts(result)
         evidence.register(tool_use_id, tool_name, success, args, finding, thin, empty,
-                          idents, events, premise)
+                          idents, events, premise, pivots)
 
 
 def record_delivered_verdict(card: dict[str, Any]) -> None:

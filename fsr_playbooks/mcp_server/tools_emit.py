@@ -2058,6 +2058,16 @@ def emit_verdict(
                 "does not support any call, send needs_more_info again and "
                 "say in unknowns what would decide it.",
                 suggestions=[verdict_contract()])
+    # Open leads. A source result revealed a key (a host, an account, an
+    # address) that no search used: the verdict would rest on the first hop.
+    # Refused with the typed fact (which key, which sources can take it), at
+    # most PIVOT_NUDGE_CAP times per turn so a noisy result cannot loop it.
+    if evidence_ctx is not None and ids_valid:
+        from ._citation_validator import pivot_hold  # noqa: PLC0415
+        held = pivot_hold(evidence_ctx)
+        if held:
+            return _err("open_lead_unsearched", held,
+                        suggestions=[verdict_contract()])
     # Generate id if missing
     if not id or not isinstance(id, str):
         import uuid  # noqa: PLC0415

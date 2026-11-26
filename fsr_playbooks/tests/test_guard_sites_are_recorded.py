@@ -242,6 +242,7 @@ LOOP_MARKERS = {
     "max_tool_turns": "turn.max_tool_turns",           # wrap-up label
     "answer_scope_wrapup": "turn.answer_scope_wrapup",
     "requested_action_staged": "RequestedActionPostcondition",
+    "open_lead_forced": "turn.open_lead_forced",
 }
 
 
@@ -413,6 +414,16 @@ def _fire_forced_containment(mp):
           tags={"unattended": True})
 
 
+def _fire_open_lead_forced(mp):
+    # A directory answer names a host no call searched: the bare reply is sent back.
+    answer = {"ok": True, "data": [{"sAMAccountName": "kfenwick",
+                                    "description": "Primary device: wks-eng-31"}]}
+    _loop(mp, [_Final([_use("a", "run_op", {"connector": "activedirectory", "op": "search",
+                                            "params": {"q": "kfenwick"}})]),
+               _Final([_say("benign")]), _Final([_say("done")])],
+          dispatch=lambda n, a, **_kw: answer)
+
+
 def _triage(**kw) -> lh.TriageDiscipline:
     return lh.TriageDiscipline(**kw)
 
@@ -557,6 +568,7 @@ DRIVERS = {
     "turn.forced_containment": _fire_forced_containment,
     "turn.max_tool_turns": _fire_max_tool_turns,
     "turn.budget_ask": _fire_budget_ask,
+    "turn.open_lead_forced": _fire_open_lead_forced,
 }
 
 

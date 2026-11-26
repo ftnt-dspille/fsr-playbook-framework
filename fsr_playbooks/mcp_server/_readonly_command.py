@@ -137,4 +137,5 @@ def op_call_is_read_only_command(connector: str, op: str, params: object) -> boo
     key = command_exec_param(connector, op)
     if key is None or not isinstance(params, dict):
         return False
-    return is_read_only_command(params.get(key))
+    cmd = params.get(key)
+    return isinstance(cmd, str) and is_read_only_command(cmd)

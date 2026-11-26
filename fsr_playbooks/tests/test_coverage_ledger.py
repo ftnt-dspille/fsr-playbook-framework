@@ -170,6 +170,11 @@ _TOOL_WORDS = ("run_op", "siem_search", "faz_search", "run_connector_operation",
                "advance_search", "fetch_incidents", "query_ip", "emit_card")
 
 
+# Rows with no value a later search could use: these tests are about which
+# sources were queried, not about keys a result revealed.
+_ROWS = {"ok": True, "count": 2, "events": [{"n": 1}, {"n": 2}]}
+
+
 class TestConnectorLedger:
     def teardown_method(self):
         set_turn_ready_sources(None)
@@ -187,7 +192,7 @@ class TestConnectorLedger:
         ev = _ev()
         set_turn_ready_connectors(SNOW)
         register_tool_result("c1", "run_op", True,
-                             {"connector": "servicenow", "op": "advance_search"}, _FULL)
+                             {"connector": "servicenow", "op": "advance_search"}, _ROWS)
         assert unchecked_ready_sources(ev.valid_ids()) == []
         assert checked_ready_sources(ev.valid_ids()) == ["ServiceNow"]
         assert unchecked_ready_note(ev.valid_ids()) == ""
@@ -219,7 +224,7 @@ class TestConnectorLedger:
         ev = _ev()
         set_turn_ready_connectors(None)
         register_tool_result("c1", "run_op", True,
-                             {"connector": "virustotal", "op": "query_ip"}, _FULL)
+                             {"connector": "virustotal", "op": "query_ip"}, _ROWS)
         assert unchecked_ready_sources(ev.valid_ids()) == []
         assert unchecked_ready_note(ev.valid_ids()) == ""
 
@@ -287,7 +292,7 @@ class TestConnectorLedger:
         _ev()
         set_turn_ready_connectors(SNOW)
         register_tool_result("c1", "run_op", True,
-                             {"connector": "servicenow", "op": "advance_search"}, _FULL)
+                             {"connector": "servicenow", "op": "advance_search"}, _ROWS)
         assert _verdict("c1")["card"]["sources_checked"] == ["ServiceNow"]
 
 
