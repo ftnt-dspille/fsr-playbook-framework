@@ -217,7 +217,7 @@ def _card_config(client, connector: str, config: str | None
     """(chosen config, all options) for an action card.
 
     ``chosen`` is the named config (by name or id), else the default, else the
-    only one. An unknown name returns an error envelope as ``chosen`` naming
+    only one, else the one this connector's earlier reads answered on. An unknown name returns an error envelope as ``chosen`` naming
     the real choices. No live box, or nothing listed: (None, []) -- fail open,
     the action runs on the default exactly as before."""
     if client is None:
@@ -245,6 +245,14 @@ def _card_config(client, connector: str, config: str | None
     hit = next((o for o in options if o["default"]), None)
     if hit is None and len(options) == 1:
         hit = options[0]
+    if hit is None:
+        # Several configs, none default: the one this connector's own reads
+        # answered on is the one that works. Without it the approved card runs
+        # on no config and fails INTEGRATION-12.
+        from .tools_execution import config_used
+        used = config_used(connector)
+        if used:
+            hit = next((o for o in options if used in (o["id"], o["name"])), None)
     return hit, options
 
 
