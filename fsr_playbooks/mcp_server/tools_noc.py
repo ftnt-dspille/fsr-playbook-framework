@@ -742,6 +742,13 @@ _FMG_CONF_STATUS = {
 }
 
 
+def _fmg_oid_key(d: dict[str, Any]) -> int:
+    """Sort key for FMG config rows: the integer oid (creation order), newest
+    first; a row without an int oid sorts last."""
+    v = d.get("oid")
+    return v if isinstance(v, int) else -1
+
+
 def fmg_get_device_diff(device: str, adom: str = "root", window: str = "7d",
                         limit: int = _FMG_DIFF_DEFAULT_LIMIT
                         ) -> dict[str, Any]:
@@ -799,8 +806,7 @@ def fmg_get_device_diff(device: str, adom: str = "root", window: str = "7d",
                 continue
             items = [d for d in (digest(x) for x in _fmg_rows(r.get("data")))
                      if d]
-            items.sort(key=lambda d: d.get("oid") if isinstance(
-                d.get("oid"), int) else -1, reverse=True)
+            items.sort(key=_fmg_oid_key, reverse=True)
             sections.append({"vdom": vdom, "kind": kind, "total": len(items),
                              "truncated": len(items) > limit,
                              "items": items[:limit]})
