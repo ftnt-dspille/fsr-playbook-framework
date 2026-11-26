@@ -257,6 +257,12 @@ def _fmg_device_row(down: bool) -> dict[str, Any]:
         "db_status": "mod", "ha_mode": "a-p",
         "platform_str": "FortiGate-60F", "os_ver": "7.4.3",
         "last_checked": _NOC_DOWN_TS, "desc": "Branch 04 edge firewall",
+        "last_resync": "2026-06-09T22:00:00Z", "mgmt_mode": "fmgfaz",
+        "conn_mode": "active", "dev_status": "retrieved",
+        "flags": ["reload_failed"],
+        # `/dvmdb/adom/<a>/device/<name>` carries the vdom list (live shape).
+        "vdom": [{"name": "root", "oid": 3, "opmode": "nat",
+                  "vdom_type": "traffic", "devid": _NOC_DEVICE}],
     }
 
 
@@ -271,8 +277,97 @@ def _fmg_jsonrpc(rows: list[dict], url: str) -> dict[str, Any]:
             "data": {"get_response": rows}}
 
 
+def _fmg_tasks(params: dict) -> list[dict[str, Any]]:
+    """The FMG task list, newest last, as `/task/task` returns it. `no loadsub`
+    drops the per-device `line` arrays; an `id` filter keeps ids at or above
+    its bound. Times are relative to now so a window query always has rows."""
+    import time
+    now = int(time.time())
+    data = params.get("data") or {}
+    tasks = [
+        {"id": 201, "state": "done", "src": "fwm", "flags": 0, "percent": 100,
+         "num_lines": 1, "num_err": 0, "num_warn": 0, "pid": 0, "adom": 3,
+         "start_tm": now - 40 * 86400, "end_tm": now - 40 * 86400 + 600,
+         "user": "admin", "title": "device firmware upgrade",
+         "line": [{"detail": "Upgrade done successfully", "err": 0, "oid": 11,
+                   "name": f"{_NOC_SERIAL}(7.4.2-b2571->7.4.3-b2573)",
+                   "state": "done", "start_tm": now - 40 * 86400,
+                   "end_tm": now - 40 * 86400 + 600}]},
+        {"id": 210, "state": "done", "src": "install device", "flags": 0,
+         "percent": 100, "num_lines": 2, "num_err": 0, "num_warn": 0, "pid": 7,
+         "adom": 3, "start_tm": now - 7200, "end_tm": now - 7140,
+         "user": "ops-apikey", "title": "Install Device",
+         "line": [
+             {"detail": "Installation to real device done", "err": 0,
+              "oid": 11, "name": f"{_NOC_DEVICE}[copy]", "state": "done",
+              "start_tm": now - 7200, "end_tm": now - 7150, "vdom": "root",
+              "ip": "198.51.100.7"},
+             {"detail": "install and save finished status=OK", "err": 0,
+              "oid": 11, "name": _NOC_DEVICE, "state": "done",
+              "start_tm": now - 7199, "end_tm": now - 7145}]},
+        {"id": 211, "state": "done", "src": "install device", "flags": 0,
+         "percent": 100, "num_lines": 1, "num_err": 0, "num_warn": 0, "pid": 8,
+         "adom": 3, "start_tm": now - 3600, "end_tm": now - 3560,
+         "user": "ops-apikey", "title": "Install Device",
+         "line": [{"detail": "install and save finished status=OK", "err": 0,
+                   "oid": 12, "name": "FGT-HQ-01", "state": "done",
+                   "start_tm": now - 3600, "end_tm": now - 3560}]},
+        {"id": 212, "state": "done", "src": "security console", "flags": 0,
+         "percent": 100, "num_lines": 1, "num_err": 0, "num_warn": 0, "pid": 9,
+         "adom": 3, "start_tm": now - 1800, "end_tm": now - 1795,
+         "user": "ops-apikey", "title": "Install Package 'branch-edge'",
+         "line": [{"detail": "No Installation Targets or no change made on "
+                             "package [branch-edge]", "err": 0, "oid": 0,
+                   "name": "root:branch-edge", "state": "done",
+                   "start_tm": now - 1800, "end_tm": now - 1795}]},
+    ]
+    for flt in data.get("filter") or []:
+        if isinstance(flt, list) and flt[:2] == ["id", ">="]:
+            tasks = [t for t in tasks if t["id"] >= flt[2]]
+    if "no loadsub" in (data.get("option") or []):
+        tasks = [{k: v for k, v in t.items() if k != "line"} for t in tasks]
+    return tasks
+
+
+def _fmg_device_db_rows(url: str) -> list[dict[str, Any]] | None:
+    """Device-database objects as `/pm/config/device/<d>/vdom/<v>/...` returns
+    them (live shapes, addresses scrubbed). The newest route (oid 3637) is the
+    blackhole an install added; FMG keeps no revisions, so the content is the
+    only evidence."""
+    if url.endswith("/router/static"):
+        def route(oid, seq, dst, comment, blackhole="disable"):
+            return {"oid": oid, "seq-num": seq, "dst": dst,
+                    "gateway": "198.51.100.254" if blackhole == "disable"
+                    else "0.0.0.0", "distance": 10, "priority": 1,
+                    "device": ["port1"] if blackhole == "disable" else [],
+                    "blackhole": blackhole, "comment": comment,
+                    "status": "enable"}
+        return [
+            route(3628, 1, ["0.0.0.0", "0.0.0.0"], "MGMT DO NOT MODIFY"),
+            route(3629, 2, ["198.18.0.0", "255.254.0.0"], "MGMT DO NOT MODIFY"),
+            route(3637, 900, ["192.0.2.0", "255.255.255.0"], "change-ticket",
+                  blackhole="enable"),
+        ]
+    if url.endswith("/system/interface"):
+        return [
+            {"oid": 109, "name": "port1", "ip": ["203.0.113.9", "255.255.255.0"],
+             "status": "up", "role": "wan", "alias": "",
+             "allowaccess": ["ping", "https", "ssh"],
+             "ipv6": {"autoconf": "disable", "oid": 1}},
+            {"oid": 110, "name": "port2", "ip": ["0.0.0.0", "0.0.0.0"],
+             "status": "down", "role": "lan", "alias": "lan-uplink"},
+        ]
+    return None
+
+
 def _fmg_json_rpc_get(params: dict) -> Any:
     url = str(params.get("url") or "")
+    if "/pm/config/device/" in url:
+        db = _fmg_device_db_rows(url)
+        if db is not None:
+            return _fmg_jsonrpc(db, url)
+    if url.rstrip("/") == "/task/task":
+        return _fmg_jsonrpc(_fmg_tasks(params), url)
     if url.endswith("/ha_slave"):
         rows = [
             {"name": _NOC_DEVICE, "sn": _NOC_SERIAL, "role": "master",

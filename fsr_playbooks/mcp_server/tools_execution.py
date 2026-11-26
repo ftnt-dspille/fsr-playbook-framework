@@ -13,6 +13,7 @@ from typing import Any
 from fsr_playbooks.llm.tool_result import no_fsr_partial
 
 from . import _shared
+from ._readonly_command import op_call_is_read_only_command
 from ._shared import (
     REPO_ROOT,
     _capability_gap_suggestion,
@@ -631,6 +632,67 @@ def populate_op_definitions(client, time_budget_s: float = 60.0,
     return {"ok": True, "warmed": warmed, "empty_or_failed": skipped,
             "fresh_cached": fresh, "budget_skipped": budget_skipped,
             "elapsed_s": round(time.time() - start, 1)}
+
+
+_CONFIG_USED: dict[str, str] = {}
+
+
+def note_config_used(connector: str, config_id: str) -> None:
+    """Remember the configuration a live op on ``connector`` last ANSWERED on.
+
+    An action card for a connector with several configs and no default has no
+    config of its own, and an approved card with no config fails
+    (INTEGRATION-12) and is consumed. The investigation's own reads already
+    proved one config works, so the card preselects it (`config_used`).
+    Process-wide and per connector: only a successful op writes it, and the
+    analyst can still switch the config on the card."""
+    if connector and config_id:
+        _CONFIG_USED[connector] = str(config_id)
+
+
+def config_used(connector: str) -> str:
+    """The config id (or name) a live op on ``connector`` last answered on."""
+    return _CONFIG_USED.get(connector, "")
+
+
+#: Total time one card spends probing configs it has no cached verdict for.
+_CONFIG_PROBE_BUDGET_S = 15.0
+
+
+def reachable_config_options(client, connector: str,
+                             options: list[dict[str, Any]]
+                             ) -> tuple[list[dict[str, Any]], int]:
+    """(options whose own healthcheck passes, how many could not be judged).
+
+    Uses the same per-config health the run preflight uses (cache first, then
+    one live probe, stored for the next caller). A probe that failed to give an
+    authoritative verdict, or that the time budget skipped, is counted as
+    unjudged, never as healthy and never as down."""
+    import time
+    rows = _configured_rows(client)
+    row = next((r for r in rows if r.get("name") == connector), None) or {}
+    version = row.get("version") or ""
+    start = time.time()
+    healthy: list[dict[str, Any]] = []
+    unjudged = 0
+    for opt in options:
+        cid = str(opt.get("id") or "")
+        health = _cached_health(connector, version, cid)
+        if health is None:
+            if (time.time() - start) > _CONFIG_PROBE_BUDGET_S:
+                unjudged += 1
+                continue
+            hc = _live_healthcheck(client, connector, version, cid,
+                                   agent_id=opt.get("agent_id") or "")
+            if hc.get("_probe_failed"):
+                unjudged += 1
+                continue
+            _store_health(connector, version, hc.get("status"),
+                          hc.get("message") or "", config=cid)
+            health = hc
+        if _is_healthy_status(health.get("status")):
+            healthy.append(opt)
+    return healthy, unjudged
 
 
 def connector_config_options(client, connector: str) -> list[dict[str, Any]]:
@@ -1667,6 +1729,7 @@ def _run_op_via_agent_playbook(connector: str, op: str,
                                config=config_id or "", agent=agent_id or "")
         except Exception:
             pass
+        note_config_used(connector, config_id)
         sample = data[0] if isinstance(data, list) and data else data
         top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
         summarized, truncated = (
@@ -1960,9 +2023,7 @@ def run_op(
         return _err(
             "unknown_connector",
             f"connector '{connector}' not found in store",
-            suggestions=near or [
-                "Run `find_connector` to search the catalog",
-            ],
+            suggestions=_shared.unknown_connector_suggestions(connector, near),
             connector=connector,
         )
     version = crow["version"]
@@ -2033,6 +2094,10 @@ def run_op(
     category = op_row["category"] if op_row else None
     from .tools_discovery import _op_risk
     risk = _op_risk(op, category, params)
+    if risk != "safe" and op_call_is_read_only_command(connector, op, params):
+        # A command-exec op (ssh run_remote_command) is judged by the command
+        # line it runs: a provable read is safe, anything else stays gated.
+        risk = "safe"
     if risk != "safe" and not confirm:
         return {
             "ok": False,
@@ -2153,6 +2218,7 @@ def run_op(
                            config=exec_config or "")
     except Exception:
         pass  # recorder is best-effort; never break a live op over it
+    note_config_used(connector, exec_config)
     # top_keys reflect the FULL shape so authoring references stay accurate.
     sample = data[0] if isinstance(data, list) and data else data
     top_keys = sorted(sample.keys()) if isinstance(sample, dict) else []
@@ -2167,6 +2233,18 @@ def run_op(
         "output_is_list": isinstance(data, list),
         "schema_cached": True,
     }
+    from ._citation_validator import payload_is_empty
+    if payload_is_empty(data):
+        # A search that ran and matched nothing is one source holding nothing for
+        # this key. Typed (`empty`), so the evidence ledger counts it thin and
+        # the model is not left to read "no rows" as "this key is clean".
+        out["empty"] = True
+        out["empty_note"] = (
+            f"{connector} returned no rows for this query. That is this source "
+            "holding nothing for this key, not proof the key is clean: other "
+            "configured sources that hold activity or history can take the "
+            "same key, and a different operation or field of this source may "
+            "still hold it.")
     if truncated:
         out["output_truncated"] = True
         out["note"] = ("Output summarized to keep context lean -- full shape is "

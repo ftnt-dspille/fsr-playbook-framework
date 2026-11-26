@@ -70,3 +70,27 @@ def test_dispatch_bounces_absent_connector_instead_of_carding(db_with_one_connec
     assert out.get("code") == "unknown_connector"
     assert not out.get("pending_approval"), "must NOT surface an approval card"
     assert "approval_id" not in out
+
+
+def test_unknown_connector_error_lists_the_real_installed_connectors(
+        db_with_one_connector, monkeypatch):
+    """The model named `fortinet-fortiguard-threat-intel`, which does not exist;
+    the error must hand it the roster of what IS installed so it chooses from
+    that, not guess another name. Red without the roster in the suggestions."""
+    from fsr_playbooks.mcp_server import _shared
+    monkeypatch.setattr(_shared, "stale_catalog_hint", lambda c: None)
+    monkeypatch.setattr(_shared, "_LIVE_CATALOG_PROBE",
+                        lambda: {"jira", "fortinet-fortimanager-json-rpc"})
+    err = tools_mod._run_op_absent_connector_error(
+        "fortinet-fortiguard-threat-intel", "search_indicators")
+    text = " ".join(err["suggestions"])
+    assert "fortinet-fortimanager-json-rpc" in text and "jira" in text
+    assert "find_connector" not in text, "that tool does not exist on the surface"
+
+
+def test_unknown_connector_without_a_roster_still_guides(db_with_one_connector, monkeypatch):
+    from fsr_playbooks.mcp_server import _shared
+    monkeypatch.setattr(_shared, "stale_catalog_hint", lambda c: None)
+    monkeypatch.setattr(_shared, "_LIVE_CATALOG_PROBE", None)
+    err = tools_mod._run_op_absent_connector_error("nope", "op")
+    assert err["suggestions"]

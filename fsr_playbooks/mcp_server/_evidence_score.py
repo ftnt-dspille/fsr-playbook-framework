@@ -1117,6 +1117,11 @@ def _empty_answer(node: dict[str, Any]) -> bool:
     ``{"result": "No records found"}``), or a status wrapper with nothing in it
     (``{"success": true}``), with nothing else readable beside it."""
     wrapped = False
+    if "__meta" in node:
+        # query metadata a connector rides on its rows (ServiceNow answers a miss
+        # with one placeholder row holding only this): not a readable field
+        node = {k: v for k, v in node.items() if k != "__meta"}
+        wrapped = True
     for k, v in node.items():
         lk = str(k).lower()
         if lk in _CONTAINER_KEYS and (
