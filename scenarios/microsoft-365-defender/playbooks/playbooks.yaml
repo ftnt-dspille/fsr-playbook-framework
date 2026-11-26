@@ -544,7 +544,7 @@ playbooks:
         config: ''
         params:
           namedLocationUuid: '{{ vars.named_location_id }}'
-          ipv4_ips: '{{ vars.reported_ip }}'
+          ipv4_ips: "{{ vars.reported_ip if '/' in vars.reported_ip else vars.reported_ip ~ '/32' }}"
           ipv6_ips: ''
         mock_result:
           data:

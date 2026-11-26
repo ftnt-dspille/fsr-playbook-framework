@@ -38,7 +38,7 @@
             "alert_id"
           ],
           "synchronous": false,
-          "lastModifyDate": 1795735376,
+          "lastModifyDate": 1795735755,
           "collection": "/api/3/workflow_collections/2bba0b7c-0737-5a44-bb6d-6b63ba37db28",
           "versions": [],
           "triggerStep": "/api/3/workflow_steps/9ec2d4f8-2c1c-5581-822f-bddbaef30712",
@@ -286,7 +286,7 @@
                 "config": "",
                 "params": {
                   "namedLocationUuid": "{{ ((vars.steps.Find_Named_Location.data.value | default([], true)) | selectattr('ipRanges', 'defined') | list | first | default(none, true)).id | default('', true) }}",
-                  "ipv4_ips": "{{ vars.reported_ip }}",
+                  "ipv4_ips": "{{ vars.reported_ip if '/' in vars.reported_ip else vars.reported_ip ~ '/32' }}",
                   "ipv6_ips": ""
                 },
                 "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations/$entity\",\n    \"@odata.type\": \"#microsoft.graph.ipNamedLocation\",\n    \"id\": \"00000000-0000-0000-0000-000000000f01\",\n    \"displayName\": \"Lab blocked ranges\",\n    \"createdDateTime\": \"2026-01-10T07:00:00Z\",\n    \"modifiedDateTime\": \"2026-01-15T10:00:00Z\",\n    \"isTrusted\": false,\n    \"ipRanges\": [\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"192.0.2.0/24\"\n      },\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"198.51.100.0/24\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"block_new_ips\"\n}",
@@ -760,7 +760,7 @@
             "alert_id"
           ],
           "synchronous": false,
-          "lastModifyDate": 1795735376,
+          "lastModifyDate": 1795735755,
           "collection": "/api/3/workflow_collections/2bba0b7c-0737-5a44-bb6d-6b63ba37db28",
           "versions": [],
           "triggerStep": "/api/3/workflow_steps/620358a7-e297-5609-9157-b40f5254f63d",

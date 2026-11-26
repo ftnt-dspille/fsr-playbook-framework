@@ -38,7 +38,7 @@
             "graph_alert_id"
           ],
           "synchronous": false,
-          "lastModifyDate": 1795733419,
+          "lastModifyDate": 1795735755,
           "collection": "/api/3/workflow_collections/cf910594-e6cc-5f03-89d2-a3c6e30aedc1",
           "versions": [],
           "triggerStep": "/api/3/workflow_steps/c78e258b-3a16-5fec-9867-b7d02483139d",
@@ -328,7 +328,7 @@
                 "config": "",
                 "params": {
                   "namedLocationUuid": "{{ vars.named_location_id }}",
-                  "ipv4_ips": "{{ vars.reported_ip }}",
+                  "ipv4_ips": "{{ vars.reported_ip if '/' in vars.reported_ip else vars.reported_ip ~ '/32' }}",
                   "ipv6_ips": ""
                 },
                 "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations/$entity\",\n    \"@odata.type\": \"#microsoft.graph.ipNamedLocation\",\n    \"id\": \"00000000-0000-0000-0000-000000000f01\",\n    \"displayName\": \"Lab blocked ranges\",\n    \"createdDateTime\": \"2026-01-10T07:00:00Z\",\n    \"modifiedDateTime\": \"2026-01-15T10:00:00Z\",\n    \"isTrusted\": false,\n    \"ipRanges\": [\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"192.0.2.0/24\"\n      },\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"198.51.100.0/24\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"block_new_ips\"\n}",

@@ -266,7 +266,7 @@ playbooks:
         config: ''
         params:
           namedLocationUuid: "{{ ((vars.steps.Find_Named_Location.data.value | default([], true)) | selectattr('ipRanges', 'defined') | list | first | default(none, true)).id | default('', true) }}"
-          ipv4_ips: '{{ vars.reported_ip }}'
+          ipv4_ips: "{{ vars.reported_ip if '/' in vars.reported_ip else vars.reported_ip ~ '/32' }}"
           ipv6_ips: ''
         mock_result:
           data:
