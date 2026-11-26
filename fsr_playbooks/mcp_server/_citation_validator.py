@@ -47,6 +47,23 @@ class TurnEvidence:
         # Times this turn was held open (verdict refused, or a bare reply sent
         # back) over a key a result revealed and nothing searched. Capped.
         self._pivot_nudges = 0
+        # NOC scaffold (see _noc_scaffold): holds spent, the one benign-over-
+        # blackhole refusal, and the addresses the analyst's ask named.
+        self._noc_nudges = 0
+        self._blackhole_refusals = 0
+        self.ask_nets: list[str] = []
+
+    def noc_nudges(self) -> int:
+        return self._noc_nudges
+
+    def note_noc_nudge(self) -> None:
+        self._noc_nudges += 1
+
+    def blackhole_refusals(self) -> int:
+        return self._blackhole_refusals
+
+    def note_blackhole_refusal(self) -> None:
+        self._blackhole_refusals += 1
 
     def pivot_nudges(self) -> int:
         return self._pivot_nudges
@@ -79,7 +96,8 @@ class TurnEvidence:
                  idents: list[str] | None = None,
                  events: list[dict[str, Any]] | None = None,
                  premise: dict[str, Any] | None = None,
-                 pivots: list[dict[str, str]] | None = None) -> None:
+                 pivots: list[dict[str, str]] | None = None,
+                 noc: dict[str, Any] | None = None) -> None:
         """Record that a tool call succeeded or failed. ``args`` is kept so a
         policy can tell WHAT a cited call looked up (its target), not just
         which tool ran; ``finding`` is what a threat-intel lookup SAID (see
@@ -101,6 +119,8 @@ class TurnEvidence:
             entry["premise"] = premise
         if pivots:
             entry["pivots"] = list(pivots)
+        if noc:
+            entry["noc"] = dict(noc)
         self._registry[tool_use_id] = entry
 
     def record_verdict(self, card: dict[str, Any]) -> None:
@@ -122,7 +142,10 @@ class TurnEvidence:
                 "_thin_refusals": self._thin_refusals,
                 "_undecided_refusals": self._undecided_refusals,
                 "_verdict_first_refused": self._verdict_first_refused,
-                "_pivot_nudges": self._pivot_nudges}
+                "_pivot_nudges": self._pivot_nudges,
+                "_noc_nudges": self._noc_nudges,
+                "_blackhole_refusals": self._blackhole_refusals,
+                "_ask_nets": list(self.ask_nets)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TurnEvidence:
@@ -134,6 +157,9 @@ class TurnEvidence:
         obj._undecided_refusals = int(data.get("_undecided_refusals") or 0)
         obj._verdict_first_refused = bool(data.get("_verdict_first_refused"))
         obj._pivot_nudges = int(data.get("_pivot_nudges") or 0)
+        obj._noc_nudges = int(data.get("_noc_nudges") or 0)
+        obj._blackhole_refusals = int(data.get("_blackhole_refusals") or 0)
+        obj.ask_nets = list(data.get("_ask_nets") or [])
         return obj
 
 
@@ -724,8 +750,12 @@ def register_tool_result(tool_use_id: str, tool_name: str, success: bool,
             idents = identifiers(result)
             events = event_facts(result)
             premise = premise_facts(result)
+        noc = None
+        if success and isinstance(result, dict):
+            from ._noc_scaffold import noc_facts  # noqa: PLC0415
+            noc = noc_facts(tool_name, args, result)
         evidence.register(tool_use_id, tool_name, success, args, finding, thin, empty,
-                          idents, events, premise, pivots)
+                          idents, events, premise, pivots, noc)
 
 
 def record_delivered_verdict(card: dict[str, Any]) -> None:
