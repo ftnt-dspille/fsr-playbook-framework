@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Every branch push gets CI (like the connector and widget repos), so a fix
+  # branch can be confirmed green before the door promotes it. Concurrency
+  # below cancels superseded runs per ref.
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
   workflow_dispatch:
 
