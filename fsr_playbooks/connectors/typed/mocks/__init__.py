@@ -61,6 +61,15 @@ MOCK_FIXTURES: dict[str, dict[str, str]] = {
         "get_incident": "microsoft-365-defender/get_incident.json",
         "update_incident": "microsoft-365-defender/update_incident.json",
         "advanced_hunting": "microsoft-365-defender/advanced_hunting.json",
+        "list_machines": "microsoft-365-defender/list_machines.json",
+        "get_machine": "microsoft-365-defender/get_machine.json",
+        "isolate_machine": "microsoft-365-defender/isolate_machine.json",
+        "unisolate_machine": "microsoft-365-defender/unisolate_machine.json",
+        "run_av_scan": "microsoft-365-defender/run_av_scan.json",
+        "collect_investigation_package": "microsoft-365-defender/collect_investigation_package.json",
+        "restrict_app_execution": "microsoft-365-defender/restrict_app_execution.json",
+        "unrestrict_app_execution": "microsoft-365-defender/unrestrict_app_execution.json",
+        "get_machine_action": "microsoft-365-defender/get_machine_action.json",
     },
 }
 

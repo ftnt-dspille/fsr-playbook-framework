@@ -53,7 +53,14 @@
             "T1486"
           ],
           "devices": [
-            "device-0001"
+            {
+              "mdatpDeviceId": "device-0001",
+              "deviceDnsName": "EXAMPLE-HOST",
+              "osPlatform": "WindowsServer2022",
+              "healthStatus": "Active",
+              "onboardingStatus": "Onboarded",
+              "loggedOnUsers": []
+            }
           ],
           "entities": [
             {

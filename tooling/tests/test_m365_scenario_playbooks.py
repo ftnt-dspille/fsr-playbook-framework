@@ -251,6 +251,71 @@ _BRANCH_CASES = [
     # carries one 404 in Error_List (the fixture's already-gone copy), so the
     # default approve run lands on the PARTIAL branch; the clean branch is
     # pinned explicitly.
+    # Scenario D - Defender endpoint response (microsoft-365-defender). The
+    # analyst gate is a plain manual_input; each option is one containment.
+    {
+        "id": "D-isolate-responds",
+        "yaml": "microsoft-365-defender",
+        "playbook": "Respond to Defender Endpoint Incident",
+        "manual": {"Analyst Gate": "isolate"},
+        "present": ["Get Incident", "Pick Device", "Get Machine", "Isolate Device",
+                    "Note Isolation", "Settle Action", "Poll Action", "Action Result",
+                    "Record Response", "Responded"],
+        "absent": ["Run AV Scan", "Collect Package", "Record No Action",
+                   "Close Not Onboarded", "Close No Device"],
+        "outcome": "responded",
+        "terminal_extra": {"action_name": "isolate", "final_status": "Succeeded"},
+    },
+    {
+        "id": "D-av-scan-responds",
+        "yaml": "microsoft-365-defender",
+        "playbook": "Respond to Defender Endpoint Incident",
+        "manual": {"Analyst Gate": "av scan"},
+        "present": ["Run AV Scan", "Note AV Scan", "Settle Action", "Poll Action",
+                    "Record Response", "Responded"],
+        "absent": ["Isolate Device", "Collect Package", "Record No Action"],
+        "outcome": "responded",
+        "terminal_extra": {"action_name": "av_scan"},
+    },
+    {
+        "id": "D-collect-responds",
+        "yaml": "microsoft-365-defender",
+        "playbook": "Respond to Defender Endpoint Incident",
+        "manual": {"Analyst Gate": "collect package"},
+        "present": ["Collect Package", "Note Package", "Settle Action", "Poll Action",
+                    "Record Response", "Responded"],
+        "absent": ["Isolate Device", "Run AV Scan", "Record No Action"],
+        "outcome": "responded",
+        "terminal_extra": {"action_name": "collect_package"},
+    },
+    {
+        "id": "D-no-action-records",
+        "yaml": "microsoft-365-defender",
+        "playbook": "Respond to Defender Endpoint Incident",
+        "manual": {"Analyst Gate": "no action"},
+        "present": ["Record No Action", "Close No Action"],
+        "absent": ["Isolate Device", "Run AV Scan", "Collect Package", "Poll Action",
+                   "Record Response"],
+        "outcome": "no_action",
+    },
+    {
+        "id": "D-not-onboarded",
+        "yaml": "microsoft-365-defender",
+        "playbook": "Respond to Defender Endpoint Incident",
+        "branches": {"Onboarded": "Not onboarded or record unreadable"},
+        "present": ["Close Not Onboarded"],
+        "absent": ["Analyst Gate", "Isolate Device", "Run AV Scan", "Collect Package"],
+        "outcome": "not_onboarded",
+    },
+    {
+        "id": "D-no-device",
+        "yaml": "microsoft-365-defender",
+        "playbook": "Respond to Defender Endpoint Incident",
+        "branches": {"Device Found": "No device in the evidence"},
+        "present": ["Close No Device"],
+        "absent": ["Get Machine", "Analyst Gate"],
+        "outcome": "no_device",
+    },
     {
         "id": "C-approve-partial",
         "yaml": "microsoft-graph_dev",
@@ -404,3 +469,24 @@ def test_scenario_b_cross_connector_steps_use_real_ops():
             seen.append(op)
     assert set(seen) == {"block_new_ips", "revoke_user_sessions",
                          "add_comment_on_security_alert"}
+
+
+def test_scenario_d_failed_machine_action_reaches_action_failed():
+    """A machine action Defender finishes as Failed must not report success.
+
+    The offline run cannot choose a poll result, so the poll's mock status is
+    rewritten to Failed in a copy of the scenario YAML before stepping through.
+    """
+    doc = yaml.safe_load(_scenario_yaml("microsoft-365-defender").read_text())
+    pb = next(p for p in doc["playbooks"] if p["name"] == "Respond to Defender Endpoint Incident")
+    poll = next(st for st in pb["steps"] if st["name"] == "Poll Action")
+    poll["mock_result"]["data"]["status"] = "Failed"
+    result = mcp_server.step_through_playbook(
+        yaml_text=yaml.safe_dump(doc, sort_keys=False),
+        playbook="Respond to Defender Endpoint Incident",
+        manual_choices={"Analyst Gate": "av scan"},
+        execute_safe_ops=False,
+    )
+    assert result["ok"], result.get("first_error")
+    outcomes = [t["outcome"] for t in _terminal_outputs(result)]
+    assert outcomes == ["action_failed"], outcomes

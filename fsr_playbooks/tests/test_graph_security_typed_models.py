@@ -136,9 +136,12 @@ def test_sec_registry_covers_the_five_registered_ops() -> None:
     }
 
 
-def test_defender_registry_covers_the_four_registered_ops() -> None:
+def test_defender_registry_covers_the_registered_ops() -> None:
     assert set(mdef.OPERATION_MODELS) == {
         "list_incidents", "get_incident", "update_incident", "advanced_hunting",
+        "list_machines", "get_machine", "isolate_machine", "unisolate_machine",
+        "run_av_scan", "collect_investigation_package", "restrict_app_execution",
+        "unrestrict_app_execution", "get_machine_action",
     }
     assert set(mdef.OP_PARAM_MODELS) == set(mdef.OPERATION_MODELS)
 
@@ -360,11 +363,25 @@ def _public_models(module) -> list[type[BaseModel]]:
     return seen
 
 
+# Defender models whose shape is backed by a promoted live capture (the machine
+# operations and the alert device block, run against a lab appliance). They cite
+# the live verification; every other model still waits for its capture.
+_LIVE_PROMOTED = frozenset({
+    "ListMachinesParams", "MachineIdParams", "IsolateMachineParams",
+    "RunAVScanParams", "GetMachineActionParams", "Machine",
+    "MachineListResponse", "MachineAction", "AlertDevice",
+})
+
+
 @pytest.mark.parametrize("module", [gc, dev, sec, mdef, dcom])
 def test_every_model_cites_provenance(module) -> None:
     for model in _public_models(module):
         doc = " ".join((model.__doc__ or "").split())
         assert "Provenance:" in doc, f"{model.__name__} lacks a provenance line"
+        if model.__name__ in _LIVE_PROMOTED:
+            assert "live-verified" in doc, (
+                f"{model.__name__} is a promoted live capture and must cite it")
+            continue
         assert "live-capture pending" in doc, (
             f"{model.__name__} must not claim live-verification before a "
             "capture has been promoted")
@@ -373,6 +390,8 @@ def test_every_model_cites_provenance(module) -> None:
 def test_no_model_claims_live_verification_yet() -> None:
     for module in (gc, dev, sec, mdef, dcom):
         for model in _public_models(module):
+            if module is mdef and model.__name__ in _LIVE_PROMOTED:
+                continue
             assert "live-verified" not in " ".join(
                 (model.__doc__ or "").split()).lower()
 
