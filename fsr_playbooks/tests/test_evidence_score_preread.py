@@ -479,6 +479,10 @@ EMPTY_ANSWERS = [
     "0 results",
     '{"result": []}',
     [{"result": []}, {"data": None}],                                  # one answer per change op
+    # ServiceNow with no match: a single placeholder row that holds only query metadata
+    {"result": [{"__meta": {"encodedQuery": "", "fields": {
+        "applied": [], "ignored": ["textSearch", "sysparm_limit"]}}}]},
+    [{"result": [{"__meta": {"encodedQuery": ""}}]}, {"result": [{"__meta": {}}]}],
 ]
 
 

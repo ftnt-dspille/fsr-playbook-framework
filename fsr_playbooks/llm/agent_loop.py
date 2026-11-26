@@ -405,6 +405,7 @@ async def run_loop(
     from ..mcp_server._citation_validator import (
         clear_tool_registry,
         get_turn_evidence,
+        pivot_hold,
         register_tool_result,
         unchecked_ready_note,
     )
@@ -911,6 +912,15 @@ async def run_loop(
                 if nfix:
                     delivery.mark_fix_forced()
                     nudge = ("failed_edit_forced", FAILED_EDIT_DIRECTIVE.format(n=nfix))
+            # A key a result revealed that no search used: the turn is not done.
+            # Typed fact from the evidence registry, bounded per turn.
+            if (nudge is None and not verified_by_loop
+                    and _ask_scope.wants_coverage_note(
+                        _ask_scope.current_scope(), tags.get("intent"))):
+                _lead = pivot_hold(get_turn_evidence())
+                if _lead:
+                    record_guard_fire("turn.open_lead_forced")
+                    nudge = ("open_lead_forced", _lead)
             if nudge:
                 yield usage_event(nudge[0])
                 turn_idx += 1

@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from typing import Any, get_args, get_origin
 
 import fsr_playbooks.mcp_server as mcp_server
+from fsr_playbooks.mcp_server._readonly_command import (
+    command_exec_param,
+    op_call_is_read_only_command,
+)
 
 from .._db import default_db_path
 from .guard_fires import record_guard_fire, refusal
@@ -400,8 +404,8 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
     if row is not None:
         return None  # connector is catalogued → let normal tiering decide
     # Absent from the catalog. Ask the box before declaring it nonexistent.
+    from ..mcp_server import _shared
     try:
-        from ..mcp_server import _shared
         stale = _shared.stale_catalog_hint(connector)
     except Exception:  # noqa: BLE001 -- never harden a tier lookup into a crash
         stale = None
@@ -412,11 +416,7 @@ def _run_op_absent_connector_error(connector: str, op: str) -> dict[str, Any] | 
         "code": "unknown_connector",
         "connector": connector,
         "message": f"connector '{connector}' not found in store",
-        "suggestions": [
-            "Run `find_connector` to search the catalog for the right name.",
-            "Only connectors from `list_configured_connectors` can run -- pivot "
-            "to a configured one, or consolidate what you already have.",
-        ],
+        "suggestions": _shared.unknown_connector_suggestions(connector),
     }
 
 
@@ -454,6 +454,44 @@ def _op_name_is_destructive(op: str) -> bool:
     return any(v in nm for v in _CONTAINMENT_VERBS)
 
 
+# Network-device write ops the catalog files under `investigation` and the
+# op_safety probe leaves unclassified, so neither the category nor the verb
+# list catches them: FortiManager JSON-RPC mutations and installs, and
+# FortiGate CLI execution. Matched on connector family + op name (a named
+# table, not a per-call hack); every other op of those connectors keeps its
+# normal tier, so FMG `json_rpc_get` stays an auto-run read.
+_NET_WRITE_OPS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("fortinet-fortimanager", frozenset({
+        "json_rpc_execute", "json_rpc_set", "json_rpc_add", "json_rpc_update",
+        "json_rpc_delete", "json_rpc_freeform", "json_rpc_gui",
+        "install_policy", "reinstall_policy",
+    })),
+    ("fortinet-fortigate", frozenset({"execute_command"})),
+    ("fortigate", frozenset({"execute_command"})),
+)
+# Connectors with a generic REST passthrough: gated only for non-GET methods.
+_NET_REST_PASSTHROUGH = (
+    ("fortigate", "execute_api_request"),
+    ("fortinet-fortigate", "execute_api_request"),
+)
+
+
+def _is_net_write_op(args: dict[str, Any]) -> bool:
+    connector = str((args or {}).get("connector") or "").lower()
+    op = str((args or {}).get("op") or "").lower()
+    for prefix, ops in _NET_WRITE_OPS:
+        if connector.startswith(prefix) and op in ops:
+            return True
+    for prefix, rest_op in _NET_REST_PASSTHROUGH:
+        if connector.startswith(prefix) and op == rest_op:
+            params = (args or {}).get("params") or {}
+            method = ""
+            if isinstance(params, dict):
+                method = str(params.get("method") or params.get("http_method") or "")
+            return bool(method) and method.strip().upper() not in ("GET", "HEAD")
+    return False
+
+
 def _tier_for_run_op(args: dict[str, Any]) -> int:
     """Resolve effective tier for a `run_op` call from op_safety + category.
 
@@ -478,6 +516,16 @@ def _tier_for_run_op(args: dict[str, Any]) -> int:
         # this ordering they auto-allow at tier 2 (no approval card) AND get
         # dropped from find_containment_actions' tier>=3 guard -- so "isolate
         # this host" would execute ungated and the proper op wouldn't surface.
+        return 4
+    if command_exec_param(connector, op) is not None:
+        # A read-only command line (a log read) is a read; any other command
+        # keeps the approval gate (tier 3), and so does a missing or non-text
+        # one. Decided on the command's structure, never on the op name.
+        return 2 if op_call_is_read_only_command(
+            connector, op, (args or {}).get("params")) else 3
+    if _is_net_write_op(args or {}):
+        # FMG writes / installs and FortiGate CLI exec: tier 4 (approval card)
+        # regardless of catalog category or a missing op_safety row.
         return 4
     if _op_name_is_destructive(op):
         # The op_safety probe is the PRIMARY signal above, but it is not always

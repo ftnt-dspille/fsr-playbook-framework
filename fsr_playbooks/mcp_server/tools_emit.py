@@ -217,7 +217,7 @@ def _card_config(client, connector: str, config: str | None
     """(chosen config, all options) for an action card.
 
     ``chosen`` is the named config (by name or id), else the default, else the
-    only one. An unknown name returns an error envelope as ``chosen`` naming
+    only one, else the one this connector's earlier reads answered on. An unknown name returns an error envelope as ``chosen`` naming
     the real choices. No live box, or nothing listed: (None, []) -- fail open,
     the action runs on the default exactly as before."""
     if client is None:
@@ -245,7 +245,44 @@ def _card_config(client, connector: str, config: str | None
     hit = next((o for o in options if o["default"]), None)
     if hit is None and len(options) == 1:
         hit = options[0]
+    if hit is None:
+        # Several configs, none default: the one this connector's own reads
+        # answered on is the one that works. Without it the approved card runs
+        # on no config and fails INTEGRATION-12.
+        from .tools_execution import config_used
+        used = config_used(connector)
+        if used:
+            hit = next((o for o in options if used in (o["id"], o["name"])), None)
+    if hit is None and len(options) > 1:
+        # No read of this connector in the session, no default: exactly one
+        # config whose own healthcheck passes is the one that can run. Any
+        # config we could not judge, or a second healthy one, leaves the
+        # choice to the analyst (the card then requires it).
+        try:
+            from .tools_execution import reachable_config_options
+            healthy, unjudged = reachable_config_options(client, connector,
+                                                         options)
+            if len(healthy) == 1 and not unjudged:
+                hit = healthy[0]
+        except Exception:  # noqa: BLE001 -- best-effort; the card requires a pick
+            pass
     return hit, options
+
+
+def _drop_nested_nulls(value: Any) -> Any:
+    """`value` without the null members of its nested objects.
+
+    A model that has no value for an optional member of a request body (an
+    install's `flags`) often writes it as null. On the card that reads as a
+    setting someone chose, and the body goes out carrying it. An omitted member
+    is absent, so nested nulls are dropped; the top-level args are untouched
+    (a missing top-level param is already absent, a blank one is a choice)."""
+    if isinstance(value, dict):
+        return {k: _drop_nested_nulls(v) for k, v in value.items()
+                if v is not None}
+    if isinstance(value, list):
+        return [_drop_nested_nulls(v) for v in value]
+    return value
 
 
 def _config_name(config: Any) -> str:
@@ -397,6 +434,8 @@ def emit_action_card(
         # Only blanks left to fill: heal and carry on. `args` is the model's
         # dict, so copy rather than mutate its caller-visible object.
         args = {**args, **{f: "" for f in healed}}
+    args = {k: (_drop_nested_nulls(v) if isinstance(v, (dict, list)) else v)
+            for k, v in args.items()}
     # Don't render an approval card for a connector/op that doesn't exist --
     # the analyst would approve a phantom action that then fails at execute.
     # Use the SHARED grounding guarantee (offline store + live-definition
@@ -479,6 +518,11 @@ def emit_action_card(
         card["config"] = chosen
     if len(options) > 1:
         card["config_options"] = options
+        if not chosen:
+            # Several configurations, none known to be the one: approval needs
+            # the analyst's pick (the connector refuses it without one and
+            # leaves the card open).
+            card["config_required"] = True
     # Autonomy policy, SHADOW only (plans/AUTONOMOUS_TIER1.md phase C): would
     # an admin policy have run this without a click? Recorded on the card so
     # the queue can compare it to what the human decides. Never changes the
@@ -2008,7 +2052,8 @@ def emit_verdict(
                     "a zero count, or an empty result). A committed verdict "
                     "needs evidence that shows something. Run one coverage "
                     "round first: query the ready sources you have not checked "
-                    "this turn, then send the verdict again. If nothing turns "
+                    "this turn that could bear on the question, then send the "
+                    "verdict again. If nothing turns "
                     "up, the verdict is capped at needs_more_info."
                     + (" Ready and not yet queried: " + ", ".join(unchecked) + "."
                        if unchecked else ""),
@@ -2049,6 +2094,16 @@ def emit_verdict(
                 "does not support any call, send needs_more_info again and "
                 "say in unknowns what would decide it.",
                 suggestions=[verdict_contract()])
+    # Open leads. A source result revealed a key (a host, an account, an
+    # address) that no search used: the verdict would rest on the first hop.
+    # Refused with the typed fact (which key, which sources can take it), at
+    # most PIVOT_NUDGE_CAP times per turn so a noisy result cannot loop it.
+    if evidence_ctx is not None and ids_valid:
+        from ._citation_validator import pivot_hold  # noqa: PLC0415
+        held = pivot_hold(evidence_ctx)
+        if held:
+            return _err("open_lead_unsearched", held,
+                        suggestions=[verdict_contract()])
     # Generate id if missing
     if not id or not isinstance(id, str):
         import uuid  # noqa: PLC0415

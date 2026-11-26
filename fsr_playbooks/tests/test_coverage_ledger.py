@@ -83,14 +83,19 @@ class TestCheckedSources:
         register_tool_result("c1", "siem_search", True, {}, _THIN)
         note = unchecked_ready_note(ev.valid_ids())
         assert "FortiAnalyzer" in note
-        assert "FortiSIEM" not in note
+        # FortiSIEM was queried: it may be named as empty, never as unqueried.
+        assert "FortiSIEM" not in note.split("Came back empty")[0]
 
-    def test_unchecked_note_is_empty_once_every_ready_source_is_queried(self):
+    def test_unchecked_note_lists_no_unqueried_source_once_every_ready_source_is_queried(self):
         ev = _ev()
         set_turn_ready_sources(READY)
         register_tool_result("c1", "siem_search", True, {}, _THIN)
         register_tool_result("c2", "faz_search", True, {}, _THIN)
-        assert unchecked_ready_note(ev.valid_ids()) == ""
+        note = unchecked_ready_note(ev.valid_ids())
+        # Nothing is left in the ready list to offer; the empties are still said
+        # plainly (see test_empty_answers_point_at_other_sources).
+        assert "ready, not yet queried" not in note
+        assert "Came back empty or errored" in note
 
 
 class TestVerdictCardSourcesChecked:
@@ -165,6 +170,11 @@ _TOOL_WORDS = ("run_op", "siem_search", "faz_search", "run_connector_operation",
                "advance_search", "fetch_incidents", "query_ip", "emit_card")
 
 
+# Rows with no value a later search could use: these tests are about which
+# sources were queried, not about keys a result revealed.
+_ROWS = {"ok": True, "count": 2, "events": [{"n": 1}, {"n": 2}]}
+
+
 class TestConnectorLedger:
     def teardown_method(self):
         set_turn_ready_sources(None)
@@ -182,7 +192,7 @@ class TestConnectorLedger:
         ev = _ev()
         set_turn_ready_connectors(SNOW)
         register_tool_result("c1", "run_op", True,
-                             {"connector": "servicenow", "op": "advance_search"}, _FULL)
+                             {"connector": "servicenow", "op": "advance_search"}, _ROWS)
         assert unchecked_ready_sources(ev.valid_ids()) == []
         assert checked_ready_sources(ev.valid_ids()) == ["ServiceNow"]
         assert unchecked_ready_note(ev.valid_ids()) == ""
@@ -214,7 +224,7 @@ class TestConnectorLedger:
         ev = _ev()
         set_turn_ready_connectors(None)
         register_tool_result("c1", "run_op", True,
-                             {"connector": "virustotal", "op": "query_ip"}, _FULL)
+                             {"connector": "virustotal", "op": "query_ip"}, _ROWS)
         assert unchecked_ready_sources(ev.valid_ids()) == []
         assert unchecked_ready_note(ev.valid_ids()) == ""
 
@@ -282,7 +292,7 @@ class TestConnectorLedger:
         _ev()
         set_turn_ready_connectors(SNOW)
         register_tool_result("c1", "run_op", True,
-                             {"connector": "servicenow", "op": "advance_search"}, _FULL)
+                             {"connector": "servicenow", "op": "advance_search"}, _ROWS)
         assert _verdict("c1")["card"]["sources_checked"] == ["ServiceNow"]
 
 
@@ -312,3 +322,24 @@ class TestConnectorSourceKind:
         from fsr_playbooks.llm import autonomy
         monkeypatch.setattr(autonomy, "_connector_category", lambda c: "threat intelligence")
         assert autonomy.connector_source_kind("jira") == "intel"
+
+
+def test_ledger_note_offers_sources_and_leaves_relevance_to_the_model():
+    """Live, "Query them before concluding" sent a network-ops question to threat
+    intel and Jira. The note must say the sources are available, not required,
+    and the ticket steer must be conditional on the question being about
+    something an earlier analyst could have written up."""
+    from fsr_playbooks.mcp_server._citation_validator import (
+        set_turn_ready_connectors,
+        unchecked_ready_note,
+    )
+    set_turn_ready_connectors({"jira": {"label": "Jira", "kind": "tickets"},
+                               "vt": {"label": "VirusTotal", "kind": "intel"}})
+    try:
+        note = unchecked_ready_note({"c1": {"name": "run_op", "args": {"connector": "x"}}})
+    finally:
+        set_turn_ready_connectors(None)
+    assert "Jira" in note and "VirusTotal" in note
+    assert "Query them before concluding" not in note
+    assert "not required" in note
+    assert "does not need them" in note
