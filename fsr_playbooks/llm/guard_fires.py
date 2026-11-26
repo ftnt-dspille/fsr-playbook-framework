@@ -87,6 +87,7 @@ MECHANISMS: dict[str, Mechanism] = dict([
     _m("RequestedActionPostcondition", LOOP_ACTION, "analyst-requested action staged by code once the verdict meets its condition"),
     _m("turn.max_tool_turns", CAP, "tool-round budget spent; forced wrap-up"),
     _m("turn.answer_scope_wrapup", LOOP_ACTION, "narrow question ended without text; one answer round"),
+    _m("turn.open_lead_forced", ROUND_END, "a result revealed a key no search used; the reply is sent back"),
     _m("turn.budget_ask", CAP, "tool-round budget spent; continue-or-stop card"),
     # Connector-side offer salvage lives in the connector's own registry
     # (connector-fsr-agentic-assistant/ops_offers.py) and rides the same list.

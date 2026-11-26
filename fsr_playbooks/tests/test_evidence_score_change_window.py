@@ -160,6 +160,12 @@ def test_the_emitted_card_ignores_a_change_whose_window_ended_before_the_alert()
         cv.register_tool_result("call_chg", "run_op",
                                 True, {"connector": "servicenow",
                                        "op": "get_all_change_requests"}, OLD)
+        # The change and its author were looked up too, so no key the change
+        # revealed is left unsearched (that gate is not what this test is about).
+        cv.register_tool_result("call_chg2", "run_op", True,
+                                {"connector": "servicenow", "op": "get_change_request",
+                                 "params": {"number": "CHG-7004", "host": "sec-host-02"}},
+                                {"result": []})
         r = emit_card(card_type="verdict", payload={
             "disposition": "true_positive", "severity": "high", "confidence": 0.9,
             "summary": f"{HOST} ({HOST_IP}) beacons to {IP}", "unknowns": [],

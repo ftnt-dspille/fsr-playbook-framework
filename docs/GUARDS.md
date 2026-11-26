@@ -83,6 +83,7 @@ none and reads as `None`, meaning unknown.
 | Failed edit | `failed_edit_forced` | 0 | The last edit still has required fixes: one directive | Keep; measure. |
 | Requested action (TaskSpec) | `requested_action_staged` | new | A delivered verdict meets a request with nothing staged: code stages it. Requests come from the analyst's words, and unattended from the triage contract (contain a true positive) and the policy's close rule. Replaced `ContainmentFollowThrough` (25 fires since 2026-10-05). See `llm/task_spec.py`. | Keep; it is the post-condition, not a nudge. |
 | Forced assessment | `assessment_forced` | 5 | Ran tools, wrote nothing | Keep. |
+| Open lead | `open_lead_forced` (and verdict refusal `open_lead_unsearched`) | new | A source result revealed a typed key (address, hash, domain, host or account name, or an entity field value) that no answered call used as a search key: the reply or verdict is sent back with the key and the sources that can take it, at most 3 times a turn. Keys are read by shape and field name, never prose; threat-intel results and values already in the mounted record are skipped. See `mcp_server/_pivot_keys.py`, `open_pivot_keys` in `_citation_validator.py`. | Keep; measure on the pivot rows. |
 | Self-repair | n/a | n/a | The last fenced ```yaml block in a terminal round fails the compile or the connector check: one repair round, up to `MAX_SELF_REPAIR_TURNS` (2). Once the cap is spent, a failing fence is neutralised in the delivered text (a note naming what failed), in the terminal round, the tool-round prose and the wrap-up. | Keep. The widget saves the last fence and has no other signal, so the loop is the only place a failing fence can be stopped. |
 
 Delivery is decided on structure: the loop emits an offer only when a verify
@@ -132,3 +133,28 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
   stages and TurnPlan.gate_refusal. Audit counts refreshed from the local
   session DB. The delivery rows now say what the loop does, not that a
   forced nudge remains.
+
+## Command-exec ops are tiered by the command, not the op
+
+An op that runs a caller-supplied command line (today `ssh.run_remote_command`)
+has no catalog category, because its effect is in the argument. It used to land
+on the unknown-op tier 3, so a plain log read stopped on an approval card and a
+"log server" hop could never finish in one turn.
+
+The rule (`_tier_for_run_op`, and the same check in `run_op`'s confirm gate):
+
+- The ops are declared in `mcp_server/_readonly_command.py` `COMMAND_EXEC_OPS`
+  as (connector, op) -> the param holding the command line. Add a connector there
+  only when its op executes a command line.
+- A call whose command line is provably read-only is tier 2 (auto-run, logged).
+  Provable means `is_read_only_command`: a pipeline of allow-listed readers
+  (`ls`, `cat`, `tail`, `grep`, `journalctl`, `ps`, `find` ...) and nothing else.
+- Everything else stays tier 3: redirection, `;` `&&` `||` `&`, `$` or backtick
+  substitution, an unknown program, a path outside the system bin dirs, an
+  unbalanced quote, a missing or non-text command, and any flag that writes,
+  executes or streams forever (`find -delete/-exec`, `sort -o`, `tail -f`,
+  `date -s`, `journalctl --vacuum*`, `dmesg -C`). It fails closed.
+- Running it as a super user does not change the class: a read is a read.
+
+The decision is on the command's structure, never on the model's prose. Tests:
+`tests/test_readonly_command_tier.py`.

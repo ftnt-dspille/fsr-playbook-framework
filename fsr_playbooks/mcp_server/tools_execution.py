@@ -13,6 +13,7 @@ from typing import Any
 from fsr_playbooks.llm.tool_result import no_fsr_partial
 
 from . import _shared
+from ._readonly_command import op_call_is_read_only_command
 from ._shared import (
     REPO_ROOT,
     _capability_gap_suggestion,
@@ -2093,6 +2094,10 @@ def run_op(
     category = op_row["category"] if op_row else None
     from .tools_discovery import _op_risk
     risk = _op_risk(op, category, params)
+    if risk != "safe" and op_call_is_read_only_command(connector, op, params):
+        # A command-exec op (ssh run_remote_command) is judged by the command
+        # line it runs: a provable read is safe, anything else stays gated.
+        risk = "safe"
     if risk != "safe" and not confirm:
         return {
             "ok": False,
@@ -2228,6 +2233,18 @@ def run_op(
         "output_is_list": isinstance(data, list),
         "schema_cached": True,
     }
+    from ._citation_validator import payload_is_empty
+    if payload_is_empty(data):
+        # A search that ran and matched nothing is one source holding nothing for
+        # this key. Typed (`empty`), so the evidence ledger counts it thin and
+        # the model is not left to read "no rows" as "this key is clean".
+        out["empty"] = True
+        out["empty_note"] = (
+            f"{connector} returned no rows for this query. That is this source "
+            "holding nothing for this key, not proof the key is clean: other "
+            "configured sources that hold activity or history can take the "
+            "same key, and a different operation or field of this source may "
+            "still hold it.")
     if truncated:
         out["output_truncated"] = True
         out["note"] = ("Output summarized to keep context lean -- full shape is "

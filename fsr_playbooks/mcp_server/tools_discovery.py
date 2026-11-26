@@ -390,6 +390,8 @@ def _synonym_queries(q: str) -> list[tuple[str, tuple[str, str]]]:
     return deduped
 
 
+# Matches ranked by fit before the answer is cut to `limit`.
+_FIT_CANDIDATES = 60
 _OP_QUERY_NOISE = frozenset({"the", "and", "for", "with", "from", "that", "this",
                              "all", "any", "into", "using", "use"})
 _READ_OP_PREFIXES = ("get", "list", "search", "fetch", "query", "find", "read",
@@ -453,6 +455,71 @@ def _read_op_rows(conn: Any, cols: str, connector: str,
     )
 
 
+# Param types a model can fill from a key it already holds (a name, address,
+# account, ticket number). Every other required type (select, datetime, json,
+# file...) needs a choice or a payload it was not given.
+_KEY_FILLABLE_TYPES = frozenset({"text", "textarea", "string", "integer",
+                                 "number", "ip", "email", "url"})
+
+
+def _op_fit_keys(conn: Any, connector: str,
+                 op_names: list[str]) -> dict[str, tuple[int, int, int]]:
+    """Per op, a sort key that ranks by FIT to a caller holding a name or key
+    rather than a record id: (single-record getter, required params the key
+    cannot fill, takes no key at all).
+
+    Read from the op's own schema, no per-connector list: an op whose output
+    schema holds a list-valued field is a search or list op (it takes a key and
+    returns matches); one whose schema is a single record is a getter that
+    needs the record's id, which a caller holding only a name does not have.
+    Required params that have a default are free; a required select, datetime
+    or payload param is one the caller cannot fill from a key. Lower sorts
+    first. An op that takes no key (it lists everything) ranks after those that
+    do. An op the catalog has no schema for counts as a getter, so a known
+    search op ranks above it."""
+    if not op_names:
+        return {}
+    ph = ",".join("?" * len(op_names))
+    out_rows = _rows(
+        conn,
+        f"SELECT op_name, output_schema_json FROM operations "
+        f"WHERE connector_name = ? AND op_name IN ({ph})",
+        (connector, *op_names))
+    is_list: dict[str, bool] = {}
+    for r in out_rows:
+        try:
+            schema = json.loads(r["output_schema_json"] or "{}")
+        except (TypeError, ValueError):
+            schema = {}
+        is_list[r["op_name"]] = isinstance(schema, dict) and any(
+            isinstance(v, list) for v in schema.values())
+    try:
+        prows = _rows(
+            conn,
+            f"SELECT op_name, type, default_value FROM operation_params "
+            f"WHERE connector_name = ? AND op_name IN ({ph}) AND required = 1 "
+            f"AND (parent_param_name IS NULL OR parent_param_name = '')",
+            (connector, *op_names))
+    except sqlite3.OperationalError:  # a slim catalog without defaults
+        prows = _rows(
+            conn,
+            f"SELECT op_name, type, NULL AS default_value FROM operation_params "
+            f"WHERE connector_name = ? AND op_name IN ({ph}) AND required = 1 "
+            f"AND (parent_param_name IS NULL OR parent_param_name = '')",
+            (connector, *op_names))
+    needs: dict[str, int] = {}
+    hard: dict[str, int] = {}
+    for pr in prows:
+        if pr["default_value"] not in (None, ""):
+            continue
+        needs[pr["op_name"]] = needs.get(pr["op_name"], 0) + 1
+        if str(pr["type"] or "").lower() not in _KEY_FILLABLE_TYPES:
+            hard[pr["op_name"]] = hard.get(pr["op_name"], 0) + 1
+    return {n: (0 if is_list.get(n) else 1, hard.get(n, 0),
+                0 if needs.get(n, 0) else 1)
+            for n in op_names}
+
+
 @mcp.tool()
 def find_operation(connector: str, q: str = "", limit: int = 10,
                    verbose: bool = False,
@@ -499,7 +566,7 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                           OR title LIKE '%'||?||'%'
                           OR description LIKE '%'||?||'%')
                    ORDER BY op_name LIMIT ?""",
-                (connector, q, q, q, limit),
+                (connector, q, q, q, _FIT_CANDIDATES),
             )
         else:
             rows = _rows(
@@ -508,7 +575,7 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                    FROM operations
                    WHERE connector_name = ?
                    ORDER BY op_name LIMIT ?""",
-                (connector, limit),
+                (connector, _FIT_CANDIDATES),
             )
         # Zero hits on a q are often a VOCABULARY miss, not an absence: the
         # analyst's term and the product's term differ (FortiSIEM calls alerts
@@ -568,10 +635,18 @@ def find_operation(connector: str, q: str = "", limit: int = 10,
                                           or v["status"] == "tested_fail"}
                     if v["status"] == "tested_fail":
                         op_failed.append(r["op_name"])
+            fit = _op_fit_keys(conn, connector, [r["op_name"] for r in rows])
             rows.sort(key=lambda r: (
-                0 if (r.get("verification") or {}).get("status") == "tested_pass" else
-                2 if (r.get("verification") or {}).get("status") == "tested_fail" else 1
+                1 if (r.get("verification") or {}).get("status") == "tested_fail" else 0,
+                # Reads before anything that can change state: fit must never
+                # lift a write op above a read just because it takes a key. The
+                # catalog files nearly every op under `investigation`, so the
+                # category cannot tell them apart; the op's own risk read does.
+                1 if _op_risk(r["op_name"], None, None) == "destructive" else 0,
+                fit.get(r["op_name"], (1, 0, 1)),
+                0 if (r.get("verification") or {}).get("status") == "tested_pass" else 1,
             ))
+            del rows[limit:]
         # A containment op reached through the CATALOG is the wrong path, and
         # it fails in a way that only shows up on the box: find_operation
         # searches every connector the reference store knows, so it happily
