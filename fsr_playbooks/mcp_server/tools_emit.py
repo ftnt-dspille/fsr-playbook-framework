@@ -2038,6 +2038,24 @@ def emit_verdict(
     # needs_more_info, and the cap says which evidence was thin.
     from ._citation_validator import get_turn_evidence  # noqa: PLC0415
     evidence_ctx = get_turn_evidence()
+    # NOC scaffold: read the content before concluding on an install, never
+    # call a blackhole that drops the asked-about traffic benign, and name the
+    # install task the diff attributes the change to (see _noc_scaffold).
+    if evidence_ctx is not None and ids_valid:
+        from fsr_playbooks.llm.noc_fires import record_review  # noqa: PLC0415
+
+        from ._noc_scaffold import review_verdict  # noqa: PLC0415
+        rev = review_verdict(evidence_ctx, str(disposition), str(severity),
+                             summary, findings, cited, VERDICT_SUMMARY_MAX)
+        record_review(rev)
+        if rev.refusal is not None:
+            return _err(rev.refusal[0], rev.refusal[1],
+                        suggestions=[verdict_contract()])
+        disposition = rev.disposition or disposition
+        severity = rev.severity or severity
+        summary = rev.summary or summary
+        findings = rev.findings if rev.findings is not None else findings
+        unknowns_list.extend(rev.unknowns)
     if (evidence_ctx is not None and disposition != "needs_more_info"
             and ids_valid and cited):
         registry = evidence_ctx.valid_ids()
