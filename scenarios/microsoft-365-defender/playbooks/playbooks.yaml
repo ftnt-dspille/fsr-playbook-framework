@@ -253,7 +253,7 @@ playbooks:
         type: decision
         conditions:
           - display: Active incidents found
-            when: "{{ vars.oldest_incident_id | default('', true) | length > 0 }}"
+            when: "{{ vars.oldest_incident_id | default('', true) | string | length > 0 }}"
             next: Get Incident
           - display: Nothing to triage
             default: true
@@ -358,6 +358,7 @@ playbooks:
         connector: microsoft-365-defender
         operation: advanced_hunting
         config: ''
+        ignore_errors: true
         params:
           Query: >-
             DeviceNetworkEvents
@@ -431,9 +432,9 @@ playbooks:
             "{{ vars.steps.Get_Incident.data.incidentName }}" (severity
             {{ vars.steps.Get_Incident.data.severity | default('unknown', true) }}).
             Compromised user: {{ vars.compromised_user }}. Devices in evidence:
-            {{ vars.device_count }}. Advanced Hunting matched
-            {{ (vars.steps.Device_Hunt.data.Results | default([], true)) | length }}
-            network-activity row(s) in the last 24h. Response pending approval.
+            {{ vars.device_count }}. {% if vars.steps.Device_Hunt.data is defined %}Advanced Hunting matched
+            {{ ((vars.steps.Device_Hunt.data | default({}, true)).Results | default([], true)) | length }}
+            network-activity row(s) in the last 24h.{% else %}Advanced Hunting did not return data for this run (the query failed; see the run log).{% endif %} Response pending approval.
           severity: /api/3/picklists/40187287-89fc-4e9c-b717-e9443d57eedb
           type: /api/3/picklists/8b6f20f0-08ba-47f7-bc7d-233592309940
         mock_result:
@@ -470,7 +471,7 @@ playbooks:
           status {{ vars.steps.Get_Incident.data.status | default('unknown', true) }}).<br>
           Compromised user: {{ vars.compromised_user }}.<br>
           Devices: {{ vars.device_count }} in evidence; Advanced Hunting saw
-          {{ (vars.steps.Device_Hunt.data.Results | default([], true)) | length }}
+          {{ ((vars.steps.Device_Hunt.data | default({}, true)).Results | default([], true)) | length }}
           network-activity row(s).<br><br>
           On <b>approve</b>: incident set to In Progress / TruePositive,
           {{ vars.reported_ip }} blocked in the Conditional Access named

@@ -606,11 +606,11 @@ playbooks:
         next: Approval
         code: |
           targets = []
-          {%- for page in vars.steps.Search_Mail.data.Message_Found_List | default([], true) -%}
-          {%- for message in page.value | default([], true) -%}
+          {% for page in vars.steps.Search_Mail.data.Message_Found_List | default([], true) %}
+          {% for message in page.value | default([], true) %}
           targets.append({"user_id": {{ page.user_id | tojson }}, "message_id": {{ message.id | tojson }}})
-          {%- endfor -%}
-          {%- endfor -%}
+          {% endfor %}
+          {% endfor %}
           print({"targets": targets, "found": len(targets)})
         mock_result:
           data:

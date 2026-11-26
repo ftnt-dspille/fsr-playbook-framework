@@ -38,7 +38,7 @@
             "alert_id"
           ],
           "synchronous": false,
-          "lastModifyDate": 1795558234,
+          "lastModifyDate": 1795732351,
           "collection": "/api/3/workflow_collections/2bba0b7c-0737-5a44-bb6d-6b63ba37db28",
           "versions": [],
           "triggerStep": "/api/3/workflow_steps/9ec2d4f8-2c1c-5581-822f-bddbaef30712",
@@ -725,7 +725,7 @@
             "alert_id"
           ],
           "synchronous": false,
-          "lastModifyDate": 1795558234,
+          "lastModifyDate": 1795732351,
           "collection": "/api/3/workflow_collections/2bba0b7c-0737-5a44-bb6d-6b63ba37db28",
           "versions": [],
           "triggerStep": "/api/3/workflow_steps/620358a7-e297-5609-9157-b40f5254f63d",
@@ -826,7 +826,7 @@
                 "version": "2.1.4",
                 "step_variables": [],
                 "params": {
-                  "python_function": "targets = []\n{%- for page in vars.steps.Search_Mail.data.Message_Found_List | default([], true) -%}\n{%- for message in page.value | default([], true) -%}\ntargets.append({\"user_id\": {{ page.user_id | tojson }}, \"message_id\": {{ message.id | tojson }}})\n{%- endfor -%}\n{%- endfor -%}\nprint({\"targets\": targets, \"found\": len(targets)})\n"
+                  "python_function": "targets = []\n{% for page in vars.steps.Search_Mail.data.Message_Found_List | default([], true) %}\n{% for message in page.value | default([], true) %}\ntargets.append({\"user_id\": {{ page.user_id | tojson }}, \"message_id\": {{ message.id | tojson }}})\n{% endfor %}\n{% endfor %}\nprint({\"targets\": targets, \"found\": len(targets)})\n"
                 },
                 "config": ""
               },
