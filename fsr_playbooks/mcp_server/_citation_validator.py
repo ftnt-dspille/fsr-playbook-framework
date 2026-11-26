@@ -335,9 +335,20 @@ _QUERY_TOOLS = frozenset({"run_op", "run_connector_operation"})
 
 
 def _queried_connectors(registry: dict[str, dict[str, Any]]) -> set[str]:
+    """Connectors this turn actually got an answer from. A call that errored
+    did not check the source: it stays unchecked (and is named as failed)."""
     return {str(((e or {}).get("args") or {}).get("connector") or "")
             for e in registry.values()
-            if str((e or {}).get("name") or "") in _QUERY_TOOLS}
+            if str((e or {}).get("name") or "") in _QUERY_TOOLS
+            and (e or {}).get("ok") is not False}
+
+
+def _failed_connectors(registry: dict[str, dict[str, Any]]) -> set[str]:
+    """Connectors queried this turn only through calls that errored."""
+    tried = {str(((e or {}).get("args") or {}).get("connector") or "")
+             for e in registry.values()
+             if str((e or {}).get("name") or "") in _QUERY_TOOLS}
+    return {c for c in tried if c} - _queried_connectors(registry)
 
 
 def _ready_source_split(registry: dict[str, dict[str, Any]]) -> tuple[list[str], list[str]]:
@@ -396,6 +407,12 @@ def unchecked_ready_note(registry: dict[str, dict[str, Any]]) -> str:
             " it holds could bear on THIS question (judge that from the"
             " question, in any language), and leave the rest unqueried"
             " without mentioning them.")
+    failed = sorted(m["label"] for c, m in (_turn_ready_connectors.get() or {}).items()
+                    if c in _failed_connectors(registry))
+    if failed:
+        note += (" Tried and errored, so not checked: " + ", ".join(failed)
+                 + ". Retry once with a different query, or report the source"
+                 " as unavailable.")
     if investigating and "tickets" in _unchecked_kinds(registry):
         empty = any((e or {}).get("thin") is True for e in registry.values())
         note += (" If the question is about an alert, host or indicator that an"
