@@ -38,7 +38,7 @@
             "alert_id"
           ],
           "synchronous": false,
-          "lastModifyDate": 1795732351,
+          "lastModifyDate": 1795735376,
           "collection": "/api/3/workflow_collections/2bba0b7c-0737-5a44-bb6d-6b63ba37db28",
           "versions": [],
           "triggerStep": "/api/3/workflow_steps/9ec2d4f8-2c1c-5581-822f-bddbaef30712",
@@ -88,7 +88,12 @@
                 "config": "",
                 "params": {},
                 "ignore_errors": true,
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identityProtection/riskyUsers\",\n    \"value\": [\n      {\n        \"id\": \"00000000-0000-0000-0000-000000000001\",\n        \"userPrincipalName\": \"alice@contoso.example\",\n        \"userDisplayName\": \"Alice Chen\",\n        \"isDeleted\": false,\n        \"isProcessing\": false,\n        \"riskLevel\": \"medium\",\n        \"riskState\": \"atRisk\",\n        \"riskDetail\": \"none\",\n        \"riskLastUpdatedDateTime\": \"2026-01-15T08:15:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"get_risky_users_list\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identityProtection/riskyUsers\",\n    \"value\": [\n      {\n        \"id\": \"00000000-0000-0000-0000-000000000001\",\n        \"userPrincipalName\": \"alice@contoso.example\",\n        \"userDisplayName\": \"Alice Chen\",\n        \"isDeleted\": false,\n        \"isProcessing\": false,\n        \"riskLevel\": \"medium\",\n        \"riskState\": \"atRisk\",\n        \"riskDetail\": \"none\",\n        \"riskLastUpdatedDateTime\": \"2026-01-15T08:15:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"get_risky_users_list\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Get Risky Users List",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "380",
@@ -205,7 +210,12 @@
                 "params": {
                   "user": "{{ vars.risk_user }}"
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#Edm.Boolean\",\n    \"value\": true\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"revoke_user_sessions\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#Edm.Boolean\",\n    \"value\": true\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"revoke_user_sessions\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Revoke User Session",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "900",
@@ -225,7 +235,12 @@
                 "params": {
                   "name": "{{ vars.named_location_name }}"
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations\",\n    \"value\": [\n      {\n        \"@odata.type\": \"#microsoft.graph.ipNamedLocation\",\n        \"id\": \"00000000-0000-0000-0000-000000000f01\",\n        \"displayName\": \"Lab blocked ranges\",\n        \"modifiedDateTime\": \"2026-01-15T07:00:00Z\",\n        \"createdDateTime\": \"2026-01-10T07:00:00Z\",\n        \"isTrusted\": false,\n        \"ipRanges\": [\n          {\n            \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n            \"cidrAddress\": \"192.0.2.0/24\"\n          },\n          {\n            \"@odata.type\": \"#microsoft.graph.iPv6CidrRange\",\n            \"cidrAddress\": \"2001:db8::/48\"\n          }\n        ]\n      },\n      {\n        \"@odata.type\": \"#microsoft.graph.countryNamedLocation\",\n        \"id\": \"00000000-0000-0000-0000-000000000f02\",\n        \"displayName\": \"Allowed countries\",\n        \"modifiedDateTime\": \"2026-01-12T07:00:00Z\",\n        \"createdDateTime\": \"2026-01-12T07:00:00Z\",\n        \"isTrusted\": true,\n        \"includeUnknownCountriesAndRegions\": false,\n        \"countryLookupMethod\": \"clientIp\",\n        \"countriesAndRegions\": [\n          \"US\",\n          \"CA\"\n        ]\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"get_all_named_locations\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations\",\n    \"value\": [\n      {\n        \"@odata.type\": \"#microsoft.graph.ipNamedLocation\",\n        \"id\": \"00000000-0000-0000-0000-000000000f01\",\n        \"displayName\": \"Lab blocked ranges\",\n        \"modifiedDateTime\": \"2026-01-15T07:00:00Z\",\n        \"createdDateTime\": \"2026-01-10T07:00:00Z\",\n        \"isTrusted\": false,\n        \"ipRanges\": [\n          {\n            \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n            \"cidrAddress\": \"192.0.2.0/24\"\n          },\n          {\n            \"@odata.type\": \"#microsoft.graph.iPv6CidrRange\",\n            \"cidrAddress\": \"2001:db8::/48\"\n          }\n        ]\n      },\n      {\n        \"@odata.type\": \"#microsoft.graph.countryNamedLocation\",\n        \"id\": \"00000000-0000-0000-0000-000000000f02\",\n        \"displayName\": \"Allowed countries\",\n        \"modifiedDateTime\": \"2026-01-12T07:00:00Z\",\n        \"createdDateTime\": \"2026-01-12T07:00:00Z\",\n        \"isTrusted\": true,\n        \"includeUnknownCountriesAndRegions\": false,\n        \"countryLookupMethod\": \"clientIp\",\n        \"countriesAndRegions\": [\n          \"US\",\n          \"CA\"\n        ]\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"get_all_named_locations\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Get All Named Locations",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "1030",
@@ -274,7 +289,12 @@
                   "ipv4_ips": "{{ vars.reported_ip }}",
                   "ipv6_ips": ""
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations/$entity\",\n    \"@odata.type\": \"#microsoft.graph.ipNamedLocation\",\n    \"id\": \"00000000-0000-0000-0000-000000000f01\",\n    \"displayName\": \"Lab blocked ranges\",\n    \"createdDateTime\": \"2026-01-10T07:00:00Z\",\n    \"modifiedDateTime\": \"2026-01-15T10:00:00Z\",\n    \"isTrusted\": false,\n    \"ipRanges\": [\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"192.0.2.0/24\"\n      },\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"198.51.100.0/24\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"block_new_ips\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/namedLocations/$entity\",\n    \"@odata.type\": \"#microsoft.graph.ipNamedLocation\",\n    \"id\": \"00000000-0000-0000-0000-000000000f01\",\n    \"displayName\": \"Lab blocked ranges\",\n    \"createdDateTime\": \"2026-01-10T07:00:00Z\",\n    \"modifiedDateTime\": \"2026-01-15T10:00:00Z\",\n    \"isTrusted\": false,\n    \"ipRanges\": [\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"192.0.2.0/24\"\n      },\n      {\n        \"@odata.type\": \"#microsoft.graph.iPv4CidrRange\",\n        \"cidrAddress\": \"198.51.100.0/24\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"block_new_ips\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Block New IP Ranges",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "1290",
@@ -295,7 +315,12 @@
                   "alert_id": "{{ vars.alert_id }}",
                   "comment": "Compromised-user response (approved): revoked all active sessions for {{ vars.risk_user }} (risk level {{ vars.risk_level }}) and blocked {{ vars.reported_ip }} by appending it to the Conditional Access IP named location \"{{ vars.named_location_name }}\"."
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Compromised-user response (approved): revoked all active sessions for alice@contoso.example (risk level medium) and blocked 198.51.100.7 by appending it to the Conditional Access IP named location \\\"Lab blocked ranges\\\".\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:40:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Compromised-user response (approved): revoked all active sessions for alice@contoso.example (risk level medium) and blocked 198.51.100.7 by appending it to the Conditional Access IP named location \\\"Lab blocked ranges\\\".\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:40:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Add Comment on Security Alert",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "1420",
@@ -316,7 +341,12 @@
                   "alert_id": "{{ vars.alert_id }}",
                   "comment": "Compromised-user response (approved, block skipped): revoked all active sessions for {{ vars.risk_user }} (risk level {{ vars.risk_level }}). {{ vars.reported_ip }} was NOT blocked - no IP named location named \"{{ vars.named_location_name }}\" exists (or the match is not an IP location); create it and re-run to block the IP."
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Compromised-user response (approved, block skipped): revoked all active sessions for alice@contoso.example (risk level medium). 198.51.100.7 was NOT blocked - no IP named location named \\\"Lab blocked ranges\\\" exists (or the match is not an IP location); create it and re-run to block the IP.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:41:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Compromised-user response (approved, block skipped): revoked all active sessions for alice@contoso.example (risk level medium). 198.51.100.7 was NOT blocked - no IP named location named \\\"Lab blocked ranges\\\" exists (or the match is not an IP location); create it and re-run to block the IP.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:41:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Add Comment on Security Alert",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "1290",
@@ -337,7 +367,12 @@
                   "alert_id": "{{ vars.alert_id }}",
                   "comment": "Compromised-user response REJECTED at approval: sessions for {{ vars.risk_user }} were NOT revoked and {{ vars.reported_ip }} was NOT blocked. The report stays with the analyst for follow-up."
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Compromised-user response REJECTED at approval: sessions for alice@contoso.example were NOT revoked and 198.51.100.7 was NOT blocked. The report stays with the analyst for follow-up.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:42:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Compromised-user response REJECTED at approval: sessions for alice@contoso.example were NOT revoked and 198.51.100.7 was NOT blocked. The report stays with the analyst for follow-up.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:42:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Add Comment on Security Alert",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "900",
@@ -725,7 +760,7 @@
             "alert_id"
           ],
           "synchronous": false,
-          "lastModifyDate": 1795732351,
+          "lastModifyDate": 1795735376,
           "collection": "/api/3/workflow_collections/2bba0b7c-0737-5a44-bb6d-6b63ba37db28",
           "versions": [],
           "triggerStep": "/api/3/workflow_steps/620358a7-e297-5609-9157-b40f5254f63d",
@@ -778,7 +813,12 @@
                   "user_list": "{{ vars.user_list }}",
                   "size": 50
                 },
-                "mock_result": "{\n  \"data\": {\n    \"Message_Found_List\": [\n      {\n        \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#users('00000000-0000-0000-0000-000000000001')/messages(subject)\",\n        \"value\": [\n          {\n            \"@odata.etag\": \"W/\\\"CQAAABYAAAA=\\\"\",\n            \"id\": \"AAMkAGI1AAA=\",\n            \"createdDateTime\": \"2026-01-15T08:00:00Z\",\n            \"lastModifiedDateTime\": \"2026-01-15T08:00:00Z\",\n            \"changeKey\": \"CQAAABYAAAA=\",\n            \"categories\": [],\n            \"receivedDateTime\": \"2026-01-15T08:00:00Z\",\n            \"sentDateTime\": \"2026-01-15T08:00:00Z\",\n            \"hasAttachments\": true,\n            \"internetMessageId\": \"<synthetic-1@contoso.example>\",\n            \"subject\": \"Action required: payroll update\",\n            \"bodyPreview\": \"Confirm your payroll details before the cycle closes.\",\n            \"importance\": \"normal\",\n            \"parentFolderId\": \"AAMkAGI1AAA=\",\n            \"conversationId\": \"AAQkAGI1AAA=\",\n            \"conversationIndex\": \"AQHZA=\",\n            \"isDeliveryReceiptRequested\": false,\n            \"isReadReceiptRequested\": false,\n            \"isRead\": false,\n            \"isDraft\": false,\n            \"webLink\": \"https://outlook.office365.com/owa/?ItemID=AAMkAGI1AAA%3D\",\n            \"inferenceClassification\": \"focused\",\n            \"body\": {\n              \"contentType\": \"html\",\n              \"content\": \"<html><body>Confirm your payroll details before the cycle closes.</body></html>\"\n            },\n            \"sender\": {\n              \"emailAddress\": {\n                \"name\": \"Cara Nunes\",\n                \"address\": \"cara@contoso.example\"\n              }\n            },\n            \"from\": {\n              \"emailAddress\": {\n                \"name\": \"Cara Nunes\",\n                \"address\": \"cara@contoso.example\"\n              }\n            },\n            \"toRecipients\": [\n              {\n                \"emailAddress\": {\n                  \"name\": \"Alice Chen\",\n                  \"address\": \"alice@contoso.example\"\n                }\n              }\n            ],\n            \"ccRecipients\": [],\n            \"bccRecipients\": [],\n            \"replyTo\": [],\n            \"flag\": {\n              \"flagStatus\": \"notFlagged\"\n            }\n          }\n        ],\n        \"user_id\": \"00000000-0000-0000-0000-000000000001\"\n      },\n      {\n        \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#users('00000000-0000-0000-0000-000000000002')/messages(subject)\",\n        \"value\": [\n          {\n            \"@odata.etag\": \"W/\\\"CQAAABYAAAA=\\\"\",\n            \"id\": \"AAMkAGI2AAA=\",\n            \"createdDateTime\": \"2026-01-15T08:05:00Z\",\n            \"lastModifiedDateTime\": \"2026-01-15T08:05:00Z\",\n            \"changeKey\": \"CQAAABYAAAA=\",\n            \"categories\": [],\n            \"receivedDateTime\": \"2026-01-15T08:05:00Z\",\n            \"sentDateTime\": \"2026-01-15T08:05:00Z\",\n            \"hasAttachments\": true,\n            \"internetMessageId\": \"<synthetic-2@contoso.example>\",\n            \"subject\": \"Action required: payroll update\",\n            \"bodyPreview\": \"Confirm your payroll details before the cycle closes.\",\n            \"importance\": \"normal\",\n            \"parentFolderId\": \"AAMkAGI2AAA=\",\n            \"conversationId\": \"AAQkAGI2AAA=\",\n            \"conversationIndex\": \"AQHZB=\",\n            \"isDeliveryReceiptRequested\": false,\n            \"isReadReceiptRequested\": false,\n            \"isRead\": false,\n            \"isDraft\": false,\n            \"webLink\": \"https://outlook.office365.com/owa/?ItemID=AAMkAGI2AAA%3D\",\n            \"inferenceClassification\": \"focused\",\n            \"body\": {\n              \"contentType\": \"html\",\n              \"content\": \"<html><body>Confirm your payroll details before the cycle closes.</body></html>\"\n            },\n            \"sender\": {\n              \"emailAddress\": {\n                \"name\": \"Cara Nunes\",\n                \"address\": \"cara@contoso.example\"\n              }\n            },\n            \"from\": {\n              \"emailAddress\": {\n                \"name\": \"Cara Nunes\",\n                \"address\": \"cara@contoso.example\"\n              }\n            },\n            \"toRecipients\": [\n              {\n                \"emailAddress\": {\n                  \"name\": \"Bob Tester\",\n                  \"address\": \"bob@contoso.example\"\n                }\n              }\n            ],\n            \"ccRecipients\": [],\n            \"bccRecipients\": [],\n            \"replyTo\": [],\n            \"flag\": {\n              \"flagStatus\": \"notFlagged\"\n            }\n          }\n        ],\n        \"user_id\": \"00000000-0000-0000-0000-000000000002\"\n      }\n    ],\n    \"Message_Not_Found_List\": [],\n    \"Run_Time\": 1.23,\n    \"Total_Users_Processed\": 2\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"search_message\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"Run_Time\": 0.13308310508728027,\n    \"Message_Found_List\": [\n      {\n        \"value\": [\n          {\n            \"id\": \"AAMkSYNTH0001AAA=\",\n            \"body\": {\n              \"content\": \"Password expiry detected for your account.\\nVerify immediately: https://portal-office-login.example.com/verify\\nSupport ref: SYNTH-MARKER\\nIT Service Desk\",\n              \"contentType\": \"text\"\n            },\n            \"flag\": {\n              \"flagStatus\": \"notFlagged\"\n            },\n            \"from\": {\n              \"emailAddress\": {\n                \"name\": \"Test User\",\n                \"address\": \"user1@contoso.example\"\n              }\n            },\n            \"isRead\": false,\n            \"sender\": {\n              \"emailAddress\": {\n                \"name\": \"Test User\",\n                \"address\": \"user1@contoso.example\"\n              }\n            },\n            \"isDraft\": false,\n            \"replyTo\": [],\n            \"subject\": \"Your password expires today - verify now\",\n            \"webLink\": \"https://outlook.office365.com/owa/?ItemID=SYNTH\",\n            \"changeKey\": \"CQAAABYAAAAsFsVLc9KCTLu1eafuoabOAAABeoK8\",\n            \"categories\": [],\n            \"importance\": \"normal\",\n            \"@odata.etag\": \"W/\\\"CQAAABYAAAAsFsVLc9KCTLu1eafuoabOAAABeoK8\\\"\",\n            \"bodyPreview\": \"Synthetic lab notice.\",\n            \"ccRecipients\": [],\n            \"sentDateTime\": \"2026-11-26T22:36:42Z\",\n            \"toRecipients\": [\n              {\n                \"emailAddress\": {\n                  \"name\": \"Test User\",\n                  \"address\": \"user2@contoso.example\"\n                }\n              }\n            ],\n            \"bccRecipients\": [],\n            \"conversationId\": \"AAQkAGE2MzQ0YzE4LWNjYjYtNGRlZi05MzM2LTMwNDUwMzQ1MGJjNgAQACpLJ6F8ChROknGT0inlgvc=\",\n            \"hasAttachments\": false,\n            \"parentFolderId\": \"AAMkSYNTH0002AAA=\",\n            \"createdDateTime\": \"2026-11-26T22:36:44Z\",\n            \"receivedDateTime\": \"2026-11-26T22:36:44Z\",\n            \"conversationIndex\": \"AQHdffabKksnoXwKFE6ScZPSKeWC9w==\",\n            \"internetMessageId\": \"<synth-0001@contoso.example>\",\n            \"lastModifiedDateTime\": \"2026-11-26T22:38:12Z\",\n            \"isReadReceiptRequested\": false,\n            \"inferenceClassification\": \"focused\",\n            \"isDeliveryReceiptRequested\": false\n          }\n        ],\n        \"user_id\": \"user2@contoso.example\",\n        \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#users/messages\"\n      },\n      {\n        \"value\": [\n          {\n            \"id\": \"AAMkSYNTH0003AAA=\",\n            \"body\": {\n              \"content\": \"Password expiry detected for your account.\\nVerify immediately: https://portal-office-login.example.com/verify\\nSupport ref: SYNTH-MARKER\\nIT Service Desk\",\n              \"contentType\": \"text\"\n            },\n            \"flag\": {\n              \"flagStatus\": \"notFlagged\"\n            },\n            \"from\": {\n              \"emailAddress\": {\n                \"name\": \"Test User\",\n                \"address\": \"user1@contoso.example\"\n              }\n            },\n            \"isRead\": false,\n            \"sender\": {\n              \"emailAddress\": {\n                \"name\": \"Test User\",\n                \"address\": \"user1@contoso.example\"\n              }\n            },\n            \"isDraft\": false,\n            \"replyTo\": [],\n            \"subject\": \"Your password expires today - verify now\",\n            \"webLink\": \"https://outlook.office365.com/owa/?ItemID=SYNTH\",\n            \"changeKey\": \"CQAAABYAAADo07cI9HF2S4MBSJCUsASbAAAA589y\",\n            \"categories\": [],\n            \"importance\": \"normal\",\n            \"@odata.etag\": \"W/\\\"CQAAABYAAADo07cI9HF2S4MBSJCUsASbAAAA589y\\\"\",\n            \"bodyPreview\": \"Synthetic lab notice.\",\n            \"ccRecipients\": [],\n            \"sentDateTime\": \"2026-11-26T22:36:44Z\",\n            \"toRecipients\": [\n              {\n                \"emailAddress\": {\n                  \"name\": \"Test User\",\n                  \"address\": \"user3@contoso.example\"\n                }\n              }\n            ],\n            \"bccRecipients\": [],\n            \"conversationId\": \"AAQkAGE4MzExMWQ2LTc1YTItNGY1MC04NTUwLWNmYmMwOTQwMDczZgAQAPiOv_6FgIhBjF9e-fxCO1U=\",\n            \"hasAttachments\": false,\n            \"parentFolderId\": \"AAMkSYNTH0004AAA=\",\n            \"createdDateTime\": \"2026-11-26T22:36:46Z\",\n            \"receivedDateTime\": \"2026-11-26T22:36:47Z\",\n            \"conversationIndex\": \"AQHdffad+I6/7oWAiEGMX179/EI7VQ==\",\n            \"internetMessageId\": \"<synth-0002@contoso.example>\",\n            \"lastModifiedDateTime\": \"2026-11-26T22:36:48Z\",\n            \"isReadReceiptRequested\": false,\n            \"inferenceClassification\": \"focused\",\n            \"isDeliveryReceiptRequested\": false\n          }\n        ],\n        \"user_id\": \"user3@contoso.example\",\n        \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#users/messages\"\n      }\n    ],\n    \"Total_Users_Processed\": 76\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"search_message\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Search Message in Users Mailbox",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "380",
@@ -819,7 +859,7 @@
               "name": "Build Delete Targets",
               "description": null,
               "arguments": {
-                "mock_result": "{\n  \"data\": {\n    \"code_output\": {\n      \"targets\": [\n        {\n          \"user_id\": \"00000000-0000-0000-0000-000000000001\",\n          \"message_id\": \"AAMkAGI1AAA=\"\n        },\n        {\n          \"user_id\": \"00000000-0000-0000-0000-000000000002\",\n          \"message_id\": \"AAMkAGI2AAA=\"\n        }\n      ],\n      \"found\": 2\n    }\n  }\n}",
+                "mock_result": "{\n  \"data\": {\n    \"code_output\": {\n      \"found\": 2,\n      \"targets\": [\n        {\n          \"user_id\": \"user2@contoso.example\",\n          \"message_id\": \"AAMkSYNTH0001AAA=\"\n        },\n        {\n          \"user_id\": \"user3@contoso.example\",\n          \"message_id\": \"AAMkSYNTH0003AAA=\"\n        }\n      ]\n    }\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"python_inline_code_editor\"\n}",
                 "connector": "code-snippet",
                 "operation": "python_inline_code_editor",
                 "operationTitle": "Execute Python Code",
@@ -918,7 +958,12 @@
                   "user_list": "{{ vars.purge_targets }}"
                 },
                 "ignore_errors": true,
-                "mock_result": "{\n  \"data\": {\n    \"Message_Deleted_List\": [\n      {\n        \"msg_deleted\": \"Yes\",\n        \"user_id\": {\n          \"user_id\": \"00000000-0000-0000-0000-000000000001\",\n          \"message_id\": \"AAMkAGI1AAA=\"\n        }\n      }\n    ],\n    \"Error_List\": [\n      {\n        \"error_msg\": 404,\n        \"user_id\": {\n          \"user_id\": \"00000000-0000-0000-0000-000000000002\",\n          \"message_id\": \"AAMkAGI2AAA=\"\n        }\n      }\n    ],\n    \"Run_Time\": 0.87,\n    \"Total_Users_Processed\": 2\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"del_message_bulk\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"Run_Time\": 0.2077465057373047,\n    \"Message_Deleted_List\": [\n      {\n        \"user_id\": {\n          \"user_id\": \"user2@contoso.example\",\n          \"message_id\": \"AAMkSYNTH0001AAA=\"\n        },\n        \"msg_deleted\": \"Yes\"\n      },\n      {\n        \"user_id\": {\n          \"user_id\": \"user3@contoso.example\",\n          \"message_id\": \"AAMkSYNTH0003AAA=\"\n        },\n        \"msg_deleted\": \"Yes\"\n      }\n    ],\n    \"Total_Users_Processed\": 2\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"del_message_bulk\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Delete Message Bulk",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "1030",
@@ -966,7 +1011,12 @@
                   "alert_id": "{{ vars.alert_id }}",
                   "comment": "Phishing mail purge (approved): deleted {{ (vars.steps.Purge_Mail.data.Message_Deleted_List | default([], true)) | length }} message(s) matching \"{{ vars.phishing_subject }}\" across {{ vars.found_count }} matched message(s); 0 deletions failed."
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Phishing mail purge (approved): deleted 1 message(s) matching \\\"Action required: payroll update\\\" across 2 matched message(s); 0 deletions failed.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:50:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Phishing mail purge (approved): deleted 1 message(s) matching \\\"Action required: payroll update\\\" across 2 matched message(s); 0 deletions failed.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:50:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Add Comment on Security Alert",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "1290",
@@ -987,7 +1037,12 @@
                   "alert_id": "{{ vars.alert_id }}",
                   "comment": "Phishing mail purge (approved, partial): deleted {{ (vars.steps.Purge_Mail.data.Message_Deleted_List | default([], true)) | length }} message(s) matching \"{{ vars.phishing_subject }}\"; {{ (vars.steps.Purge_Mail.data.Error_List | default([], true)) | length }} deletion(s) failed and need follow-up (typically already-purged copies answering 404)."
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Phishing mail purge (approved, partial): deleted 1 message(s) matching \\\"Action required: payroll update\\\"; 1 deletion(s) failed and need follow-up (typically already-purged copies answering 404).\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:51:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Phishing mail purge (approved, partial): deleted 1 message(s) matching \\\"Action required: payroll update\\\"; 1 deletion(s) failed and need follow-up (typically already-purged copies answering 404).\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:51:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Add Comment on Security Alert",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "1290",
@@ -1008,7 +1063,12 @@
                   "alert_id": "{{ vars.alert_id }}",
                   "comment": "Phishing mail purge REJECTED at approval: no mail matching \"{{ vars.phishing_subject }}\" was deleted. The report stays with the analyst for follow-up."
                 },
-                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Phishing mail purge REJECTED at approval: no mail matching \\\"Action required: payroll update\\\" was deleted. The report stays with the analyst for follow-up.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:52:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}"
+                "mock_result": "{\n  \"data\": {\n    \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#security#security/alerts_v2('00000000-0000-0000-0000-000000000b01')/comments\",\n    \"value\": [\n      {\n        \"comment\": \"Phishing mail purge REJECTED at approval: no mail matching \\\"Action required: payroll update\\\" was deleted. The report stays with the analyst for follow-up.\",\n        \"createdByDisplayName\": \"FortiSOAR\",\n        \"createdDateTime\": \"2026-01-15T09:52:00Z\"\n      }\n    ]\n  },\n  \"status\": \"success\",\n  \"message\": \"\",\n  \"operation\": \"add_comment_on_security_alert\"\n}",
+                "version": "3.1.0",
+                "name": "Microsoft Graph API (fork)",
+                "operationTitle": "Add Comment on Security Alert",
+                "step_variables": [],
+                "pickFromTenant": false
               },
               "status": null,
               "top": "900",

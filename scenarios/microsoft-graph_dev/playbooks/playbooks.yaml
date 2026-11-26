@@ -485,104 +485,114 @@ playbooks:
           size: 50
         mock_result:
           data:
+            Run_Time: 0.13308310508728027
             Message_Found_List:
-              - "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('00000000-0000-0000-0000-000000000001')/messages(subject)"
-                value:
-                  - "@odata.etag": 'W/"CQAAABYAAAA="'
-                    id: AAMkAGI1AAA=
-                    createdDateTime: '2026-01-15T08:00:00Z'
-                    lastModifiedDateTime: '2026-01-15T08:00:00Z'
-                    changeKey: CQAAABYAAAA=
-                    categories: []
-                    receivedDateTime: '2026-01-15T08:00:00Z'
-                    sentDateTime: '2026-01-15T08:00:00Z'
-                    hasAttachments: true
-                    internetMessageId: <synthetic-1@contoso.example>
-                    subject: 'Action required: payroll update'
-                    bodyPreview: Confirm your payroll details before the cycle closes.
-                    importance: normal
-                    parentFolderId: AAMkAGI1AAA=
-                    conversationId: AAQkAGI1AAA=
-                    conversationIndex: AQHZA=
-                    isDeliveryReceiptRequested: false
-                    isReadReceiptRequested: false
-                    isRead: false
-                    isDraft: false
-                    webLink: https://outlook.office365.com/owa/?ItemID=AAMkAGI1AAA%3D
-                    inferenceClassification: focused
-                    body:
-                      contentType: html
-                      content: <html><body>Confirm your payroll details before the cycle closes.</body></html>
-                    sender:
-                      emailAddress:
-                        name: Cara Nunes
-                        address: cara@contoso.example
-                    from:
-                      emailAddress:
-                        name: Cara Nunes
-                        address: cara@contoso.example
-                    toRecipients:
-                      - emailAddress:
-                          name: Alice Chen
-                          address: alice@contoso.example
-                    ccRecipients: []
-                    bccRecipients: []
-                    replyTo: []
-                    flag:
-                      flagStatus: notFlagged
-                user_id: 00000000-0000-0000-0000-000000000001
-              - "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('00000000-0000-0000-0000-000000000002')/messages(subject)"
-                value:
-                  - "@odata.etag": 'W/"CQAAABYAAAA="'
-                    id: AAMkAGI2AAA=
-                    createdDateTime: '2026-01-15T08:05:00Z'
-                    lastModifiedDateTime: '2026-01-15T08:05:00Z'
-                    changeKey: CQAAABYAAAA=
-                    categories: []
-                    receivedDateTime: '2026-01-15T08:05:00Z'
-                    sentDateTime: '2026-01-15T08:05:00Z'
-                    hasAttachments: true
-                    internetMessageId: <synthetic-2@contoso.example>
-                    subject: 'Action required: payroll update'
-                    bodyPreview: Confirm your payroll details before the cycle closes.
-                    importance: normal
-                    parentFolderId: AAMkAGI2AAA=
-                    conversationId: AAQkAGI2AAA=
-                    conversationIndex: AQHZB=
-                    isDeliveryReceiptRequested: false
-                    isReadReceiptRequested: false
-                    isRead: false
-                    isDraft: false
-                    webLink: https://outlook.office365.com/owa/?ItemID=AAMkAGI2AAA%3D
-                    inferenceClassification: focused
-                    body:
-                      contentType: html
-                      content: <html><body>Confirm your payroll details before the cycle closes.</body></html>
-                    sender:
-                      emailAddress:
-                        name: Cara Nunes
-                        address: cara@contoso.example
-                    from:
-                      emailAddress:
-                        name: Cara Nunes
-                        address: cara@contoso.example
-                    toRecipients:
-                      - emailAddress:
-                          name: Bob Tester
-                          address: bob@contoso.example
-                    ccRecipients: []
-                    bccRecipients: []
-                    replyTo: []
-                    flag:
-                      flagStatus: notFlagged
-                user_id: 00000000-0000-0000-0000-000000000002
-            Message_Not_Found_List: []
-            Run_Time: 1.23
-            Total_Users_Processed: 2
+            - value:
+              - id: AAMkSYNTH0001AAA=
+                body:
+                  content: 'Password expiry detected for your account.
+
+                    Verify immediately: https://portal-office-login.example.com/verify
+
+                    Support ref: SYNTH-MARKER
+
+                    IT Service Desk'
+                  contentType: text
+                flag:
+                  flagStatus: notFlagged
+                from:
+                  emailAddress:
+                    name: Test User
+                    address: user1@contoso.example
+                isRead: false
+                sender:
+                  emailAddress:
+                    name: Test User
+                    address: user1@contoso.example
+                isDraft: false
+                replyTo: []
+                subject: Your password expires today - verify now
+                webLink: https://outlook.office365.com/owa/?ItemID=SYNTH
+                changeKey: CQAAABYAAAAsFsVLc9KCTLu1eafuoabOAAABeoK8
+                categories: []
+                importance: normal
+                '@odata.etag': W/"CQAAABYAAAAsFsVLc9KCTLu1eafuoabOAAABeoK8"
+                bodyPreview: Synthetic lab notice.
+                ccRecipients: []
+                sentDateTime: '2026-11-26T22:36:42Z'
+                toRecipients:
+                - emailAddress:
+                    name: Test User
+                    address: user2@contoso.example
+                bccRecipients: []
+                conversationId: AAQkAGE2MzQ0YzE4LWNjYjYtNGRlZi05MzM2LTMwNDUwMzQ1MGJjNgAQACpLJ6F8ChROknGT0inlgvc=
+                hasAttachments: false
+                parentFolderId: AAMkSYNTH0002AAA=
+                createdDateTime: '2026-11-26T22:36:44Z'
+                receivedDateTime: '2026-11-26T22:36:44Z'
+                conversationIndex: AQHdffabKksnoXwKFE6ScZPSKeWC9w==
+                internetMessageId: <synth-0001@contoso.example>
+                lastModifiedDateTime: '2026-11-26T22:38:12Z'
+                isReadReceiptRequested: false
+                inferenceClassification: focused
+                isDeliveryReceiptRequested: false
+              user_id: user2@contoso.example
+              '@odata.context': https://graph.microsoft.com/v1.0/$metadata#users/messages
+            - value:
+              - id: AAMkSYNTH0003AAA=
+                body:
+                  content: 'Password expiry detected for your account.
+
+                    Verify immediately: https://portal-office-login.example.com/verify
+
+                    Support ref: SYNTH-MARKER
+
+                    IT Service Desk'
+                  contentType: text
+                flag:
+                  flagStatus: notFlagged
+                from:
+                  emailAddress:
+                    name: Test User
+                    address: user1@contoso.example
+                isRead: false
+                sender:
+                  emailAddress:
+                    name: Test User
+                    address: user1@contoso.example
+                isDraft: false
+                replyTo: []
+                subject: Your password expires today - verify now
+                webLink: https://outlook.office365.com/owa/?ItemID=SYNTH
+                changeKey: CQAAABYAAADo07cI9HF2S4MBSJCUsASbAAAA589y
+                categories: []
+                importance: normal
+                '@odata.etag': W/"CQAAABYAAADo07cI9HF2S4MBSJCUsASbAAAA589y"
+                bodyPreview: Synthetic lab notice.
+                ccRecipients: []
+                sentDateTime: '2026-11-26T22:36:44Z'
+                toRecipients:
+                - emailAddress:
+                    name: Test User
+                    address: user3@contoso.example
+                bccRecipients: []
+                conversationId: AAQkAGE4MzExMWQ2LTc1YTItNGY1MC04NTUwLWNmYmMwOTQwMDczZgAQAPiOv_6FgIhBjF9e-fxCO1U=
+                hasAttachments: false
+                parentFolderId: AAMkSYNTH0004AAA=
+                createdDateTime: '2026-11-26T22:36:46Z'
+                receivedDateTime: '2026-11-26T22:36:47Z'
+                conversationIndex: AQHdffad+I6/7oWAiEGMX179/EI7VQ==
+                internetMessageId: <synth-0002@contoso.example>
+                lastModifiedDateTime: '2026-11-26T22:36:48Z'
+                isReadReceiptRequested: false
+                inferenceClassification: focused
+                isDeliveryReceiptRequested: false
+              user_id: user3@contoso.example
+              '@odata.context': https://graph.microsoft.com/v1.0/$metadata#users/messages
+            Total_Users_Processed: 76
           status: success
           message: ''
           operation: search_message
-
       - name: Messages Found
         type: decision
         conditions:
@@ -615,13 +625,15 @@ playbooks:
         mock_result:
           data:
             code_output:
-              targets:
-                - user_id: 00000000-0000-0000-0000-000000000001
-                  message_id: AAMkAGI1AAA=
-                - user_id: 00000000-0000-0000-0000-000000000002
-                  message_id: AAMkAGI2AAA=
               found: 2
-
+              targets:
+              - user_id: user2@contoso.example
+                message_id: AAMkSYNTH0001AAA=
+              - user_id: user3@contoso.example
+                message_id: AAMkSYNTH0003AAA=
+          status: success
+          message: ''
+          operation: python_inline_code_editor
       - name: Approval
         type: manual_input
         options:
@@ -675,22 +687,20 @@ playbooks:
         ignore_errors: true
         mock_result:
           data:
+            Run_Time: 0.2077465057373047
             Message_Deleted_List:
-              - msg_deleted: 'Yes'
-                user_id:
-                  user_id: 00000000-0000-0000-0000-000000000001
-                  message_id: AAMkAGI1AAA=
-            Error_List:
-              - error_msg: 404
-                user_id:
-                  user_id: 00000000-0000-0000-0000-000000000002
-                  message_id: AAMkAGI2AAA=
-            Run_Time: 0.87
+            - user_id:
+                user_id: user2@contoso.example
+                message_id: AAMkSYNTH0001AAA=
+              msg_deleted: 'Yes'
+            - user_id:
+                user_id: user3@contoso.example
+                message_id: AAMkSYNTH0003AAA=
+              msg_deleted: 'Yes'
             Total_Users_Processed: 2
           status: success
           message: ''
           operation: del_message_bulk
-
       - name: Purge Checked
         type: decision
         conditions:

@@ -252,19 +252,22 @@ _BRANCH_CASES = [
         "absent": ["Get Incident", "Update Incident"],
         "outcome": "nothing_to_triage",
     },
-    # Scenario C - phishing mail purge (microsoft-graph_dev). The purge mock
-    # carries one 404 in Error_List (the fixture's already-gone copy), so the
-    # default approve run lands on the PARTIAL branch; the clean branch is
-    # pinned explicitly.
+    # Scenario C - phishing mail purge (microsoft-graph_dev). The purge mock is
+    # the all-succeed live capture (no Error_List), so the default approve run
+    # lands on the CLEAN branch. The PARTIAL branch is pinned here; a live
+    # partial run (one copy raced away inside the approval pause) is banked in
+    # scratch and its error-list mock is not yet promoted.
     {
         "id": "C-approve-partial",
         "yaml": "microsoft-graph_dev",
         "playbook": "Purge Reported Phishing Mail",
         "manual": {"Approval": "approve"},
+        "branches": {"Purge Checked": "Some deletions failed"},
         "present": ["Build Delete Targets", "Purge Mail", "Close Out Partial"],
         "absent": ["Reject Comment", "Close Out Purged"],
         "outcome": "purged_with_errors",
-        "terminal_extra": {"deleted_count": 1, "error_count": 1},
+        # Route only: the counts come from the all-succeed mock, so no
+        # deleted/error counts are asserted for this pinned branch.
     },
     {
         "id": "C-approve-clean",
