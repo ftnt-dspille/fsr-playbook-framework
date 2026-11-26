@@ -1,6 +1,6 @@
 """Typed outputs for the ``microsoft-purview-ediscovery`` connector.
 
-Source: ``~/PycharmProjects/ConnectorsV2/microsoft-purview-ediscovery``
+Source: the ``microsoft-purview-ediscovery`` connector repo (private)
 (info.json version 1.0.0, label "Microsoft Purview eDiscovery"). The
 connector talks to the Microsoft Graph **v1.0 security namespace**
 (``/v1.0/security/cases/ediscoveryCases``), NOT the beta
