@@ -84,6 +84,8 @@ none and reads as `None`, meaning unknown.
 | Requested action (TaskSpec) | `requested_action_staged` | new | A delivered verdict meets a request with nothing staged: code stages it. Requests come from the analyst's words, and unattended from the triage contract (contain a true positive) and the policy's close rule. Replaced `ContainmentFollowThrough` (25 fires since 2026-10-05). See `llm/task_spec.py`. | Keep; it is the post-condition, not a nudge. |
 | Forced assessment | `assessment_forced` | 5 | Ran tools, wrote nothing | Keep. |
 | Open lead | `open_lead_forced` (and verdict refusal `open_lead_unsearched`) | new | A source result revealed a typed key (address, hash, domain, host or account name, or an entity field value) that no answered call used as a search key: the reply or verdict is sent back with the key and the sources that can take it, at most 3 times a turn. Keys are read by shape and field name, never prose; threat-intel results and values already in the mounted record are skipped. See `mcp_server/_pivot_keys.py`, `open_pivot_keys` in `_citation_validator.py`. | Keep; measure on the pivot rows. |
+| NOC diff not read | `noc_diff_forced` (and verdict refusal `diff_not_read`) | new | `fmg_device by=changes` showed an install (or `by=status` showed out of sync) and `by=diff` was never read for that device: the reply or verdict is sent back naming the call. A reply with no verdict and no staged card is also sent back once to name the install task the diff cites. Typed facts only; at most 3 per turn. See `mcp_server/_noc_scaffold.py`. | Keep; measure on NOC rows. |
+| NOC fix card | `noc_fix_staged` | new | The analyst asks for a fix and this turn's `by=diff` read found a blackhole route among the newest static routes: the loop stages the `json_rpc_delete` action card itself (tier 3, analyst approves). Once per turn. Known limit: the evidence registry is per turn, so a later "fix it" turn with no fresh `by=diff` read gets no card. | Keep; the limit is open. |
 | Self-repair | n/a | n/a | The last fenced ```yaml block in a terminal round fails the compile or the connector check: one repair round, up to `MAX_SELF_REPAIR_TURNS` (2). Once the cap is spent, a failing fence is neutralised in the delivered text (a note naming what failed), in the terminal round, the tool-round prose and the wrap-up. | Keep. The widget saves the last fence and has no other signal, so the loop is the only place a failing fence can be stopped. |
 
 Delivery is decided on structure: the loop emits an offer only when a verify
@@ -107,6 +109,8 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
 | Duplicate search | `TriageDiscipline` | `guard_redirect` / `duplicate_search_guard` | 106 | Keep. |
 | Capability gap | `TriageDiscipline` | `guard_redirect` / `capability_guard` | 0 | Keep; terminal. |
 | Enrichment cap | `TriageDiscipline` | `guard_redirect` / `enrichment_cap_guard` | 0 | Keep; terminal. |
+| Benign over a blackhole | `emit_verdict` (`benign_over_blackhole`, then `benign_capped`) | new | A benign or false_positive verdict while a blackhole route among the 3 newest static routes of this turn's diff drops the asked-about traffic: refused once; a repeat is held at `suspicious`, severity at least medium, by the verdict tool. A route unrelated to the ask costs one refusal. | Keep; safety. |
+| Install task cited | `emit_verdict` (`install_task_attached`) | new | A verdict resting on a `by=diff` read that does not name the install task the diff cites gets a grounded finding naming it. No model round. | Keep. |
 | Forbidden pivot and internal-IP correlation search | removed | n/a | 438 (earlier) | Removed by owner decision. The only internal-address protection kept is the repo-level infra-leak check (`scripts/check_infra_leaks.py`). |
 
 ### Argument gate, turn plan and approval
@@ -123,6 +127,8 @@ substring matches on `agent_tool_calls.result_summary` in the same DB.
 | User denied | `authorization.authorize` / `approvals` | `user_denied` | 0 | Not a guard; the approval outcome. |
 
 ## Changelog
+
+- NOC scaffold: six mechanisms (`turn.noc_diff_forced`, `turn.noc_fix_staged`, `noc.diff_not_read`, `noc.benign_over_blackhole`, `noc.benign_capped`, `noc.install_task_attached`) keep a weak model on the FortiManager `by=diff` layer.
 
 - 2026-10-12: self-repair. A failing fence is no longer delivered after the cap:
   `_neutralise_failing_fences` replaces it with a note. The fence text is held
