@@ -11,7 +11,7 @@ import textwrap
 import pytest
 
 pytest.importorskip(
-    "mcp.server.fastmcp",
+    "mcp.server.mcpserver",
     reason="mcp package not installed (pip install mcp)",
 )
 

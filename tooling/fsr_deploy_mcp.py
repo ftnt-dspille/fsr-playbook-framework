@@ -28,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT / "tooling") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tooling"))
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.server.mcpserver import MCPServer as FastMCP  # noqa: E402
 
 deploy_mcp = FastMCP("fsr-deploy")
 

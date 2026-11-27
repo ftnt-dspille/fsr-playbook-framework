@@ -51,7 +51,7 @@ os.chdir(REPO_ROOT)
 
 from typing import Any  # noqa: E402
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.server.mcpserver import MCPServer as FastMCP  # noqa: E402
 
 import fsr_playbooks.mcp_server as fsrpb  # noqa: E402
 

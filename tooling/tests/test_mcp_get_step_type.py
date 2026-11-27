@@ -13,12 +13,12 @@ import json
 
 import pytest
 
-# `mcp_server` imports `mcp.server.fastmcp.FastMCP` at module load.
+# `mcp_server` imports `mcp.server.mcpserver.FastMCP` at module load.
 # Skip this whole file gracefully on environments without the mcp
 # package installed -- the get_step_type behavior it tests is exercised
 # indirectly by the chat / resolver tests.
 pytest.importorskip(
-    "mcp.server.fastmcp",
+    "mcp.server.mcpserver",
     reason="mcp package not installed (pip install mcp)",
 )
 

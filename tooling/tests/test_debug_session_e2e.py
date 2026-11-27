@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp",
+pytest.importorskip("mcp.server.mcpserver",
                     reason="mcp package not installed")
 
 import fsr_playbooks.mcp_server as mcp_server  # noqa: E402

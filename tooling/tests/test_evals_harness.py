@@ -14,7 +14,7 @@ import sqlite3
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp",
+pytest.importorskip("mcp.server.mcpserver",
                     reason="mcp package not installed")
 
 from evals.harness import run_matrix  # noqa: E402

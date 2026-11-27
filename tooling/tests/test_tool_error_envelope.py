@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp",
+pytest.importorskip("mcp.server.mcpserver",
                     reason="mcp package not installed")
 
 from agent import load_system_prompt  # noqa: E402

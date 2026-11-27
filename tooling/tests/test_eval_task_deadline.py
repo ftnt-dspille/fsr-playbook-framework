@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp", reason="mcp package not installed")
+pytest.importorskip("mcp.server.mcpserver", reason="mcp package not installed")
 
 from evals import harness  # noqa: E402
 from evals.providers import TaskCancelled, _check_cancel  # noqa: E402
