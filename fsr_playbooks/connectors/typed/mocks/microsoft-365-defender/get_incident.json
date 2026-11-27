@@ -50,7 +50,23 @@
       "threatFamilyName": "SyntheticExample",
       "mitreTechniques": [],
       "devices": [
-        "device-0002"
+        {
+          "mdatpDeviceId": "0000000000000000000000000000000000000001",
+          "aadDeviceId": null,
+          "deviceDnsName": "EXAMPLE-HOST",
+          "osPlatform": "WindowsServer2022",
+          "version": "21H2",
+          "osProcessor": "x64",
+          "osBuild": 20348,
+          "healthStatus": "Active",
+          "riskScore": "Informational",
+          "rbacGroupName": null,
+          "firstSeen": "2026-11-01T08:00:00.0000000Z",
+          "tags": [],
+          "onboardingStatus": "Onboarded",
+          "vmMetadata": null,
+          "loggedOnUsers": []
+        }
       ],
       "entities": [
         {

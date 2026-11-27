@@ -1,0 +1,23 @@
+{
+  "@odata.context": "https://api.security.microsoft.com/api/$metadata#MachineActions/$entity",
+  "id": "00000000-0000-0000-0000-0000000000a1",
+  "type": "RestrictCodeExecution",
+  "title": null,
+  "requestor": "soar-connector-app",
+  "requestorComment": "FortiSOAR scenario D live test: restrict",
+  "status": "Failed",
+  "machineId": "00000000000000000000000000000000000000d1",
+  "computerDnsName": "EXAMPLE-HOST",
+  "creationDateTimeUtc": "2026-11-26T22:32:46.5257403Z",
+  "lastUpdateDateTimeUtc": "2026-11-26T22:48:29.9377136Z",
+  "cancellationRequestor": null,
+  "cancellationComment": null,
+  "cancellationDateTimeUtc": null,
+  "errorHResult": -2144731135,
+  "scope": null,
+  "externalId": null,
+  "requestSource": "PublicApi",
+  "relatedFileInfo": null,
+  "commands": [],
+  "troubleshootInfo": null
+}

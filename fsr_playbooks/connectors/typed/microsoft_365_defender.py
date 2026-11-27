@@ -391,6 +391,32 @@ class Evidence(BaseModel):
     userPrincipalName: str | None = None
 
 
+class AlertDevice(BaseModel):
+    """One device block inside an alert's ``devices[]``.
+
+    Provenance: live-verified on 8.0.1 (incident detail with alerts expanded);
+    sanitized. ``mdatpDeviceId`` is the id the machines API keys on, so it is
+    the link from an incident to :func:`get_machine`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    mdatpDeviceId: str | None = None
+    aadDeviceId: str | None = None
+    deviceDnsName: str | None = None
+    osPlatform: str | None = None
+    version: str | None = None
+    osProcessor: str | None = None
+    osBuild: int | None = None
+    healthStatus: str | None = None
+    riskScore: str | None = None
+    onboardingStatus: str | None = None
+    firstSeen: str | None = None
+    loggedOnUsers: list[Any] = Field(default_factory=list)
+
+    _coerce_null_users = field_validator("loggedOnUsers", mode="before")(_none_to_empty_list)
+
+
 class IncidentAlert(BaseModel):
     """One alert bundled into an incident.
 
@@ -398,7 +424,7 @@ class IncidentAlert(BaseModel):
     set from the info.json ``output_schema``; values kept ``str`` rather than
     Literal because only a capture can pin the enumerations (severity,
     serviceSource, detectionSource, ...). ``resolvedTime`` is null for active
-    alerts; ``devices`` is a list of device-ID strings.
+    alerts; ``devices`` is a list of device objects (see :class:`AlertDevice`).
     """
 
     model_config = ConfigDict(extra="allow")
@@ -427,7 +453,7 @@ class IncidentAlert(BaseModel):
     actorName: str | None = None
     threatFamilyName: str | None = None
     mitreTechniques: list[str] = Field(default_factory=list)
-    devices: list[str] = Field(default_factory=list)
+    devices: list[AlertDevice] = Field(default_factory=list)
     entities: list[Evidence] = Field(default_factory=list)
 
     _coerce_null_lists = field_validator(
@@ -601,6 +627,168 @@ class AdvancedHuntingResponse(BaseModel):
     )
 
 
+# ---- machine (endpoint) operations -------------------------------------
+#
+# The machines API shares the unified host (api.security.microsoft.com) but
+# needs a token minted for the WindowsDefenderATP resource; the connector mints
+# that token itself (machine_ops.py, connector 1.3.0+). Every machine action is
+# asynchronous: the POST returns the machine action record (status Pending)
+# and the caller polls get_machine_action until a terminal status.
+
+MACHINE_ID_PATTERN = r"^[0-9a-fA-F]{40}$"
+MACHINE_ACTION_ID_PATTERN = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+MACHINE_ACTION_TERMINAL_STATUSES = ("Succeeded", "Failed", "Cancelled", "TimeOut")
+
+
+class ListMachinesParams(BaseModel):
+    """``list_machines`` params. ``filter`` is an OData ``$filter``; ``top`` a count.
+
+    Provenance: live-verified on 8.0.1 (params as the connector sent them in
+    the scenario D runs). Blank TEXT params arrive as ``""`` from the platform
+    -- normalized to None.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    filter: StrictStr | None = None
+    top: StrictInt | None = Field(default=None, ge=1)
+
+    _blank_filter = field_validator("filter", mode="before")(_blank_to_none)
+
+    @field_validator("top", mode="before")
+    @classmethod
+    def _blank_top(cls, value: Any) -> Any:
+        if value in ("", None):
+            return None
+        if isinstance(value, str):
+            return int(value)
+        return value
+
+
+class MachineIdParams(BaseModel):
+    """Params for the ops that address one device by its 40-hex machine id.
+
+    Provenance: live-verified on 8.0.1 (the isolate, release, scan, package and
+    app-execution ops ran with these params).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: StrictStr = Field(pattern=MACHINE_ID_PATTERN)
+    comment: StrictStr | None = None
+
+    _blank_comment = field_validator("comment", mode="before")(_blank_to_none)
+
+
+class IsolateMachineParams(MachineIdParams):
+    """``isolate_machine`` params. Full cuts all traffic but the Defender channel.
+
+    Provenance: live-verified on 8.0.1 (Full and Selective isolation ran).
+    """
+
+    isolation_type: Literal["Full", "Selective"] = "Full"
+
+    @field_validator("isolation_type", mode="before")
+    @classmethod
+    def _blank_isolation(cls, value: Any) -> Any:
+        return "Full" if value in ("", None) else value
+
+
+class RunAVScanParams(MachineIdParams):
+    """``run_av_scan`` params. Quick is the platform default.
+
+    Provenance: live-verified on 8.0.1 (a Quick scan ran to Succeeded).
+    """
+
+    scan_type: Literal["Quick", "Full"] = "Quick"
+
+    @field_validator("scan_type", mode="before")
+    @classmethod
+    def _blank_scan(cls, value: Any) -> Any:
+        return "Quick" if value in ("", None) else value
+
+
+class GetMachineActionParams(BaseModel):
+    """``get_machine_action`` params: the GUID the action operation returned.
+
+    Provenance: live-verified on 8.0.1 (polled to a terminal status).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: StrictStr = Field(pattern=MACHINE_ACTION_ID_PATTERN)
+
+
+class Machine(BaseModel):
+    """``get_machine`` output (one element of ``list_machines`` ``value``).
+
+    Provenance: live-verified on 8.0.1 (machines list + machine detail);
+    sanitized. ``extra="allow"`` keeps the rest of the Defender record.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    id: StrictStr
+    computerDnsName: str | None = None
+    osPlatform: str | None = None
+    osBuild: int | None = None
+    healthStatus: str | None = None
+    onboardingStatus: str | None = None
+    riskScore: str | None = None
+    exposureLevel: str | None = None
+    firstSeen: str | None = None
+    lastSeen: str | None = None
+    lastIpAddress: str | None = None
+    lastExternalIpAddress: str | None = None
+    agentVersion: str | None = None
+    machineTags: list[str] = Field(default_factory=list)
+
+    _coerce_null_tags = field_validator("machineTags", mode="before")(_none_to_empty_list)
+
+
+class MachineListResponse(BaseModel):
+    """``list_machines`` output: the OData collection of machines.
+
+    Provenance: live-verified on 8.0.1 (machines list); sanitized.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    odata_context: str | None = Field(default=None, alias="@odata.context")
+    value: list[Machine]
+
+
+class MachineAction(BaseModel):
+    """A machine action record: the POST result of every action op, and the
+    ``get_machine_action`` poll result.
+
+    Provenance: live-verified on 8.0.1 (isolate, unisolate, AV scan, package
+    collection, app-execution restriction); sanitized. ``status`` walks
+    Pending -> InProgress -> one of :data:`MACHINE_ACTION_TERMINAL_STATUSES`.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    odata_context: str | None = Field(default=None, alias="@odata.context")
+    id: StrictStr
+    type: str | None = None
+    status: Literal["Pending", "InProgress", "Succeeded", "Failed", "Cancelled", "TimeOut"]
+    machineId: str | None = None
+    computerDnsName: str | None = None
+    requestor: str | None = None
+    requestorComment: str | None = None
+    requestSource: str | None = None
+    scope: str | None = None
+    errorHResult: int | None = None
+    creationDateTimeUtc: str | None = None
+    lastUpdateDateTimeUtc: str | None = None
+    commands: list[Any] = Field(default_factory=list)
+
+    _coerce_null_commands = field_validator("commands", mode="before")(_none_to_empty_list)
+
+
 #: Per-op PARAM models. The graph-security pair types its params only in the
 #: docstrings; this connector's params carry real platform quirks (blank-string
 #: TEXT params, the unchecked-checkbox ``get_all_records: ""``, the
@@ -611,6 +799,15 @@ OP_PARAM_MODELS: dict[str, type[BaseModel]] = {
     "get_incident": GetIncidentParams,
     "update_incident": UpdateIncidentParams,
     "advanced_hunting": AdvancedHuntingParams,
+    "list_machines": ListMachinesParams,
+    "get_machine": MachineIdParams,
+    "isolate_machine": IsolateMachineParams,
+    "unisolate_machine": MachineIdParams,
+    "run_av_scan": RunAVScanParams,
+    "collect_investigation_package": MachineIdParams,
+    "restrict_app_execution": MachineIdParams,
+    "unrestrict_app_execution": MachineIdParams,
+    "get_machine_action": GetMachineActionParams,
 }
 
 #: Per-op OUTPUT models -- same name/shape as the graph-security pair's
@@ -622,6 +819,15 @@ OPERATION_MODELS: dict[str, Any] = {
     "get_incident": GetIncidentResponse,
     "update_incident": UpdateIncidentResponse,
     "advanced_hunting": AdvancedHuntingResponse,
+    "list_machines": MachineListResponse,
+    "get_machine": Machine,
+    "isolate_machine": MachineAction,
+    "unisolate_machine": MachineAction,
+    "run_av_scan": MachineAction,
+    "collect_investigation_package": MachineAction,
+    "restrict_app_execution": MachineAction,
+    "unrestrict_app_execution": MachineAction,
+    "get_machine_action": MachineAction,
 }
 
 __all__ = [
@@ -635,6 +841,7 @@ __all__ = [
     "AdvancedHuntingParams",
     "Incident",
     "IncidentAlert",
+    "AlertDevice",
     "IncidentComment",
     "Evidence",
     "IncidentListResponse",
@@ -646,6 +853,15 @@ __all__ = [
     "AHSchemaColumn",
     "AHDatasetStat",
     "CellValue",
+    "ListMachinesParams",
+    "MachineIdParams",
+    "IsolateMachineParams",
+    "RunAVScanParams",
+    "GetMachineActionParams",
+    "Machine",
+    "MachineListResponse",
+    "MachineAction",
+    "MACHINE_ACTION_TERMINAL_STATUSES",
     "OP_PARAM_MODELS",
     "OPERATION_MODELS",
 ]

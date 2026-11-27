@@ -54,6 +54,15 @@ _DEFENDER_OPS = (
     "get_incident",
     "update_incident",
     "advanced_hunting",
+    "list_machines",
+    "get_machine",
+    "isolate_machine",
+    "unisolate_machine",
+    "run_av_scan",
+    "collect_investigation_package",
+    "restrict_app_execution",
+    "unrestrict_app_execution",
+    "get_machine_action",
 )
 
 _ERROR_KEYS = sorted(k for k in ERROR_FIXTURES if k.startswith("m365def-"))
@@ -81,6 +90,17 @@ def _mock_dir() -> Path:
 # --- every fixture validates through its model -------------------------------
 
 
+_MACHINE_ACTION_OPS = (
+    "isolate_machine",
+    "unisolate_machine",
+    "run_av_scan",
+    "collect_investigation_package",
+    "restrict_app_execution",
+    "unrestrict_app_execution",
+    "get_machine_action",
+)
+
+
 @pytest.mark.parametrize("op", _DEFENDER_OPS)
 def test_every_op_fixture_validates_through_its_model(op: str) -> None:
     body = load_mock("microsoft-365-defender", op)
@@ -95,6 +115,12 @@ def test_every_op_fixture_validates_through_its_model(op: str) -> None:
         assert parsed.value[0].incidentId == "9"
     elif op == "get_incident":
         assert parsed.incidentId == "9"
+    elif op == "list_machines":
+        assert parsed.value and len(parsed.value[0].id) == 40
+    elif op == "get_machine":
+        assert len(parsed.id) == 40 and parsed.onboardingStatus == "Onboarded"
+    elif op in _MACHINE_ACTION_OPS:
+        assert parsed.id and parsed.status in m.MACHINE_ACTION_TERMINAL_STATUSES + ("Pending", "InProgress")
     else:
         assert parsed.Schema[0].Name == "Timestamp"
         assert parsed.Results[0]["EventCount"] == 3
