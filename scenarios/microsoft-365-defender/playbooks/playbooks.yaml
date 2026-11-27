@@ -1,4 +1,4 @@
-# Sample playbooks for the microsoft-365-defender connector (v1.2.1) -- the
+# Sample playbooks for the microsoft-365-defender connector (v1.3.0) -- the
 # M365 scenario set, written in the fortinet-fortiaigate style:
 # scenario-grouped YAML source of truth, compiled by build.py, with a
 # mock_result on every step that would otherwise need the connector configured.
@@ -23,7 +23,7 @@
 #     revokeSignInSessions live on Graph, not on api.security.microsoft.com.
 #   - for the mock run: neither connector needs to be configured.
 
-collection: Sample - Microsoft 365 Defender - 1.2.1
+collection: Sample - Microsoft 365 Defender - 1.3.0
 description: >-
   Sample playbooks for the "Microsoft 365 Defender" connector. If you are
   planning to use the sample playbooks in your environment, ensure that you
@@ -106,15 +106,15 @@ playbooks:
         type: connector
         next: Oldest First
         comment: >-
-          Active incidents only, all pages (get_all_records). The datetime
+          Active and In Progress incidents, all pages (get_all_records). The datetime
           params are left off on purpose: they must carry fractional seconds or
           the connector refuses the run before any HTTP call, and a triage
-          sweep wants everything Active, not a time slice.
+          sweep wants every open incident, not a time slice.
         connector: microsoft-365-defender
         operation: list_incidents
         config: ''
         params:
-          status: Active
+          status: [Active, "In Progress"]
           get_all_records: true
         mock_result:
           data:
@@ -129,7 +129,7 @@ playbooks:
                 assignedTo: alice@contoso.example
                 classification: TruePositive
                 determination: MultiStagedAttack
-                status: Active
+                status: InProgress
                 severity: High
                 tags: [ransomware]
                 comments:
@@ -163,7 +163,9 @@ playbooks:
                     actorName: null
                     threatFamilyName: null
                     mitreTechniques: [T1059, T1486]
-                    devices: [device-0001]
+                    devices:
+                      - mdatpDeviceId: device-0001
+                        deviceDnsName: win11-workstation-01
                     entities:
                       - entityType: User
                         evidenceCreationTime: '2026-11-02T09:45:51.3616613Z'
@@ -220,7 +222,9 @@ playbooks:
                     actorName: null
                     threatFamilyName: SyntheticExample
                     mitreTechniques: []
-                    devices: [device-0002]
+                    devices:
+                      - mdatpDeviceId: device-0002
+                        deviceDnsName: win11-workstation-02
                     entities:
                       - entityType: File
                         evidenceCreationTime: '2026-11-03T08:10:00.2019430Z'
@@ -279,7 +283,7 @@ playbooks:
             assignedTo: alice@contoso.example
             classification: TruePositive
             determination: MultiStagedAttack
-            status: Active
+            status: InProgress
             severity: High
             tags: [ransomware]
             comments:
@@ -313,7 +317,9 @@ playbooks:
                 actorName: null
                 threatFamilyName: null
                 mitreTechniques: [T1059, T1486]
-                devices: [device-0001]
+                devices:
+                  - mdatpDeviceId: device-0001
+                    deviceDnsName: win11-workstation-01
                 entities:
                   - entityType: User
                     evidenceCreationTime: '2026-11-02T09:45:51.3616613Z'
@@ -652,3 +658,817 @@ playbooks:
           compromised_user: ''
           revoked: false
           named_location: ''
+
+  # - Scenario D (Windows endpoint response) - a Defender incident names the
+  #   device it fired on. The playbook pulls that device's machine record,
+  #   refuses to act unless Defender reports it onboarded, and then asks an
+  #   analyst which containment to apply. The chosen machine action runs, is
+  #   polled to a terminal status, and the outcome is written back to the
+  #   incident. --------------------------------------------------------------
+
+  - name: Respond to Defender Endpoint Incident
+    description: >-
+      Endpoint response for one Microsoft 365 Defender incident: pull the
+      incident, find the device in its alert evidence, confirm the device is
+      onboarded to Defender for Endpoint, then let an analyst choose the
+      containment. The choices are isolate the device (Full isolation: all
+      traffic except the Defender cloud channel is cut), run a Quick
+      antivirus scan, collect an investigation package, or no action. The
+      machine action is asynchronous, so the playbook waits and polls the
+      action until Defender reports a terminal status, then records the
+      outcome as a comment and tag on the incident.
+
+      Why the device comes from the incident and not from a parameter: the
+      analyst is answering a detection, and the device is the one Defender
+      already attached to it. Taking the device id from the alert evidence
+      keeps the response on the machine the detection names.
+
+      Why the onboarding gate: a device that is not onboarded has no sensor
+      to act through, and Defender answers the action with an error that
+      reads like a permissions problem. The gate reports the real state.
+
+      Why the poll: isolation finishes in seconds, a Quick scan in about a
+      minute, a package in a few minutes. The action record is the only place
+      Defender reports success or failure, so the outcome is read from it.
+
+      Inputs: incident_id (the Defender incident to respond to; default is a
+      sample id). Outputs: outcome (responded, action_failed, no_action,
+      not_onboarded or no_device), incident_id, device_name, action_name,
+      action_id, final_status.
+
+      Live prerequisites: the microsoft-365-defender connector (1.3.0 or
+      later) configured with Application permission auth, and the Machine.*
+      application roles granted (Read.All, Isolate, Scan, CollectForensics,
+      RestrictExecution). The Defender for Endpoint plane must be licensed and
+      the device onboarded.
+    is_active: true
+    debug: true
+    parameters: [incident_id]
+    steps:
+
+      - name: Start
+        type: start
+        next: Resolve Inputs
+
+      # Scheduled and API runs bind no parameters, so the incident resolves
+      # through the same default chain as scenario B: run parameter, then a
+      # top-level trigger variable, then the sanitized default.
+      - name: Resolve Inputs
+        type: set_variable
+        next: Get Incident
+        vars:
+          incident_id: "{{ vars.input.params.incident_id | default(vars.incident_id, true) | default('1', true) }}"
+
+      - name: Get Incident
+        type: connector
+        next: Pick Device
+        comment: >-
+          The full incident, alerts expanded, is what carries the device
+          evidence. get_incident is read-only.
+        connector: microsoft-365-defender
+        operation: get_incident
+        config: ''
+        params:
+          id: '{{ vars.incident_id }}'
+        mock_result:
+          data:
+            tags:
+            - m365-lab
+            alerts:
+            - title: '''EICAR_Test_File'' malware was prevented'
+              status: New
+              alertId: da7a77bec7-4bd5-474d-8f8d-62d38cf47edb_1
+              devices:
+              - tags: []
+                osBuild: 20348
+                version: 21H2
+                firstSeen: '2026-11-25T22:19:45.444097Z'
+                riskScore: Informational
+                osPlatform: WindowsServer2022
+                vmMetadata: null
+                aadDeviceId: null
+                osProcessor: x64
+                healthStatus: Active
+                deviceDnsName: EXAMPLE-HOST
+                loggedOnUsers: []
+                mdatpDeviceId: 00000000000000000000000000000000000000d1
+                rbacGroupName: null
+                onboardingStatus: Onboarded
+              category: Malware
+              entities:
+              - sha1: 00000000000000000000000000000000000000d2
+                sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+                verdict: Suspicious
+                deviceId: 00000000000000000000000000000000000000d1
+                fileName: eicar_test.txt
+                filePath: C:\Users\administrator
+                entityType: File
+                detectionStatus: Prevented
+                remediationStatus: None
+                evidenceCreationTime: '2026-11-25T22:27:45.21Z'
+              - sha1: 00000000000000000000000000000000000000d2
+                sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+                verdict: Suspicious
+                deviceId: 00000000000000000000000000000000000000d1
+                fileName: eicar_scd_20261126144304.txt
+                filePath: C:\Users\administrator
+                entityType: File
+                detectionStatus: Prevented
+                remediationStatus: None
+                evidenceCreationTime: '2026-11-26T22:44:57.6433333Z'
+              severity: Informational
+              actorName: null
+              assignedTo: null
+              detectorId: 00000000-0000-0000-0000-0000000000a1
+              incidentId: 1
+              description: 'Malware and unwanted software are undesirable applications that perform annoying, disruptive, or harmful actions on affected machines. Some of these undesirable applications can replicate and spread from one machine to another. Others are able to receive commands from remote attackers and perform activities associated with cyber attacks.
+
+
+                This detection might indicate that the malware was stopped from delivering its payload. However, it is prudent to check the machine for signs of infection.'
+              creationTime: '2026-11-25T22:27:45.08Z'
+              lastActivity: '2026-11-26T22:43:42.2021063Z'
+              resolvedTime: null
+              determination: null
+              firstActivity: '2026-11-25T22:26:36.4801299Z'
+              serviceSource: MicrosoftDefenderForEndpoint
+              classification: null
+              detectionSource: WindowsDefenderAv
+              investigationId: null
+              lastUpdatedTime: '2026-11-26T22:44:57.7Z'
+              mitreTechniques: []
+              providerAlertId: 7a77bec7-4bd5-474d-8f8d-62d38cf47edb_1
+              threatFamilyName: EICAR_Test_File
+              investigationState: UnsupportedAlertType
+            status: Active
+            comments: []
+            severity: Informational
+            assignedTo: null
+            incidentId: 1
+            createdTime: '2026-11-25T22:27:46.0866667Z'
+            incidentUri: https://security.microsoft.com/incidents/1?tid=00000000-0000-0000-0000-0000000000a2
+            incidentName: '''EICAR_Test_File'' malware was prevented'
+            determination: NotAvailable
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#Incidents/$entity
+            classification: Unknown
+            lastUpdateTime: '2026-11-26T22:44:57.69Z'
+            redirectIncidentId: null
+          status: success
+          message: ''
+          operation: get_incident
+
+      # Each alert carries a devices[] block; mdatpDeviceId is the id the
+      # machines API keys on. selectattr('devices') skips alerts with no device
+      # block, and select|first answers empty when no alert names a device, so
+      # the Device Found decision can route without a Jinja error.
+      - name: Pick Device
+        type: set_variable
+        next: Device Found
+        vars:
+          device_id: "{{ vars.steps.Get_Incident.data.alerts | default([], true) | selectattr('devices') | map(attribute='devices') | sum(start=[]) | map(attribute='mdatpDeviceId') | select | first | default('', true) }}"
+          device_name: "{{ vars.steps.Get_Incident.data.alerts | default([], true) | selectattr('devices') | map(attribute='devices') | sum(start=[]) | map(attribute='deviceDnsName') | select | first | default('', true) }}"
+
+      - name: Device Found
+        type: decision
+        conditions:
+          - display: Incident names a device
+            when: "{{ vars.device_id | length > 0 }}"
+            next: Get Machine
+          - display: No device in the evidence
+            default: true
+            next: Close No Device
+
+      - name: Get Machine
+        type: connector
+        next: Onboarded
+        comment: >-
+          Reads the machine record by its id. The onboarding state and the
+          health are shown to the analyst at the gate.
+        connector: microsoft-365-defender
+        operation: get_machine
+        config: ''
+        params:
+          id: '{{ vars.device_id }}'
+        mock_result:
+          data:
+            id: 00000000000000000000000000000000000000d1
+            osBuild: 20348
+            version: 21H2
+            lastSeen: '2026-11-26T12:37:24.9612259Z'
+            firstSeen: '2026-11-25T22:19:45.444097Z'
+            managedBy: Unknown
+            riskScore: Informational
+            isExcluded: false
+            osPlatform: WindowsServer2022
+            vmMetadata: null
+            aadDeviceId: null
+            deviceValue: Normal
+            ipAddresses:
+            - type: Ethernet
+              ipAddress: 192.0.2.10
+              macAddress: '020000000001'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::5d99:7a52:1963:bfe2
+              macAddress: '020000000001'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.11
+              macAddress: '020000000002'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::b9d1:deac:3ee7:aed6
+              macAddress: '020000000002'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.12
+              macAddress: '020000000003'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::f8a9:5675:db0a:32d7
+              macAddress: '020000000003'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.13
+              macAddress: '020000000004'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::ccc4:e0bd:6325:ddaa
+              macAddress: '020000000004'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.14
+              macAddress: '020000000005'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::f52b:b6fb:35c2:5002
+              macAddress: '020000000005'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.15
+              macAddress: '020000000006'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::d5d1:1fa3:5fe3:3298
+              macAddress: '020000000006'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.16
+              macAddress: '020000000007'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::70b8:28d8:3f57:2a99
+              macAddress: '020000000007'
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.17
+              macAddress: 020000000008
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::c838:fcdd:e81:3854
+              macAddress: 020000000008
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.18
+              macAddress: 020000000009
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: fe80::450a:ac47:4bad:b7fe
+              macAddress: 020000000009
+              operationalStatus: Down
+            - type: Ethernet
+              ipAddress: 192.0.2.19
+              macAddress: 02000000000a
+              operationalStatus: Up
+            - type: Ethernet
+              ipAddress: fe80::e98b:7208:efd0:d959
+              macAddress: 02000000000a
+              operationalStatus: Up
+            isAadJoined: false
+            machineTags: []
+            osProcessor: x64
+            rbacGroupId: 0
+            agentVersion: 10.8040.20348.587
+            healthStatus: Active
+            exposureLevel: High
+            lastIpAddress: 192.0.2.19
+            rbacGroupName: null
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#Machines/$entity
+            osArchitecture: 64-bit
+            computerDnsName: EXAMPLE-HOST
+            exclusionReason: null
+            managedByStatus: Unknown
+            onboardingStatus: Onboarded
+            mergedIntoMachineId: null
+            lastExternalIpAddress: 192.0.2.20
+            isPotentialDuplication: false
+          status: success
+          message: ''
+          operation: get_machine
+
+      - name: Onboarded
+        type: decision
+        conditions:
+          - display: Device is onboarded to Defender
+            when: "{{ (vars.steps.Get_Machine.data | default({}, true)).onboardingStatus | default('', true) == 'Onboarded' }}"
+            next: Analyst Gate
+          - display: Not onboarded or record unreadable
+            default: true
+            next: Close Not Onboarded
+
+      # The analyst gate. A plain manual_input (answered in the FortiSOAR UI
+      # or through the API) keeps this scenario off any chat channel. Each
+      # option is one branch; the no-action option still reaches the terminal
+      # outcome through a recorded comment.
+      - name: Analyst Gate
+        type: manual_input
+        options:
+          - display: isolate
+            primary: true
+            next: Isolate Device
+          - display: av scan
+            next: Run AV Scan
+          - display: collect package
+            next: Collect Package
+          - display: no action
+            next: Record No Action
+        title: "Endpoint response for Defender incident {{ vars.incident_id }} on {{ vars.device_name }}"
+        description: >-
+          <b>{{ vars.steps.Get_Incident.data.incidentName | default('incident', true) }}</b>
+          (severity {{ vars.steps.Get_Incident.data.severity | default('unknown', true) }},
+          status {{ vars.steps.Get_Incident.data.status | default('unknown', true) }}).<br>
+          Device <b>{{ vars.device_name }}</b>: health
+          {{ vars.steps.Get_Machine.data.healthStatus | default('unknown', true) }}, risk
+          {{ vars.steps.Get_Machine.data.riskScore | default('unknown', true) }}, last seen
+          {{ vars.steps.Get_Machine.data.lastSeen | default('unknown', true) }}.<br><br>
+          <b>isolate</b> cuts all network traffic except the Defender channel.
+          <b>av scan</b> runs a Quick Microsoft Defender Antivirus scan.
+          <b>collect package</b> gathers an investigation package for download.
+          <b>no action</b> leaves the device alone and records that decision.
+
+      # Isolation, scan and package all share the same tail (settle, poll,
+      # record). Each branch only records which action it started and the
+      # machine action id, then joins the shared path.
+      - name: Isolate Device
+        type: connector
+        next: Note Isolation
+        comment: >-
+          Full isolation: Defender cuts the device off the network except its
+          own cloud channel, which is what lets the release action reach it.
+          Selective isolation would keep Microsoft productivity endpoints
+          reachable; the analyst gate uses Full.
+        connector: microsoft-365-defender
+        operation: isolate_machine
+        config: ''
+        params:
+          id: '{{ vars.device_id }}'
+          isolation_type: Full
+          comment: "FortiSOAR scenario D: isolate for Defender incident {{ vars.incident_id }} (analyst decision)"
+        mock_result:
+          data:
+            id: 00000000-0000-0000-0000-0000000000a3
+            type: Isolate
+            scope: null
+            title: null
+            status: Pending
+            commands: []
+            machineId: 00000000000000000000000000000000000000d1
+            requestor: soar-connector-app
+            externalId: null
+            errorHResult: 0
+            requestSource: PublicApi
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#MachineActions/$entity
+            computerDnsName: EXAMPLE-HOST
+            relatedFileInfo: null
+            requestorComment: 'FortiSOAR scenario D: isolate for Defender incident 1 (analyst decision)'
+            troubleshootInfo: null
+            cancellationComment: null
+            creationDateTimeUtc: '2026-11-26T22:59:07.7246801Z'
+            cancellationRequestor: null
+            lastUpdateDateTimeUtc: '2026-11-26T22:59:07.7246804Z'
+            cancellationDateTimeUtc: null
+          status: success
+          message: ''
+          operation: isolate_machine
+
+      - name: Note Isolation
+        type: set_variable
+        next: Settle Action
+        vars:
+          action_name: isolate
+          action_id: "{{ vars.steps.Isolate_Device.data.id | default('', true) }}"
+
+      - name: Run AV Scan
+        type: connector
+        next: Note AV Scan
+        comment: >-
+          Quick scan: the usual malware locations, minutes rather than the
+          hours a Full scan takes. The analyst chose a scan, not isolation, so
+          the device stays on the network.
+        connector: microsoft-365-defender
+        operation: run_av_scan
+        config: ''
+        params:
+          id: '{{ vars.device_id }}'
+          scan_type: Quick
+          comment: "FortiSOAR scenario D: quick antivirus scan for Defender incident {{ vars.incident_id }} (analyst decision)"
+        mock_result:
+          data:
+            id: 00000000-0000-0000-0000-0000000000a4
+            type: RunAntiVirusScan
+            scope: null
+            title: null
+            status: Pending
+            commands: []
+            machineId: 00000000000000000000000000000000000000d1
+            requestor: soar-connector-app
+            externalId: null
+            errorHResult: 0
+            requestSource: PublicApi
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#MachineActions/$entity
+            computerDnsName: EXAMPLE-HOST
+            relatedFileInfo: null
+            requestorComment: 'FortiSOAR scenario D: quick antivirus scan for Defender incident 1 (analyst decision)'
+            troubleshootInfo: null
+            cancellationComment: null
+            creationDateTimeUtc: '2026-11-26T23:04:10.8536859Z'
+            cancellationRequestor: null
+            lastUpdateDateTimeUtc: '2026-11-26T23:04:10.8536865Z'
+            cancellationDateTimeUtc: null
+          status: success
+          message: ''
+          operation: run_av_scan
+
+      - name: Note AV Scan
+        type: set_variable
+        next: Settle Action
+        vars:
+          action_name: av_scan
+          action_id: "{{ vars.steps.Run_AV_Scan.data.id | default('', true) }}"
+
+      - name: Collect Package
+        type: connector
+        next: Note Package
+        comment: >-
+          Asks the device for its investigation package. The package is
+          collected by the sensor and stored in Defender; the playbook records
+          that it was requested and that it completed, not the package itself.
+        connector: microsoft-365-defender
+        operation: collect_investigation_package
+        config: ''
+        params:
+          id: '{{ vars.device_id }}'
+          comment: "FortiSOAR scenario D: investigation package for Defender incident {{ vars.incident_id }} (analyst decision)"
+        mock_result:
+          data:
+            id: 00000000-0000-0000-0000-0000000000a5
+            type: CollectInvestigationPackage
+            scope: null
+            title: null
+            status: Pending
+            commands: []
+            machineId: 00000000000000000000000000000000000000d1
+            requestor: soar-connector-app
+            externalId: null
+            errorHResult: 0
+            requestSource: PublicApi
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#MachineActions/$entity
+            computerDnsName: EXAMPLE-HOST
+            relatedFileInfo: null
+            requestorComment: 'FortiSOAR scenario D: investigation package for Defender incident 1 (analyst decision)'
+            troubleshootInfo: null
+            cancellationComment: null
+            creationDateTimeUtc: '2026-11-26T23:05:04.0586826Z'
+            cancellationRequestor: null
+            lastUpdateDateTimeUtc: '2026-11-26T23:05:04.0586833Z'
+            cancellationDateTimeUtc: null
+          status: success
+          message: ''
+          operation: collect_investigation_package
+
+      - name: Note Package
+        type: set_variable
+        next: Settle Action
+        vars:
+          action_name: collect_package
+          action_id: "{{ vars.steps.Collect_Package.data.id | default('', true) }}"
+
+      # The first poll right after a create can answer not-yet-visible for a
+      # few seconds, so the playbook waits before polling.
+      - name: Settle Action
+        type: delay
+        next: Poll Action
+        seconds: 20
+
+      # Poll the machine action until Defender reports a terminal status. The
+      # until reads this step's own data (a poll is a self-reference by
+      # construction). 40 x 15 s bounds the wait at about ten minutes, longer
+      # than the slowest action (package collection) took live.
+      - name: Poll Action
+        type: connector
+        next: Action Result
+        comment: >-
+          get_machine_action, retried until the status is terminal. Pending
+          and InProgress keep it looping.
+        connector: microsoft-365-defender
+        operation: get_machine_action
+        config: ''
+        params:
+          id: '{{ vars.action_id }}'
+        retry:
+          times: 40
+          delay: 15
+          until: "{{ (vars.steps.Poll_Action.data | default({}, true)).status | default('', true) in ['Succeeded', 'Failed', 'Cancelled', 'TimeOut'] }}"
+        mock_result:
+          data:
+            id: 00000000-0000-0000-0000-0000000000a3
+            type: Isolate
+            scope: Full
+            title: null
+            status: Succeeded
+            commands: []
+            machineId: 00000000000000000000000000000000000000d1
+            requestor: soar-connector-app
+            externalId: null
+            errorHResult: 0
+            requestSource: PublicApi
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#MachineActions/$entity
+            computerDnsName: EXAMPLE-HOST
+            relatedFileInfo: null
+            requestorComment: 'FortiSOAR scenario D: isolate for Defender incident 1 (analyst decision)'
+            troubleshootInfo: null
+            cancellationComment: null
+            creationDateTimeUtc: '2026-11-26T22:59:07.6524775Z'
+            cancellationRequestor: null
+            lastUpdateDateTimeUtc: '2026-11-26T22:59:24.9055336Z'
+            cancellationDateTimeUtc: null
+          status: success
+          message: ''
+          operation: get_machine_action
+
+      - name: Action Result
+        type: set_variable
+        next: Record Response
+        vars:
+          final_status: "{{ (vars.steps.Poll_Action.data | default({}, true)).status | default('unknown', true) }}"
+
+      - name: Record Response
+        type: connector
+        next: Responded
+        comment: >-
+          The incident gets the result as a tag (searchable in the Defender
+          portal), an In Progress status and a comment naming the machine
+          action. The comment does not echo back on read in the trial tenant,
+          so the tag is the durable record.
+        connector: microsoft-365-defender
+        operation: update_incident
+        config: ''
+        params:
+          id: '{{ vars.incident_id }}'
+          status: In Progress
+          tags: fortisoar-endpoint-response
+          comment: >-
+            FortiSOAR endpoint response on {{ vars.device_name }}:
+            {{ vars.action_name }} finished {{ vars.final_status }}
+            (machine action {{ vars.action_id }}).
+        mock_result:
+          data:
+            tags:
+            - fortisoar-endpoint-response
+            alerts:
+            - title: '''EICAR_Test_File'' malware was prevented'
+              status: New
+              alertId: da7a77bec7-4bd5-474d-8f8d-62d38cf47edb_1
+              devices:
+              - tags: []
+                osBuild: 20348
+                version: 21H2
+                firstSeen: '2026-11-25T22:19:45.444097Z'
+                riskScore: Informational
+                osPlatform: WindowsServer2022
+                vmMetadata: null
+                aadDeviceId: null
+                osProcessor: x64
+                healthStatus: Active
+                deviceDnsName: EXAMPLE-HOST
+                loggedOnUsers: []
+                mdatpDeviceId: 00000000000000000000000000000000000000d1
+                rbacGroupName: null
+                onboardingStatus: Onboarded
+              category: Malware
+              entities:
+              - sha1: 00000000000000000000000000000000000000d2
+                sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+                verdict: Suspicious
+                deviceId: 00000000000000000000000000000000000000d1
+                fileName: eicar_test.txt
+                filePath: C:\Users\administrator
+                entityType: File
+                detectionStatus: Prevented
+                remediationStatus: None
+                evidenceCreationTime: '2026-11-25T22:27:45.21Z'
+              - sha1: 00000000000000000000000000000000000000d2
+                sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+                verdict: Suspicious
+                deviceId: 00000000000000000000000000000000000000d1
+                fileName: eicar_scd_20261126144304.txt
+                filePath: C:\Users\administrator
+                entityType: File
+                detectionStatus: Prevented
+                remediationStatus: None
+                evidenceCreationTime: '2026-11-26T22:44:57.6433333Z'
+              severity: Informational
+              actorName: null
+              assignedTo: null
+              detectorId: 00000000-0000-0000-0000-0000000000a1
+              incidentId: 1
+              description: 'Malware and unwanted software are undesirable applications that perform annoying, disruptive, or harmful actions on affected machines. Some of these undesirable applications can replicate and spread from one machine to another. Others are able to receive commands from remote attackers and perform activities associated with cyber attacks.
+
+
+                This detection might indicate that the malware was stopped from delivering its payload. However, it is prudent to check the machine for signs of infection.'
+              creationTime: '2026-11-25T22:27:45.08Z'
+              lastActivity: '2026-11-26T22:43:42.2021063Z'
+              resolvedTime: null
+              determination: null
+              firstActivity: '2026-11-25T22:26:36.4801299Z'
+              serviceSource: MicrosoftDefenderForEndpoint
+              classification: null
+              detectionSource: WindowsDefenderAv
+              investigationId: null
+              lastUpdatedTime: '2026-11-26T22:44:57.7Z'
+              mitreTechniques: []
+              providerAlertId: 7a77bec7-4bd5-474d-8f8d-62d38cf47edb_1
+              threatFamilyName: EICAR_Test_File
+              investigationState: UnsupportedAlertType
+            status: InProgress
+            comments:
+            - comment: 'FortiSOAR endpoint response on EXAMPLE-HOST: isolate finished Succeeded (machine action 00000000-0000-0000-0000-0000000000a3).'
+              createdBy: soar-connector-app
+              createdTime: '2026-11-26T22:59:29.4143363Z'
+            severity: Informational
+            assignedTo: null
+            incidentId: 1
+            createdTime: '2026-11-25T22:27:46.0866667Z'
+            incidentUri: https://security.microsoft.com/incidents/1?tid=00000000-0000-0000-0000-0000000000a2
+            incidentName: '''EICAR_Test_File'' malware was prevented'
+            determination: NotAvailable
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#Incidents/$entity
+            classification: Unknown
+            lastUpdateTime: '2026-11-26T22:59:29.4143379Z'
+            redirectIncidentId: null
+          status: success
+          message: ''
+          operation: update_incident
+
+      - name: Record No Action
+        type: connector
+        next: Close No Action
+        comment: >-
+          No containment was chosen. The decision still goes on the incident,
+          so the record shows the device was looked at and left alone.
+        connector: microsoft-365-defender
+        operation: update_incident
+        config: ''
+        params:
+          id: '{{ vars.incident_id }}'
+          comment: "FortiSOAR endpoint response: analyst reviewed {{ vars.device_name }} and chose no action."
+        mock_result:
+          data:
+            tags:
+            - fortisoar-endpoint-response
+            alerts:
+            - title: '''EICAR_Test_File'' malware was prevented'
+              status: InProgress
+              alertId: da7a77bec7-4bd5-474d-8f8d-62d38cf47edb_1
+              devices:
+              - tags: []
+                osBuild: 20348
+                version: 21H2
+                firstSeen: '2026-11-25T22:19:45.444097Z'
+                riskScore: Informational
+                osPlatform: WindowsServer2022
+                vmMetadata: null
+                aadDeviceId: null
+                osProcessor: x64
+                healthStatus: Active
+                deviceDnsName: EXAMPLE-HOST
+                loggedOnUsers: []
+                mdatpDeviceId: 00000000000000000000000000000000000000d1
+                rbacGroupName: null
+                onboardingStatus: Onboarded
+              category: Malware
+              entities:
+              - sha1: 00000000000000000000000000000000000000d2
+                sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+                verdict: Suspicious
+                deviceId: 00000000000000000000000000000000000000d1
+                fileName: eicar_test.txt
+                filePath: C:\Users\administrator
+                entityType: File
+                detectionStatus: Prevented
+                remediationStatus: None
+                evidenceCreationTime: '2026-11-25T22:27:45.21Z'
+              - sha1: 00000000000000000000000000000000000000d2
+                sha256: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+                verdict: Suspicious
+                deviceId: 00000000000000000000000000000000000000d1
+                fileName: eicar_scd_20261126144304.txt
+                filePath: C:\Users\administrator
+                entityType: File
+                detectionStatus: Prevented
+                remediationStatus: None
+                evidenceCreationTime: '2026-11-26T22:44:57.6433333Z'
+              severity: Informational
+              actorName: null
+              assignedTo: null
+              detectorId: 00000000-0000-0000-0000-0000000000a1
+              incidentId: 1
+              description: 'Malware and unwanted software are undesirable applications that perform annoying, disruptive, or harmful actions on affected machines. Some of these undesirable applications can replicate and spread from one machine to another. Others are able to receive commands from remote attackers and perform activities associated with cyber attacks.
+
+
+                This detection might indicate that the malware was stopped from delivering its payload. However, it is prudent to check the machine for signs of infection.'
+              creationTime: '2026-11-25T22:27:45.08Z'
+              lastActivity: '2026-11-26T22:43:42.2021063Z'
+              resolvedTime: null
+              determination: null
+              firstActivity: '2026-11-25T22:26:36.4801299Z'
+              serviceSource: MicrosoftDefenderForEndpoint
+              classification: null
+              detectionSource: WindowsDefenderAv
+              investigationId: null
+              lastUpdatedTime: '2026-11-26T23:04:31.87Z'
+              mitreTechniques: []
+              providerAlertId: 7a77bec7-4bd5-474d-8f8d-62d38cf47edb_1
+              threatFamilyName: EICAR_Test_File
+              investigationState: UnsupportedAlertType
+            status: InProgress
+            comments:
+            - comment: 'FortiSOAR endpoint response on EXAMPLE-HOST: isolate finished Succeeded (machine action 00000000-0000-0000-0000-0000000000a3).'
+              createdBy: API-App:soar-connector-app
+              createdTime: '2026-11-26T22:59:29.2133333Z'
+            - comment: 'FortiSOAR endpoint response on EXAMPLE-HOST: av_scan finished Succeeded (machine action 00000000-0000-0000-0000-0000000000a4).'
+              createdBy: API-App:soar-connector-app
+              createdTime: '2026-11-26T23:04:31.86Z'
+            - comment: 'FortiSOAR endpoint response: analyst reviewed EXAMPLE-HOST and chose no action.'
+              createdBy: soar-connector-app
+              createdTime: '2026-11-26T23:05:09.6671397Z'
+            severity: Informational
+            assignedTo: soar-connector-app
+            incidentId: 1
+            createdTime: '2026-11-25T22:27:46.0866667Z'
+            incidentUri: https://security.microsoft.com/incidents/1?tid=00000000-0000-0000-0000-0000000000a2
+            incidentName: '''EICAR_Test_File'' malware was prevented'
+            determination: NotAvailable
+            '@odata.context': https://api.security.microsoft.com/api/$metadata#Incidents/$entity
+            classification: Unknown
+            lastUpdateTime: '2026-11-26T23:05:09.6671406Z'
+            redirectIncidentId: null
+          status: success
+          message: ''
+          operation: update_incident
+
+      - name: Responded
+        type: set_variable
+        comment: >-
+          action_failed is the honest terminal when Defender finished the
+          machine action unsuccessfully: the incident still got the record, but
+          the outcome does not claim a containment that did not happen.
+        vars:
+          outcome: "{{ 'responded' if vars.final_status == 'Succeeded' else 'action_failed' }}"
+          incident_id: "{{ vars.incident_id }}"
+          device_name: "{{ vars.device_name }}"
+          action_name: "{{ vars.action_name }}"
+          action_id: "{{ vars.action_id }}"
+          final_status: "{{ vars.final_status }}"
+
+      - name: Close No Action
+        type: set_variable
+        vars:
+          outcome: no_action
+          incident_id: "{{ vars.incident_id }}"
+          device_name: "{{ vars.device_name }}"
+          action_name: ''
+          action_id: ''
+          final_status: ''
+
+      - name: Close Not Onboarded
+        type: set_variable
+        comment: >-
+          Nothing is sent to the device: Defender reports it is not onboarded,
+          so an action would fail on the sensor, not on the request.
+        vars:
+          outcome: not_onboarded
+          incident_id: "{{ vars.incident_id }}"
+          device_name: "{{ vars.device_name }}"
+          action_name: ''
+          action_id: ''
+          final_status: ''
+
+      - name: Close No Device
+        type: set_variable
+        vars:
+          outcome: no_device
+          incident_id: "{{ vars.incident_id }}"
+          device_name: ''
+          action_name: ''
+          action_id: ''
+          final_status: ''

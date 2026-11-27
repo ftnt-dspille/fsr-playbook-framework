@@ -1,0 +1,23 @@
+{
+  "@odata.context": "https://api.security.microsoft.com/api/$metadata#MachineActions/$entity",
+  "id": "00000000-0000-0000-0000-0000000000a3",
+  "type": "Unisolate",
+  "title": null,
+  "requestor": "soar-connector-app",
+  "requestorComment": "FortiSOAR scenario D live test: release",
+  "status": "Pending",
+  "machineId": "00000000000000000000000000000000000000d1",
+  "computerDnsName": "EXAMPLE-HOST",
+  "creationDateTimeUtc": "2026-11-26T22:28:55.4516369Z",
+  "lastUpdateDateTimeUtc": "2026-11-26T22:28:55.4516373Z",
+  "cancellationRequestor": null,
+  "cancellationComment": null,
+  "cancellationDateTimeUtc": null,
+  "errorHResult": 0,
+  "scope": null,
+  "externalId": null,
+  "requestSource": "PublicApi",
+  "relatedFileInfo": null,
+  "commands": [],
+  "troubleshootInfo": null
+}
