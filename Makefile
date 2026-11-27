@@ -329,11 +329,11 @@ mypy: ## mypy type-check over fsr_playbooks/compiler (default config; not --stri
 mypy-gate: ## ratchet gate: fail on NEW mypy errors in llm/ + mcp_server/ (baseline docs/typing/mypy_ratchet.json)
 	$(VENV_PY) scripts/mypy_gate.py
 
-typecheck: ## mypy over the typed connector-model package (default checks)
-	$(VENV_PY) -m mypy fsr_playbooks/connectors/typed
+typecheck: ## mypy over the connector models contract (default checks)
+	$(VENV_PY) -m mypy fsr_playbooks/connectors/contract.py
 
-typecheck-strict: ## mypy --strict over the typed connector-model package
-	$(VENV_PY) -m mypy --strict fsr_playbooks/connectors/typed
+typecheck-strict: ## mypy --strict over the connector models contract
+	$(VENV_PY) -m mypy --strict fsr_playbooks/connectors/contract.py
 
 doctor: ## environment preflight: version resolution, pyfsr floor, reference DB
 	$(VENV_PY) -m fsr_playbooks.doctor

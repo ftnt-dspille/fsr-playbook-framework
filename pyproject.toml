@@ -76,7 +76,6 @@ packages = [
     "fsr_playbooks.harness",
     "fsr_playbooks.connectors",
     "fsr_playbooks.connectors.lint",
-    "fsr_playbooks.connectors.typed",
 ]
 
 [tool.ruff]
