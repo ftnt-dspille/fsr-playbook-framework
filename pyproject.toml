@@ -62,10 +62,14 @@ version_scheme = "no-guess-dev"
 
 [tool.setuptools]
 # fsr_playbooks lives at the repo root; non-shipped tooling lives under tooling/.
-package-dir = {"" = ".", "probes" = "tooling/probes", "store" = "tooling/store", "e2e" = "tooling/e2e"}
+package-dir = {"" = ".", "probes" = "tooling/probes", "store" = "tooling/store", "e2e" = "tooling/e2e", "fsrpb_tooling" = "tooling"}
 py-modules = ["fsrpb_main"]
 packages = [
     "probes", "store", "e2e",
+    # The CLI's own modules (cli.py and its siblings) ship as package data under
+    # fsrpb_tooling so a wheel/git install has them; fsrpb_main puts that
+    # directory on sys.path when there is no source checkout next to it.
+    "fsrpb_tooling",
     "fsr_playbooks",
     "fsr_playbooks.compiler", "fsr_playbooks.compiler.resolver", "fsr_playbooks.compiler.rulesets",
     "fsr_playbooks.compiler.typed_args", "fsr_playbooks.compiler.typed_args.steps",
@@ -77,6 +81,15 @@ packages = [
     "fsr_playbooks.connectors",
     "fsr_playbooks.connectors.lint",
 ]
+
+[tool.setuptools.package-data]
+# Everything under tooling/ except its tests and typing audit: the CLI imports
+# its siblings (recover, picklists, agent/, catalog/, evals/, recipes/ ...) as
+# top-level modules, and several read data files that live beside them.
+fsrpb_tooling = ["**/*.py", "**/*.json", "**/*.yaml", "**/*.yml", "**/*.md", "**/*.txt", "**/*.jsonl", "**/*.j2", "**/*.sql", "**/*.db"]
+
+[tool.setuptools.exclude-package-data]
+fsrpb_tooling = ["tests/**", "typing/**", "**/__pycache__/**"]
 
 [tool.ruff]
 # Lint at the supported floor (requires-python >=3.10) so version-specific
