@@ -23,7 +23,7 @@ pytest.importorskip("mcp.server.mcpserver", reason="mcp server SDK not installed
 def test_shared_mcp_is_the_real_server_not_the_fallback_shim():
     from fsr_playbooks.mcp_server import _shared
 
-    assert type(_shared.mcp).__name__ != "_FallbackFastMCP", (
+    assert type(_shared.mcp._bind()).__name__ != "_FallbackFastMCP", (
         "_shared.mcp fell back to the no-op shim even though the real mcp "
         "server SDK is installed; the import in _shared.py is not finding "
         "MCPServer (mcp 2.x renamed it from mcp.server.fastmcp.FastMCP)"

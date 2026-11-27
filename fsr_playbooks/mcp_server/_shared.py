@@ -37,19 +37,20 @@ class _FallbackFastMCP:
             "`python -m mcp_server` / `fsrpb mcp` need the real SDK.")
 
 
-# The MCP server class. mcp 2.x renamed `mcp.server.fastmcp.FastMCP` to
-# `mcp.server.mcpserver.MCPServer` (same `.tool()` decorator, `_tool_manager`
-# and `run(transport=...)` surface). We require mcp>=2 (see pyproject), so we
-# import MCPServer directly and fall back only to the no-op shim for the
-# connector sandbox, where the real `mcp` package is not importable at all. The
-# two are unrelated types, so the name is declared as `type[Any]` first.
-FastMCP: type[Any]
-try:
-    from mcp.server.mcpserver import MCPServer as _ImportedServer  # mcp 2.x
-except Exception:  # noqa: BLE001
-    FastMCP = _FallbackFastMCP
-else:
-    FastMCP = _ImportedServer if callable(_ImportedServer) else _FallbackFastMCP
+def _server_class() -> type[Any]:
+    """The real MCP server class, or the no-op shim when the SDK is absent.
+
+    mcp 2.x renamed `mcp.server.fastmcp.FastMCP` to `mcp.server.mcpserver.MCPServer`
+    (same `.tool()` decorator, `_tool_manager` and `run(transport=...)` surface).
+    We require mcp>=2 (see pyproject) and fall back only to the no-op shim for the
+    connector sandbox, where the real `mcp` package is not importable at all.
+    Imported lazily: see `_DeferredMCP`.
+    """
+    try:
+        from mcp.server.mcpserver import MCPServer as _ImportedServer  # mcp 2.x
+    except Exception:  # noqa: BLE001
+        return _FallbackFastMCP
+    return _ImportedServer if callable(_ImportedServer) else _FallbackFastMCP
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -61,7 +62,7 @@ DB_PATH = default_db_path()
 # MCP server instance (shared across all tools)
 # ---------------------------------------------------------------------------
 def _make_mcp():
-    server = FastMCP(
+    server = _server_class()(
         "fsrpb",
         instructions=(
             "FortiSOAR playbook authoring tools. "
@@ -78,10 +79,55 @@ def _make_mcp():
     return server
 
 
-try:
-    mcp = _make_mcp()
-except Exception:  # noqa: BLE001
-    mcp = _FallbackFastMCP("fsrpb")
+class _DeferredMCP:
+    """The shared MCP server, bound on first real use.
+
+    Building the real server imports the MCP SDK (~0.5s), which every connector
+    cold start and test process paid even when it only called the tool functions
+    directly. Until bound, `@mcp.tool()` records the registration (same args, same
+    order) and returns the function unchanged, as the real decorator does. Binding
+    builds the real server and replays the recorded registrations onto it. It
+    happens on `.run()` (the stdio server) or on any other attribute, such as
+    `_tool_manager` (the call_mcp_tool registry). Registrations made after binding
+    go straight to the real server.
+    """
+
+    def __init__(self, name: str):
+        self._name = name
+        self._pending: list[tuple[tuple, dict, Any]] = []
+        self._real: Any = None
+
+    def tool(self, *args: Any, **kwargs: Any):
+        def _decorate(fn):
+            if self._real is not None:
+                self._real.tool(*args, **kwargs)(fn)
+            else:
+                self._pending.append((args, kwargs, fn))
+            return fn
+        return _decorate
+
+    def _bind(self):
+        if self._real is None:
+            try:
+                real = _make_mcp()
+            except Exception:  # noqa: BLE001
+                real = _FallbackFastMCP(self._name)
+            for args, kwargs, fn in self._pending:
+                real.tool(*args, **kwargs)(fn)
+            self._pending = []
+            self._real = real
+        return self._real
+
+    def run(self, *args: Any, **kwargs: Any):
+        return self._bind().run(*args, **kwargs)
+
+    def __getattr__(self, attr: str):
+        if attr.startswith("__"):
+            raise AttributeError(attr)
+        return getattr(self._bind(), attr)
+
+
+mcp = _DeferredMCP("fsrpb")
 
 # ---------------------------------------------------------------------------
 # Structured error envelope (uniform tool I/O contract)
