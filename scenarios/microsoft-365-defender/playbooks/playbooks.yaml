@@ -106,15 +106,15 @@ playbooks:
         type: connector
         next: Oldest First
         comment: >-
-          Active incidents only, all pages (get_all_records). The datetime
+          Active and In Progress incidents, all pages (get_all_records). The datetime
           params are left off on purpose: they must carry fractional seconds or
           the connector refuses the run before any HTTP call, and a triage
-          sweep wants everything Active, not a time slice.
+          sweep wants every open incident, not a time slice.
         connector: microsoft-365-defender
         operation: list_incidents
         config: ''
         params:
-          status: Active
+          status: [Active, "In Progress"]
           get_all_records: true
         mock_result:
           data:
@@ -129,7 +129,7 @@ playbooks:
                 assignedTo: alice@contoso.example
                 classification: TruePositive
                 determination: MultiStagedAttack
-                status: Active
+                status: InProgress
                 severity: High
                 tags: [ransomware]
                 comments:
@@ -283,7 +283,7 @@ playbooks:
             assignedTo: alice@contoso.example
             classification: TruePositive
             determination: MultiStagedAttack
-            status: Active
+            status: InProgress
             severity: High
             tags: [ransomware]
             comments:
