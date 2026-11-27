@@ -44,6 +44,9 @@ from fsr_playbooks.connectors.typed.microsoft_365_defender import (  # noqa: E40
 from fsr_playbooks.connectors.typed.microsoft_graph_dev import (  # noqa: E402
     OPERATION_MODELS as DEV_OPS,
 )
+from fsr_playbooks.connectors.typed.microsoft_purview_ediscovery import (  # noqa: E402
+    OPERATION_MODELS as PURVIEW_OPS,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 SCENARIOS = REPO / "scenarios"
@@ -56,11 +59,13 @@ LAX_CODES = {"unknown_connector", "unknown_operation", "unknown_param"}
 _SCENARIO_FILES = {
     "microsoft-graph_dev": ("playbooks/playbooks.yaml", "playbooks/playbooks.json"),
     "microsoft-365-defender": ("playbooks/playbooks.yaml", "playbooks/playbooks.json"),
+    "microsoft-purview-ediscovery": ("playbooks/playbooks.yaml", "playbooks/playbooks.json"),
 }
 
 _TYPED_OPS = {
     "microsoft-graph_dev": DEV_OPS,
     "microsoft-365-defender": DEFENDER_OPS,
+    "microsoft-purview-ediscovery": PURVIEW_OPS,
 }
 
 
@@ -354,6 +359,117 @@ _BRANCH_CASES = [
         "absent": ["Purge Mail", "Reject Comment"],
         "outcome": "no_mail_found",
     },
+    # Scenario D - eDiscovery multi mailbox search and triage
+    # (microsoft-purview-ediscovery). The default run opens the case and the
+    # search (the mocks list neither by the default names), so cleanup runs;
+    # the adopt paths are pinned by binding the display names as inputs.
+    {
+        "id": "D-soft-purge",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "manual": {"Analyst Gate": "soft purge"},
+        "present": ["Create Case", "Add Custodians", "Create Mailbox Sources",
+                    "Create Search", "Wait For Statistics", "Analyst Gate",
+                    "Soft Purge", "Wait Soft Purge", "Cleanup Search"],
+        "absent": ["Hard Purge", "Export Results", "No Hits Cleanup"],
+        "outcome": "purged_recoverable",
+        "terminal_extra": {
+            "case_id": "00000000-0000-0000-0000-00000000c009",
+            "search_id": "00000000-0000-0000-0000-00000000f103",
+            "action": "soft purge (recoverable items folder)",
+            "total_items": 132,
+        },
+    },
+    {
+        "id": "D-hard-purge",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "manual": {"Analyst Gate": "hard purge"},
+        "present": ["Hard Purge", "Wait Hard Purge", "Cleanup Search"],
+        "absent": ["Soft Purge", "Wait Soft Purge", "Export Results"],
+        "outcome": "purged_permanent",
+        "terminal_extra": {
+            "action": "hard purge (permanently deleted)",
+            "operation_id": "00000000-0000-0000-0000-00000000f204",
+        },
+    },
+    {
+        "id": "D-export",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "manual": {"Analyst Gate": "export"},
+        "present": ["Export Results", "Wait For Export", "Record Export",
+                    "Cleanup Search"],
+        "absent": ["Soft Purge", "Hard Purge"],
+        "outcome": "exported",
+        "terminal_extra": {
+            "export_files": "export-1.zip",
+            "download_url": "https://contoso.example/ediscovery-exports/export-1.zip",
+        },
+    },
+    {
+        "id": "D-no-action",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "manual": {"Analyst Gate": "no action"},
+        "present": ["No Action", "Cleanup Search"],
+        "absent": ["Soft Purge", "Export Results"],
+        "outcome": "no_action",
+    },
+    {
+        # Unattended run: the preselected choice routes around the card.
+        "id": "D-preselected-export",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "input": {"purge_choice": "export", "incident_id": "1042"},
+        "present": ["Response Mode", "Export Results", "Wait For Export",
+                    "Record Case File"],
+        "ran": ["Record Case File"],
+        "absent": ["Analyst Gate"],
+        "outcome": "exported",
+    },
+    {
+        "id": "D-no-hits",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "branches": {"Hits Found": "No hits"},
+        "present": ["Mark No Hits", "No Hits Cleanup"],
+        "absent": ["Response Mode", "Analyst Gate", "Soft Purge",
+                   "Cleanup Search"],
+        "outcome": "no_hits",
+        "terminal_extra": {"total_items": 0, "action": "none"},
+    },
+    {
+        # A search by this exact name already exists: it is reused and the
+        # cleanup step is bypassed by its when-gate (a pre-existing search
+        # definition survives the run).
+        "id": "D-adopt-existing-search",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "input": {"search_display_name": "Search One"},
+        "manual": {"Analyst Gate": "no action"},
+        "present": ["Adopt Search", "Cleanup Search"],
+        "ran": ["Adopt Search"],
+        "skipped": ["Cleanup Search"],
+        "absent": ["Create Search"],
+        "outcome": "no_action",
+        "terminal_extra": {
+            "search_id": "00000000-0000-0000-0000-00000000f101",
+        },
+    },
+    {
+        "id": "D-adopt-existing-case",
+        "yaml": "microsoft-purview-ediscovery",
+        "playbook": "EDiscovery Multi Mailbox Search and Triage",
+        "input": {"case_name": "Quarterly audit hold"},
+        "manual": {"Analyst Gate": "soft purge"},
+        "present": ["Adopt Case", "Soft Purge"],
+        "absent": ["Create Case"],
+        "outcome": "purged_recoverable",
+        "terminal_extra": {
+            "case_id": "00000000-0000-0000-0000-00000000c002",
+        },
+    },
 ]
 
 
@@ -364,6 +480,7 @@ def test_scenario_branches_run_end_to_end(case: dict):
     result = mcp_server.step_through_playbook(
         yaml_text=yaml_text,
         playbook=case["playbook"],
+        input=case.get("input"),
         manual_choices=case.get("manual"),
         branch_choices=case.get("branches"),
         execute_safe_ops=False,
@@ -376,6 +493,21 @@ def test_scenario_branches_run_end_to_end(case: dict):
         assert name in by_id, f"expected {name!r} to run; trace ran {ran}"
     for name in case["absent"]:
         assert name not in by_id, f"{name!r} must not run on this branch"
+    # A step behind a falsy step-level `when:` stays IN the trace as skipped
+    # (FSR bypasses it at runtime); `ran` pins steps whose gate must have
+    # passed.
+    for name in case.get("skipped", []):
+        record = by_id.get(name)
+        assert record is not None and record.get("status") == "skipped", (
+            f"{name!r} must appear as a skipped (when-gated) step, got "
+            f"{None if record is None else record.get('status')!r}"
+        )
+    for name in case.get("ran", []):
+        record = by_id.get(name)
+        assert record is not None, f"expected {name!r} to run; trace ran {ran}"
+        assert record.get("status") != "skipped", (
+            f"{name!r} is in the trace but its when-gate skipped it"
+        )
 
     terminals = _terminal_outputs(result)
     matching = [t for t in terminals if t["outcome"] == case["outcome"]]
@@ -450,7 +582,7 @@ def test_mock_payloads_validate_against_typed_models(connector: str):
             )
             TypeAdapter(step_models[op]).validate_python(mock["data"])
             checked += 1
-    assert checked >= 7  # graph_dev: 12; defender-native: 4
+    assert checked >= 7  # graph_dev: 12; defender: 7; purview-ediscovery: 15
 
 
 def test_scenario_b_cross_connector_steps_use_real_ops():

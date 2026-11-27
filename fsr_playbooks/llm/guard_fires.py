@@ -88,6 +88,12 @@ MECHANISMS: dict[str, Mechanism] = dict([
     _m("turn.max_tool_turns", CAP, "tool-round budget spent; forced wrap-up"),
     _m("turn.answer_scope_wrapup", LOOP_ACTION, "narrow question ended without text; one answer round"),
     _m("turn.open_lead_forced", ROUND_END, "a result revealed a key no search used; the reply is sent back"),
+    _m("turn.noc_diff_forced", ROUND_END, "device history read, content never read, or the diff's install task left out of the reply; the reply is sent back"),
+    _m("turn.noc_fix_staged", LOOP_ACTION, "analyst asked for a fix and the diff found the offending route: loop stages the removal card"),
+    _m("noc.diff_not_read", DISPATCH_REFUSAL, "verdict on an install the turn never read the content of"),
+    _m("noc.benign_over_blackhole", DISPATCH_REFUSAL, "benign verdict while a blackhole route among the newest objects drops traffic"),
+    _m("noc.benign_capped", LOOP_ACTION, "second benign over a blackhole: disposition held at suspicious"),
+    _m("noc.install_task_attached", LOOP_ACTION, "verdict omitted the install task the diff attributes the change to; a grounded finding names it"),
     _m("turn.budget_ask", CAP, "tool-round budget spent; continue-or-stop card"),
     # Connector-side offer salvage lives in the connector's own registry
     # (connector-fsr-agentic-assistant/ops_offers.py) and rides the same list.

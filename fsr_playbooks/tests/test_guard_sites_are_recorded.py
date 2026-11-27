@@ -243,6 +243,8 @@ LOOP_MARKERS = {
     "answer_scope_wrapup": "turn.answer_scope_wrapup",
     "requested_action_staged": "RequestedActionPostcondition",
     "open_lead_forced": "turn.open_lead_forced",
+    "noc_diff_forced": "turn.noc_diff_forced",
+    "noc_fix_staged": "turn.noc_fix_staged",
 }
 
 
@@ -360,6 +362,89 @@ def _loop(monkeypatch, turns, *, dispatch=None, tools_=None, max_tool_turns=None
 
 def _offer(cid="o1", card="playbook_offer"):
     return _use(cid, "emit_card", {"card_type": card, "payload": {"id": cid}})
+
+
+_NOC_SLICE = [{"name": n, "description": "", "input_schema": {"type": "object"}}
+              for n in ("fmg_device", "emit_card", "get_record")]
+_NOC_CHANGES = {"ok": True, "query": {"device": "fgt-1"}, "changes": [
+    {"task_id": 368, "kind": "install", "state": "done"}]}
+_NOC_DIFF = {"ok": True, "query": {"device": "fgt-1"},
+             "last_install": {"task_id": 368, "state": "done", "user": "ops"},
+             "sections": [{"vdom": "root", "kind": "static_routes", "items": [
+                 {"oid": 9, "seq": 900, "dst": "192.0.2.0/24", "blackhole": "enable",
+                  "status": "enable"}]}]}
+
+
+def _noc_dispatch(name, args, **_kw):
+    return _NOC_DIFF if (args or {}).get("by") == "diff" else _NOC_CHANGES
+
+
+def _fire_noc_diff_forced(mp):
+    # The model read the install history and stopped: the reply is sent back.
+    _loop(mp, [_Final([_use("a", "fmg_device", {"by": "changes", "device": "fgt-1"})]),
+               _Final([_say("The install ran.")]), _Final([_say("done")])],
+          dispatch=_noc_dispatch, tools_=_NOC_SLICE)
+
+
+def _fire_noc_fix_staged(mp):
+    # The analyst asks for the fix; the diff found the route: the loop stages it.
+    async def go():
+        provider = AnthropicProvider(model="fake", client=_Client([
+            _Final([_use("a", "fmg_device", {"by": "diff", "device": "fgt-1"})]),
+            _Final([_say("Install task 368 added it.")]),
+            _Final([_use("f", "emit_card", {"card_type": "action", "payload": {}})]),
+            _Final([_say("done")])]))
+        return [e async for e in provider.stream(
+            system="sys", messages=[Message(role="user", content="Propose the fix.")],
+            tools=_NOC_SLICE)]
+    mp.setattr(agent_loop, "dispatch", _noc_dispatch)
+    mp.setattr(agent_loop, "_tier_for", lambda n, a: 1)
+    asyncio.run(go())
+
+
+def _noc_verdict(mp, disposition, summary="x", repeat=1):
+    from fsr_playbooks.mcp_server import _citation_validator as cv
+    from fsr_playbooks.mcp_server.tools_emit import emit_verdict
+    ev = cv.TurnEvidence()
+    ev.ask_nets = ["192.0.2.0/24"]
+    cv.set_turn_evidence(ev)
+    args = {"by": "diff", "device": "fgt-1"}
+    cv.register_tool_result("d1", "fmg_device", True, args, _NOC_DIFF)
+    cv.register_tool_result("c1", "fmg_device", True,
+                            {"by": "changes", "device": "fgt-1"}, _NOC_CHANGES)
+    try:
+        for _ in range(repeat):
+            emit_verdict(disposition=disposition, severity="low", confidence=0.9,
+                         summary=summary,
+                         findings=[{"claim": "an install ran", "evidence": ["d1"]}])
+    finally:
+        cv.set_turn_evidence(None)
+
+
+def _fire_noc_diff_not_read(mp):
+    from fsr_playbooks.mcp_server import _citation_validator as cv
+    from fsr_playbooks.mcp_server.tools_emit import emit_verdict
+    ev = cv.TurnEvidence()
+    cv.set_turn_evidence(ev)
+    cv.register_tool_result("c1", "fmg_device", True,
+                            {"by": "changes", "device": "fgt-1"}, _NOC_CHANGES)
+    try:
+        emit_verdict(disposition="suspicious", severity="low", confidence=0.9,
+                     summary="x", findings=[{"claim": "ran", "evidence": ["c1"]}])
+    finally:
+        cv.set_turn_evidence(None)
+
+
+def _fire_noc_benign_over_blackhole(mp):
+    _noc_verdict(mp, "benign")
+
+
+def _fire_noc_benign_capped(mp):
+    _noc_verdict(mp, "benign", repeat=2)
+
+
+def _fire_noc_install_task_attached(mp):
+    _noc_verdict(mp, "true_positive", summary="A blackhole route was added.")
 
 
 def _fire_bad_args(mp):
@@ -569,6 +654,12 @@ DRIVERS = {
     "turn.max_tool_turns": _fire_max_tool_turns,
     "turn.budget_ask": _fire_budget_ask,
     "turn.open_lead_forced": _fire_open_lead_forced,
+    "turn.noc_diff_forced": _fire_noc_diff_forced,
+    "turn.noc_fix_staged": _fire_noc_fix_staged,
+    "noc.diff_not_read": _fire_noc_diff_not_read,
+    "noc.benign_over_blackhole": _fire_noc_benign_over_blackhole,
+    "noc.benign_capped": _fire_noc_benign_capped,
+    "noc.install_task_attached": _fire_noc_install_task_attached,
 }
 
 

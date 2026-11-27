@@ -98,6 +98,7 @@ from .task_spec import (
 )
 from .task_spec import (
     RequestedActionPostcondition,
+    asks_for_fix,
     close_stage_directive,
     contain_stage_directive,
     specs_for_turn,
@@ -410,6 +411,13 @@ async def run_loop(
         unchecked_ready_note,
     )
     clear_tool_registry()
+    from ..mcp_server._noc_scaffold import addresses_in as _addresses_in
+    from ..mcp_server._noc_scaffold import noc_hold, remediation_payload
+    _ev0 = get_turn_evidence()
+    if _ev0 is not None:
+        # The addresses the analyst's own words name: typed by shape, they say
+        # which traffic a blackhole route is judged against.
+        _ev0.ask_nets = _addresses_in(latest_user_text(messages))
 
     tags = tags or {}
     turn_budget = max_tool_turns or MAX_TOOL_TURNS
@@ -742,6 +750,7 @@ async def run_loop(
             o.note_result(call.name, args, result)
         out.append("continue")
 
+    fix_staged = False
     for _turn in range(turn_budget):
         # C6: checked between rounds, before the next model call.
         if _stop_requested(provider):
@@ -921,11 +930,45 @@ async def run_loop(
                 if _lead:
                     record_guard_fire("turn.open_lead_forced")
                     nudge = ("open_lead_forced", _lead)
+            # NOC: a device's install history was read but not its content, or
+            # the diff's install task is left out of the reply. Typed, bounded.
+            if nudge is None and not verified_by_loop:
+                _noc = noc_hold(get_turn_evidence(), rnd.text, staged=post.staged or fix_staged)
+                if _noc:
+                    record_guard_fire("turn.noc_diff_forced")
+                    nudge = ("noc_diff_forced", _noc)
             if nudge:
                 yield usage_event(nudge[0])
                 turn_idx += 1
                 w.append_user(_with_language(nudge[1]))
                 continue
+
+            # The analyst asked for the fix and the diff found the offending
+            # route this turn: the loop stages the removal for approval (tier 3,
+            # P2), never a capability gap. Once per turn.
+            if (not fix_staged and not post.staged and w.has_tool("emit_card")
+                    and asks_for_fix(latest_user_text(messages))):
+                _fix = remediation_payload(get_turn_evidence())
+                if _fix is not None:
+                    fix_staged = True
+                    record_guard_fire("turn.noc_fix_staged")
+                    yield usage_event("noc_fix_staged")
+                    fix_out: list[Any] = []
+                    try:
+                        async for ev in loop_call(
+                                "emit_card",
+                                {"card_type": "action", "payload": dict(_fix),
+                                 "requested_by": "analyst"},
+                                fix_out, tool_call_usage):
+                            yield ev
+                    except Exception:
+                        log.exception("noc fix card failed")
+                    if fix_out:
+                        _fc, _fr, _fo = fix_out[0]
+                        w.append_tool_call(_fc)
+                        w.append_tool_results([_fo])
+                        turn_idx += 1
+                        continue
 
             # A build turn that ended on a compile-clean fence it never verified
             # and never offered: the loop verifies those bytes itself, so the

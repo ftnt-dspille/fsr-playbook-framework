@@ -1,0 +1,25 @@
+[
+  {
+    "CreationTime": "2026-01-01T00:00:00",
+    "Id": "11111111-1111-1111-1111-111111111111",
+    "Operation": "Get-Label",
+    "OrganizationId": "00000000-0000-0000-0000-000000000000",
+    "RecordType": 18,
+    "ResultStatus": "Success",
+    "UserKey": "analyst@contoso.onmicrosoft.com",
+    "UserType": 0,
+    "Version": 1,
+    "Workload": "SecurityComplianceCenter",
+    "ClientIP": "",
+    "ObjectId": "",
+    "UserId": "analyst@contoso.onmicrosoft.com",
+    "SecurityComplianceCenterEventType": 0,
+    "ClientApplication": "",
+    "CmdletVersion": "...",
+    "EffectiveOrganization": "contoso.onmicrosoft.com",
+    "NonPIIParameters": "-Organization \"00000000-0000-0000-0000-000000000000\" -SkipValidations \"<SNIP-PII>\"",
+    "Parameters": "-Organization \"00000000-0000-0000-0000-000000000000\" -SkipValidations \"True\"",
+    "StartTime": "2026-01-01T00:00:00",
+    "UserServicePlan": ""
+  }
+]

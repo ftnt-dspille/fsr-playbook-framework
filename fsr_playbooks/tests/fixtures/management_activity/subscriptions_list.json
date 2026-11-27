@@ -1,0 +1,16 @@
+[
+    {
+        "contentType": "Audit.SharePoint",
+        "status": "enabled",
+        "webhook": {
+            "status": "enabled",
+            "address": "https://webhook.myapp.com/o365/",
+            "authId": "o365activityapinotification",
+            "expiration": null
+        }
+    },
+    {
+        "contentType": "Audit.Exchange",
+        "webhook": null
+    }
+]
