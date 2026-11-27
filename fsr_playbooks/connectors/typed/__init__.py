@@ -130,6 +130,38 @@ from fsr_playbooks.connectors.typed.microsoft_management_activity import (
     SubscriptionListItem,
     SubscriptionsPage,
 )
+from fsr_playbooks.connectors.typed.microsoft_purview_ediscovery import (
+    OPERATION_MODELS as PURVIEW_EDISCOVERY_OPERATION_MODELS,
+)
+from fsr_playbooks.connectors.typed.microsoft_purview_ediscovery import (
+    CaseOperation,
+    CasesPage,
+    CaseStatus,
+    CreatedCase,
+    CustodianCreateResult,
+    CustodianRow,
+    CustodiansBulkResult,
+    CustodiansPage,
+    DataSourceScope,
+    DeletedSearchResult,
+    EdiscoveryCase,
+    EdiscoveryCustodian,
+    EdiscoverySearch,
+    EstimateOperation,
+    ExportFileMetadata,
+    ExportResultOperation,
+    HoldStatus,
+    OperationsPage,
+    OperationStatus,
+    PurgeResult,
+    SearchCreateResult,
+    SearchesPage,
+    SearchStatisticsResult,
+    SiteSource,
+    UserSource,
+    WaitForOperationResult,
+    WaitSearchStatisticsResult,
+)
 
 __all__ = [
     "AadstsTokenError", "AlertComment", "AlertUnion",
@@ -165,4 +197,13 @@ __all__ = [
     "IdentityTypeValuePair", "ManagementActivityAPIError",
     "ManagementActivityWebhook", "ModifiedProperty", "NameValuePair",
     "SubscriptionListItem", "SubscriptionsPage",
+    "PURVIEW_EDISCOVERY_OPERATION_MODELS", "CaseOperation", "CasesPage",
+    "CaseStatus", "CreatedCase", "CustodianCreateResult", "CustodianRow",
+    "CustodiansBulkResult", "CustodiansPage", "DataSourceScope",
+    "DeletedSearchResult", "EdiscoveryCase", "EdiscoveryCustodian",
+    "EdiscoverySearch", "EstimateOperation", "ExportFileMetadata",
+    "ExportResultOperation", "HoldStatus", "OperationsPage",
+    "OperationStatus", "PurgeResult", "SearchCreateResult", "SearchesPage",
+    "SearchStatisticsResult", "SiteSource", "UserSource",
+    "WaitForOperationResult", "WaitSearchStatisticsResult",
 ]
