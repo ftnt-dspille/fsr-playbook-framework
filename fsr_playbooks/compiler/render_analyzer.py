@@ -196,6 +196,12 @@ def _c2_missing_key(trace: list[dict[str, Any]],
             if result is None:
                 continue
             missing_at, valid_keys = result
+            # A missing final key on a ``| default`` / ``is defined``
+            # guarded reference resolves to the default at runtime; only a
+            # missing intermediate key is a real break.
+            if ref.get("guarded") and sub_segments \
+                    and missing_at == sub_segments[-1]:
+                continue
             # Downgrade severity when the producer's output shape
             # isn't trustworthy: either we couldn't simulate it
             # (default_empty) or it's gated by a runtime condition

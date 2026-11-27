@@ -36,6 +36,9 @@ class ConsumedPath:
     root: str  # 'steps' | 'input' | 'item' | other
     source_step_id: str  # producer step Jinja key (or "")
     location: str  # arguments.<...> dotted location of the template
+    # True when the reference is the operand of a ``default`` filter or an
+    # ``is defined`` test, so a missing final key is handled at runtime.
+    guarded: bool = False
 
 
 _ENV = Environment(autoescape=False,
@@ -107,7 +110,27 @@ def _walk_ast(root: nodes.Node) -> Iterator[tuple[str, ...]]:
     yield from sorted(pruned)
 
 
-def _ref_to_consumed(chain: tuple[str, ...], location: str) -> ConsumedPath:
+def _guarded_chains(root: nodes.Node) -> set[tuple[str, ...]]:
+    """Vars-rooted chains that are the operand of ``| default(...)`` or
+    ``is defined``. A missing final key on such a chain resolves to the
+    default at runtime, so the analyzer must not report it as broken."""
+    guarded: set[tuple[str, ...]] = set()
+    for node in root.find_all((nodes.Filter, nodes.Test)):
+        if isinstance(node, nodes.Filter) and node.name not in ("default", "d"):
+            continue
+        if isinstance(node, nodes.Test) and node.name != "defined":
+            continue
+        operand = node.node
+        if operand is None:
+            continue
+        path = _node_to_path(operand)
+        if path and path[0] == "vars":
+            guarded.add(path)
+    return guarded
+
+
+def _ref_to_consumed(chain: tuple[str, ...], location: str,
+                     guarded: bool = False) -> ConsumedPath:
     """Build a ConsumedPath from a vars-rooted chain like
     ``('vars', 'steps', 'fetch_alert', 'data', 'id')``."""
     segments = chain[1:]  # drop leading 'vars'
@@ -121,6 +144,7 @@ def _ref_to_consumed(chain: tuple[str, ...], location: str) -> ConsumedPath:
         root=root,
         source_step_id=source_step_id,
         location=location,
+        guarded=guarded,
     )
 
 
@@ -131,7 +155,9 @@ def _extract_from_string(template: str, location: str) -> list[ConsumedPath]:
         ast = _ENV.parse(template)
     except TemplateSyntaxError:
         return []
-    return [_ref_to_consumed(chain, location) for chain in _walk_ast(ast)]
+    guarded = _guarded_chains(ast)
+    return [_ref_to_consumed(chain, location, chain in guarded)
+            for chain in _walk_ast(ast)]
 
 
 def extract_consumed_paths(value: Any,
@@ -197,6 +223,7 @@ def consumed_paths_dict(value: Any,
             "root": cp.root,
             "source_step_id": cp.source_step_id,
             "location": cp.location,
+            "guarded": cp.guarded,
         }
         for cp in extract_consumed_paths(value, location)
     ]

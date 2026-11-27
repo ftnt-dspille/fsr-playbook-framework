@@ -156,7 +156,19 @@ def test_consumed_paths_dict_shape():
         "root": "steps",
         "source_step_id": "a",
         "location": "arguments.x",
+        "guarded": False,
     }]
+
+
+def test_default_and_defined_operands_are_marked_guarded():
+    out = consumed_paths_dict({
+        "d": "{{ vars.steps.a.b | default('', true) }}",
+        "e": "{{ 'y' if vars.steps.a.c is defined else 'n' }}",
+        "u": "{{ vars.steps.a.z }}",
+    })
+    flags = {item["path"]: item["guarded"] for item in out}
+    assert flags == {"vars.steps.a.b": True, "vars.steps.a.c": True,
+                     "vars.steps.a.z": False}
 
 
 def test_consumed_path_dataclass_is_hashable():
@@ -172,7 +184,7 @@ def test_consumed_path_dataclass_is_hashable():
 import pytest  # noqa: E402
 
 pytest.importorskip(
-    "mcp.server.fastmcp",
+    "mcp.server.mcpserver",
     reason="mcp package not installed",
 )
 import fsr_playbooks.mcp_server as mcp_server  # noqa: E402

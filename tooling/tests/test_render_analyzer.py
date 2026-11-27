@@ -10,7 +10,7 @@ import textwrap
 
 import pytest
 
-pytest.importorskip("mcp.server.fastmcp",
+pytest.importorskip("mcp.server.mcpserver",
                     reason="mcp package not installed")
 
 import fsr_playbooks.mcp_server as mcp_server  # noqa: E402
@@ -206,6 +206,60 @@ def test_c2_passes_when_key_exists():
         """)
     diags = analyze(_trace(yaml))
     assert _by_kind(diags).get("missing_key", []) == []
+
+
+def _c2_yaml(expr: str) -> str:
+    return textwrap.dedent("""\
+        playbooks:
+          - name: P
+            steps:
+              - id: t
+                type: start
+                name: T
+                next: fetch
+              - id: fetch
+                type: connector
+                name: Fetch
+                connector: jira
+                operation: get_ticket_details
+                mock_result:
+                  summary: "ok"
+                next: emit
+              - id: emit
+                type: set_variable
+                name: Emit
+                arg_list:
+                  - name: s
+                    value: "{{ %s }}"
+                next: stop
+              - id: stop
+                type: stop
+                name: Stop
+        """) % expr
+
+
+def test_c2_ignores_missing_final_key_behind_default_filter():
+    # Error-list style: the key is absent from the mock, but the reference is
+    # guarded by ``| default`` so the runtime yields the default, not a break.
+    yaml = _c2_yaml("(vars.steps.Fetch.errors | default([], true)) | length")
+    assert _by_kind(analyze(_trace(yaml))).get("missing_key", []) == []
+
+
+def test_c2_ignores_missing_final_key_behind_is_defined():
+    yaml = _c2_yaml("'x' if vars.steps.Fetch.errors is defined else 'y'")
+    assert _by_kind(analyze(_trace(yaml))).get("missing_key", []) == []
+
+
+def test_c2_still_flags_missing_intermediate_key_behind_default_filter():
+    # The guard covers the last key only; a missing middle key is a real break.
+    yaml = _c2_yaml("vars.steps.Fetch.nope.deeper | default('', true)")
+    by = _by_kind(analyze(_trace(yaml)))
+    assert "missing_key" in by and by["missing_key"][0].actual == "nope"
+
+
+def test_c2_still_flags_unguarded_missing_key():
+    yaml = _c2_yaml("vars.steps.Fetch.errors")
+    assert "missing_key" in _by_kind(analyze(_trace(yaml)))
 
 
 def test_c2_downgrades_when_producer_was_conditionally_skipped():
