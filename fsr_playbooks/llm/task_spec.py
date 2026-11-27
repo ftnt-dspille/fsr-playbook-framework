@@ -205,6 +205,31 @@ def contain_stage_directive(spec: TaskSpec, disposition: str) -> str:
         "containment applies, say why in one sentence.")
 
 
+_FIX_RE = re.compile(
+    r"\b(?:fix|remediate|revert|undo|roll\s*back|rollback|remove|delete|restore)\b",
+    re.IGNORECASE)
+_FIX_NOT_A_REQUEST_RE = re.compile(
+    r"\b(?:don'?t|do\s+not|never|no\s+need\s+to|without)\s+(?:\w+\s+){0,1}"
+    r"(?:fix|remediate|revert|undo|roll\s*back|rollback|remove|delete|restore)\b"
+    r"|\bhow\s+(?:to|do|can|would|should|might)\b"
+    r"|\b(?:was|were|is|are|been|got|already)\s+(?:\w+\s+){0,2}"
+    r"(?:fixed|reverted|removed|deleted|restored|undone)\b",
+    re.IGNORECASE)
+
+
+def asks_for_fix(user_text: str | None) -> bool:
+    """True when the analyst's own message asks for a fix of what the turn
+    found: "propose the fix", "stage a card to delete the route", "revert it".
+    Trusted input like ``parse_task_spec``; the loop acts on it only when the
+    turn's own read found the offending item, so a miss or a false hit costs at
+    most one approval card the analyst can decline."""
+    for sentence in re.split(r"(?<=[.;!?\n])\s+", (user_text or "").strip()):
+        if (sentence.strip() and _FIX_RE.search(sentence)
+                and not _FIX_NOT_A_REQUEST_RE.search(sentence)):
+            return True
+    return False
+
+
 def split_subject(iri: str | None) -> tuple[str, str] | None:
     """(module, uuid) from a record IRI like ``/api/3/alerts/<uuid>``."""
     parts = [p for p in str(iri or "").split("/") if p]
@@ -249,6 +274,10 @@ class RequestedActionPostcondition:
         elif name in ("emit_action_card", "update_record", "run_op") or \
                 result.get("pending_approval"):
             self._staged = True
+
+    @property
+    def staged(self) -> bool:
+        return self._staged
 
     @property
     def disposition(self) -> str | None:

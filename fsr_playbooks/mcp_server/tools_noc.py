@@ -660,8 +660,13 @@ def fmg_get_device_changes(device: str, adom: str = "root",
     env = _envelope("json_rpc_get", echo, changes, limit,
                     covers=covers, window=echo["window"])
     env["changes"] = env.pop("events")
-    if any(c.get("kind") == "install" for c in changes):
+    installs = [c for c in changes if c.get("kind") == "install"]
+    if installs:
         env["reading"] = _FMG_INSTALL_READING
+        env["next_step"] = (
+            f"Install task {installs[0].get('task_id')} ran on this device but this "
+            f"list does not show what it changed. Call fmg_device by=diff "
+            f"device={device} for the content, and name the task id in your answer.")
     env["tasks_in_window"] = len(in_window)
     if scan_truncated:
         env["scan_truncated"] = True
@@ -838,6 +843,9 @@ def fmg_get_device_diff(device: str, adom: str = "root", window: str = "7d",
         "count": sum(len(sec["items"]) for sec in sections),
         "reading": _FMG_DIFF_READING,
     }
+    if last_install is not None and last_install.get("task_id") is not None:
+        out["cite"] = (f"Name install task {last_install['task_id']} as the install "
+                       "this content is tied to when you report it.")
     if last_install is None:
         out["last_install_note"] = (
             f"no install task for this device in the last {window}")
