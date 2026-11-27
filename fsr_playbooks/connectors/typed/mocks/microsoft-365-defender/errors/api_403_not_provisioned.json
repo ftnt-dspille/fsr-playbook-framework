@@ -1,6 +1,0 @@
-{
-  "error": {
-    "code": "Account is not provisioned",
-    "message": "Account is not provisioned. Onboard the tenant to the Microsoft 365 Defender service, then grant the application the requested permissions."
-  }
-}
